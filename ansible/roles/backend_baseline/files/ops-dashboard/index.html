@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>NutsNews Backend Ops</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>NutsNews Backend Ops</h1>
+          <p id="subtitle">Loading sanitized status snapshot...</p>
+        </div>
+        <div id="overall" class="overall unknown">unknown</div>
+      </header>
+
+      <section class="metrics" aria-label="Resource utilization">
+        <article>
+          <span>Memory</span>
+          <strong id="memory-value">--</strong>
+          <div class="bar"><i id="memory-bar"></i></div>
+        </article>
+        <article>
+          <span>Swap</span>
+          <strong id="swap-value">--</strong>
+          <div class="bar"><i id="swap-bar"></i></div>
+        </article>
+        <article>
+          <span>Root Disk</span>
+          <strong id="disk-value">--</strong>
+          <div class="bar"><i id="disk-bar"></i></div>
+        </article>
+        <article>
+          <span>Root Inodes</span>
+          <strong id="inode-value">--</strong>
+          <div class="bar"><i id="inode-bar"></i></div>
+        </article>
+      </section>
+
+      <section class="grid">
+        <section class="panel">
+          <h2>Host</h2>
+          <dl id="host-list"></dl>
+        </section>
+
+        <section class="panel">
+          <h2>Endpoint</h2>
+          <div id="endpoint"></div>
+        </section>
+
+        <section class="panel wide">
+          <h2>Services</h2>
+          <div id="services" class="status-grid"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Network</h2>
+          <div id="network"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Timers</h2>
+          <pre id="timers"></pre>
+        </section>
+      </section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

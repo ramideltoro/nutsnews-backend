@@ -46,3 +46,12 @@ backend_monitoring_app_status: infrastructure_health_only
 backend_caddy_enabled: true
 backend_caddy_config_path: /etc/caddy/Caddyfile
 backend_caddy_health_response: ok
+backend_ops_dashboard_enabled: true
+backend_ops_dashboard_user: nutsnews-dashboard
+backend_ops_dashboard_group: nutsnews-dashboard
+backend_ops_dashboard_public_dir: /var/www/nutsnews-ops-dashboard
+backend_ops_dashboard_collector_path: /usr/local/bin/nutsnews-ops-dashboard-collect
+backend_ops_dashboard_status_path: /var/www/nutsnews-ops-dashboard/status.json
+backend_ops_dashboard_bind: 127.0.0.1
+backend_ops_dashboard_port: "8081"
+backend_ops_dashboard_collect_interval: "*:0/2:00"

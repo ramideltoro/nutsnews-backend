@@ -18,14 +18,6 @@
     mode: "0644"
     content: |
       # Managed by ramideltoro/nutsnews-backend.
-      http://{{ backend_domain }} {
-          @health path {{ backend_monitoring_health_path }}
-          header @health Content-Type text/plain
-          respond @health "{{ backend_caddy_health_response }}" 200
-
-          redir https://{{ backend_domain }}{uri} 308
-      }
-
       {{ backend_domain }} {
           encode zstd gzip
 

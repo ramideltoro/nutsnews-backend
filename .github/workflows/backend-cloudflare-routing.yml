@@ -110,7 +110,7 @@ jobs:
 
           exit "$missing"
 
-      - name: Verify origin health before DNS apply
+      - name: Verify origin reachability before DNS apply
         if: inputs.run_mode == 'apply'
         shell: bash
         env:
@@ -119,14 +119,25 @@ jobs:
         run: |
           set -euo pipefail
 
-          response="$(curl --fail --silent --show-error --retry 5 --retry-delay 5 \
+          body_file="$(mktemp)"
+          status="$(curl --silent --show-error --output "$body_file" --write-out "%{http_code}" \
+            --retry 5 --retry-delay 5 \
             --resolve "$RECORD_NAME:80:$TARGET_IPV4" \
             "http://$RECORD_NAME/healthz")"
+          body="$(cat "$body_file")"
+          rm -f "$body_file"
 
-          if [[ "$response" != "ok" ]]; then
-            echo "Unexpected origin health response before DNS apply." >&2
-            exit 1
+          if [[ "$status" == "200" && "$body" == "ok" ]]; then
+            exit 0
           fi
+
+          if [[ "$status" == "308" ]]; then
+            echo "Origin returned the expected Caddy HTTP-to-HTTPS redirect before DNS apply."
+            exit 0
+          fi
+
+          echo "Unexpected origin response before DNS apply: HTTP $status" >&2
+          exit 1
 
       - name: Manage Cloudflare backend DNS record
         shell: bash
@@ -149,6 +160,98 @@ jobs:
             --proxied "$PROXIED" \
             --ttl 300 \
             --output "$RUNNER_TEMP/backend-cloudflare-routing.json"
+
+      - name: Verify backend HTTPS health after DNS mutation
+        if: inputs.run_mode == 'apply'
+        shell: bash
+        env:
+          RECORD_NAME: ${{ inputs.record_name }}
+          TARGET_IPV4: ${{ inputs.target_ipv4 }}
+        run: |
+          set -euo pipefail
+
+          for attempt in {1..12}; do
+            response="$(curl --fail --silent --show-error --connect-timeout 10 \
+              --resolve "$RECORD_NAME:443:$TARGET_IPV4" \
+              "https://$RECORD_NAME/healthz" || true)"
+
+            if [[ "$response" == "ok" ]]; then
+              exit 0
+            fi
+
+            echo "HTTPS health is not ready yet; retry $attempt/12."
+            sleep 10
+          done
+
+          echo "backend HTTPS health did not return ok after DNS mutation." >&2
+          exit 1
+
+      - name: Verify public DNS answer after DNS mutation
+        if: inputs.run_mode == 'apply'
+        shell: bash
+        env:
+          RECORD_NAME: ${{ inputs.record_name }}
+          TARGET_IPV4: ${{ inputs.target_ipv4 }}
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import os
+          import random
+          import socket
+          import struct
+          import sys
+
+          name = os.environ["RECORD_NAME"].rstrip(".")
+          expected = os.environ["TARGET_IPV4"]
+
+          def skip_name(packet: bytes, offset: int) -> int:
+              while True:
+                  length = packet[offset]
+                  if length & 0xC0 == 0xC0:
+                      return offset + 2
+                  if length == 0:
+                      return offset + 1
+                  offset += length + 1
+
+          def query_a(resolver: str) -> list[str]:
+              query_id = random.randint(0, 65535)
+              qname = b"".join(bytes([len(part)]) + part.encode("ascii") for part in name.split(".")) + b"\0"
+              packet = struct.pack("!HHHHHH", query_id, 0x0100, 1, 0, 0, 0) + qname + struct.pack("!HH", 1, 1)
+
+              with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                  sock.settimeout(5)
+                  sock.sendto(packet, (resolver, 53))
+                  response, _ = sock.recvfrom(2048)
+
+              rid, flags, qdcount, ancount, _, _ = struct.unpack("!HHHHHH", response[:12])
+              if rid != query_id:
+                  raise RuntimeError(f"{resolver} returned a mismatched DNS response id")
+              rcode = flags & 0x000F
+              if rcode != 0:
+                  return []
+
+              offset = 12
+              for _ in range(qdcount):
+                  offset = skip_name(response, offset) + 4
+
+              answers = []
+              for _ in range(ancount):
+                  offset = skip_name(response, offset)
+                  rtype, rclass, _, rdlength = struct.unpack("!HHIH", response[offset : offset + 10])
+                  offset += 10
+                  rdata = response[offset : offset + rdlength]
+                  offset += rdlength
+                  if rtype == 1 and rclass == 1 and rdlength == 4:
+                      answers.append(socket.inet_ntoa(rdata))
+              return answers
+
+          for resolver in ("1.1.1.1", "8.8.8.8"):
+              answers = query_a(resolver)
+              if expected not in answers:
+                  print(f"{resolver} returned {answers!r} for {name}, expected {expected}.", file=sys.stderr)
+                  sys.exit(1)
+          PY
 
       - name: Upload routing result
         if: always()

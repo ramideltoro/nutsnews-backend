@@ -26,11 +26,16 @@ The backend baseline installs Caddy and serves:
 All other paths return `backend application not deployed` with `404` until a
 reviewed backend app deployment owns those routes.
 
-Before DNS apply, the protected workflow verifies direct-origin health with:
+Before DNS apply, the protected workflow verifies direct-origin reachability with:
 
 ```bash
 curl --resolve backend.nutsnews.com:80:65.75.201.18 http://backend.nutsnews.com/healthz
 ```
+
+The expected pre-DNS response is either `200` with `ok`, or Caddy's `308`
+HTTP-to-HTTPS redirect once automatic HTTPS owns the site. After DNS mutation,
+the workflow requires HTTPS `/healthz` to return `ok` with SNI pinned to the
+origin address and checks public DNS through Cloudflare and Google resolvers.
 
 ## Protected Workflow
 
@@ -49,7 +54,7 @@ Run modes:
 | Mode | Effect |
 | --- | --- |
 | `check` | Reads Cloudflare and prints the planned create/update/noop/delete action without mutation |
-| `apply` | Requires `confirm_apply=backend.nutsnews.com`, verifies origin health, then creates or updates the DNS record |
+| `apply` | Requires `confirm_apply=backend.nutsnews.com`, verifies origin reachability, creates or updates the DNS record, then verifies HTTPS health and public DNS |
 | `rollback` | Requires `confirm_apply=backend.nutsnews.com`, deletes the managed `A` record if present |
 
 ## Apply Order
@@ -57,7 +62,7 @@ Run modes:
 1. Merge the reviewed routing PR.
 2. Run `Protected Backend Ansible Apply` in `check` mode.
 3. Approve and run `Protected Backend Ansible Apply` in `apply` mode.
-4. Verify direct-origin health with `curl --resolve`.
+4. Verify direct-origin HTTP reachability with `curl --resolve`.
 5. Run `Backend Cloudflare Routing` in `check` mode.
 6. Approve and run `Backend Cloudflare Routing` in `apply` mode.
 7. Verify DNS, TLS, and health from outside the host.

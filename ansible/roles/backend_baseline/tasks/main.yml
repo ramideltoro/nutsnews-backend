@@ -10,3 +10,6 @@
 
 - name: Configure SSH brute-force protection
   ansible.builtin.import_tasks: fail2ban.yml
+
+- name: Configure swap safety buffer
+  ansible.builtin.import_tasks: swap.yml

@@ -1,0 +1,85 @@
+---
+- name: Check swapfile state
+  ansible.builtin.stat:
+    path: "{{ backend_swap_file }}"
+  register: backend_swapfile_stat
+  when: backend_swap_enabled | bool
+
+- name: Create swapfile
+  ansible.builtin.command: "fallocate -l {{ backend_swap_size_mb }}M {{ backend_swap_file }}"
+  args:
+    creates: "{{ backend_swap_file }}"
+  register: backend_swapfile_created
+  when: backend_swap_enabled | bool
+
+- name: Set swapfile permissions
+  ansible.builtin.file:
+    path: "{{ backend_swap_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: backend_swap_enabled | bool
+
+- name: Format swapfile when newly created
+  ansible.builtin.command: "mkswap {{ backend_swap_file }}"
+  when:
+    - backend_swap_enabled | bool
+    - backend_swapfile_created is changed
+
+- name: Persist swapfile in fstab
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: '^{{ backend_swap_file | regex_escape }}\s+none\s+swap\s+'
+    line: "{{ backend_swap_file }} none swap sw 0 0"
+    owner: root
+    group: root
+    mode: "0644"
+  when: backend_swap_enabled | bool
+
+- name: Capture active swap devices
+  ansible.builtin.command: swapon --show=NAME --noheadings
+  register: backend_active_swap_devices
+  changed_when: false
+  failed_when: false
+  when: backend_swap_enabled | bool
+
+- name: Enable swapfile
+  ansible.builtin.command: "swapon {{ backend_swap_file }}"
+  when:
+    - backend_swap_enabled | bool
+    - not ansible_check_mode
+    - backend_swap_file not in backend_active_swap_devices.stdout_lines
+
+- name: Configure backend swap sysctl
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-nutsnews-backend-swap.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      vm.swappiness = {{ backend_swap_swappiness }}
+  notify: Apply backend sysctl
+  when: backend_swap_enabled | bool
+
+- name: Capture swap summary
+  ansible.builtin.command: swapon --show
+  register: backend_swapon_show
+  changed_when: false
+  failed_when: false
+
+- name: Capture memory summary
+  ansible.builtin.command: free -h
+  register: backend_free_h
+  changed_when: false
+  failed_when: false
+
+- name: Report swap verification summary
+  ansible.builtin.debug:
+    msg:
+      enabled: "{{ backend_swap_enabled }}"
+      swap_file: "{{ backend_swap_file }}"
+      swap_size_mb: "{{ backend_swap_size_mb }}"
+      swappiness: "{{ backend_swap_swappiness }}"
+      swapon_show: "{{ backend_swapon_show.stdout_lines }}"
+      free_h: "{{ backend_free_h.stdout_lines }}"

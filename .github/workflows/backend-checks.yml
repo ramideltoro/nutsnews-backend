@@ -48,6 +48,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_no_secret_files.py
 
+      - name: Validate service baseline inventory
+        shell: bash
+        run: python3 scripts/validate_service_baseline.py
+
       - name: Install Ansible in temporary venv
         shell: bash
         run: |

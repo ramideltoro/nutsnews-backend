@@ -60,6 +60,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_redis_valkey_decision.py
 
+      - name: Validate search service decision
+        shell: bash
+        run: python3 scripts/validate_search_service_decision.py
+
       - name: Install Ansible in temporary venv
         shell: bash
         run: |

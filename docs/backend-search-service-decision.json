@@ -1,0 +1,85 @@
+{
+  "issue": 29,
+  "decision_date_utc": "2026-07-16",
+  "decision": "keep_postgres_full_text_search_now",
+  "install_search_service": false,
+  "recommended_path": "Use the existing Supabase/Postgres full-text search path before adding a dedicated search service.",
+  "host": "backend",
+  "ipv4": "65.75.201.18",
+  "source_baseline": "docs/backend-service-baseline.json",
+  "app_evidence": [
+    {
+      "repository": "ramideltoro/nutsnews",
+      "path": "supabase/migrations/20260626000000_add_full_archive_search.sql",
+      "finding": "Adds a generated tsvector search column, a GIN index, and public.search_articles for title, summary, source, and category search."
+    },
+    {
+      "repository": "ramideltoro/nutsnews",
+      "path": "web/app/api/search/route.ts",
+      "finding": "Public search API uses searchPublishedArticles, clamps query/limit/page, has a runtime feature flag, and emits public 60-second search cache headers."
+    },
+    {
+      "repository": "ramideltoro/nutsnews",
+      "path": "web/lib/articles.ts",
+      "finding": "Search is part of the existing article data access layer and returns the same article shape used by the reader."
+    },
+    {
+      "repository": "ramideltoro/nutsnews",
+      "path": "api-contracts/inventory.json",
+      "finding": "Search is an existing public API contract used by archive search clients."
+    }
+  ],
+  "product_need": {
+    "public_article_search": "already implemented through Postgres full-text search",
+    "admin_article_search": "current admin pages query Supabase directly; no dedicated search daemon requirement identified",
+    "moderation_search": "no separate moderation/review search workload identified",
+    "facets_typo_tolerance_semantic_search": "not required by current app evidence"
+  },
+  "comparison": {
+    "postgres_full_text": {
+      "status": "recommended_now",
+      "resource_estimate": "No additional always-on service on the backend VPS; uses existing Postgres/Supabase CPU, disk, and GIN index storage.",
+      "backup_strategy": "Covered by the database backup/restore plan because the search index is rebuildable from source article rows.",
+      "rollback": "Disable the reader_archive_search feature flag or revert the app migration/API change in the app repo."
+    },
+    "meilisearch": {
+      "status": "deferred",
+      "resource_estimate": "Adds an always-on daemon plus separate index disk. Official docs say search speed depends on RAM-to-database-size ratio and indexing may use up to two thirds of available memory by default.",
+      "backup_strategy": "Prefer rebuild from Postgres source rows; snapshot only if rebuild time becomes unacceptable.",
+      "rollback": "Remove the service from backend automation, stop indexing, and route app search back to Postgres full-text search."
+    },
+    "typesense": {
+      "status": "deferred",
+      "resource_estimate": "Adds an always-on daemon plus separate index disk. Official guidance recommends memory sized from the dataset, and semantic/hybrid search can require multiple GB of extra RAM.",
+      "backup_strategy": "Prefer rebuild from Postgres source rows; snapshot only if rebuild time becomes unacceptable.",
+      "rollback": "Remove the service from backend automation, stop indexing, and route app search back to Postgres full-text search."
+    },
+    "opensearch_elasticsearch": {
+      "status": "rejected_for_current_vps",
+      "resource_estimate": "Operationally too heavy for the current small backend host without a separate capacity plan.",
+      "backup_strategy": "Not applicable unless a future capacity plan approves it.",
+      "rollback": "Do not deploy in the current backend phase."
+    }
+  },
+  "future_install_gate": {
+    "trigger": "Measured Postgres search latency, product ranking requirements, typo-tolerance/faceting needs, or admin workflows exceed the Postgres path.",
+    "network": "private-only binding behind the backend app network; no public search TCP port",
+    "resource_limits": "document memory, CPU, disk, index size, and rebuild time before apply",
+    "rebuild_strategy": "indexes must be rebuildable from source database rows unless a snapshot backup is explicitly justified",
+    "health_check": "define service health and app degraded behavior before the app depends on a search daemon",
+    "observability": "collect service health, index document count, index age, query errors, latency, disk, and memory with low-cardinality labels",
+    "app_tracking": "open a concrete ramideltoro/nutsnews app issue when app integration is required",
+    "protected_apply_required": true
+  },
+  "external_references": [
+    "https://www.postgresql.org/docs/current/textsearch-indexes.html",
+    "https://meilisearch.com/docs/resources/help/faq",
+    "https://meilisearch.com/docs/resources/self_hosting/configuration/reference",
+    "https://typesense.org/docs/guide/system-requirements.html",
+    "https://cloud-help-center.typesense.org/article/22-choosing-how-much-memory-you-need"
+  ],
+  "validation": {
+    "local_validator": "python3 scripts/validate_search_service_decision.py",
+    "live_verification": "read-only until a later approved protected apply"
+  }
+}

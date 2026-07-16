@@ -63,6 +63,7 @@ Put secret values on your local machine as either:
 - files under `.secrets/production-backend/<SECRET_NAME>`.
 
 The `.secrets/` directory must stay local and untracked.
+The backend repo ignores `.secrets/` so local provider values are not accidentally staged.
 
 Dry-run first:
 

@@ -49,7 +49,9 @@ No backend app, reverse proxy, dashboard, or database service is considered depl
 
 Start with [runbooks/BACKEND_BOOTSTRAP.md](runbooks/BACKEND_BOOTSTRAP.md).
 
-The current scaffold intentionally does not mutate the server. It defines the host contract, runtime choice, validation commands, required secret boundaries, and rollback expectations that later issues will fill in through Ansible roles and protected workflows.
+Use [runbooks/PROTECTED_BACKEND_APPLY.md](runbooks/PROTECTED_BACKEND_APPLY.md) before running the protected backend Ansible workflow.
+
+The current Ansible scaffold is intentionally narrow. It defines the host contract, runtime choice, validation commands, required secret boundaries, and rollback expectations that later issues will fill in through Ansible roles and protected workflows.
 
 ## Secret Boundaries
 
@@ -80,3 +82,5 @@ ansible-playbook playbooks/bootstrap.yml --syntax-check
 ```
 
 For protected applies, run check mode first and apply only after the protected environment approval gate.
+
+The protected backend workflow is manual-only and uses the `production-backend` GitHub Environment.

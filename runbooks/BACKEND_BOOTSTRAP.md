@@ -58,7 +58,7 @@ For a fresh Ubuntu 26.04 host:
 7. Keep a second SSH session or provider console available while SSH and firewall changes apply.
 8. Run the documented read-only verification commands.
 
-Issue #10 owns the protected workflow and exact secret list. Until #10 is complete, this runbook is the source-of-truth direction but not an apply mechanism.
+The protected workflow and exact secret list are documented in [PROTECTED_BACKEND_APPLY.md](PROTECTED_BACKEND_APPLY.md).
 
 ## Read-Only Verification Commands
 

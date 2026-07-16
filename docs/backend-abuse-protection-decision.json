@@ -1,0 +1,55 @@
+{
+  "issue": 24,
+  "decision_date_utc": "2026-07-16",
+  "host": "backend",
+  "ipv4": "65.75.201.18",
+  "source_baseline": "docs/backend-service-baseline.json",
+  "current_public_services": [
+    "ssh"
+  ],
+  "selected_tool": "fail2ban",
+  "selected_scope": "ssh-only",
+  "crowdsec_status": "deferred",
+  "crowdsec_defer_reasons": [
+    "The current attested host exposes only SSH.",
+    "Caddy, Docker, public HTTP, and public HTTPS are not deployed yet.",
+    "CrowdSec HTTP decisions need real Caddy access logs and route behavior to avoid false positives.",
+    "The VPS should avoid extra agents until there is an HTTP workload to protect."
+  ],
+  "http_enforcement_status": "deferred_until_caddy_and_backend_logs_exist",
+  "enforcement": {
+    "live_apply_required": true,
+    "protected_apply_required": true,
+    "initial_http_mode_when_added": "detection-or-report-only",
+    "production_blocking_before_approval": false
+  },
+  "allowlists": {
+    "ssh": [
+      "127.0.0.1/8",
+      "::1"
+    ],
+    "http_future_sources": [
+      "Cloudflare edge ranges from the provider-managed source",
+      "GitHub Actions only for documented deployment or validation callbacks",
+      "external uptime probes with documented provider names and source ranges when available",
+      "operator IPs only through a reviewed PR or protected secret-backed variable"
+    ]
+  },
+  "false_positive_sensitive_routes": [
+    "/health",
+    "/healthz",
+    "/readyz",
+    "auth-provider-route",
+    "admin-redirects"
+  ],
+  "validation": {
+    "local_validator": "python3 scripts/validate_abuse_protection_decision.py",
+    "ansible_syntax_check": "ansible-playbook playbooks/bootstrap.yml --syntax-check -i inventories/production/hosts.yml",
+    "live_verification": "read-only until a later approved protected apply"
+  },
+  "rollback": {
+    "preferred": "git revert the abuse-protection change and run protected apply",
+    "ssh_unban": "sudo fail2ban-client set sshd unbanip <ip-address>",
+    "break_glass_stop": "sudo systemctl stop fail2ban"
+  }
+}

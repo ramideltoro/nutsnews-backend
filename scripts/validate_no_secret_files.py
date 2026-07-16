@@ -40,7 +40,12 @@ SENSITIVE_PARTS = {
 }
 
 ALLOWLIST = {
+    ".github/workflows/backend-credential-readiness.yml",
     ".github/workflows/protected-backend-ansible-apply.yml",
+    "docs/backend-credential-inventory.json",
+    "runbooks/CREDENTIAL_BOOTSTRAP.md",
+    "scripts/check_backend_credential_readiness.py",
+    "scripts/validate_backend_credential_inventory.py",
     "scripts/validate_no_secret_files.py",
 }
 

@@ -35,6 +35,10 @@ EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 REMOTE_COMMANDS: dict[str, str] = {
     "hostname": "hostname",
     "kernel": "uname -r",
+    "latest_installed_kernel": (
+        "latest=$(find /boot -maxdepth 1 -name 'vmlinuz-*' -printf '%f\\n' 2>/dev/null "
+        "| sed 's/^vmlinuz-//' | sort -V | tail -n 1); printf '%s\\n' \"${latest:-unknown}\""
+    ),
     "os_release": ". /etc/os-release 2>/dev/null && printf '%s %s\\n' \"${NAME:-unknown}\" \"${VERSION_ID:-unknown}\" || true",
     "uptime_pretty": "uptime -p || true",
     "uptime_since": "uptime -s || true",
@@ -245,6 +249,22 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
             "name": "package_updates",
             "status": "warning" if (upgradable_count or 0) > 0 else "healthy" if upgradable_count == 0 else "unknown",
             "summary": f"upgradable_packages={upgradable_count if upgradable_count is not None else 'unknown'}",
+        }
+    )
+
+    kernel = command_stdout(report, "kernel").strip()
+    latest_kernel = command_stdout(report, "latest_installed_kernel").strip()
+    if not latest_kernel or latest_kernel == "unknown":
+        kernel_status = "unknown"
+    elif kernel == latest_kernel:
+        kernel_status = "healthy"
+    else:
+        kernel_status = "warning"
+    checks.append(
+        {
+            "name": "kernel_alignment",
+            "status": kernel_status,
+            "summary": f"running={kernel or 'unknown'} latest_installed={latest_kernel or 'unknown'}",
         }
     )
 

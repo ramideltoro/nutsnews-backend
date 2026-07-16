@@ -7,11 +7,13 @@
 - name: Apply available package upgrades
   ansible.builtin.apt:
     upgrade: dist
+  when: backend_apply_dist_upgrade | bool
 
 - name: Remove unused packages
   ansible.builtin.apt:
     autoremove: true
     purge: true
+  when: backend_apt_autoremove | bool
 
 - name: Clean apt package cache
   ansible.builtin.apt:
@@ -51,6 +53,9 @@
   ansible.builtin.debug:
     msg:
       kernel: "{{ ansible_kernel }}"
+      dist_upgrade_enabled: "{{ backend_apply_dist_upgrade }}"
+      autoremove_enabled: "{{ backend_apt_autoremove }}"
       reboot_required: "{{ backend_reboot_required.stat.exists }}"
+      reboot_if_required_enabled: "{{ backend_reboot_if_required }}"
       upgradable_packages_output: "{{ backend_upgradable_packages.stdout_lines }}"
       failed_units_output: "{{ backend_failed_units.stdout_lines }}"

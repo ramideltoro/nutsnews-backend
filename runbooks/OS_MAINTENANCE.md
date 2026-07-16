@@ -1,6 +1,6 @@
 # OS Maintenance Runbook
 
-This runbook covers backend issue #2 for `65.75.201.18`.
+This runbook covers backend OS maintenance for `65.75.201.18`.
 
 ## Acceptance Criteria
 
@@ -14,26 +14,67 @@ This runbook covers backend issue #2 for `65.75.201.18`.
 
 Ansible role: `ansible/roles/backend_baseline`
 
-The maintenance tasks:
+The baseline maintenance tasks:
 
 - refresh apt metadata;
-- apply available package upgrades with `upgrade: dist`;
-- remove unused packages and clean the cache;
-- reboot when `/var/run/reboot-required` exists during real apply mode;
+- do not apply broad package upgrades by default;
+- do not remove packages by default;
+- do not reboot by default;
 - capture package, kernel, reboot-required, and failed-unit evidence in the workflow logs.
 
-The reboot is skipped in Ansible check mode.
+Broad `dist` upgrades, package autoremove, and reboots are opt-in variables and
+must not be enabled for routine baseline applies. Security-update and reboot
+maintenance belongs in the fixed-purpose workflow described below.
+
+## Controlled Maintenance Workflow
+
+Workflow: `Backend Controlled Maintenance`
+
+Allowed actions:
+
+- `precheck`: read-only state collection only.
+- `security-upgrade`: runs the fixed `unattended-upgrade` path only after prechecks pass and `confirm_target` is exactly `backend.nutsnews.com`.
+- `reboot`: runs a fixed reboot path only after prechecks pass and `confirm_target` is exactly `backend.nutsnews.com`.
+
+The workflow has no arbitrary command input. All actions run under the protected
+`production-backend` Environment approval gate and upload a sanitized
+`backend-controlled-maintenance-report` artifact.
+
+Prechecks include:
+
+- backup freshness status;
+- failed systemd units;
+- running kernel and latest installed kernel;
+- Docker, Caddy, SSH, UFW, and fail2ban states;
+- backend health endpoint state;
+- root disk and inode pressure;
+- active alert state;
+- reboot-required and package-update visibility;
+- unattended-upgrade availability.
+
+Current expected not-configured states are explicit. A reboot is blocked until
+backup freshness and active-alert state are healthy, so it should normally be
+run after backup and alerting issues are complete.
 
 ## Apply Path
 
-Run only through the protected backend workflow:
+For baseline changes, run only through the protected backend workflow:
 
 1. Merge the reviewed OS maintenance PR.
 2. Run `Protected Backend Ansible Apply` in `check` mode.
-3. Review the package and reboot plan.
+3. Confirm the baseline plan does not enable broad upgrades or reboot unless a
+   reviewed issue explicitly adds those variables.
 4. Run `apply` mode only during an approved maintenance window.
-5. Wait for Ansible to reconnect after any reboot.
-6. Run the verification commands below before considering #2 complete.
+5. Run the verification commands below.
+
+For controlled maintenance:
+
+1. Run `Backend Controlled Maintenance` with `action=precheck`.
+2. Review the report artifact and summary.
+3. Run `action=security-upgrade` or `action=reboot` only when required.
+4. For mutating actions, set `confirm_target=backend.nutsnews.com` and approve
+   the `production-backend` gate.
+5. Review the postcheck report before closing any maintenance issue.
 
 ## Verification
 
@@ -43,6 +84,7 @@ ssh -i ~/.ssh/servercheap_65_75_201_18 rami@65.75.201.18 'test ! -e /var/run/reb
 ssh -i ~/.ssh/servercheap_65_75_201_18 rami@65.75.201.18 'apt list --upgradable 2>/dev/null'
 ssh -i ~/.ssh/servercheap_65_75_201_18 rami@65.75.201.18 'systemctl --failed --no-pager'
 ssh -i ~/.ssh/servercheap_65_75_201_18 rami@65.75.201.18 'hostname && whoami'
+ssh -i ~/.ssh/servercheap_65_75_201_18 rami@65.75.201.18 'cat /proc/sys/kernel/random/boot_id'
 ```
 
 If packages remain upgradable, document whether they are explicitly deferred and why.
@@ -59,3 +101,12 @@ If a package update breaks the host:
 4. Reconcile the fix into this repository through a pull request.
 
 For a kernel regression, select the previous bootable kernel from the provider console or bootloader if available, then reconcile the pinned/deferred package state in this repo.
+
+If a controlled reboot fails postchecks:
+
+1. Do not run additional broad maintenance.
+2. Verify SSH and provider console access.
+3. Capture boot ID, kernel, failed units, Caddy health, disk pressure, and backup
+   state through read-only commands.
+4. Recover only the minimum service needed for access or health.
+5. Reconcile any break-glass change into this repository through review.

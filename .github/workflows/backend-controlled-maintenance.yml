@@ -1,0 +1,120 @@
+name: Backend Controlled Maintenance
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Fixed maintenance action to run.
+        required: true
+        default: precheck
+        type: choice
+        options:
+          - precheck
+          - security-upgrade
+          - reboot
+      confirm_target:
+        description: For security-upgrade or reboot only, type backend.nutsnews.com.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-controlled-maintenance
+  cancel-in-progress: false
+
+jobs:
+  maintenance:
+    name: Controlled backend maintenance
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          CONFIRM_TARGET: ${{ inputs.confirm_target }}
+        run: |
+          set -euo pipefail
+
+          case "$ACTION" in
+            precheck|security-upgrade|reboot) ;;
+            *)
+              echo "Unsupported action: $ACTION" >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ "$ACTION" != "precheck" && "$CONFIRM_TARGET" != "backend.nutsnews.com" ]]; then
+            echo "Maintenance action $ACTION requires confirm_target to be exactly backend.nutsnews.com." >&2
+            exit 1
+          fi
+
+      - name: Prepare SSH material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for secret_name in NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
+            if [[ -z "${!secret_name}" ]]; then
+              echo "Missing required production-backend environment secret: $secret_name" >&2
+              missing=1
+            fi
+          done
+          if [[ "$missing" -ne 0 ]]; then
+            exit "$missing"
+          fi
+
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Run fixed maintenance action
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          CONFIRM_TARGET: ${{ inputs.confirm_target }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            --action "$ACTION"
+            --confirm-target "$CONFIRM_TARGET"
+            --ssh-host "$NUTSNEWS_BACKEND_HOST"
+            --ssh-user "${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+            --ssh-key "$HOME/.ssh/nutsnews_backend"
+            --known-hosts "$HOME/.ssh/known_hosts"
+            --output "$RUNNER_TEMP/backend-controlled-maintenance-report.json"
+            --summary "$GITHUB_STEP_SUMMARY"
+          )
+
+          python3 scripts/backend_controlled_maintenance.py "${args[@]}"
+
+      - name: Upload maintenance report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-controlled-maintenance-report
+          path: ${{ runner.temp }}/backend-controlled-maintenance-report.json
+          if-no-files-found: ignore

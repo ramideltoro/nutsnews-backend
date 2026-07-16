@@ -60,6 +60,7 @@ Use [runbooks/CLOUD_INIT_PROVIDER_BOOTSTRAP.md](runbooks/CLOUD_INIT_PROVIDER_BOO
 Use [runbooks/BACKUP_RESTORE_BASELINE.md](runbooks/BACKUP_RESTORE_BASELINE.md) before adding any stateful backend workload.
 Use [runbooks/MONITORING_BASELINE.md](runbooks/MONITORING_BASELINE.md) before applying or verifying monitoring and log retention.
 Use [runbooks/SERVICE_BASELINE_ATTESTATION.md](runbooks/SERVICE_BASELINE_ATTESTATION.md) before adding optional backend services.
+Use [runbooks/REDIS_VALKEY_DECISION.md](runbooks/REDIS_VALKEY_DECISION.md) before adding Redis or Valkey.
 
 The current Ansible scaffold is intentionally narrow. It defines the host contract, runtime choice, validation commands, required secret boundaries, and rollback expectations that later issues will fill in through Ansible roles and protected workflows.
 

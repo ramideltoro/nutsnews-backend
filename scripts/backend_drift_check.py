@@ -17,6 +17,11 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE_PATH = ROOT / "docs" / "backend-service-baseline.json"
 
+ALLOWED_NUTSNEWS_NON_APP_UNITS = {
+    "nutsnews-ops-dashboard-collect.service",
+    "nutsnews-ops-dashboard-collect.timer",
+}
+
 TOKEN_RE = re.compile(
     r"(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+|"
     r"[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})"
@@ -39,7 +44,7 @@ REMOTE_COMMANDS: dict[str, str] = {
     "docker_present": "command -v docker >/dev/null 2>&1 && echo yes || echo no",
     "caddy_active": "systemctl is-active caddy 2>/dev/null || true",
     "caddy_present": "command -v caddy >/dev/null 2>&1 && echo yes || echo no",
-    "backend_units": "systemctl list-units --type=service --all --no-legend 'nutsnews*' 2>/dev/null || true",
+    "backend_units": "systemctl list-units --type=service --type=timer --all --no-legend 'nutsnews*' 2>/dev/null || true",
     "postgres_active": "systemctl is-active postgresql 2>/dev/null || true",
     "redis_active": "systemctl is-active redis-server 2>/dev/null || systemctl is-active valkey 2>/dev/null || true",
     "swap": "swapon --show=NAME --noheadings 2>/dev/null || true",
@@ -257,15 +262,30 @@ def classify_not_deployed(evidence: dict[str, Any], baseline: dict[str, Any]) ->
             }
         )
 
-    backend_units = command_stdout(evidence, "backend_units").strip()
+    backend_unit_lines = [
+        line.strip()
+        for line in command_stdout(evidence, "backend_units").splitlines()
+        if line.strip()
+    ]
+    allowed_backend_unit_lines = [
+        line
+        for line in backend_unit_lines
+        if any(unit in line for unit in ALLOWED_NUTSNEWS_NON_APP_UNITS)
+    ]
+    unexpected_backend_unit_lines = [
+        line
+        for line in backend_unit_lines
+        if line not in allowed_backend_unit_lines
+    ]
     if "backend app" in not_deployed:
         checks.append(
             {
                 "surface": "not_deployed:backend app",
-                "status": "unexpected" if backend_units else "expected",
-                "severity": "medium" if backend_units else "info",
+                "status": "unexpected" if unexpected_backend_unit_lines else "expected",
+                "severity": "medium" if unexpected_backend_unit_lines else "info",
                 "expected": "no nutsnews backend service",
-                "observed": backend_units.splitlines(),
+                "observed": unexpected_backend_unit_lines,
+                "allowed_observed": allowed_backend_unit_lines,
             }
         )
     return checks

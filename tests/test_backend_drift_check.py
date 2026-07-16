@@ -85,6 +85,37 @@ class BackendDriftCheckTests(unittest.TestCase):
         _, summary = backend_drift_check.classify(fixture, BASELINE)
         self.assertIn("failed_systemd_units", summary["high_priority_unexpected"])
 
+    def test_ops_dashboard_units_do_not_count_as_backend_app_deployed(self):
+        fixture = evidence(
+            backend_units={
+                "stdout": "\n".join(
+                    [
+                        "nutsnews-ops-dashboard-collect.service loaded inactive dead NutsNews read-only ops dashboard collector",
+                        "nutsnews-ops-dashboard-collect.timer loaded active waiting Refresh NutsNews read-only ops dashboard status",
+                    ]
+                )
+            }
+        )
+        checks, _ = backend_drift_check.classify(fixture, BASELINE)
+        backend_check = next(item for item in checks if item["surface"] == "not_deployed:backend app")
+        self.assertEqual(backend_check["status"], "expected")
+        self.assertEqual(backend_check["observed"], [])
+        self.assertEqual(len(backend_check["allowed_observed"]), 2)
+
+    def test_unexpected_nutsnews_service_counts_as_backend_app_deployed(self):
+        fixture = evidence(
+            backend_units={
+                "stdout": "nutsnews-backend.service loaded active running NutsNews backend app\n",
+            }
+        )
+        checks, _ = backend_drift_check.classify(fixture, BASELINE)
+        backend_check = next(item for item in checks if item["surface"] == "not_deployed:backend app")
+        self.assertEqual(backend_check["status"], "unexpected")
+        self.assertEqual(
+            backend_check["observed"],
+            ["nutsnews-backend.service loaded active running NutsNews backend app"],
+        )
+
     def test_redaction_removes_tokens_keys_and_url_passwords(self):
         raw = (
             "github_pat_1234567890abcdefghijklmnopqrstuvwxyzABCDEF "

@@ -57,3 +57,20 @@ backend_ops_dashboard_status_path: /var/www/nutsnews-ops-dashboard/status.json
 backend_ops_dashboard_bind: 127.0.0.1
 backend_ops_dashboard_port: "8081"
 backend_ops_dashboard_collect_interval: "*:0/2:00"
+backend_backup_enabled: false
+backend_backup_config_dir: /etc/nutsnews-backup
+backend_backup_state_dir: /var/lib/nutsnews/backups
+backend_backup_runner_path: /usr/local/sbin/nutsnews-backup
+backend_backup_matrix_path: /etc/nutsnews-backup/service-matrix.json
+backend_backup_env_path: /etc/nutsnews-backup/restic.env
+backend_backup_restic_repository: ""
+backend_backup_restic_password: ""
+backend_backup_restic_provider: s3
+backend_backup_environment: {}
+backend_backup_stale_after_hours: 30
+backend_backup_check_read_data_subset: "1%"
+backend_backup_quota_warn_bytes: 0
+backend_backup_restic_init_if_missing: true
+backend_backup_calendar: "*-*-* 03:17:00"
+backend_backup_verify_calendar: "*-*-* 04:17:00"
+backend_backup_restore_drill_calendar: "Sun *-*-* 05:17:00"

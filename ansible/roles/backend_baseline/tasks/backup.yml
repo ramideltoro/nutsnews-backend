@@ -1,0 +1,187 @@
+---
+- name: Install restic backup tooling
+  ansible.builtin.apt:
+    name:
+      - restic
+    state: present
+    update_cache: true
+    cache_valid_time: "{{ backend_apt_cache_valid_time }}"
+  register: backend_backup_packages
+
+- name: Create backup config directory
+  ansible.builtin.file:
+    path: "{{ backend_backup_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Create backup status directory
+  ansible.builtin.file:
+    path: "{{ backend_backup_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install backup service matrix
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../docs/backend-backup-service-matrix.json"
+    dest: "{{ backend_backup_matrix_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install backup runner
+  ansible.builtin.copy:
+    src: nutsnews_backup.py
+    dest: "{{ backend_backup_runner_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install root-only restic environment
+  ansible.builtin.copy:
+    dest: "{{ backend_backup_env_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      RESTIC_REPOSITORY={{ backend_backup_restic_repository | quote }}
+      RESTIC_PASSWORD={{ backend_backup_restic_password | quote }}
+      NUTSNEWS_BACKUP_MATRIX={{ backend_backup_matrix_path | quote }}
+      NUTSNEWS_BACKUP_STATE_DIR={{ backend_backup_state_dir | quote }}
+      NUTSNEWS_BACKUP_STALE_AFTER_HOURS={{ backend_backup_stale_after_hours | quote }}
+      NUTSNEWS_BACKUP_CHECK_READ_DATA_SUBSET={{ backend_backup_check_read_data_subset | quote }}
+      NUTSNEWS_BACKUP_QUOTA_WARN_BYTES={{ backend_backup_quota_warn_bytes | quote }}
+      NUTSNEWS_BACKUP_RESTIC_INIT_IF_MISSING={{ backend_backup_restic_init_if_missing | ternary('true', 'false') | quote }}
+      {% for key, value in backend_backup_environment | dictsort %}
+      {{ key }}={{ value | quote }}
+      {% endfor %}
+  no_log: true
+
+- name: Install backup service unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nutsnews-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=NutsNews service-aware restic backup
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      Type=oneshot
+      EnvironmentFile={{ backend_backup_env_path }}
+      ExecStart={{ backend_backup_runner_path }} backup
+
+- name: Install backup verify service unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nutsnews-backup-verify.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=NutsNews restic repository verification
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      Type=oneshot
+      EnvironmentFile={{ backend_backup_env_path }}
+      ExecStart={{ backend_backup_runner_path }} verify
+
+- name: Install restore drill service unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nutsnews-restore-drill.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=NutsNews lightweight restore drill
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      Type=oneshot
+      EnvironmentFile={{ backend_backup_env_path }}
+      ExecStart={{ backend_backup_runner_path }} restore-drill
+
+- name: Install backup timer unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nutsnews-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Run NutsNews service-aware restic backup
+
+      [Timer]
+      OnCalendar={{ backend_backup_calendar }}
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+
+- name: Install backup verify timer unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nutsnews-backup-verify.timer
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Verify NutsNews latest restic backup
+
+      [Timer]
+      OnCalendar={{ backend_backup_verify_calendar }}
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+
+- name: Install restore drill timer unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nutsnews-restore-drill.timer
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Run NutsNews lightweight restore drill
+
+      [Timer]
+      OnCalendar={{ backend_backup_restore_drill_calendar }}
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+
+- name: Enable backup timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop:
+    - nutsnews-backup.timer
+    - nutsnews-backup-verify.timer
+    - nutsnews-restore-drill.timer
+  when: not ansible_check_mode
+
+- name: Report backup baseline summary
+  ansible.builtin.debug:
+    msg:
+      enabled: "{{ backend_backup_enabled }}"
+      state_dir: "{{ backend_backup_state_dir }}"
+      matrix: "{{ backend_backup_matrix_path }}"
+      timers:
+        - nutsnews-backup.timer
+        - nutsnews-backup-verify.timer
+        - nutsnews-restore-drill.timer
+      check_mode_package_pending: "{{ backend_backup_packages is changed and ansible_check_mode }}"

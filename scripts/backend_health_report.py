@@ -52,7 +52,7 @@ REMOTE_COMMANDS: dict[str, str] = {
     "upgradable_count": "apt list --upgradable 2>/dev/null | tail -n +2 | wc -l",
     "failed_units": "systemctl --failed --no-legend --no-pager || true",
     "service_states": (
-        "for unit in ssh ufw fail2ban docker caddy postgresql alloy sysstat; do "
+        "for unit in ssh ufw fail2ban docker caddy postgresql alloy sysstat nutsnews-backup.timer; do "
         "state=$(systemctl is-active \"$unit\" 2>/dev/null || true); "
         "if [ -z \"$state\" ]; then state=unavailable; fi; "
         "printf '%s=%s\\n' \"$unit\" \"$state\"; "
@@ -69,6 +69,11 @@ REMOTE_COMMANDS: dict[str, str] = {
     ),
     "backend_units": "systemctl list-units --type=service --type=timer --all --no-legend 'nutsnews*' 2>/dev/null || true",
     "backup_tools": "for tool in restic rclone pg_dump docker caddy alloy; do command -v \"$tool\" >/dev/null 2>&1 && echo \"$tool=present\" || echo \"$tool=missing\"; done",
+    "backup_status": (
+        "if test -x /usr/local/sbin/nutsnews-backup; then "
+        "/usr/local/sbin/nutsnews-backup status 2>/dev/null || sudo -n /usr/local/sbin/nutsnews-backup status 2>/dev/null || true; "
+        "else echo not_configured; fi"
+    ),
     "recent_errors": "journalctl -p err..alert -n 25 --no-pager 2>/dev/null || true",
     "sudo_nopasswd": "sudo -n true >/dev/null 2>&1 && echo yes || echo no",
 }
@@ -160,6 +165,26 @@ def parse_upgradable_count(text: str) -> int | None:
         return int(stripped.splitlines()[-1].strip())
     except ValueError:
         return None
+
+
+def parse_json_object(text: str) -> dict[str, Any]:
+    stripped = text.strip()
+    if not stripped or stripped == "not_configured":
+        return {}
+    try:
+        data = json.loads(stripped)
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def status_from_backup_section(section: dict[str, Any]) -> str:
+    status = str(section.get("freshness_status") or section.get("status") or "not_configured")
+    if status == "ok":
+        return "healthy"
+    if status in {"healthy", "warning", "critical", "not_configured", "unknown"}:
+        return status
+    return "unknown"
 
 
 def run_ssh_command(host: str, user: str, key: str, known_hosts: str, command: str, timeout: int) -> dict[str, Any]:
@@ -269,9 +294,9 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
     )
 
     services = parse_key_values(command_stdout(report, "service_states"))
-    for service in ("ssh", "ufw", "fail2ban", "docker", "caddy", "postgresql", "alloy", "sysstat"):
+    for service in ("ssh", "ufw", "fail2ban", "docker", "caddy", "postgresql", "alloy", "sysstat", "nutsnews-backup.timer"):
         state = services.get(service, "unavailable")
-        expected_missing = service in {"docker", "postgresql", "alloy"}
+        expected_missing = service in {"docker", "postgresql", "alloy", "nutsnews-backup.timer"}
         if state == "active":
             status = "healthy"
         elif expected_missing and state in {"inactive", "unavailable", "failed"}:
@@ -306,6 +331,37 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
             "status": "not_configured" if restic_state == "missing" else "healthy",
             "summary": f"restic={restic_state}",
         }
+    )
+
+    backup_status = parse_json_object(command_stdout(report, "backup_status"))
+    backup = backup_status.get("backup", {})
+    verification = backup_status.get("verification", {})
+    restore_drill = backup_status.get("restore_drill", {})
+    quota = backup.get("quota", {}) if isinstance(backup, dict) else {}
+
+    checks.extend(
+        [
+            {
+                "name": "backup_freshness",
+                "status": status_from_backup_section(backup if isinstance(backup, dict) else {}),
+                "summary": f"snapshot={backup.get('snapshot_id') if isinstance(backup, dict) else None}",
+            },
+            {
+                "name": "backup_verification",
+                "status": status_from_backup_section(verification if isinstance(verification, dict) else {}),
+                "summary": f"snapshot={verification.get('snapshot_id') if isinstance(verification, dict) else None}",
+            },
+            {
+                "name": "backup_restore_drill",
+                "status": status_from_backup_section(restore_drill if isinstance(restore_drill, dict) else {}),
+                "summary": f"snapshot={restore_drill.get('snapshot_id') if isinstance(restore_drill, dict) else None}",
+            },
+            {
+                "name": "backup_storage_quota",
+                "status": status_from_backup_section(quota if isinstance(quota, dict) else {}),
+                "summary": f"quota_status={quota.get('status', 'not_configured') if isinstance(quota, dict) else 'not_configured'}",
+            },
+        ]
     )
 
     sudo_state = command_stdout(report, "sudo_nopasswd").strip()

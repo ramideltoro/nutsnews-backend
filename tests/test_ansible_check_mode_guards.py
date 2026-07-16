@@ -49,6 +49,14 @@ class AnsibleCheckModeGuardTests(unittest.TestCase):
         self.assertIn("when: backend_apply_dist_upgrade | bool", maintenance)
         self.assertIn("when: backend_apt_autoremove | bool", maintenance)
 
+    def test_backup_timers_are_not_started_in_check_mode(self):
+        defaults = read_role_file("ansible/roles/backend_baseline/defaults/main.yml")
+        backup = read_role_file("ansible/roles/backend_baseline/tasks/backup.yml")
+        self.assertIn("backend_backup_enabled: false", defaults)
+        self.assertIn("Enable backup timers", backup)
+        self.assertIn("when: not ansible_check_mode", backup)
+        self.assertIn("no_log: true", backup)
+
 
 if __name__ == "__main__":
     unittest.main()

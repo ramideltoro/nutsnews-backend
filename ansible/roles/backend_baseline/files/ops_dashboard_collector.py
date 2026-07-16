@@ -26,7 +26,7 @@ URL_SECRET_RE = re.compile(r"([a-z][a-z0-9+.-]*://[^:/\s]+:)([^@\s]+)(@)", re.IG
 EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 
 
-SERVICES = ("ssh", "ufw", "fail2ban", "caddy", "docker", "postgresql", "alloy", "resticprofile")
+SERVICES = ("ssh", "ufw", "fail2ban", "caddy", "docker", "postgresql", "alloy", "nutsnews-backup.timer")
 
 
 def utc_now() -> str:
@@ -123,6 +123,16 @@ def threshold(value: float | int | None, warn: int = 80, crit: int = 90) -> str:
     return "healthy"
 
 
+def read_json(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"status": "not_configured"}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"status": "unknown"}
+    return data if isinstance(data, dict) else {"status": "unknown"}
+
+
 def service_state(service: str) -> str:
     result = run(["systemctl", "is-active", service], timeout=5)
     state = result["stdout"].strip()
@@ -132,7 +142,7 @@ def service_state(service: str) -> str:
 def classify_service(service: str, state: str) -> str:
     if state == "active":
         return "healthy"
-    if service in {"docker", "postgresql", "alloy", "resticprofile"} and state in {"inactive", "unavailable", "failed"}:
+    if service in {"docker", "postgresql", "alloy", "nutsnews-backup.timer"} and state in {"inactive", "unavailable", "failed"}:
         return "not_configured"
     if service == "fail2ban" and state in {"inactive", "unavailable"}:
         return "warning"
@@ -231,6 +241,12 @@ def collect() -> dict[str, Any]:
     root_inodes["status"] = threshold(root_inodes.get("used_percent"))
     memory["status"] = threshold(memory.get("used_percent"))
     swap["status"] = "not_configured" if not swap.get("total") else threshold(swap.get("used_percent"), warn=60, crit=85)
+    backup_dir = Path("/var/lib/nutsnews/backups")
+    backup = {
+        "backup": read_json(backup_dir / "last-backup.json"),
+        "verification": read_json(backup_dir / "last-verification.json"),
+        "restore_drill": read_json(backup_dir / "last-restore-verification.json"),
+    }
 
     return {
         "schema_version": 1,
@@ -268,6 +284,7 @@ def collect() -> dict[str, Any]:
             "failed_units": failed_units.splitlines()[:10],
             "timers": [line for line in timers.splitlines() if line.strip()][:20],
         },
+        "backup": backup,
         "network": {
             "public_tcp_listeners": listeners,
             "expected_public_tcp_ports": [22, 80, 443],

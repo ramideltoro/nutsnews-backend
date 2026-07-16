@@ -1,0 +1,129 @@
+name: Backend Backup Maintenance
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Fixed backup action to run.
+        required: true
+        default: status
+        type: choice
+        options:
+          - status
+          - backup
+          - verify
+          - restore-drill
+      confirm_target:
+        description: For backup, verify, or restore-drill only, type backend.nutsnews.com.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-backup-maintenance
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Backend backup maintenance
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production-backend
+
+    steps:
+      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          CONFIRM_TARGET: ${{ inputs.confirm_target }}
+        run: |
+          set -euo pipefail
+
+          case "$ACTION" in
+            status|backup|verify|restore-drill) ;;
+            *)
+              echo "Unsupported action: $ACTION" >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ "$ACTION" != "status" && "$CONFIRM_TARGET" != "backend.nutsnews.com" ]]; then
+            echo "Backup action $ACTION requires confirm_target to be exactly backend.nutsnews.com." >&2
+            exit 1
+          fi
+
+      - name: Prepare SSH material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for secret_name in NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
+            if [[ -z "${!secret_name}" ]]; then
+              echo "Missing required production-backend environment secret: $secret_name" >&2
+              missing=1
+            fi
+          done
+          if [[ "$missing" -ne 0 ]]; then
+            exit "$missing"
+          fi
+
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Run fixed backup action
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          unit=""
+          case "$ACTION" in
+            backup) unit="nutsnews-backup.service" ;;
+            verify) unit="nutsnews-backup-verify.service" ;;
+            restore-drill) unit="nutsnews-restore-drill.service" ;;
+          esac
+
+          if [[ -n "$unit" ]]; then
+            ssh -i "$HOME/.ssh/nutsnews_backend" \
+              -o BatchMode=yes \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+              "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+              "sudo -n systemctl start '$unit'"
+          fi
+
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "sudo -n /usr/local/sbin/nutsnews-backup status" \
+            | tee "$RUNNER_TEMP/backend-backup-maintenance-report.json"
+
+      - name: Upload backup maintenance report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-backup-maintenance-report
+          path: ${{ runner.temp }}/backend-backup-maintenance-report.json
+          if-no-files-found: ignore

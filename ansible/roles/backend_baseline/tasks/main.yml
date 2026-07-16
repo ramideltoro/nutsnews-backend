@@ -17,6 +17,10 @@
 - name: Configure monitoring and log retention baseline
   ansible.builtin.import_tasks: monitoring.yml
 
+- name: Configure service-aware backup baseline
+  ansible.builtin.import_tasks: backup.yml
+  when: backend_backup_enabled | bool
+
 - name: Configure read-only ops dashboard
   ansible.builtin.import_tasks: ops_dashboard.yml
   when: backend_ops_dashboard_enabled | bool

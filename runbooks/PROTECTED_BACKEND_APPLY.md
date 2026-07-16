@@ -42,6 +42,11 @@ Optional secrets:
 | --- | --- |
 | `NUTSNEWS_BACKEND_ANSIBLE_USER` | Overrides the inventory SSH user if the pipeline uses a dedicated automation account |
 | `NUTSNEWS_BACKEND_BECOME_PASSWORD` | Sudo password for the Ansible user if passwordless sudo has not been provisioned |
+| `RESTIC_REPOSITORY` | Encrypted restic repository for service-aware backend backups |
+| `RESTIC_PASSWORD` | Restic repository encryption password |
+| `AWS_ACCESS_KEY_ID` | S3-compatible restic access key when `NUTSNEWS_BACKEND_RESTIC_PROVIDER=s3` |
+| `AWS_SECRET_ACCESS_KEY` | S3-compatible restic secret key when `NUTSNEWS_BACKEND_RESTIC_PROVIDER=s3` |
+| `AWS_DEFAULT_REGION` | Optional S3-compatible region |
 
 Prefer a dedicated automation user with tightly scoped key-based SSH and passwordless sudo for the reviewed Ansible command set. If a sudo password is used during early bootstrap, rotate it after the automation user exists.
 

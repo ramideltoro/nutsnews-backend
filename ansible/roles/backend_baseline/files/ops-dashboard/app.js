@@ -73,6 +73,30 @@ function renderNetwork(network) {
   }
 }
 
+function backupStatus(section) {
+  return section?.freshness_status || section?.status || "not_configured";
+}
+
+function renderBackup(backup) {
+  const target = document.getElementById("backup");
+  target.replaceChildren();
+  const rows = [
+    ["Freshness", backup?.backup, backupStatus(backup?.backup)],
+    ["Verification", backup?.verification, backupStatus(backup?.verification)],
+    ["Restore Drill", backup?.restore_drill, backupStatus(backup?.restore_drill)],
+    ["Quota", backup?.backup?.quota, backup?.backup?.quota?.status || "not_configured"],
+  ];
+  for (const [labelText, section, status] of rows) {
+    const row = document.createElement("div");
+    row.className = "status-row";
+    const label = document.createElement("strong");
+    label.textContent = labelText;
+    const snapshot = section?.snapshot_id ? ` ${section.snapshot_id}` : "";
+    row.append(label, pill(status, `${status}${snapshot}`));
+    target.append(row);
+  }
+}
+
 function overallStatus(data) {
   const statuses = [
     data.endpoint?.status,
@@ -81,6 +105,9 @@ function overallStatus(data) {
     data.resources?.root_disk?.status,
     data.resources?.root_inodes?.status,
     data.systemd?.failed_units_status,
+    backupStatus(data.backup?.backup),
+    backupStatus(data.backup?.verification),
+    backupStatus(data.backup?.restore_drill),
     ...(data.services || []).map((service) => service.status),
   ];
   return statuses.sort((a, b) => (statusRank[b] ?? 2) - (statusRank[a] ?? 2))[0] || "unknown";
@@ -127,6 +154,7 @@ function render(data) {
 
   renderServices(data.services);
   renderNetwork(data.network);
+  renderBackup(data.backup);
   setText("timers", (data.systemd?.timers || []).join("\n") || "No relevant timers reported.");
 }
 

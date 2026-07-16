@@ -62,6 +62,13 @@ class BackendControlledMaintenanceTests(unittest.TestCase):
         blockers = maintenance.mutation_blockers("reboot", checks)
         self.assertIn({"check": "backup_freshness", "status": "not_configured"}, blockers)
 
+    def test_backup_status_json_can_satisfy_reboot_freshness_gate(self):
+        checks = maintenance.classify_prechecks(
+            evidence(backup_state=command('{"status":"healthy","freshness_status":"healthy","snapshot_id":"abc"}\n'))
+        )
+        by_name = {item["name"]: item for item in checks}
+        self.assertEqual(by_name["backup_freshness"]["status"], "healthy")
+
     def test_security_upgrade_blocks_when_unattended_upgrade_missing(self):
         checks = maintenance.classify_prechecks(evidence(unattended_upgrade=command("missing\n")))
         blockers = maintenance.mutation_blockers("security-upgrade", checks)

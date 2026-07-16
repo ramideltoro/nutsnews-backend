@@ -40,6 +40,7 @@ def fixture_report(**overrides):
         ),
         "backend_health": command("ok\n"),
         "backup_tools": command("restic=missing\nrclone=missing\npg_dump=missing\ndocker=missing\ncaddy=missing\nalloy=missing\n"),
+        "backup_status": command("not_configured\n"),
         "sudo_nopasswd": command("no\n"),
     }
     commands.update(overrides)
@@ -76,8 +77,30 @@ class BackendHealthReportTests(unittest.TestCase):
         self.assertEqual(by_name["service_docker"]["status"], "not_configured")
         self.assertEqual(by_name["backend_endpoint_health"]["status"], "healthy")
         self.assertEqual(by_name["backup_tooling"]["status"], "not_configured")
+        self.assertEqual(by_name["backup_freshness"]["status"], "not_configured")
+        self.assertEqual(by_name["backup_verification"]["status"], "not_configured")
+        self.assertEqual(by_name["backup_restore_drill"]["status"], "not_configured")
         self.assertEqual(by_name["sudo_nopasswd"]["status"], "warning")
         self.assertGreaterEqual(summary["warning"], 2)
+
+    def test_backup_status_checks_are_distinct(self):
+        checks, _ = backend_health_report.classify(
+            fixture_report(
+                backup_tools=command("restic=present\n"),
+                backup_status=command(
+                    "{"
+                    '"backup":{"status":"healthy","freshness_status":"healthy","snapshot_id":"abc","quota":{"status":"warning"}},'
+                    '"verification":{"status":"healthy","snapshot_id":"abc"},'
+                    '"restore_drill":{"status":"critical","snapshot_id":"abc"}'
+                    "}\n"
+                ),
+            )
+        )
+        by_name = {item["name"]: item for item in checks}
+        self.assertEqual(by_name["backup_freshness"]["status"], "healthy")
+        self.assertEqual(by_name["backup_verification"]["status"], "healthy")
+        self.assertEqual(by_name["backup_restore_drill"]["status"], "critical")
+        self.assertEqual(by_name["backup_storage_quota"]["status"], "warning")
 
     def test_active_caddy_with_failed_endpoint_is_critical(self):
         checks, summary = backend_health_report.classify(fixture_report(backend_health=command("")))

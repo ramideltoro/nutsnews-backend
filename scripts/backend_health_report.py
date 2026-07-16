@@ -56,6 +56,13 @@ REMOTE_COMMANDS: dict[str, str] = {
     ),
     "timers": "systemctl list-timers --all --no-legend --no-pager 'apt*' 'logrotate*' 'fstrim*' 'dpkg-db-backup*' 'nutsnews*' 2>/dev/null || true",
     "listeners": "ss -H -tuln || true",
+    "backend_health": (
+        "if command -v curl >/dev/null 2>&1 && systemctl is-active caddy >/dev/null 2>&1; then "
+        "curl -fsS --connect-timeout 5 "
+        "--resolve backend.nutsnews.com:443:127.0.0.1 "
+        "https://backend.nutsnews.com/healthz 2>/dev/null || true; "
+        "else echo unavailable; fi"
+    ),
     "backend_units": "systemctl list-units --type=service --type=timer --all --no-legend 'nutsnews*' 2>/dev/null || true",
     "backup_tools": "for tool in restic rclone pg_dump docker caddy alloy; do command -v \"$tool\" >/dev/null 2>&1 && echo \"$tool=present\" || echo \"$tool=missing\"; done",
     "recent_errors": "journalctl -p err..alert -n 25 --no-pager 2>/dev/null || true",
@@ -254,6 +261,22 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
         else:
             status = "warning" if state in {"inactive", "unavailable"} else "critical"
         checks.append({"name": f"service_{service}", "status": status, "summary": f"{service}={state}"})
+
+    endpoint_health = command_stdout(report, "backend_health").strip()
+    caddy_state = services.get("caddy", "unavailable")
+    if endpoint_health == "ok":
+        endpoint_status = "healthy"
+    elif caddy_state == "active":
+        endpoint_status = "critical"
+    else:
+        endpoint_status = "not_configured"
+    checks.append(
+        {
+            "name": "backend_endpoint_health",
+            "status": endpoint_status,
+            "summary": f"backend_endpoint_health={endpoint_health or 'empty'}",
+        }
+    )
 
     backup_tools = parse_key_values(command_stdout(report, "backup_tools"))
     restic_state = backup_tools.get("restic", "missing")

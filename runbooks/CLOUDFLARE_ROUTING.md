@@ -48,6 +48,8 @@ Environment. It requires the Environment secrets:
 | --- | --- |
 | `CLOUDFLARE_API_TOKEN` | Scoped token with DNS edit access to the `nutsnews.com` zone |
 | `CLOUDFLARE_ZONE_ID` | Cloudflare zone id for `nutsnews.com` |
+| `NUTSNEWS_BACKEND_SSH_PRIVATE_KEY` | Backend SSH key used for fixed safety pre/post checks |
+| `NUTSNEWS_BACKEND_KNOWN_HOSTS` | Verified backend known_hosts entry |
 
 Run modes:
 
@@ -56,6 +58,10 @@ Run modes:
 | `check` | Reads Cloudflare and prints the planned create/update/noop/delete action without mutation |
 | `apply` | Requires `confirm_apply=backend.nutsnews.com`, verifies origin reachability, creates or updates the DNS record, then verifies HTTPS health and public DNS |
 | `rollback` | Requires `confirm_apply=backend.nutsnews.com`, deletes the managed `A` record if present |
+
+The workflow runs deployment safety gates before and after apply or rollback.
+Check mode runs the same gate as a non-blocking dry run. Rollback and recovery
+details are in [DEPLOYMENT_SAFETY_GATES.md](DEPLOYMENT_SAFETY_GATES.md).
 
 ## Apply Order
 

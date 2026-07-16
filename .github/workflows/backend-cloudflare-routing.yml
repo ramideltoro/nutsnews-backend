@@ -97,11 +97,18 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
 
           missing=0
-          for secret_name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ZONE_ID; do
+          for secret_name in \
+            CLOUDFLARE_API_TOKEN \
+            CLOUDFLARE_ZONE_ID \
+            NUTSNEWS_BACKEND_SSH_PRIVATE_KEY \
+            NUTSNEWS_BACKEND_KNOWN_HOSTS
+          do
             if [[ -z "${!secret_name}" ]]; then
               echo "Missing required production-backend environment secret: $secret_name" >&2
               missing=1
@@ -109,6 +116,64 @@ jobs:
           done
 
           exit "$missing"
+
+      - name: Prepare SSH material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Run routing safety preflight
+        shell: bash
+        env:
+          RUN_MODE: ${{ inputs.run_mode }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+        run: |
+          set -euo pipefail
+
+          enforce=false
+          phase=dry-run
+          profile=cloudflare_dns_apply
+          if [[ "$RUN_MODE" != "check" ]]; then
+            enforce=true
+            phase=pre
+          fi
+          if [[ "$RUN_MODE" == "rollback" ]]; then
+            profile=cloudflare_dns_rollback
+          fi
+
+          python3 scripts/backend_deployment_safety.py \
+            --profile "$profile" \
+            --phase "$phase" \
+            --enforce "$enforce" \
+            --change-description "backend-cloudflare-routing:${RUN_MODE}" \
+            --ssh-host "$NUTSNEWS_BACKEND_HOST" \
+            --ssh-user "${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}" \
+            --ssh-key "$HOME/.ssh/nutsnews_backend" \
+            --known-hosts "$HOME/.ssh/known_hosts" \
+            --required-secret NUTSNEWS_BACKEND_SSH_PRIVATE_KEY \
+            --required-secret NUTSNEWS_BACKEND_KNOWN_HOSTS \
+            --required-secret CLOUDFLARE_API_TOKEN \
+            --required-secret CLOUDFLARE_ZONE_ID \
+            --output "$RUNNER_TEMP/backend-routing-safety-pre.json" \
+            --summary "$RUNNER_TEMP/backend-routing-safety-pre.md"
 
       - name: Verify origin reachability before DNS apply
         if: inputs.run_mode == 'apply'
@@ -253,10 +318,50 @@ jobs:
                   sys.exit(1)
           PY
 
+      - name: Run routing safety postcheck
+        if: always() && inputs.run_mode != 'check'
+        shell: bash
+        env:
+          RUN_MODE: ${{ inputs.run_mode }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+        run: |
+          set -euo pipefail
+
+          profile=cloudflare_dns_apply
+          if [[ "$RUN_MODE" == "rollback" ]]; then
+            profile=cloudflare_dns_rollback
+          fi
+
+          python3 scripts/backend_deployment_safety.py \
+            --profile "$profile" \
+            --phase post \
+            --enforce true \
+            --change-description "backend-cloudflare-routing:${RUN_MODE}" \
+            --ssh-host "$NUTSNEWS_BACKEND_HOST" \
+            --ssh-user "${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}" \
+            --ssh-key "$HOME/.ssh/nutsnews_backend" \
+            --known-hosts "$HOME/.ssh/known_hosts" \
+            --required-secret NUTSNEWS_BACKEND_SSH_PRIVATE_KEY \
+            --required-secret NUTSNEWS_BACKEND_KNOWN_HOSTS \
+            --required-secret CLOUDFLARE_API_TOKEN \
+            --required-secret CLOUDFLARE_ZONE_ID \
+            --output "$RUNNER_TEMP/backend-routing-safety-post.json" \
+            --summary "$RUNNER_TEMP/backend-routing-safety-post.md"
+
       - name: Upload routing result
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: backend-cloudflare-routing
-          path: ${{ runner.temp }}/backend-cloudflare-routing.json
+          path: |
+            ${{ runner.temp }}/backend-cloudflare-routing.json
+            ${{ runner.temp }}/backend-routing-safety-pre.json
+            ${{ runner.temp }}/backend-routing-safety-pre.md
+            ${{ runner.temp }}/backend-routing-safety-post.json
+            ${{ runner.temp }}/backend-routing-safety-post.md
           if-no-files-found: ignore

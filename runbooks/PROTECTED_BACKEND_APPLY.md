@@ -82,6 +82,12 @@ and reboot disabled. Use the `Backend Controlled Maintenance` workflow for
 fixed-purpose `precheck`, `security-upgrade`, or `reboot` actions, each under the
 same protected `production-backend` approval gate.
 
+## Deployment Safety Gates
+
+Apply mode runs the deployment safety gate before and after Ansible. Check mode
+runs the same gate as a non-blocking dry run. The gate and rollback map are
+documented in [DEPLOYMENT_SAFETY_GATES.md](DEPLOYMENT_SAFETY_GATES.md).
+
 ## Read-Only Verification After Apply
 
 After apply, verify from a read-only SSH session:

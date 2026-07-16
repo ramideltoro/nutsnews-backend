@@ -107,6 +107,38 @@ jobs:
           ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
           ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
 
+      - name: Run deployment safety preflight
+        shell: bash
+        env:
+          RUN_MODE: ${{ inputs.run_mode }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          enforce=false
+          phase=dry-run
+          if [[ "$RUN_MODE" == "apply" ]]; then
+            enforce=true
+            phase=pre
+          fi
+
+          python3 scripts/backend_deployment_safety.py \
+            --profile baseline_apply \
+            --phase "$phase" \
+            --enforce "$enforce" \
+            --change-description "protected-backend-ansible-apply:${RUN_MODE}" \
+            --ssh-host "$NUTSNEWS_BACKEND_HOST" \
+            --ssh-user "${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}" \
+            --ssh-key "$HOME/.ssh/nutsnews_backend" \
+            --known-hosts "$HOME/.ssh/known_hosts" \
+            --required-secret NUTSNEWS_BACKEND_SSH_PRIVATE_KEY \
+            --required-secret NUTSNEWS_BACKEND_KNOWN_HOSTS \
+            --output "$RUNNER_TEMP/backend-deployment-safety-pre.json" \
+            --summary "$RUNNER_TEMP/backend-deployment-safety-pre.md"
+
       - name: Build runtime extra vars
         shell: bash
         env:
@@ -155,3 +187,40 @@ jobs:
           fi
 
           ansible-playbook "${args[@]}"
+
+      - name: Run deployment safety postcheck
+        if: always() && inputs.run_mode == 'apply'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          python3 scripts/backend_deployment_safety.py \
+            --profile baseline_apply \
+            --phase post \
+            --enforce true \
+            --change-description "protected-backend-ansible-apply:apply" \
+            --ssh-host "$NUTSNEWS_BACKEND_HOST" \
+            --ssh-user "${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}" \
+            --ssh-key "$HOME/.ssh/nutsnews_backend" \
+            --known-hosts "$HOME/.ssh/known_hosts" \
+            --required-secret NUTSNEWS_BACKEND_SSH_PRIVATE_KEY \
+            --required-secret NUTSNEWS_BACKEND_KNOWN_HOSTS \
+            --output "$RUNNER_TEMP/backend-deployment-safety-post.json" \
+            --summary "$RUNNER_TEMP/backend-deployment-safety-post.md"
+
+      - name: Upload deployment safety reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-deployment-safety-reports
+          path: |
+            ${{ runner.temp }}/backend-deployment-safety-pre.json
+            ${{ runner.temp }}/backend-deployment-safety-pre.md
+            ${{ runner.temp }}/backend-deployment-safety-post.json
+            ${{ runner.temp }}/backend-deployment-safety-post.md
+          if-no-files-found: ignore

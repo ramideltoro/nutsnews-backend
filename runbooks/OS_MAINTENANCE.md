@@ -40,6 +40,9 @@ The workflow has no arbitrary command input. All actions run under the protected
 `production-backend` Environment approval gate and upload a sanitized
 `backend-controlled-maintenance-report` artifact.
 
+Deployment safety and recovery paths for this workflow are summarized in
+[DEPLOYMENT_SAFETY_GATES.md](DEPLOYMENT_SAFETY_GATES.md).
+
 Prechecks include:
 
 - backup freshness status;

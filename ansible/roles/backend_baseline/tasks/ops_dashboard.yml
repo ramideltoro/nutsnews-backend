@@ -1,0 +1,110 @@
+---
+- name: Ensure ops dashboard system group exists
+  ansible.builtin.group:
+    name: "{{ backend_ops_dashboard_group }}"
+    system: true
+
+- name: Ensure ops dashboard system user exists
+  ansible.builtin.user:
+    name: "{{ backend_ops_dashboard_user }}"
+    group: "{{ backend_ops_dashboard_group }}"
+    system: true
+    create_home: false
+    home: /nonexistent
+    shell: /usr/sbin/nologin
+
+- name: Ensure ops dashboard public directory exists
+  ansible.builtin.file:
+    path: "{{ backend_ops_dashboard_public_dir }}"
+    state: directory
+    owner: root
+    group: "{{ backend_ops_dashboard_group }}"
+    mode: "0775"
+
+- name: Install ops dashboard static assets
+  ansible.builtin.copy:
+    src: "ops-dashboard/{{ item }}"
+    dest: "{{ backend_ops_dashboard_public_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - index.html
+    - styles.css
+    - app.js
+
+- name: Install ops dashboard collector
+  ansible.builtin.copy:
+    src: ops_dashboard_collector.py
+    dest: "{{ backend_ops_dashboard_collector_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install ops dashboard collector service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nutsnews-ops-dashboard-collect.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      [Unit]
+      Description=NutsNews read-only ops dashboard collector
+      Documentation=https://github.com/ramideltoro/nutsnews-backend
+
+      [Service]
+      Type=oneshot
+      User={{ backend_ops_dashboard_user }}
+      Group={{ backend_ops_dashboard_group }}
+      NoNewPrivileges=true
+      PrivateTmp=true
+      ProtectHome=true
+      ProtectSystem=strict
+      ReadWritePaths={{ backend_ops_dashboard_public_dir }}
+      ExecStart={{ backend_ops_dashboard_collector_path }} --output {{ backend_ops_dashboard_status_path }}
+  notify: Reload systemd
+
+- name: Install ops dashboard collector timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nutsnews-ops-dashboard-collect.timer
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      [Unit]
+      Description=Collect NutsNews backend ops dashboard status
+
+      [Timer]
+      OnCalendar={{ backend_ops_dashboard_collect_interval }}
+      Persistent=true
+      Unit=nutsnews-ops-dashboard-collect.service
+
+      [Install]
+      WantedBy=timers.target
+  notify: Reload systemd
+
+- name: Flush systemd reload before managing dashboard timer
+  ansible.builtin.meta: flush_handlers
+
+- name: Run ops dashboard collector once
+  ansible.builtin.command: "{{ backend_ops_dashboard_collector_path }} --output {{ backend_ops_dashboard_status_path }}"
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Ensure ops dashboard collector timer is enabled and started
+  ansible.builtin.systemd:
+    name: nutsnews-ops-dashboard-collect.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: not ansible_check_mode
+
+- name: Report ops dashboard summary
+  ansible.builtin.debug:
+    msg:
+      enabled: "{{ backend_ops_dashboard_enabled }}"
+      route: "http://{{ backend_ops_dashboard_bind }}:{{ backend_ops_dashboard_port }}/"
+      access_boundary: loopback_only_ssh_tunnel
+      status_path: "{{ backend_ops_dashboard_status_path }}"

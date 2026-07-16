@@ -52,6 +52,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_service_baseline.py
 
+      - name: Validate abuse protection decision
+        shell: bash
+        run: python3 scripts/validate_abuse_protection_decision.py
+
       - name: Install Ansible in temporary venv
         shell: bash
         run: |

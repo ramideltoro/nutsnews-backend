@@ -54,6 +54,7 @@ Use [runbooks/SSH_HARDENING.md](runbooks/SSH_HARDENING.md) before applying or ve
 Use [runbooks/OS_MAINTENANCE.md](runbooks/OS_MAINTENANCE.md) before applying package updates or rebooting the backend host.
 Use [runbooks/FIREWALL_BASELINE.md](runbooks/FIREWALL_BASELINE.md) before applying or verifying firewall policy.
 Use [runbooks/FAIL2BAN_SSH.md](runbooks/FAIL2BAN_SSH.md) before applying or verifying SSH brute-force protection.
+Use [runbooks/ABUSE_PROTECTION.md](runbooks/ABUSE_PROTECTION.md) before adding broader backend abuse protection.
 Use [runbooks/SWAP_BASELINE.md](runbooks/SWAP_BASELINE.md) before applying or verifying the swap safety buffer.
 Use [runbooks/CLOUD_INIT_PROVIDER_BOOTSTRAP.md](runbooks/CLOUD_INIT_PROVIDER_BOOTSTRAP.md) for the provider NoCloud deprecation warning notes.
 Use [runbooks/BACKUP_RESTORE_BASELINE.md](runbooks/BACKUP_RESTORE_BASELINE.md) before adding any stateful backend workload.

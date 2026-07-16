@@ -107,6 +107,29 @@ jobs:
           ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
           ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
 
+      - name: Reset fixed backup one-shot failure state
+        if: inputs.run_mode == 'apply'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            'set -eu
+            for unit in nutsnews-backup.service nutsnews-backup-verify.service nutsnews-restore-drill.service; do
+              if systemctl list-unit-files "$unit" --no-legend 2>/dev/null | grep -q "$unit"; then
+                sudo -n systemctl reset-failed "$unit"
+              fi
+            done'
+
       - name: Run deployment safety preflight
         shell: bash
         env:

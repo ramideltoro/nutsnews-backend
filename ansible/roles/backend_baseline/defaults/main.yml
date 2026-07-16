@@ -8,3 +8,15 @@ backend_ssh_managed_directives:
 backend_apt_cache_valid_time: 3600
 backend_reboot_if_required: true
 backend_reboot_timeout: 900
+backend_firewall_reset_before_apply: true
+backend_firewall_ipv6: "yes"
+backend_firewall_logging: "off"
+backend_firewall_public_tcp_ports:
+  - port: "22"
+    comment: Backend SSH
+backend_firewall_enable_http_https: false
+backend_firewall_future_tcp_ports:
+  - port: "80"
+    comment: Future backend HTTP reverse proxy
+  - port: "443"
+    comment: Future backend HTTPS reverse proxy

@@ -63,6 +63,11 @@ jobs:
           "$RUNNER_TEMP/ansible-venv/bin/python" -m pip install ansible-core
           echo "$RUNNER_TEMP/ansible-venv/bin" >> "$GITHUB_PATH"
 
+      - name: Install Ansible collections
+        shell: bash
+        working-directory: ansible
+        run: ansible-galaxy collection install -r requirements.yml
+
       - name: Validate required environment secrets
         shell: bash
         env:

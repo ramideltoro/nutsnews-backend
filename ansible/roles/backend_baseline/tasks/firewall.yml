@@ -1,0 +1,69 @@
+---
+- name: Ensure UFW is installed
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+    update_cache: true
+
+- name: Ensure UFW IPv6 policy is enabled
+  ansible.builtin.lineinfile:
+    path: /etc/default/ufw
+    regexp: '^IPV6='
+    line: 'IPV6={{ backend_firewall_ipv6 }}'
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload ufw
+
+- name: Reset UFW before applying the backend baseline
+  community.general.ufw:
+    state: reset
+  when: backend_firewall_reset_before_apply | bool
+
+- name: Set default deny incoming policy
+  community.general.ufw:
+    direction: incoming
+    policy: deny
+
+- name: Set default allow outgoing policy
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+
+- name: Configure UFW logging level
+  community.general.ufw:
+    logging: "{{ backend_firewall_logging }}"
+
+- name: Allow current public TCP ports
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port }}"
+    proto: tcp
+    comment: "{{ item.comment }}"
+  loop: "{{ backend_firewall_public_tcp_ports }}"
+
+- name: Allow future HTTP and HTTPS ports only when explicitly enabled
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port }}"
+    proto: tcp
+    comment: "{{ item.comment }}"
+  loop: "{{ backend_firewall_future_tcp_ports }}"
+  when: backend_firewall_enable_http_https | bool
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+
+- name: Capture UFW verbose status
+  ansible.builtin.command: ufw status verbose
+  register: backend_ufw_status_verbose
+  changed_when: false
+
+- name: Report UFW verification summary
+  ansible.builtin.debug:
+    msg:
+      ipv6: "{{ backend_firewall_ipv6 }}"
+      current_public_tcp_ports: "{{ backend_firewall_public_tcp_ports }}"
+      future_http_https_enabled: "{{ backend_firewall_enable_http_https }}"
+      ufw_status_verbose: "{{ backend_ufw_status_verbose.stdout_lines }}"

@@ -4,3 +4,6 @@
 
 - name: Apply OS package maintenance
   ansible.builtin.import_tasks: maintenance.yml
+
+- name: Configure UFW firewall baseline
+  ansible.builtin.import_tasks: firewall.yml

@@ -12,3 +12,7 @@
   ansible.builtin.service:
     name: fail2ban
     state: restarted
+
+- name: Apply backend sysctl
+  ansible.builtin.command: sysctl --system
+  changed_when: true

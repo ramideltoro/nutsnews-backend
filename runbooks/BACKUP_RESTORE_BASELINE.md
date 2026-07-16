@@ -1,12 +1,24 @@
 # Backup And Restore Baseline
 
-This runbook covers backend issue #6 for `65.75.201.18`.
+This runbook covers backend backup and restore for `65.75.201.18`.
 
 ## Current State
 
-The backend host has no deployed app runtime, database service, upload storage, or other production backend state yet.
+The backend host has no deployed app runtime, database service, upload storage,
+or other production backend app state yet. It does now have host baseline,
+Caddy, dashboard, and backup-status state that must be covered.
 
-This runbook defines the backup baseline that must be implemented before any production backend state depends on this host.
+The service-aware matrix is:
+
+```text
+docs/backend-backup-service-matrix.json
+```
+
+Validate it with:
+
+```bash
+python3 scripts/validate_backup_service_matrix.py
+```
 
 ## Policy
 
@@ -18,14 +30,15 @@ Provider snapshots are supplemental only. They are useful for fast whole-server 
 
 | Data class | Initial owner | Backup requirement |
 | --- | --- | --- |
-| Backend app code/config | GitHub repositories | Git remotes are source of truth; do not back up generated checkouts as primary state |
-| Backend app runtime env | GitHub Environment secrets or documented secret store | Secret names documented in repo; values stored outside git and backed up by the secret-store owner |
-| Reverse proxy config | This repo through Ansible | Recreate from repo and protected apply |
-| Host baseline config | This repo through Ansible | Recreate from repo and protected apply |
-| Ops dashboard snapshots | Generated on host | Recreate from collectors unless explicitly needed for incident evidence |
+| Backend app code/config | GitHub repositories | Git remotes are source of truth; generated checkouts are not primary backup state |
+| Backend app runtime env | GitHub Environment secrets or documented secret store | Secret names documented in repo; values are excluded from restic |
+| Reverse proxy config/state | Caddy and this repo | Back up `/etc/caddy` and `/var/lib/caddy`; restore then reconcile with protected apply |
+| Host baseline config | This repo through Ansible | Back up selected host config for evidence; protected apply remains preferred restore |
+| Ops dashboard snapshots | Generated on host | Back up `status.json` for incident evidence; collectors can regenerate |
+| Backup status metadata | Backup runner | Back up `/var/lib/nutsnews/backups` status JSON |
 | Application uploads or local files | Future backend issue | Must use off-server backups before production use |
 | PostgreSQL data | Future database issue | Must use off-server encrypted backups plus restore drills before production use |
-| Logs | Host log retention plus future off-server policy | Retain enough for troubleshooting without storing secrets or unbounded raw logs |
+| Logs | Host log retention plus future off-server policy | Back up `/var/log/nutsnews` only; avoid unbounded raw logs |
 
 ## Off-Server Target
 
@@ -35,7 +48,19 @@ The first approved backend backup implementation should use encrypted off-server
 - another encrypted backup store documented in this repo;
 - managed database backups when the state is not hosted on this VPS.
 
-Backup credentials must live in the `production-backend` GitHub Environment or a documented secret store. Do not commit backup credentials, repository passwords, rclone config, database dumps, or restore artifacts.
+Backup credentials live in the `production-backend` GitHub Environment. Do not
+commit backup credentials, repository passwords, provider keys, database dumps,
+or restore artifacts.
+
+Required secret names:
+
+- `RESTIC_REPOSITORY`
+- `RESTIC_PASSWORD`
+- provider credentials for `NUTSNEWS_BACKEND_RESTIC_PROVIDER`, currently
+  `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` for `s3`
+
+The protected apply writes a root-only systemd environment file. Status JSON is
+world-readable for observability, but it contains no secret values.
 
 ## Initial Retention Baseline
 
@@ -64,6 +89,51 @@ Minimum restore test:
 
 No backend database, upload store, or other stateful production service should be enabled until this gate is satisfied.
 
+## GitOps Components
+
+The protected Ansible baseline installs:
+
+- `/usr/local/sbin/nutsnews-backup`
+- `/etc/nutsnews-backup/service-matrix.json`
+- `/etc/nutsnews-backup/restic.env` with mode `0600`
+- `/var/lib/nutsnews/backups/` with mode `0755`
+- `nutsnews-backup.service` and `.timer`
+- `nutsnews-backup-verify.service` and `.timer`
+- `nutsnews-restore-drill.service` and `.timer`
+
+Manual backup operations use the fixed workflow:
+
+```text
+Backend Backup Maintenance
+```
+
+Allowed actions:
+
+- `status`
+- `backup`
+- `verify`
+- `restore-drill`
+
+The mutating actions require `confirm_target=backend.nutsnews.com` and
+`production-backend` approval.
+
+## Status Files
+
+The runner writes:
+
+| File | Meaning |
+| --- | --- |
+| `/var/lib/nutsnews/backups/last-backup.json` | latest backup freshness, snapshot id, included paths, quota status |
+| `/var/lib/nutsnews/backups/last-verification.json` | latest restic check result |
+| `/var/lib/nutsnews/backups/last-restore-verification.json` | lightweight restore-drill result |
+
+The health report and ops dashboard expose these statuses separately:
+
+- backup failure;
+- stale backup;
+- unverified latest snapshot;
+- storage/quota warning.
+
 ## Verification Commands
 
 Current read-only host context:
@@ -78,6 +148,7 @@ Future backup implementations must add service-specific commands such as:
 restic snapshots
 restic check
 systemctl status <backup-timer-or-service> --no-pager
+sudo /usr/local/sbin/nutsnews-backup status
 ```
 
 ## Recovery Order

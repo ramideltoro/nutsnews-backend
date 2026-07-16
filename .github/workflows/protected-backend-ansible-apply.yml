@@ -115,6 +115,10 @@ jobs:
           NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
           NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
           NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          RESTIC_REPOSITORY: ${{ secrets.RESTIC_REPOSITORY }}
+          RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           set -euo pipefail
 
@@ -136,6 +140,10 @@ jobs:
             --known-hosts "$HOME/.ssh/known_hosts" \
             --required-secret NUTSNEWS_BACKEND_SSH_PRIVATE_KEY \
             --required-secret NUTSNEWS_BACKEND_KNOWN_HOSTS \
+            --required-secret RESTIC_REPOSITORY \
+            --required-secret RESTIC_PASSWORD \
+            --required-secret AWS_ACCESS_KEY_ID \
+            --required-secret AWS_SECRET_ACCESS_KEY \
             --output "$RUNNER_TEMP/backend-deployment-safety-pre.json" \
             --summary "$RUNNER_TEMP/backend-deployment-safety-pre.md"
 
@@ -144,6 +152,17 @@ jobs:
         env:
           NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
           NUTSNEWS_BACKEND_BECOME_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_BECOME_PASSWORD }}
+          NUTSNEWS_BACKEND_RESTIC_PROVIDER: ${{ vars.NUTSNEWS_BACKEND_RESTIC_PROVIDER || 's3' }}
+          RESTIC_REPOSITORY: ${{ secrets.RESTIC_REPOSITORY }}
+          RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          B2_ACCOUNT_ID: ${{ secrets.B2_ACCOUNT_ID }}
+          B2_ACCOUNT_KEY: ${{ secrets.B2_ACCOUNT_KEY }}
+          NUTSNEWS_BACKUP_CHECK_READ_DATA_SUBSET: ${{ vars.NUTSNEWS_BACKUP_CHECK_READ_DATA_SUBSET || '1%' }}
+          NUTSNEWS_BACKUP_STALE_AFTER_HOURS: ${{ vars.NUTSNEWS_BACKUP_STALE_AFTER_HOURS || '30' }}
+          NUTSNEWS_BACKUP_QUOTA_WARN_BYTES: ${{ vars.NUTSNEWS_BACKUP_QUOTA_WARN_BYTES || '0' }}
         run: |
           set -euo pipefail
 
@@ -161,6 +180,29 @@ jobs:
           become_password = os.environ.get("NUTSNEWS_BACKEND_BECOME_PASSWORD", "")
           if become_password:
               extra_vars["ansible_become_password"] = become_password
+
+          restic_repository = os.environ.get("RESTIC_REPOSITORY", "").strip()
+          restic_password = os.environ.get("RESTIC_PASSWORD", "")
+          if restic_repository and restic_password:
+              extra_vars["backend_backup_enabled"] = True
+              extra_vars["backend_backup_restic_repository"] = restic_repository
+              extra_vars["backend_backup_restic_password"] = restic_password
+              extra_vars["backend_backup_restic_provider"] = os.environ.get("NUTSNEWS_BACKEND_RESTIC_PROVIDER", "s3").strip() or "s3"
+              extra_vars["backend_backup_check_read_data_subset"] = os.environ.get("NUTSNEWS_BACKUP_CHECK_READ_DATA_SUBSET", "1%").strip() or "1%"
+              extra_vars["backend_backup_stale_after_hours"] = int(os.environ.get("NUTSNEWS_BACKUP_STALE_AFTER_HOURS", "30") or "30")
+              extra_vars["backend_backup_quota_warn_bytes"] = int(os.environ.get("NUTSNEWS_BACKUP_QUOTA_WARN_BYTES", "0") or "0")
+              backup_environment = {}
+              for name in (
+                  "AWS_ACCESS_KEY_ID",
+                  "AWS_SECRET_ACCESS_KEY",
+                  "AWS_DEFAULT_REGION",
+                  "B2_ACCOUNT_ID",
+                  "B2_ACCOUNT_KEY",
+              ):
+                  value = os.environ.get(name, "")
+                  if value:
+                      backup_environment[name] = value
+              extra_vars["backend_backup_environment"] = backup_environment
 
           path = Path(os.environ["RUNNER_TEMP"]) / "backend-extra-vars.json"
           path.write_text(json.dumps(extra_vars), encoding="utf-8")
@@ -196,6 +238,10 @@ jobs:
           NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
           NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
           NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          RESTIC_REPOSITORY: ${{ secrets.RESTIC_REPOSITORY }}
+          RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           set -euo pipefail
 
@@ -210,6 +256,10 @@ jobs:
             --known-hosts "$HOME/.ssh/known_hosts" \
             --required-secret NUTSNEWS_BACKEND_SSH_PRIVATE_KEY \
             --required-secret NUTSNEWS_BACKEND_KNOWN_HOSTS \
+            --required-secret RESTIC_REPOSITORY \
+            --required-secret RESTIC_PASSWORD \
+            --required-secret AWS_ACCESS_KEY_ID \
+            --required-secret AWS_SECRET_ACCESS_KEY \
             --output "$RUNNER_TEMP/backend-deployment-safety-post.json" \
             --summary "$RUNNER_TEMP/backend-deployment-safety-post.md"
 

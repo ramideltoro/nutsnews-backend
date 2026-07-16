@@ -2,7 +2,7 @@
   "observed_at_utc": "2026-07-16T21:15:00Z",
   "host": "backend",
   "ipv4": "65.75.201.18",
-  "kernel": "7.0.0-14-generic",
+  "kernel": "7.0.0-28-generic",
   "source": "read-only ssh",
   "public_tcp_ports": [
     {
@@ -64,8 +64,7 @@
     "Docker Compose",
     "PostgreSQL",
     "Redis or Valkey",
-    "search service",
-    "ops dashboard"
+    "search service"
   ],
   "failed_systemd_units": 0,
   "represented_in_repo": [
@@ -76,6 +75,8 @@
     "swap desired state",
     "monitoring and log retention desired state",
     "backup policy",
+    "service-aware backup desired state",
+    "ops dashboard",
     "protected apply workflow"
   ],
   "requires_protected_apply": [
@@ -86,6 +87,7 @@
     "swap activation",
     "monitoring and log retention installation",
     "Caddy health endpoint installation",
+    "service-aware backup installation",
     "public HTTP/HTTPS firewall enablement"
   ]
 }

@@ -1,0 +1,162 @@
+{
+  "version": 1,
+  "repository": "ramideltoro/nutsnews-backend",
+  "updated_at_utc": "2026-07-16",
+  "status_file_dir": "/var/lib/nutsnews/backups",
+  "restic": {
+    "repository_secret": "RESTIC_REPOSITORY",
+    "password_secret": "RESTIC_PASSWORD",
+    "provider_variable": "NUTSNEWS_BACKEND_RESTIC_PROVIDER",
+    "provider_secret_sets": {
+      "s3": [
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY"
+      ],
+      "b2": [
+        "B2_ACCOUNT_ID",
+        "B2_ACCOUNT_KEY"
+      ]
+    }
+  },
+  "alert_kinds": [
+    "backup_failure",
+    "stale_backup",
+    "unverified_latest_snapshot",
+    "storage_quota_warning"
+  ],
+  "services": [
+    {
+      "id": "host_baseline_config",
+      "title": "Host baseline configuration",
+      "current_state": "configured",
+      "criticality": "critical",
+      "data_sources": [
+        "/etc/ssh/sshd_config.d/00-nutsnews-hardening.conf",
+        "/etc/fail2ban/jail.d/nutsnews-sshd.local",
+        "/etc/sysctl.d/99-nutsnews-backend-swap.conf",
+        "/etc/systemd/journald.conf.d/99-nutsnews-backend.conf",
+        "/etc/logrotate.d/nutsnews-backend",
+        "/usr/local/sbin/nutsnews-backend-smoke"
+      ],
+      "backup_method": "restic_paths",
+      "restore_method": "protected_apply_preferred_restic_for_evidence",
+      "verification_method": "restore_drill_selected_files",
+      "exclusion_rationale": ""
+    },
+    {
+      "id": "caddy_reverse_proxy",
+      "title": "Caddy reverse proxy config and state",
+      "current_state": "configured",
+      "criticality": "critical",
+      "data_sources": [
+        "/etc/caddy",
+        "/var/lib/caddy"
+      ],
+      "backup_method": "restic_paths",
+      "restore_method": "restore_caddy_state_then_protected_apply",
+      "verification_method": "restore_drill_caddyfile_and_caddy_validate",
+      "exclusion_rationale": ""
+    },
+    {
+      "id": "ops_dashboard_state",
+      "title": "Read-only ops dashboard generated status",
+      "current_state": "configured",
+      "criticality": "standard",
+      "data_sources": [
+        "/var/www/nutsnews-ops-dashboard/status.json"
+      ],
+      "backup_method": "restic_paths",
+      "restore_method": "regenerate_from_collector_or_restore_incident_snapshot",
+      "verification_method": "restore_drill_status_json_parse",
+      "exclusion_rationale": ""
+    },
+    {
+      "id": "backup_status_metadata",
+      "title": "Backup status and restore-drill metadata",
+      "current_state": "configured",
+      "criticality": "critical",
+      "data_sources": [
+        "/var/lib/nutsnews/backups"
+      ],
+      "backup_method": "restic_paths",
+      "restore_method": "restore_status_metadata_after_repository_reconnect",
+      "verification_method": "restore_drill_status_json_parse",
+      "exclusion_rationale": ""
+    },
+    {
+      "id": "nutsnews_logs",
+      "title": "NutsNews local operational logs",
+      "current_state": "configured",
+      "criticality": "standard",
+      "data_sources": [
+        "/var/log/nutsnews"
+      ],
+      "backup_method": "restic_paths",
+      "restore_method": "restore_for_incident_context_only",
+      "verification_method": "restore_drill_directory_listing",
+      "exclusion_rationale": ""
+    },
+    {
+      "id": "docker_volumes",
+      "title": "Docker named volumes",
+      "current_state": "not_configured",
+      "criticality": "future_critical",
+      "data_sources": [
+        "/var/lib/docker/volumes"
+      ],
+      "backup_method": "restic_paths_when_docker_is_active",
+      "restore_method": "stop_services_restore_volumes_start_services",
+      "verification_method": "future_service_specific_smoke",
+      "exclusion_rationale": ""
+    },
+    {
+      "id": "postgresql_data",
+      "title": "PostgreSQL data",
+      "current_state": "not_configured",
+      "criticality": "future_critical",
+      "data_sources": [
+        "/var/lib/postgresql"
+      ],
+      "backup_method": "future_pg_dump_and_or_basebackup_plus_restic",
+      "restore_method": "restore_to_isolated_postgres_and_run_integrity_checks",
+      "verification_method": "future_restore_validation_sql",
+      "exclusion_rationale": ""
+    },
+    {
+      "id": "redis_valkey_data",
+      "title": "Redis or Valkey persistent data",
+      "current_state": "not_configured",
+      "criticality": "future_conditional",
+      "data_sources": [
+        "/var/lib/redis",
+        "/var/lib/valkey"
+      ],
+      "backup_method": "only_if_persistence_is_enabled",
+      "restore_method": "restore_persistent_dump_or_rebuild_cache",
+      "verification_method": "future_queue_or_cache_integrity_check",
+      "exclusion_rationale": "Rebuildable cache data is excluded unless a future issue enables persistence."
+    },
+    {
+      "id": "search_indexes",
+      "title": "Search indexes",
+      "current_state": "not_configured",
+      "criticality": "future_conditional",
+      "data_sources": [],
+      "backup_method": "rebuild_from_database_rows",
+      "restore_method": "rebuild_index_after_database_restore",
+      "verification_method": "future_search_smoke",
+      "exclusion_rationale": "Search indexes should remain rebuildable unless a future issue justifies snapshots."
+    },
+    {
+      "id": "runtime_secrets",
+      "title": "Runtime secrets",
+      "current_state": "external_secret_store",
+      "criticality": "critical",
+      "data_sources": [],
+      "backup_method": "excluded_from_restic",
+      "restore_method": "restore_from_github_environment_or_secret_store",
+      "verification_method": "credential_readiness_by_name_only",
+      "exclusion_rationale": "Secret values must not be copied into host backups or git."
+    }
+  ]
+}

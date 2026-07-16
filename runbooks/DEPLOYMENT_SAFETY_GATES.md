@@ -9,6 +9,7 @@ Backend-changing workflows are:
 - `Protected Backend Ansible Apply`
 - `Backend Cloudflare Routing` when `run_mode` is `apply` or `rollback`
 - `Backend Controlled Maintenance` when `action` is `security-upgrade` or `reboot`
+- `Backend Backup Maintenance` when `action` is `backup`, `verify`, or `restore-drill`
 
 Read-only workflows such as `Backend Drift Check`, `Backend Health Report`, and
 `Backend Credential Readiness` do not mutate the host or providers.
@@ -96,13 +97,33 @@ Recovery path:
   verifies boot ID, kernel, failed units, Caddy health, disk pressure, backup
   state, and alert state before any further mutation.
 
+### Backend Backup Maintenance
+
+The backup workflow starts only fixed systemd units:
+
+- `nutsnews-backup.service`
+- `nutsnews-backup-verify.service`
+- `nutsnews-restore-drill.service`
+
+It then reads `/usr/local/sbin/nutsnews-backup status` and uploads the sanitized
+JSON report. It does not accept arbitrary commands or paths.
+
+Recovery path:
+
+1. If backup fails, preserve the existing restic repository and status files.
+2. Fix credentials, repository access, or matrix paths through a reviewed PR.
+3. Re-run `backup`, then `verify`, then `restore-drill`.
+4. Do not delete old snapshots until the latest backup verifies and a restore
+   drill passes.
+
 ## Current Expected Non-Configured Surfaces
 
-Until the related issues land, backup freshness, restore verification, Docker,
-the backend app, and active-alert state may be reported as `not_configured`.
-They remain visible in reports. Profiles only block on the surfaces that are
-critical for the specific workflow action, so foundational work can still deploy
-the missing safety components through the protected path.
+Until the related issues land, Docker, the backend app, and active-alert state
+may be reported as `not_configured`. Backup freshness and restore verification
+become healthy only after the backup workflow has run `backup`, `verify`, and
+`restore-drill`. Profiles only block on the surfaces that are critical for the
+specific workflow action, so foundational work can still deploy missing safety
+components through the protected path.
 
 ## Validation
 

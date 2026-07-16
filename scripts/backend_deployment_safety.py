@@ -30,7 +30,8 @@ REMOTE_SAFETY_COMMANDS: dict[str, str] = {
         "else echo not_configured; fi"
     ),
     "restore_verification": (
-        "test -s /var/lib/nutsnews/backups/last-restore-verification.json && echo present || echo not_configured"
+        "test -s /var/lib/nutsnews/backups/last-restore-verification.json "
+        "&& cat /var/lib/nutsnews/backups/last-restore-verification.json || echo not_configured"
     ),
 }
 
@@ -156,11 +157,20 @@ def safety_checks(args: argparse.Namespace, evidence: dict[str, Any]) -> list[di
     checks.append({"name": "docker_health", "status": docker_status, "summary": docker_output or "unknown"})
 
     restore_output = maintenance.command_stdout(evidence, "restore_verification").strip()
+    restore_status = "not_configured"
+    if restore_output.startswith("{"):
+        try:
+            restore_data = json.loads(restore_output)
+            restore_status = str(restore_data.get("status") or "unknown")
+        except json.JSONDecodeError:
+            restore_status = "unknown"
+    elif restore_output != "not_configured":
+        restore_status = "unknown"
     checks.append(
         {
             "name": "restore_verification",
-            "status": "healthy" if restore_output == "present" else "not_configured" if restore_output == "not_configured" else "unknown",
-            "summary": restore_output or "unknown",
+            "status": restore_status if restore_status in maintenance.VALID_STATUSES else "unknown",
+            "summary": "restore drill status file" if restore_output.startswith("{") else restore_output or "unknown",
         }
     )
 

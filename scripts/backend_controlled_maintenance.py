@@ -64,10 +64,10 @@ REMOTE_COMMANDS: dict[str, str] = {
     "unattended_upgrade": "command -v unattended-upgrade >/dev/null 2>&1 && echo present || echo missing",
     "unattended_upgrades_enabled": "systemctl is-enabled unattended-upgrades 2>/dev/null || true",
     "backup_state": (
-        "if command -v resticprofile >/dev/null 2>&1; then "
-        "echo resticprofile_present; "
-        "systemctl is-active resticprofile.timer 2>/dev/null || true; "
-        "systemctl list-timers --all --no-legend --no-pager 'resticprofile*' 2>/dev/null || true; "
+        "if test -r /var/lib/nutsnews/backups/last-backup.json; then "
+        "cat /var/lib/nutsnews/backups/last-backup.json; "
+        "elif command -v resticprofile >/dev/null 2>&1; then "
+        "echo resticprofile_present; systemctl is-active resticprofile.timer 2>/dev/null || true; "
         "else echo not_configured; fi"
     ),
     "active_alerts": (
@@ -192,6 +192,29 @@ def service_check(name: str, state: str, *, required: bool) -> dict[str, Any]:
     return {"name": name, "status": status, "summary": f"{name}={normalized}"}
 
 
+def classify_backup_state(text: str) -> tuple[str, str]:
+    stripped = text.strip()
+    if stripped == "not_configured":
+        return "not_configured", "not_configured"
+    if stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError:
+            return "unknown", "backup status json invalid"
+        status = str(data.get("freshness_status") or data.get("status") or "unknown")
+        if status == "ok":
+            status = "healthy"
+        if status not in VALID_STATUSES:
+            status = "unknown"
+        snapshot = data.get("snapshot_id") or "none"
+        return status, f"snapshot={snapshot}"
+    if "active" in stripped or "waiting" in stripped:
+        return "healthy", stripped
+    if stripped:
+        return "warning", stripped
+    return "unknown", "unknown"
+
+
 def classify_prechecks(evidence: dict[str, Any]) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
 
@@ -271,16 +294,8 @@ def classify_prechecks(evidence: dict[str, Any]) -> list[dict[str, Any]]:
         }
     )
 
-    backup_state = command_stdout(evidence, "backup_state").strip()
-    if backup_state == "not_configured":
-        backup_status = "not_configured"
-    elif "active" in backup_state or "waiting" in backup_state:
-        backup_status = "healthy"
-    elif backup_state:
-        backup_status = "warning"
-    else:
-        backup_status = "unknown"
-    checks.append({"name": "backup_freshness", "status": backup_status, "summary": backup_state or "unknown"})
+    backup_status, backup_summary = classify_backup_state(command_stdout(evidence, "backup_state"))
+    checks.append({"name": "backup_freshness", "status": backup_status, "summary": backup_summary})
 
     active_alerts = command_stdout(evidence, "active_alerts").strip()
     if active_alerts == "not_configured":

@@ -9,7 +9,7 @@ Captured over read-only SSH on 2026-07-16:
 ```text
 host: backend
 ssh user: rami
-kernel: 7.0.0-14-generic
+kernel: 7.0.0-28-generic
 failed systemd units: 0
 cloud-init status: done
 ```
@@ -40,7 +40,6 @@ Not deployed at attestation time:
 - PostgreSQL
 - Redis or Valkey
 - search service
-- ops dashboard
 
 ## Repo-Managed Desired State
 
@@ -52,7 +51,8 @@ The repository now represents desired state for:
 - fail2ban SSH protection
 - swap safety buffer
 - monitoring and log retention
-- backup policy
+- read-only ops dashboard
+- service-aware backup policy and desired state
 - protected apply workflow
 
 Live enforcement still requires the protected backend workflow and explicit approval.
@@ -86,7 +86,7 @@ Database, cache, search, and dashboard ports must not be public.
 Update this attestation after:
 
 - a protected apply changes listeners or services;
-- Docker, Caddy, the backend app, database, cache, search, or dashboard is added;
+- Docker, Caddy, the backend app, database, cache, search, dashboard, or backup services are added;
 - a read-only audit finds drift;
 - public routing changes.
 

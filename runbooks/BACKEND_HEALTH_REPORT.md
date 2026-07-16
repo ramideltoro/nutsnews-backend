@@ -56,7 +56,7 @@ The JSON report includes:
 - `last_error`
 - delivery status
 - fixed-command SSH evidence
-- classified checks for host resources, failed units, reboot/update state, core services, backup tooling, and sudo readiness
+- classified checks for host resources, failed units, reboot/update state, core services, backup tooling, backup freshness, backup verification, restore drill status, storage quota status, and sudo readiness
 
 Statuses are:
 

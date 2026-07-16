@@ -56,6 +56,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_service_baseline.py
 
+      - name: Validate backup service matrix
+        shell: bash
+        run: python3 scripts/validate_backup_service_matrix.py
+
       - name: Validate abuse protection decision
         shell: bash
         run: python3 scripts/validate_abuse_protection_decision.py

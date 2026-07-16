@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import re
 from pathlib import Path
 from typing import Any
 
@@ -62,10 +63,39 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def redact_restic_text(text: str) -> str:
+    redacted = re.sub(r"s3:[^\s]+", "s3:[REDACTED]", text)
+    redacted = re.sub(r"https?://[^\s]+", "URL_REDACTED", redacted)
+    redacted = re.sub(r"(?i)(access[_ -]?key|secret|password)[^\s]*", "REDACTED", redacted)
+    return redacted
+
+
+def repository_normalization_metadata() -> dict[str, str]:
+    provider = (
+        os.environ.get("NUTSNEWS_BACKUP_RESTIC_PROVIDER")
+        or os.environ.get("NUTSNEWS_BACKEND_RESTIC_PROVIDER")
+        or ""
+    ).strip().lower()
+    repository = os.environ.get("RESTIC_REPOSITORY", "").strip()
+    if provider == "s3" and repository.startswith(("https://", "http://")):
+        return {"status": "applied", "provider": "s3", "rule": "prefix_s3_for_http_repository"}
+    return {"status": "not_needed", "provider": provider or "unspecified"}
+
+
+def restic_env() -> dict[str, str]:
+    env = os.environ.copy()
+    metadata = repository_normalization_metadata()
+    repository = env.get("RESTIC_REPOSITORY", "").strip()
+    if metadata["status"] == "applied":
+        env["RESTIC_REPOSITORY"] = f"s3:{repository}"
+    return env
+
+
 def run_restic(args: list[str], timeout: int = 3600) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["restic", *args],
         check=False,
+        env=restic_env(),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -130,7 +160,8 @@ def init_repository_if_needed(enabled: bool) -> dict[str, Any] | None:
     return {
         "status": "initialized" if init.returncode == 0 else "error",
         "returncode": init.returncode,
-        "stderr_tail": init.stderr[-1000:],
+        "stderr_tail": redact_restic_text(init.stderr[-1000:]),
+        "repository_normalization": repository_normalization_metadata(),
     }
 
 
@@ -197,6 +228,7 @@ def action_backup(args: argparse.Namespace) -> dict[str, Any]:
             "snapshot_id": None,
             "included_paths": paths,
             "missing_secret_names": missing,
+            "repository_normalization": repository_normalization_metadata(),
             "alerts": [{"kind": "backup_failure", "status": "critical"}],
         }
         write_json(args.state_dir / STATUS_FILES["backup"], status)
@@ -236,13 +268,14 @@ def action_backup(args: argparse.Namespace) -> dict[str, Any]:
         "snapshot_id": snapshot_id,
         "included_paths": paths,
         "service_matrix_version": matrix.get("version"),
+        "repository_normalization": repository_normalization_metadata(),
         "files_new": summary.get("files_new"),
         "files_changed": summary.get("files_changed"),
         "total_bytes_processed": summary.get("total_bytes_processed"),
         "repository_initialization": init,
         "quota": quota,
         "alerts": alert_list(backup_status="healthy" if healthy else "critical", stale=False, verified=verified, quota=quota),
-        "stderr_tail": result.stderr[-1000:] if result.returncode != 0 else "",
+        "stderr_tail": redact_restic_text(result.stderr[-1000:]) if result.returncode != 0 else "",
     }
     write_json(args.state_dir / STATUS_FILES["backup"], status)
     return status
@@ -278,7 +311,8 @@ def action_verify(args: argparse.Namespace) -> dict[str, Any]:
         "snapshot_id": snapshot_id,
         "read_data_subset": args.read_data_subset,
         "alerts": [] if healthy else [{"kind": "unverified_latest_snapshot", "status": "critical"}],
-        "stderr_tail": result.stderr[-1000:] if result.returncode != 0 else "",
+        "repository_normalization": repository_normalization_metadata(),
+        "stderr_tail": redact_restic_text(result.stderr[-1000:]) if result.returncode != 0 else "",
     }
     write_json(args.state_dir / STATUS_FILES["verification"], status)
     return status
@@ -321,7 +355,8 @@ def action_restore_drill(args: argparse.Namespace) -> dict[str, Any]:
         "selected_paths": selected,
         "restored_paths": restored,
         "alerts": [] if healthy else [{"kind": "unverified_latest_snapshot", "status": "critical"}],
-        "stderr_tail": result.stderr[-1000:] if result.returncode != 0 else "",
+        "repository_normalization": repository_normalization_metadata(),
+        "stderr_tail": redact_restic_text(result.stderr[-1000:]) if result.returncode != 0 else "",
     }
     write_json(args.state_dir / STATUS_FILES["restore_drill"], status)
     return status

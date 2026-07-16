@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 RUNNER_PATH = Path("ansible/roles/backend_baseline/files/nutsnews_backup.py")
@@ -57,6 +59,25 @@ class BackendBackupTests(unittest.TestCase):
         self.assertEqual(status["backup"]["status"], "not_configured")
         self.assertEqual(status["verification"]["status"], "not_configured")
         self.assertEqual(status["restore_drill"]["status"], "not_configured")
+
+    def test_restic_env_prefixes_s3_https_repository_without_mutating_parent_env(self):
+        runner = load_runner()
+        env = {
+            "RESTIC_REPOSITORY": "https://s3.example.test/nutsnews-backup",
+            "NUTSNEWS_BACKUP_RESTIC_PROVIDER": "s3",
+        }
+        with mock.patch.dict(os.environ, env, clear=True):
+            child_env = runner.restic_env()
+            metadata = runner.repository_normalization_metadata()
+            self.assertEqual(os.environ["RESTIC_REPOSITORY"], "https://s3.example.test/nutsnews-backup")
+        self.assertEqual(child_env["RESTIC_REPOSITORY"], "s3:https://s3.example.test/nutsnews-backup")
+        self.assertEqual(metadata["status"], "applied")
+
+    def test_restic_status_redacts_repository_urls_from_stderr(self):
+        runner = load_runner()
+        text = "Fatal: create repository at https://s3.example.test/bucket/path failed"
+        self.assertNotIn("s3.example.test", runner.redact_restic_text(text))
+        self.assertIn("URL_REDACTED", runner.redact_restic_text(text))
 
     def test_backup_workflow_has_only_fixed_actions(self):
         workflow = Path(".github/workflows/backend-backup-maintenance.yml").read_text(encoding="utf-8")

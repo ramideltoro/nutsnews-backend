@@ -1,0 +1,152 @@
+name: Protected Backend Ansible Apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_mode:
+        description: Run the backend baseline in check mode or apply mode.
+        required: true
+        default: check
+        type: choice
+        options:
+          - check
+          - apply
+      confirm_apply:
+        description: For apply mode only, type backend.nutsnews.com. Leave blank for check mode.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-backend-ansible-baseline
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    name: Backend baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          RUN_MODE: ${{ inputs.run_mode }}
+          CONFIRM_APPLY: ${{ inputs.confirm_apply }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$RUN_MODE" != "check" && "$RUN_MODE" != "apply" ]]; then
+            echo "Unsupported run_mode: $RUN_MODE" >&2
+            exit 1
+          fi
+
+          if [[ "$RUN_MODE" == "apply" && "$CONFIRM_APPLY" != "backend.nutsnews.com" ]]; then
+            echo "Apply mode requires confirm_apply to be exactly backend.nutsnews.com." >&2
+            exit 1
+          fi
+
+      - name: Install Ansible in temporary venv
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/ansible-venv"
+          "$RUNNER_TEMP/ansible-venv/bin/python" -m pip install ansible-core
+          echo "$RUNNER_TEMP/ansible-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Validate required environment secrets
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for secret_name in \
+            NUTSNEWS_BACKEND_SSH_PRIVATE_KEY \
+            NUTSNEWS_BACKEND_KNOWN_HOSTS
+          do
+            if [[ -z "${!secret_name}" ]]; then
+              echo "Missing required production-backend environment secret: $secret_name" >&2
+              missing=1
+            fi
+          done
+
+          exit "$missing"
+
+      - name: Prepare SSH material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Build runtime extra vars
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          NUTSNEWS_BACKEND_BECOME_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_BECOME_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          extra_vars = {}
+
+          ansible_user = os.environ.get("NUTSNEWS_BACKEND_ANSIBLE_USER", "").strip()
+          if ansible_user:
+              extra_vars["ansible_user"] = ansible_user
+
+          become_password = os.environ.get("NUTSNEWS_BACKEND_BECOME_PASSWORD", "")
+          if become_password:
+              extra_vars["ansible_become_password"] = become_password
+
+          path = Path(os.environ["RUNNER_TEMP"]) / "backend-extra-vars.json"
+          path.write_text(json.dumps(extra_vars), encoding="utf-8")
+          path.chmod(0o600)
+          PY
+
+      - name: Run backend Ansible baseline
+        shell: bash
+        working-directory: ansible
+        env:
+          RUN_MODE: ${{ inputs.run_mode }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            playbooks/bootstrap.yml
+            -i inventories/production/hosts.yml
+            --private-key "$HOME/.ssh/nutsnews_backend"
+            --extra-vars "@$RUNNER_TEMP/backend-extra-vars.json"
+          )
+
+          if [[ "$RUN_MODE" == "check" ]]; then
+            args+=(--check --diff)
+          fi
+
+          ansible-playbook "${args[@]}"

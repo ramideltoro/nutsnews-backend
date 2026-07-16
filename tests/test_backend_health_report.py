@@ -31,11 +31,12 @@ def fixture_report(**overrides):
             "ufw=active\n"
             "fail2ban=unavailable\n"
             "docker=unavailable\n"
-            "caddy=unavailable\n"
+            "caddy=active\n"
             "postgresql=inactive\n"
             "alloy=unavailable\n"
             "sysstat=active\n"
         ),
+        "backend_health": command("ok\n"),
         "backup_tools": command("restic=missing\nrclone=missing\npg_dump=missing\ndocker=missing\ncaddy=missing\nalloy=missing\n"),
         "sudo_nopasswd": command("no\n"),
     }
@@ -70,9 +71,16 @@ class BackendHealthReportTests(unittest.TestCase):
         self.assertEqual(by_name["root_disk_used_percent"]["status"], "healthy")
         self.assertEqual(by_name["package_updates"]["status"], "warning")
         self.assertEqual(by_name["service_docker"]["status"], "not_configured")
+        self.assertEqual(by_name["backend_endpoint_health"]["status"], "healthy")
         self.assertEqual(by_name["backup_tooling"]["status"], "not_configured")
         self.assertEqual(by_name["sudo_nopasswd"]["status"], "warning")
         self.assertGreaterEqual(summary["warning"], 2)
+
+    def test_active_caddy_with_failed_endpoint_is_critical(self):
+        checks, summary = backend_health_report.classify(fixture_report(backend_health=command("")))
+        by_name = {item["name"]: item for item in checks}
+        self.assertEqual(by_name["backend_endpoint_health"]["status"], "critical")
+        self.assertGreaterEqual(summary["critical"], 1)
 
     def test_missing_smtp_degrades_without_failure(self):
         env = {key: value for key, value in os.environ.items() if not key.startswith("NUTSNEWS_REPORT_")}

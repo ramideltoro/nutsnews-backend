@@ -49,6 +49,13 @@ The Caddy-managed `/healthz` endpoint returns `ok` to prove the origin and
 routing are ready; all other public paths return `404` until a reviewed backend
 app deployment owns them.
 
+The smoke command and scheduled health report verify that endpoint locally with
+SNI pinned to loopback:
+
+```bash
+curl -fsS --resolve backend.nutsnews.com:443:127.0.0.1 https://backend.nutsnews.com/healthz
+```
+
 ## Alert Thresholds
 
 Initial host thresholds:
@@ -71,7 +78,12 @@ Initial host thresholds:
 
 ## Alert Delivery
 
-Alert delivery is not configured yet. Before #7 can close, a later PR must configure and test an alert path such as GitHub Actions notification, email, uptime monitor, Grafana, Better Stack, or another documented lightweight service.
+Alert delivery uses `.github/workflows/backend-health-report.yml`. The manual
+and scheduled workflow runs a fixed set of read-only SSH checks, writes a JSON
+artifact, and can send the report by SMTP when `send_email=true`.
+
+The delivery result is recorded in the report artifact as
+`delivery.status=sent`, `skipped`, `not_configured`, or `error`.
 
 ## Apply Path
 
@@ -82,7 +94,8 @@ Run only through the protected backend workflow:
 3. Review log retention, sysstat, and smoke script changes.
 4. Run `apply` mode after the `production-backend` approval gate.
 5. Run the smoke command and review service/log state.
-6. Configure and test alert delivery before closing #7.
+6. Run `Backend Health Report` with `send_email=true` and confirm
+   `delivery.status=sent` in the artifact before closing #7.
 
 ## Rollback
 

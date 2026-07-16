@@ -6,6 +6,11 @@
       - sysstat
     state: present
     update_cache: true
+  register: backend_monitoring_packages
+
+- name: Track whether sysstat service can be managed in this run
+  ansible.builtin.set_fact:
+    backend_monitoring_sysstat_manageable: "{{ (not ansible_check_mode) or not (backend_monitoring_packages is changed) }}"
 
 - name: Ensure backend log directory exists
   ansible.builtin.file:
@@ -65,12 +70,14 @@
     group: root
     mode: "0644"
   notify: Restart sysstat
+  when: backend_monitoring_sysstat_manageable | bool
 
 - name: Ensure sysstat service is enabled and started
   ansible.builtin.service:
     name: sysstat
     enabled: true
     state: started
+  when: backend_monitoring_sysstat_manageable | bool
 
 - name: Install backend smoke check
   ansible.builtin.template:
@@ -99,4 +106,5 @@
       memory_crit_percent: "{{ backend_monitoring_memory_crit_percent }}"
       health_path: "{{ backend_monitoring_health_path }}"
       app_status: "{{ backend_monitoring_app_status }}"
+      sysstat_service_manageable: "{{ backend_monitoring_sysstat_manageable }}"
       smoke_output: "{{ backend_smoke_check.stdout_lines | default([]) }}"

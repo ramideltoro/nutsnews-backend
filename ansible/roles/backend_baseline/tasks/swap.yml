@@ -12,18 +12,26 @@
   register: backend_swapfile_created
   when: backend_swap_enabled | bool
 
+- name: Track whether swapfile can be managed in this run
+  ansible.builtin.set_fact:
+    backend_swapfile_manageable: "{{ (not ansible_check_mode) or (backend_swapfile_stat.stat.exists | default(false)) }}"
+  when: backend_swap_enabled | bool
+
 - name: Set swapfile permissions
   ansible.builtin.file:
     path: "{{ backend_swap_file }}"
     owner: root
     group: root
     mode: "0600"
-  when: backend_swap_enabled | bool
+  when:
+    - backend_swap_enabled | bool
+    - backend_swapfile_manageable | bool
 
 - name: Format swapfile when newly created
   ansible.builtin.command: "mkswap {{ backend_swap_file }}"
   when:
     - backend_swap_enabled | bool
+    - backend_swapfile_manageable | bool
     - backend_swapfile_created is changed
 
 - name: Persist swapfile in fstab
@@ -81,5 +89,6 @@
       swap_file: "{{ backend_swap_file }}"
       swap_size_mb: "{{ backend_swap_size_mb }}"
       swappiness: "{{ backend_swap_swappiness }}"
-      swapon_show: "{{ backend_swapon_show.stdout_lines }}"
-      free_h: "{{ backend_free_h.stdout_lines }}"
+      swapfile_manageable: "{{ backend_swapfile_manageable | default(false) }}"
+      swapon_show: "{{ backend_swapon_show.stdout_lines | default([]) }}"
+      free_h: "{{ backend_free_h.stdout_lines | default([]) }}"

@@ -24,6 +24,8 @@ Create a GitHub Environment named `production-backend` in `ramideltoro/nutsnews-
 
 The Environment must require explicit approval before jobs can access secrets or mutate the backend server.
 
+The credential bootstrap path is documented in [CREDENTIAL_BOOTSTRAP.md](CREDENTIAL_BOOTSTRAP.md). Use it to create or update the Environment, set non-secret variables, and load Environment secrets from local-only values.
+
 ## Required Environment Secrets
 
 Add these to the `production-backend` Environment:

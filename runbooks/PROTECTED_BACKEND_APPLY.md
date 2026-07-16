@@ -8,7 +8,8 @@ The protected backend workflow is the normal mutation path for `65.75.201.18`.
 
 It must own or orchestrate backend host changes for:
 
-- package updates and reboot handling
+- baseline package metadata refresh and maintenance-state reporting
+- controlled security-update and reboot handling through `Backend Controlled Maintenance`
 - SSH configuration and access hardening
 - UFW firewall policy
 - fail2ban or equivalent SSH abuse protection
@@ -74,6 +75,12 @@ the swapfile would only be created by a real apply.
 6. Review the final Ansible recap.
 
 Apply mode must never be run from a pull request branch.
+
+Routine baseline applies must not be used as a broad OS-upgrade or reboot
+shortcut. The backend baseline defaults keep `dist` upgrades, package autoremove,
+and reboot disabled. Use the `Backend Controlled Maintenance` workflow for
+fixed-purpose `precheck`, `security-upgrade`, or `reboot` actions, each under the
+same protected `production-backend` approval gate.
 
 ## Read-Only Verification After Apply
 

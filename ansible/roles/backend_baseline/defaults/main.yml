@@ -6,7 +6,9 @@ backend_ssh_managed_directives:
   - KbdInteractiveAuthentication
   - PubkeyAuthentication
 backend_apt_cache_valid_time: 3600
-backend_reboot_if_required: true
+backend_apply_dist_upgrade: false
+backend_apt_autoremove: false
+backend_reboot_if_required: false
 backend_reboot_timeout: 900
 backend_firewall_reset_before_apply: true
 backend_firewall_ipv6: "yes"

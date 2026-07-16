@@ -107,6 +107,8 @@ function render(data) {
   renderDefinitionList("host-list", [
     ["OS", host.os],
     ["Kernel", host.kernel],
+    ["Latest Installed Kernel", host.latest_installed_kernel],
+    ["Boot ID", host.boot_id],
     ["Uptime", host.uptime],
     ["Boot Time", host.boot_time],
     ["CPU Count", host.cpu_count],

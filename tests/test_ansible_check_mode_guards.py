@@ -40,6 +40,15 @@ class AnsibleCheckModeGuardTests(unittest.TestCase):
         self.assertIn("backend_swapfile_stat.stat.exists | default(false)", swap)
         self.assertGreaterEqual(swap.count("backend_swapfile_manageable | bool"), 2)
 
+    def test_baseline_package_upgrade_and_reboot_are_opt_in(self):
+        defaults = read_role_file("ansible/roles/backend_baseline/defaults/main.yml")
+        maintenance = read_role_file("ansible/roles/backend_baseline/tasks/maintenance.yml")
+        self.assertIn("backend_apply_dist_upgrade: false", defaults)
+        self.assertIn("backend_apt_autoremove: false", defaults)
+        self.assertIn("backend_reboot_if_required: false", defaults)
+        self.assertIn("when: backend_apply_dist_upgrade | bool", maintenance)
+        self.assertIn("when: backend_apt_autoremove | bool", maintenance)
+
 
 if __name__ == "__main__":
     unittest.main()

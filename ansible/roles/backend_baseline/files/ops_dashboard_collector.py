@@ -213,6 +213,17 @@ def collect() -> dict[str, Any]:
         upgradable_count = int(upgradable_raw)
     except ValueError:
         upgradable_count = None
+    latest_kernel = run(
+        [
+            "sh",
+            "-lc",
+            "find /boot -maxdepth 1 -name 'vmlinuz-*' -printf '%f\\n' 2>/dev/null | sed 's/^vmlinuz-//' | sort -V | tail -n 1",
+        ]
+    )["stdout"].strip()
+    try:
+        boot_id = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
+    except OSError:
+        boot_id = "unknown"
 
     memory = free_data.get("memory", {})
     swap = free_data.get("swap", {})
@@ -228,6 +239,8 @@ def collect() -> dict[str, Any]:
         "host": {
             "hostname": socket.gethostname(),
             "kernel": run(["uname", "-r"])["stdout"].strip(),
+            "latest_installed_kernel": latest_kernel or "unknown",
+            "boot_id": boot_id,
             "os": run(["sh", "-lc", ". /etc/os-release && printf '%s %s' \"$NAME\" \"$VERSION_ID\""])["stdout"].strip(),
             "uptime": run(["uptime", "-p"])["stdout"].strip(),
             "boot_time": run(["uptime", "-s"])["stdout"].strip(),

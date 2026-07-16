@@ -21,6 +21,8 @@ def fixture_report(**overrides):
             "Mem:     10415267840   536870912  9448928051     4194304   742391808  9878424780\n"
             "Swap:             0          0          0\n"
         ),
+        "kernel": command("7.0.0-28-generic\n"),
+        "latest_installed_kernel": command("7.0.0-28-generic\n"),
         "root_disk": command("/dev/vda1 82678120448 2147483648 80530636800 3% /\n"),
         "root_inodes": command("/dev/vda1 5242880 102400 5140480 2% /\n"),
         "failed_units": command(""),
@@ -70,6 +72,7 @@ class BackendHealthReportTests(unittest.TestCase):
         by_name = {item["name"]: item for item in checks}
         self.assertEqual(by_name["root_disk_used_percent"]["status"], "healthy")
         self.assertEqual(by_name["package_updates"]["status"], "warning")
+        self.assertEqual(by_name["kernel_alignment"]["status"], "healthy")
         self.assertEqual(by_name["service_docker"]["status"], "not_configured")
         self.assertEqual(by_name["backend_endpoint_health"]["status"], "healthy")
         self.assertEqual(by_name["backup_tooling"]["status"], "not_configured")

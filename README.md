@@ -58,6 +58,7 @@ Use [runbooks/SWAP_BASELINE.md](runbooks/SWAP_BASELINE.md) before applying or ve
 Use [runbooks/CLOUD_INIT_PROVIDER_BOOTSTRAP.md](runbooks/CLOUD_INIT_PROVIDER_BOOTSTRAP.md) for the provider NoCloud deprecation warning notes.
 Use [runbooks/BACKUP_RESTORE_BASELINE.md](runbooks/BACKUP_RESTORE_BASELINE.md) before adding any stateful backend workload.
 Use [runbooks/MONITORING_BASELINE.md](runbooks/MONITORING_BASELINE.md) before applying or verifying monitoring and log retention.
+Use [runbooks/SERVICE_BASELINE_ATTESTATION.md](runbooks/SERVICE_BASELINE_ATTESTATION.md) before adding optional backend services.
 
 The current Ansible scaffold is intentionally narrow. It defines the host contract, runtime choice, validation commands, required secret boundaries, and rollback expectations that later issues will fill in through Ansible roles and protected workflows.
 

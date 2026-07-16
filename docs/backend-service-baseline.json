@@ -1,0 +1,72 @@
+{
+  "observed_at_utc": "2026-07-16T15:34:00Z",
+  "host": "backend",
+  "ipv4": "65.75.201.18",
+  "kernel": "7.0.0-14-generic",
+  "source": "read-only ssh",
+  "public_tcp_ports": [
+    {
+      "port": 22,
+      "address": "0.0.0.0",
+      "purpose": "SSH"
+    },
+    {
+      "port": 22,
+      "address": "::",
+      "purpose": "SSH"
+    }
+  ],
+  "private_listeners": [
+    {
+      "port": 53,
+      "address": "127.0.0.53%lo",
+      "purpose": "local systemd-resolved DNS"
+    },
+    {
+      "port": 53,
+      "address": "127.0.0.54",
+      "purpose": "local systemd-resolved DNS"
+    },
+    {
+      "port": 323,
+      "address": "127.0.0.1",
+      "purpose": "local chrony"
+    },
+    {
+      "port": 323,
+      "address": "::1",
+      "purpose": "local chrony"
+    }
+  ],
+  "not_deployed": [
+    "backend app",
+    "Docker Engine",
+    "Docker Compose",
+    "Caddy",
+    "public HTTP",
+    "public HTTPS",
+    "PostgreSQL",
+    "Redis or Valkey",
+    "search service",
+    "ops dashboard"
+  ],
+  "failed_systemd_units": 0,
+  "represented_in_repo": [
+    "SSH hardening desired state",
+    "OS package maintenance desired state",
+    "UFW desired state",
+    "fail2ban desired state",
+    "swap desired state",
+    "monitoring and log retention desired state",
+    "backup policy",
+    "protected apply workflow"
+  ],
+  "requires_protected_apply": [
+    "SSH hardening live enforcement",
+    "OS package updates and reboot",
+    "UFW live enforcement",
+    "fail2ban live enforcement",
+    "swap activation",
+    "monitoring and log retention installation"
+  ]
+}

@@ -23,7 +23,7 @@
 
           @health path {{ backend_monitoring_health_path }}
           header @health Content-Type text/plain
-          respond @health "{{ backend_caddy_health_response }}\n" 200
+          respond @health "{{ backend_caddy_health_response }}" 200
 
           respond "backend application not deployed\n" 404
       }

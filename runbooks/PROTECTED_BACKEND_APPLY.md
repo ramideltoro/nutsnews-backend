@@ -58,6 +58,12 @@ Do not commit secret values.
 
 Check mode is required before apply mode.
 
+Check mode must stay non-mutating. When a package such as `fail2ban` or
+`sysstat` is not installed yet, Ansible may report that it would install the
+package, then skip dependent service management until apply mode creates the
+service unit. Swapfile permission and format steps follow the same pattern when
+the swapfile would only be created by a real apply.
+
 ## Run Apply Mode
 
 1. Run check mode first and review the output.

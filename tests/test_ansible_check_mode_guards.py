@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import re
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def read_role_file(relative_path: str) -> str:
+    return (ROOT / relative_path).read_text(encoding="utf-8")
+
+
+class AnsibleCheckModeGuardTests(unittest.TestCase):
+    def test_handlers_do_not_reload_or_restart_services_in_check_mode(self):
+        handlers = read_role_file("ansible/roles/backend_baseline/handlers/main.yml")
+        handler_blocks = re.findall(r"(?m)^- name: .*(?:\n(?!- name: ).*)*", handlers)
+        guarded_handlers = [block for block in handler_blocks if "when: not ansible_check_mode" in block]
+        self.assertEqual(len(guarded_handlers), len(handler_blocks))
+
+    def test_fail2ban_skips_service_management_when_check_mode_package_is_pending(self):
+        fail2ban = read_role_file("ansible/roles/backend_baseline/tasks/fail2ban.yml")
+        self.assertIn("register: backend_fail2ban_package", fail2ban)
+        self.assertIn("backend_fail2ban_service_manageable", fail2ban)
+        self.assertIn("not (backend_fail2ban_package is changed)", fail2ban)
+        self.assertIn("when: backend_fail2ban_service_manageable | bool", fail2ban)
+
+    def test_sysstat_skips_service_management_when_check_mode_package_is_pending(self):
+        monitoring = read_role_file("ansible/roles/backend_baseline/tasks/monitoring.yml")
+        self.assertIn("register: backend_monitoring_packages", monitoring)
+        self.assertIn("backend_monitoring_sysstat_manageable", monitoring)
+        self.assertIn("not (backend_monitoring_packages is changed)", monitoring)
+        self.assertIn("when: backend_monitoring_sysstat_manageable | bool", monitoring)
+
+    def test_swapfile_permissions_wait_for_real_swapfile_creation_in_check_mode(self):
+        swap = read_role_file("ansible/roles/backend_baseline/tasks/swap.yml")
+        self.assertIn("backend_swapfile_manageable", swap)
+        self.assertIn("backend_swapfile_stat.stat.exists | default(false)", swap)
+        self.assertGreaterEqual(swap.count("backend_swapfile_manageable | bool"), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

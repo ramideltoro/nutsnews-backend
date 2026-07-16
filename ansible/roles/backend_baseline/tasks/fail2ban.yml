@@ -4,6 +4,11 @@
     name: fail2ban
     state: present
     update_cache: true
+  register: backend_fail2ban_package
+
+- name: Track whether fail2ban service can be managed in this run
+  ansible.builtin.set_fact:
+    backend_fail2ban_service_manageable: "{{ (not ansible_check_mode) or not (backend_fail2ban_package is changed) }}"
 
 - name: Install backend SSH fail2ban jail
   ansible.builtin.copy:
@@ -29,12 +34,14 @@
     name: fail2ban
     enabled: true
     state: started
+  when: backend_fail2ban_service_manageable | bool
 
 - name: Capture fail2ban sshd jail status
   ansible.builtin.command: fail2ban-client status sshd
   register: backend_fail2ban_sshd_status
   changed_when: false
   failed_when: false
+  when: backend_fail2ban_service_manageable | bool
 
 - name: Report fail2ban verification summary
   ansible.builtin.debug:
@@ -44,4 +51,5 @@
       bantime: "{{ backend_fail2ban_sshd_bantime }}"
       findtime: "{{ backend_fail2ban_sshd_findtime }}"
       maxretry: "{{ backend_fail2ban_sshd_maxretry }}"
-      status: "{{ backend_fail2ban_sshd_status.stdout_lines }}"
+      service_manageable: "{{ backend_fail2ban_service_manageable }}"
+      status: "{{ backend_fail2ban_sshd_status.stdout_lines | default([]) }}"

@@ -1,0 +1,3 @@
+---
+- name: Configure SSH hardening
+  ansible.builtin.import_tasks: ssh.yml

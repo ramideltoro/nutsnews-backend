@@ -1,0 +1,7 @@
+---
+backend_ssh_hardening_dropin: /etc/ssh/sshd_config.d/00-nutsnews-hardening.conf
+backend_ssh_managed_directives:
+  - PermitRootLogin
+  - PasswordAuthentication
+  - KbdInteractiveAuthentication
+  - PubkeyAuthentication

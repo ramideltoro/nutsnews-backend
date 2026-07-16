@@ -53,6 +53,7 @@ Use [runbooks/PROTECTED_BACKEND_APPLY.md](runbooks/PROTECTED_BACKEND_APPLY.md) b
 Use [runbooks/SSH_HARDENING.md](runbooks/SSH_HARDENING.md) before applying or verifying SSH hardening.
 Use [runbooks/OS_MAINTENANCE.md](runbooks/OS_MAINTENANCE.md) before applying package updates or rebooting the backend host.
 Use [runbooks/FIREWALL_BASELINE.md](runbooks/FIREWALL_BASELINE.md) before applying or verifying firewall policy.
+Use [runbooks/FAIL2BAN_SSH.md](runbooks/FAIL2BAN_SSH.md) before applying or verifying SSH brute-force protection.
 
 The current Ansible scaffold is intentionally narrow. It defines the host contract, runtime choice, validation commands, required secret boundaries, and rollback expectations that later issues will fill in through Ansible roles and protected workflows.
 

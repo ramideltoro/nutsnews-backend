@@ -7,3 +7,6 @@
 
 - name: Configure UFW firewall baseline
   ansible.builtin.import_tasks: firewall.yml
+
+- name: Configure SSH brute-force protection
+  ansible.builtin.import_tasks: fail2ban.yml

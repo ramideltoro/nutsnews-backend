@@ -1,0 +1,102 @@
+---
+- name: Ensure monitoring and log retention packages are installed
+  ansible.builtin.apt:
+    name:
+      - logrotate
+      - sysstat
+    state: present
+    update_cache: true
+
+- name: Ensure backend log directory exists
+  ansible.builtin.file:
+    path: "{{ backend_monitoring_log_dir }}"
+    state: directory
+    owner: root
+    group: adm
+    mode: "0750"
+
+- name: Ensure journald drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Configure backend journald retention
+  ansible.builtin.copy:
+    dest: /etc/systemd/journald.conf.d/99-nutsnews-backend.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      [Journal]
+      Storage=persistent
+      SystemMaxUse={{ backend_monitoring_journal_system_max_use }}
+      MaxRetentionSec={{ backend_monitoring_journal_max_retention_sec }}
+  notify: Restart systemd-journald
+
+- name: Configure backend log rotation
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/nutsnews-backend
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      {{ backend_monitoring_log_dir }}/*.log {
+          daily
+          rotate 14
+          missingok
+          notifempty
+          compress
+          delaycompress
+          copytruncate
+          create 0640 root adm
+      }
+
+- name: Enable sysstat collection
+  ansible.builtin.lineinfile:
+    path: /etc/default/sysstat
+    regexp: '^ENABLED='
+    line: 'ENABLED="true"'
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart sysstat
+
+- name: Ensure sysstat service is enabled and started
+  ansible.builtin.service:
+    name: sysstat
+    enabled: true
+    state: started
+
+- name: Install backend smoke check
+  ansible.builtin.template:
+    src: nutsnews-backend-smoke.sh.j2
+    dest: /usr/local/sbin/nutsnews-backend-smoke
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Run backend smoke check after monitoring setup
+  ansible.builtin.command: /usr/local/sbin/nutsnews-backend-smoke
+  register: backend_smoke_check
+  changed_when: false
+  failed_when: false
+  when: not ansible_check_mode
+
+- name: Report monitoring baseline summary
+  ansible.builtin.debug:
+    msg:
+      log_dir: "{{ backend_monitoring_log_dir }}"
+      journal_system_max_use: "{{ backend_monitoring_journal_system_max_use }}"
+      journal_max_retention_sec: "{{ backend_monitoring_journal_max_retention_sec }}"
+      disk_warn_percent: "{{ backend_monitoring_disk_warn_percent }}"
+      disk_crit_percent: "{{ backend_monitoring_disk_crit_percent }}"
+      memory_warn_percent: "{{ backend_monitoring_memory_warn_percent }}"
+      memory_crit_percent: "{{ backend_monitoring_memory_crit_percent }}"
+      health_path: "{{ backend_monitoring_health_path }}"
+      app_status: "{{ backend_monitoring_app_status }}"
+      smoke_output: "{{ backend_smoke_check.stdout_lines | default([]) }}"

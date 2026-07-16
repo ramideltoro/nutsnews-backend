@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "host=$(hostname)"
+echo "kernel=$(uname -r)"
+echo "app_status={{ backend_monitoring_app_status }}"
+echo "health_path={{ backend_monitoring_health_path }}"
+
+if [[ -e /var/run/reboot-required ]]; then
+  echo "reboot_required=true"
+else
+  echo "reboot_required=false"
+fi
+
+echo "disk_root_percent=$(df -P / | awk 'NR==2 {print $5}')"
+echo "memory_summary_begin"
+free -h
+echo "memory_summary_end"
+
+echo "swap_summary_begin"
+swapon --show || true
+echo "swap_summary_end"
+
+echo "failed_units_begin"
+systemctl --failed --no-pager || true
+echo "failed_units_end"
+
+echo "listeners_begin"
+ss -tulpen 2>/dev/null || ss -tulpn || true
+echo "listeners_end"
+
+if command -v fail2ban-client >/dev/null 2>&1; then
+  echo "fail2ban_sshd_begin"
+  fail2ban-client status sshd 2>/dev/null || true
+  echo "fail2ban_sshd_end"
+fi

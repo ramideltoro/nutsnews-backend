@@ -13,3 +13,6 @@
 
 - name: Configure swap safety buffer
   ansible.builtin.import_tasks: swap.yml
+
+- name: Configure monitoring and log retention baseline
+  ansible.builtin.import_tasks: monitoring.yml

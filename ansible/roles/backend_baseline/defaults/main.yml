@@ -20,3 +20,11 @@ backend_firewall_future_tcp_ports:
     comment: Future backend HTTP reverse proxy
   - port: "443"
     comment: Future backend HTTPS reverse proxy
+backend_fail2ban_sshd_enabled: true
+backend_fail2ban_sshd_backend: systemd
+backend_fail2ban_sshd_bantime: 1h
+backend_fail2ban_sshd_findtime: 10m
+backend_fail2ban_sshd_maxretry: 5
+backend_fail2ban_sshd_ignoreip:
+  - 127.0.0.1/8
+  - ::1

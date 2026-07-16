@@ -1,0 +1,47 @@
+---
+- name: Ensure fail2ban is installed
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+    update_cache: true
+
+- name: Install backend SSH fail2ban jail
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.d/nutsnews-sshd.local
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      [sshd]
+      enabled = {{ backend_fail2ban_sshd_enabled | ternary('true', 'false') }}
+      backend = {{ backend_fail2ban_sshd_backend }}
+      port = ssh
+      filter = sshd
+      bantime = {{ backend_fail2ban_sshd_bantime }}
+      findtime = {{ backend_fail2ban_sshd_findtime }}
+      maxretry = {{ backend_fail2ban_sshd_maxretry }}
+      ignoreip = {{ backend_fail2ban_sshd_ignoreip | join(' ') }}
+  notify: Restart fail2ban
+
+- name: Ensure fail2ban service is enabled and started
+  ansible.builtin.service:
+    name: fail2ban
+    enabled: true
+    state: started
+
+- name: Capture fail2ban sshd jail status
+  ansible.builtin.command: fail2ban-client status sshd
+  register: backend_fail2ban_sshd_status
+  changed_when: false
+  failed_when: false
+
+- name: Report fail2ban verification summary
+  ansible.builtin.debug:
+    msg:
+      enabled: "{{ backend_fail2ban_sshd_enabled }}"
+      backend: "{{ backend_fail2ban_sshd_backend }}"
+      bantime: "{{ backend_fail2ban_sshd_bantime }}"
+      findtime: "{{ backend_fail2ban_sshd_findtime }}"
+      maxretry: "{{ backend_fail2ban_sshd_maxretry }}"
+      status: "{{ backend_fail2ban_sshd_status.stdout_lines }}"

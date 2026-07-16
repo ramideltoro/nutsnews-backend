@@ -56,6 +56,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_abuse_protection_decision.py
 
+      - name: Validate Redis Valkey decision
+        shell: bash
+        run: python3 scripts/validate_redis_valkey_decision.py
+
       - name: Install Ansible in temporary venv
         shell: bash
         run: |

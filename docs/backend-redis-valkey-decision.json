@@ -1,0 +1,62 @@
+{
+  "issue": 27,
+  "decision_date_utc": "2026-07-16",
+  "decision": "do_not_install_now",
+  "install_allowed": false,
+  "runtime_dependency_required": false,
+  "host": "backend",
+  "ipv4": "65.75.201.18",
+  "source_baseline": "docs/backend-service-baseline.json",
+  "app_evidence": [
+    {
+      "repository": "ramideltoro/nutsnews",
+      "path": "web/package.json",
+      "finding": "Dependencies include Supabase, Next, NextAuth, React, and Sentry, but no Redis or Valkey client."
+    },
+    {
+      "repository": "ramideltoro/nutsnews",
+      "path": "web/app/page.tsx",
+      "finding": "Homepage feed uses Next unstable_cache and existing edge/Supabase fallback data flow."
+    },
+    {
+      "repository": "ramideltoro/nutsnews",
+      "path": "web/lib/cacheHeaders.ts",
+      "finding": "Public API and page caching is currently CDN/header based."
+    },
+    {
+      "repository": "ramideltoro/nutsnews",
+      "path": "api-contracts/inventory.json",
+      "finding": "Contact API anti-abuse is documented as route-level origin validation, Turnstile, and rate limiting."
+    },
+    {
+      "repository": "ramideltoro/nutsnews",
+      "path": "web/lib/adminCostGuardrails.ts",
+      "finding": "Redis/KV appears as a future quota guardrail category, not as an active app dependency."
+    }
+  ],
+  "workloads": {
+    "queue": "no concrete backend-owned queue workload identified",
+    "cache": "current public caching is Next/CDN/Supabase based",
+    "rate_limiter": "no shared backend Redis rate-limiter dependency identified",
+    "session_state": "admin auth uses JWT session strategy; no Redis session store identified",
+    "feed_coordination": "feed automation is not currently owned by this backend host",
+    "admin_task_progress": "no backend job-progress workload identified",
+    "retry_buffer": "no durable retry-buffer workload identified"
+  },
+  "future_install_gate": {
+    "workload_owner": "must be a concrete app, worker, or backend issue before install",
+    "network": "bind to localhost or a private Docker network only; never expose a Redis or Valkey TCP port publicly",
+    "authentication": "require authentication or an equivalent private-network access boundary",
+    "resource_limits": "document maxmemory, CPU expectation, and eviction policy before apply",
+    "persistence": "cache/rate-limit data should be non-persistent; durable queues need a restore strategy before production use",
+    "backup": "only persistent Redis or Valkey data is backed up; rebuildable cache indexes are explicitly excluded",
+    "health_check": "define app readiness and degraded behavior before adding a runtime dependency",
+    "observability": "collect low-cardinality service health, memory, evictions, connected clients, and persistence errors if installed",
+    "fallback": "app behavior must degrade safely when Redis or Valkey is unavailable",
+    "protected_apply_required": true
+  },
+  "validation": {
+    "local_validator": "python3 scripts/validate_redis_valkey_decision.py",
+    "live_verification": "read-only until a later approved protected apply"
+  }
+}

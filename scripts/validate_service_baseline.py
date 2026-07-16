@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 BASELINE_PATH = Path("docs/backend-service-baseline.json")
-ALLOWED_PUBLIC_TCP_PORTS = {22}
+ALLOWED_PUBLIC_TCP_PORTS = {22, 80, 443}
 REQUIRED_KEYS = {
     "observed_at_utc",
     "host",

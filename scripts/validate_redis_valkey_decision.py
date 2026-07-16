@@ -37,8 +37,8 @@ def main() -> int:
         errors.append("runtime_dependency_required must be false while Redis/Valkey is not installed")
 
     public_ports = {int(entry["port"]) for entry in baseline.get("public_tcp_ports", [])}
-    if public_ports != {22}:
-        errors.append(f"service baseline must expose only SSH while Redis/Valkey is not installed; got {sorted(public_ports)}")
+    if not public_ports.issubset({22, 80, 443}):
+        errors.append(f"service baseline exposes unsupported public ports while Redis/Valkey is not installed: {sorted(public_ports)}")
 
     not_deployed = set(baseline.get("not_deployed", []))
     if "Redis or Valkey" not in not_deployed:

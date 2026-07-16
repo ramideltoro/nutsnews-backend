@@ -1,5 +1,5 @@
 {
-  "observed_at_utc": "2026-07-16T15:34:00Z",
+  "observed_at_utc": "2026-07-16T21:15:00Z",
   "host": "backend",
   "ipv4": "65.75.201.18",
   "kernel": "7.0.0-14-generic",
@@ -14,6 +14,26 @@
       "port": 22,
       "address": "::",
       "purpose": "SSH"
+    },
+    {
+      "port": 80,
+      "address": "0.0.0.0",
+      "purpose": "HTTP health and ACME"
+    },
+    {
+      "port": 80,
+      "address": "::",
+      "purpose": "HTTP health and ACME"
+    },
+    {
+      "port": 443,
+      "address": "0.0.0.0",
+      "purpose": "HTTPS health"
+    },
+    {
+      "port": 443,
+      "address": "::",
+      "purpose": "HTTPS health"
     }
   ],
   "private_listeners": [
@@ -42,9 +62,6 @@
     "backend app",
     "Docker Engine",
     "Docker Compose",
-    "Caddy",
-    "public HTTP",
-    "public HTTPS",
     "PostgreSQL",
     "Redis or Valkey",
     "search service",
@@ -67,6 +84,8 @@
     "UFW live enforcement",
     "fail2ban live enforcement",
     "swap activation",
-    "monitoring and log retention installation"
+    "monitoring and log retention installation",
+    "Caddy health endpoint installation",
+    "public HTTP/HTTPS firewall enablement"
   ]
 }

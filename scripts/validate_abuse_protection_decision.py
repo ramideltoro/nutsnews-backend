@@ -28,25 +28,25 @@ def main() -> int:
     errors: list[str] = []
 
     public_ports = {int(entry["port"]) for entry in baseline.get("public_tcp_ports", [])}
-    if public_ports != {22}:
-        errors.append(f"service baseline must expose only SSH while issue #24 is ssh-only; got {sorted(public_ports)}")
+    if not public_ports.issubset({22, 80, 443}):
+        errors.append(f"service baseline exposes unsupported public ports for the current decision: {sorted(public_ports)}")
 
     not_deployed = set(baseline.get("not_deployed", []))
-    for service in ("Caddy", "public HTTP", "public HTTPS"):
+    for service in ("backend app", "Docker Engine"):
         if service not in not_deployed:
             errors.append(f"{service} is no longer marked not_deployed; update the abuse-protection decision")
 
     if decision.get("selected_tool") != "fail2ban":
         errors.append("selected_tool must remain fail2ban until a new reviewed decision replaces it")
 
-    if decision.get("selected_scope") != "ssh-only":
-        errors.append("selected_scope must remain ssh-only while HTTP is not deployed")
+    if decision.get("selected_scope") != "ssh-fail2ban-with-http-health-observe-only":
+        errors.append("selected_scope must match the SSH fail2ban plus HTTP health observe-only phase")
 
     if decision.get("crowdsec_status") != "deferred":
         errors.append("crowdsec_status must be deferred unless a CrowdSec implementation PR replaces this record")
 
-    if decision.get("http_enforcement_status") != "deferred_until_caddy_and_backend_logs_exist":
-        errors.append("HTTP enforcement must stay deferred until Caddy/backend logs exist")
+    if decision.get("http_enforcement_status") != "deferred_until_backend_app_and_route_logs_exist":
+        errors.append("HTTP enforcement must stay deferred until backend app route logs exist")
 
     enforcement = decision.get("enforcement", {})
     if enforcement.get("protected_apply_required") is not True:

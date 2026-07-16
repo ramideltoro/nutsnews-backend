@@ -21,7 +21,8 @@ The monitoring baseline:
 - configures persistent journald with `SystemMaxUse=512M` and `MaxRetentionSec=14day`;
 - rotates `/var/log/nutsnews/*.log` daily with 14 compressed rotations;
 - enables sysstat collection;
-- installs `/usr/local/sbin/nutsnews-backend-smoke`.
+- installs `/usr/local/sbin/nutsnews-backend-smoke`;
+- includes a local Caddy `/healthz` probe in the smoke output when Caddy is active.
 
 ## Health Checks
 
@@ -43,7 +44,10 @@ Application health endpoint:
 /healthz
 ```
 
-Until the backend app exists, application status is `not_deployed`. Once deployed, `/healthz` must return a simple healthy response before public routing is enabled.
+Until the backend app exists, application status is `infrastructure_health_only`.
+The Caddy-managed `/healthz` endpoint returns `ok` to prove the origin and
+routing are ready; all other public paths return `404` until a reviewed backend
+app deployment owns them.
 
 ## Alert Thresholds
 

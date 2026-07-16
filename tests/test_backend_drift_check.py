@@ -11,11 +11,14 @@ BASELINE = {
     "public_tcp_ports": [
         {"port": 22, "address": "0.0.0.0", "purpose": "SSH"},
         {"port": 22, "address": "::", "purpose": "SSH"},
+        {"port": 80, "address": "0.0.0.0", "purpose": "HTTP health and ACME"},
+        {"port": 80, "address": "::", "purpose": "HTTP health and ACME"},
+        {"port": 443, "address": "0.0.0.0", "purpose": "HTTPS health"},
+        {"port": 443, "address": "::", "purpose": "HTTPS health"},
     ],
     "not_deployed": [
         "backend app",
         "Docker Engine",
-        "Caddy",
         "PostgreSQL",
         "Redis or Valkey",
     ],
@@ -61,13 +64,13 @@ class BackendDriftCheckTests(unittest.TestCase):
         self.assertGreater(summary["missing"], 0)
         self.assertIn("sudo_nopasswd", {item["surface"] for item in checks})
 
-    def test_unexpected_public_http_is_high_priority(self):
+    def test_unexpected_public_database_port_is_high_priority(self):
         fixture = evidence(
             listeners={
                 "stdout": "\n".join(
                     [
                         "tcp LISTEN 0 128 0.0.0.0:22 0.0.0.0:*",
-                        "tcp LISTEN 0 128 0.0.0.0:80 0.0.0.0:*",
+                        "tcp LISTEN 0 128 0.0.0.0:5432 0.0.0.0:*",
                     ]
                 )
             }

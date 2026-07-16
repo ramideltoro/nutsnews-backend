@@ -5,18 +5,20 @@
   "ipv4": "65.75.201.18",
   "source_baseline": "docs/backend-service-baseline.json",
   "current_public_services": [
-    "ssh"
+    "ssh",
+    "http-health",
+    "https-health"
   ],
   "selected_tool": "fail2ban",
-  "selected_scope": "ssh-only",
+  "selected_scope": "ssh-fail2ban-with-http-health-observe-only",
   "crowdsec_status": "deferred",
   "crowdsec_defer_reasons": [
-    "The current attested host exposes only SSH.",
-    "Caddy, Docker, public HTTP, and public HTTPS are not deployed yet.",
-    "CrowdSec HTTP decisions need real Caddy access logs and route behavior to avoid false positives.",
-    "The VPS should avoid extra agents until there is an HTTP workload to protect."
+    "The current attested HTTP/HTTPS surface is limited to Caddy /healthz.",
+    "Docker and the backend app are not deployed yet.",
+    "CrowdSec HTTP decisions need real backend app access logs and route behavior to avoid false positives.",
+    "The VPS should avoid extra agents until there is an application HTTP workload to protect."
   ],
-  "http_enforcement_status": "deferred_until_caddy_and_backend_logs_exist",
+  "http_enforcement_status": "deferred_until_backend_app_and_route_logs_exist",
   "enforcement": {
     "live_apply_required": true,
     "protected_apply_required": true,

@@ -55,6 +55,7 @@ Use [runbooks/DRIFT_CHECK.md](runbooks/DRIFT_CHECK.md) to run the protected read
 Use [runbooks/SSH_HARDENING.md](runbooks/SSH_HARDENING.md) before applying or verifying SSH hardening.
 Use [runbooks/OS_MAINTENANCE.md](runbooks/OS_MAINTENANCE.md) before applying package updates or rebooting the backend host.
 Use [runbooks/FIREWALL_BASELINE.md](runbooks/FIREWALL_BASELINE.md) before applying or verifying firewall policy.
+Use [runbooks/CLOUDFLARE_ROUTING.md](runbooks/CLOUDFLARE_ROUTING.md) before applying or rolling back `backend.nutsnews.com` DNS.
 Use [runbooks/FAIL2BAN_SSH.md](runbooks/FAIL2BAN_SSH.md) before applying or verifying SSH brute-force protection.
 Use [runbooks/ABUSE_PROTECTION.md](runbooks/ABUSE_PROTECTION.md) before adding broader backend abuse protection.
 Use [runbooks/SWAP_BASELINE.md](runbooks/SWAP_BASELINE.md) before applying or verifying the swap safety buffer.

@@ -1,0 +1,56 @@
+---
+- name: Update apt package index
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: "{{ backend_apt_cache_valid_time }}"
+
+- name: Apply available package upgrades
+  ansible.builtin.apt:
+    upgrade: dist
+
+- name: Remove unused packages
+  ansible.builtin.apt:
+    autoremove: true
+    purge: true
+
+- name: Clean apt package cache
+  ansible.builtin.apt:
+    autoclean: true
+
+- name: Check whether a reboot is required
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: backend_reboot_required
+
+- name: Reboot after kernel or security updates when required
+  ansible.builtin.reboot:
+    reboot_timeout: "{{ backend_reboot_timeout }}"
+    msg: "Rebooting backend host after repo-managed package maintenance."
+  when:
+    - backend_reboot_if_required | bool
+    - backend_reboot_required.stat.exists
+    - not ansible_check_mode
+
+- name: Refresh facts after maintenance
+  ansible.builtin.setup:
+  when: not ansible_check_mode
+
+- name: Capture remaining upgradable packages
+  ansible.builtin.command: apt list --upgradable
+  register: backend_upgradable_packages
+  changed_when: false
+  failed_when: false
+
+- name: Capture failed systemd units
+  ansible.builtin.command: systemctl --failed --no-pager
+  register: backend_failed_units
+  changed_when: false
+  failed_when: false
+
+- name: Report package maintenance verification summary
+  ansible.builtin.debug:
+    msg:
+      kernel: "{{ ansible_kernel }}"
+      reboot_required: "{{ backend_reboot_required.stat.exists }}"
+      upgradable_packages_output: "{{ backend_upgradable_packages.stdout_lines }}"
+      failed_units_output: "{{ backend_failed_units.stdout_lines }}"

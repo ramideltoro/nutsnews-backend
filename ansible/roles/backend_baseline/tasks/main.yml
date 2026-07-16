@@ -1,3 +1,6 @@
 ---
 - name: Configure SSH hardening
   ansible.builtin.import_tasks: ssh.yml
+
+- name: Apply OS package maintenance
+  ansible.builtin.import_tasks: maintenance.yml

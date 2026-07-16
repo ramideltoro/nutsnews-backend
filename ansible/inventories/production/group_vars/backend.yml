@@ -1,0 +1,12 @@
+backend_hostname: backend
+backend_domain: backend.nutsnews.com
+backend_ipv4: 65.75.201.18
+backend_os_family: Ubuntu
+backend_os_version: "26.04"
+backend_runtime: docker-compose
+backend_reverse_proxy: caddy
+backend_public_ports:
+  - 22
+backend_future_public_ports:
+  - 80
+  - 443

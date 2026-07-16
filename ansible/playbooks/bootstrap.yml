@@ -1,0 +1,28 @@
+---
+- name: Backend bootstrap contract
+  hosts: backend
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Verify supported operating system family
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == backend_os_family
+          - ansible_distribution_version is version(backend_os_version, '>=')
+        fail_msg: >-
+          This backend baseline targets {{ backend_os_family }} {{ backend_os_version }} or newer.
+          Found {{ ansible_distribution }} {{ ansible_distribution_version }}.
+        success_msg: "Backend OS target is supported."
+
+    - name: Report backend bootstrap contract
+      ansible.builtin.debug:
+        msg:
+          hostname: "{{ backend_hostname }}"
+          domain: "{{ backend_domain }}"
+          ipv4: "{{ backend_ipv4 }}"
+          runtime: "{{ backend_runtime }}"
+          reverse_proxy: "{{ backend_reverse_proxy }}"
+          current_public_ports: "{{ backend_public_ports }}"
+          future_public_ports: "{{ backend_future_public_ports }}"
+          note: "Mutation tasks are added by the pipeline and baseline issues after this scaffold."

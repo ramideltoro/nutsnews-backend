@@ -31,6 +31,8 @@ Syntax check:
 ansible-playbook playbooks/bootstrap.yml --syntax-check
 ```
 
+`ansible.cfg` sets `roles_path = roles` so `playbooks/bootstrap.yml` resolves repository-owned roles from `ansible/roles` in both local checks and the protected GitHub Actions workflow.
+
 Dry-run against the backend server must happen only through the protected workflow once issue #10 adds it.
 
 Do not run mutating playbooks directly from an operator laptop as the normal path.

@@ -64,6 +64,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_search_service_decision.py
 
+      - name: Validate PostgreSQL replacement plan
+        shell: bash
+        run: python3 scripts/validate_postgres_replacement_plan.py
+
       - name: Install Ansible in temporary venv
         shell: bash
         run: |

@@ -34,3 +34,9 @@ if command -v fail2ban-client >/dev/null 2>&1; then
   fail2ban-client status sshd 2>/dev/null || true
   echo "fail2ban_sshd_end"
 fi
+
+if command -v curl >/dev/null 2>&1 && systemctl is-active caddy >/dev/null 2>&1; then
+  echo "local_health_begin"
+  curl -fsS -H "Host: {{ backend_domain }}" "http://127.0.0.1{{ backend_monitoring_health_path }}" || true
+  echo "local_health_end"
+fi

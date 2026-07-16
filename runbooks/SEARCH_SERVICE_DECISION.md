@@ -23,6 +23,9 @@ The app already has:
 - a `reader_archive_search` runtime feature flag;
 - public 60-second search cache headers.
 
+Public backend HTTP/HTTPS health routing does not change this decision; no
+dedicated search daemon or public search TCP port is installed.
+
 Machine-readable record:
 
 ```text

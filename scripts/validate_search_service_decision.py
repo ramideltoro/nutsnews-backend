@@ -34,8 +34,8 @@ def main() -> int:
         errors.append("install_search_service must be false for the current decision")
 
     public_ports = {int(entry["port"]) for entry in baseline.get("public_tcp_ports", [])}
-    if public_ports != {22}:
-        errors.append(f"service baseline must expose only SSH while search service is not installed; got {sorted(public_ports)}")
+    if not public_ports.issubset({22, 80, 443}):
+        errors.append(f"service baseline exposes unsupported public ports while search service is not installed: {sorted(public_ports)}")
 
     not_deployed = set(baseline.get("not_deployed", []))
     if "search service" not in not_deployed:

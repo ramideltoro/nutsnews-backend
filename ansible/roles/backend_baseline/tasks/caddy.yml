@@ -1,0 +1,64 @@
+---
+- name: Ensure Caddy reverse proxy is installed
+  ansible.builtin.apt:
+    name: caddy
+    state: present
+    update_cache: true
+  register: backend_caddy_package
+
+- name: Track whether Caddy can be managed in this run
+  ansible.builtin.set_fact:
+    backend_caddy_manageable: "{{ (not ansible_check_mode) or not (backend_caddy_package is changed) }}"
+
+- name: Install backend Caddy health configuration
+  ansible.builtin.copy:
+    dest: "{{ backend_caddy_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      http://{{ backend_domain }}, https://{{ backend_domain }} {
+          encode zstd gzip
+
+          @health path {{ backend_monitoring_health_path }}
+          header @health Content-Type text/plain
+          respond @health "{{ backend_caddy_health_response }}\n" 200
+
+          respond "backend application not deployed\n" 404
+      }
+  notify: Reload caddy
+  when: backend_caddy_manageable | bool
+
+- name: Validate backend Caddy configuration
+  ansible.builtin.command: "caddy validate --config {{ backend_caddy_config_path }}"
+  changed_when: false
+  when:
+    - backend_caddy_manageable | bool
+    - not ansible_check_mode
+
+- name: Ensure Caddy service is enabled and started
+  ansible.builtin.service:
+    name: caddy
+    enabled: true
+    state: started
+  when: backend_caddy_manageable | bool
+
+- name: Capture local backend health endpoint
+  ansible.builtin.command: "curl -fsS -H 'Host: {{ backend_domain }}' http://127.0.0.1{{ backend_monitoring_health_path }}"
+  register: backend_caddy_local_health
+  changed_when: false
+  failed_when: false
+  when:
+    - backend_caddy_manageable | bool
+    - not ansible_check_mode
+
+- name: Report Caddy health endpoint summary
+  ansible.builtin.debug:
+    msg:
+      enabled: "{{ backend_caddy_enabled }}"
+      domain: "{{ backend_domain }}"
+      config_path: "{{ backend_caddy_config_path }}"
+      health_path: "{{ backend_monitoring_health_path }}"
+      service_manageable: "{{ backend_caddy_manageable }}"
+      local_health_output: "{{ backend_caddy_local_health.stdout_lines | default([]) }}"

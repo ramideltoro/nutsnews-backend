@@ -12,24 +12,25 @@ This runbook covers backend issue #24 for `65.75.201.18`.
 
 ## Current Host State
 
-The 2026-07-16 service-baseline attestation found SSH as the only public service.
+The current service-baseline attestation allows SSH plus the Caddy-managed
+HTTP/HTTPS `/healthz` endpoint.
 
 Not deployed yet:
 
-- Caddy
 - Docker
-- public HTTP
-- public HTTPS
 - backend app service
 - ops dashboard
 
-Because there is no HTTP listener, no Caddy access log, and no deployed app/admin route behavior, HTTP abuse blocking would be speculative and false-positive-prone.
+Because there is no deployed backend app/admin route behavior, HTTP abuse
+blocking would still be speculative and false-positive-prone. The health route
+must remain observable and unblocked.
 
 ## Decision
 
-Use fail2ban for the current SSH-only phase.
+Use fail2ban for SSH in the current phase.
 
-Defer CrowdSec and HTTP/Caddy enforcement until a later reviewed PR adds Caddy, backend app health routes, app/admin probes, and real log sources.
+Defer CrowdSec and HTTP/Caddy enforcement until a later reviewed PR adds backend
+app routes, app/admin probes, and real route log sources.
 
 Machine-readable record:
 
@@ -43,7 +44,9 @@ Validator:
 python3 scripts/validate_abuse_protection_decision.py
 ```
 
-The validator intentionally fails if the service baseline starts listing HTTP/Caddy as deployed while this decision still says SSH-only.
+The validator intentionally fails if the service baseline starts exposing ports
+outside SSH plus HTTP/HTTPS health routing while this decision is still in the
+observe-only HTTP phase.
 
 ## CrowdSec Versus Fail2ban
 

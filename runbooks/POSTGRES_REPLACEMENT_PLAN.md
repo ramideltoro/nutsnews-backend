@@ -14,6 +14,8 @@ This runbook covers backend issue #28 for `65.75.201.18`.
 Keep Supabase until a replacement is proven in non-production.
 
 Do not install PostgreSQL on the backend host now. Do not cut production traffic over now.
+Public backend HTTP/HTTPS health routing does not change this decision; no
+database process, database dashboard, or database TCP port is deployed.
 
 Machine-readable plan:
 

@@ -14,12 +14,12 @@ backend_firewall_logging: "off"
 backend_firewall_public_tcp_ports:
   - port: "22"
     comment: Backend SSH
-backend_firewall_enable_http_https: false
+backend_firewall_enable_http_https: true
 backend_firewall_future_tcp_ports:
   - port: "80"
-    comment: Future backend HTTP reverse proxy
+    comment: Backend HTTP health and ACME
   - port: "443"
-    comment: Future backend HTTPS reverse proxy
+    comment: Backend HTTPS health
 backend_fail2ban_sshd_enabled: true
 backend_fail2ban_sshd_backend: systemd
 backend_fail2ban_sshd_bantime: 1h
@@ -42,4 +42,7 @@ backend_monitoring_memory_crit_percent: 90
 backend_monitoring_load_warn_per_cpu: 1.5
 backend_monitoring_load_crit_per_cpu: 2.5
 backend_monitoring_health_path: /healthz
-backend_monitoring_app_status: not_deployed
+backend_monitoring_app_status: infrastructure_health_only
+backend_caddy_enabled: true
+backend_caddy_config_path: /etc/caddy/Caddyfile
+backend_caddy_health_response: ok

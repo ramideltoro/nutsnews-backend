@@ -14,7 +14,7 @@ This runbook covers backend issue #27 for `65.75.201.18`.
 
 Do not install Redis or Valkey now.
 
-The current backend service baseline marks Redis/Valkey as not deployed, and the app evidence inspected on 2026-07-16 does not show a concrete Redis/Valkey workload or client dependency.
+The current backend service baseline marks Redis/Valkey as not deployed, and the app evidence inspected on 2026-07-16 does not show a concrete Redis/Valkey workload or client dependency. Public HTTP/HTTPS health routing does not create a Redis/Valkey workload.
 
 Machine-readable record:
 

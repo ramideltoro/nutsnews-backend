@@ -244,7 +244,7 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
     services = parse_key_values(command_stdout(report, "service_states"))
     for service in ("ssh", "ufw", "fail2ban", "docker", "caddy", "postgresql", "alloy", "sysstat"):
         state = services.get(service, "unavailable")
-        expected_missing = service in {"docker", "caddy", "postgresql", "alloy"}
+        expected_missing = service in {"docker", "postgresql", "alloy"}
         if state == "active":
             status = "healthy"
         elif expected_missing and state in {"inactive", "unavailable", "failed"}:

@@ -1,0 +1,159 @@
+name: Backend Cloudflare Routing
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_mode:
+        description: Plan, apply, or roll back the backend DNS record.
+        required: true
+        default: check
+        type: choice
+        options:
+          - check
+          - apply
+          - rollback
+      confirm_apply:
+        description: For apply or rollback, type backend.nutsnews.com. Leave blank for check mode.
+        required: false
+        default: ""
+        type: string
+      record_name:
+        description: Backend DNS record name.
+        required: true
+        default: backend.nutsnews.com
+        type: string
+      target_ipv4:
+        description: Backend origin IPv4 address.
+        required: true
+        default: 65.75.201.18
+        type: string
+      proxied:
+        description: Whether Cloudflare should proxy this A record.
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-backend-cloudflare-routing
+  cancel-in-progress: false
+
+jobs:
+  route:
+    name: Backend Cloudflare route
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          RUN_MODE: ${{ inputs.run_mode }}
+          CONFIRM_APPLY: ${{ inputs.confirm_apply }}
+          RECORD_NAME: ${{ inputs.record_name }}
+          TARGET_IPV4: ${{ inputs.target_ipv4 }}
+          PROXIED: ${{ inputs.proxied }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$RUN_MODE" != "check" && "$RUN_MODE" != "apply" && "$RUN_MODE" != "rollback" ]]; then
+            echo "Unsupported run_mode: $RUN_MODE" >&2
+            exit 1
+          fi
+
+          if [[ "$RUN_MODE" != "check" && "$CONFIRM_APPLY" != "backend.nutsnews.com" ]]; then
+            echo "Apply and rollback require confirm_apply to be exactly backend.nutsnews.com." >&2
+            exit 1
+          fi
+
+          if [[ "$RECORD_NAME" != "backend.nutsnews.com" ]]; then
+            echo "This workflow only manages backend.nutsnews.com." >&2
+            exit 1
+          fi
+
+          if [[ "$TARGET_IPV4" != "65.75.201.18" ]]; then
+            echo "This workflow only targets 65.75.201.18." >&2
+            exit 1
+          fi
+
+          if [[ "$PROXIED" != "false" && "$PROXIED" != "true" ]]; then
+            echo "proxied must be false or true." >&2
+            exit 1
+          fi
+
+      - name: Validate required Cloudflare secrets
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for secret_name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ZONE_ID; do
+            if [[ -z "${!secret_name}" ]]; then
+              echo "Missing required production-backend environment secret: $secret_name" >&2
+              missing=1
+            fi
+          done
+
+          exit "$missing"
+
+      - name: Verify origin health before DNS apply
+        if: inputs.run_mode == 'apply'
+        shell: bash
+        env:
+          RECORD_NAME: ${{ inputs.record_name }}
+          TARGET_IPV4: ${{ inputs.target_ipv4 }}
+        run: |
+          set -euo pipefail
+
+          response="$(curl --fail --silent --show-error --retry 5 --retry-delay 5 \
+            --resolve "$RECORD_NAME:80:$TARGET_IPV4" \
+            "http://$RECORD_NAME/healthz")"
+
+          if [[ "$response" != "ok" ]]; then
+            echo "Unexpected origin health response before DNS apply." >&2
+            exit 1
+          fi
+
+      - name: Manage Cloudflare backend DNS record
+        shell: bash
+        env:
+          RUN_MODE: ${{ inputs.run_mode }}
+          RECORD_NAME: ${{ inputs.record_name }}
+          TARGET_IPV4: ${{ inputs.target_ipv4 }}
+          PROXIED: ${{ inputs.proxied }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+        run: |
+          set -euo pipefail
+
+          python3 scripts/cloudflare_backend_dns.py \
+            --mode "$RUN_MODE" \
+            --zone-id "$CLOUDFLARE_ZONE_ID" \
+            --api-token "$CLOUDFLARE_API_TOKEN" \
+            --record-name "$RECORD_NAME" \
+            --target-ipv4 "$TARGET_IPV4" \
+            --proxied "$PROXIED" \
+            --ttl 300 \
+            --output "$RUNNER_TEMP/backend-cloudflare-routing.json"
+
+      - name: Upload routing result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-cloudflare-routing
+          path: ${{ runner.temp }}/backend-cloudflare-routing.json
+          if-no-files-found: ignore

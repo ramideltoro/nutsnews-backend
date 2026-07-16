@@ -21,8 +21,9 @@ The firewall tasks:
 - reset existing UFW rules during approved apply;
 - set default incoming policy to deny;
 - set default outgoing policy to allow;
-- allow only TCP `22` for SSH in the current phase;
-- keep HTTP/HTTPS disabled until the reverse proxy and routing issues are ready;
+- allow TCP `22` for SSH;
+- allow TCP `80` for backend HTTP health and ACME;
+- allow TCP `443` for backend HTTPS health;
 - enable UFW and record `ufw status verbose` in workflow logs.
 
 ## Current Public Ports
@@ -30,8 +31,8 @@ The firewall tasks:
 | Port | Protocol | Purpose |
 | --- | --- | --- |
 | `22` | TCP | SSH |
-
-Future ports `80/tcp` and `443/tcp` are documented in Ansible defaults but disabled until explicitly enabled by a reviewed PR.
+| `80` | TCP | HTTP health and ACME |
+| `443` | TCP | HTTPS health |
 
 ## Apply Path
 
@@ -39,7 +40,7 @@ Run only through the protected backend workflow:
 
 1. Merge the reviewed firewall baseline PR.
 2. Run `Protected Backend Ansible Apply` in `check` mode.
-3. Confirm the plan preserves SSH and does not enable HTTP/HTTPS yet.
+3. Confirm the plan preserves SSH and enables only reviewed HTTP/HTTPS health routing.
 4. Keep provider console or an existing privileged session available.
 5. Run `apply` mode after the `production-backend` approval gate.
 6. Verify SSH access and firewall state before considering #3 complete.

@@ -37,8 +37,8 @@ def main() -> int:
         errors.append("production_cutover_allowed must be false")
 
     public_ports = {int(entry["port"]) for entry in baseline.get("public_tcp_ports", [])}
-    if public_ports != {22}:
-        errors.append(f"service baseline must expose only SSH while PostgreSQL is not deployed; got {sorted(public_ports)}")
+    if not public_ports.issubset({22, 80, 443}):
+        errors.append(f"service baseline exposes unsupported public ports while PostgreSQL is not deployed: {sorted(public_ports)}")
 
     not_deployed = set(baseline.get("not_deployed", []))
     if "PostgreSQL" not in not_deployed:

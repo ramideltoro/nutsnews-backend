@@ -25,4 +25,8 @@
           reverse_proxy: "{{ backend_reverse_proxy }}"
           current_public_ports: "{{ backend_public_ports }}"
           future_public_ports: "{{ backend_future_public_ports }}"
-          note: "Mutation tasks are added by the pipeline and baseline issues after this scaffold."
+          note: "Baseline mutation tasks run only through the protected backend workflow."
+
+    - name: Apply backend baseline
+      ansible.builtin.include_role:
+        name: backend_baseline

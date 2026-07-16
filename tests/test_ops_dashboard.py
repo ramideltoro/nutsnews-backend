@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import importlib.util
+import stat
+import tempfile
 from pathlib import Path
 import unittest
 
@@ -55,6 +57,14 @@ class OpsDashboardTests(unittest.TestCase):
         self.assertNotIn("<form", lowered)
         self.assertNotIn("exec", lowered)
         self.assertIn('fetch("status.json"', combined)
+
+    def test_snapshot_write_is_caddy_readable(self):
+        collector = load_collector()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = Path(tmpdir) / "status.json"
+            collector.write_atomic(output, {"schema_version": 1})
+            mode = stat.S_IMODE(output.stat().st_mode)
+        self.assertEqual(mode, 0o644)
 
 
 if __name__ == "__main__":

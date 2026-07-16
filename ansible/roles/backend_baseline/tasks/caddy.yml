@@ -30,6 +30,7 @@
       {% if backend_ops_dashboard_enabled | bool %}
 
       http://{{ backend_ops_dashboard_bind }}:{{ backend_ops_dashboard_port }} {
+          bind {{ backend_ops_dashboard_bind }}
           root * {{ backend_ops_dashboard_public_dir }}
           @status path /status.json
           header @status Cache-Control "no-store"

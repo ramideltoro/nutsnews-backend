@@ -268,6 +268,7 @@ def write_atomic(path: Path, data: dict[str, Any]) -> None:
         json.dump(data, handle, indent=2, sort_keys=True)
         handle.write("\n")
         temp_name = handle.name
+    os.chmod(temp_name, 0o644)
     os.replace(temp_name, path)
 
 

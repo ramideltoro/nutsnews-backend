@@ -62,6 +62,7 @@ Use [runbooks/MONITORING_BASELINE.md](runbooks/MONITORING_BASELINE.md) before ap
 Use [runbooks/SERVICE_BASELINE_ATTESTATION.md](runbooks/SERVICE_BASELINE_ATTESTATION.md) before adding optional backend services.
 Use [runbooks/REDIS_VALKEY_DECISION.md](runbooks/REDIS_VALKEY_DECISION.md) before adding Redis or Valkey.
 Use [runbooks/SEARCH_SERVICE_DECISION.md](runbooks/SEARCH_SERVICE_DECISION.md) before adding a dedicated search service.
+Use [runbooks/POSTGRES_REPLACEMENT_PLAN.md](runbooks/POSTGRES_REPLACEMENT_PLAN.md) before replacing Supabase or installing production PostgreSQL.
 
 The current Ansible scaffold is intentionally narrow. It defines the host contract, runtime choice, validation commands, required secret boundaries, and rollback expectations that later issues will fill in through Ansible roles and protected workflows.
 

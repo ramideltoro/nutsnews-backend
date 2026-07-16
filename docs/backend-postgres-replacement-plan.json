@@ -1,0 +1,108 @@
+{
+  "issue": 28,
+  "decision_date_utc": "2026-07-16",
+  "decision": "keep_supabase_until_replacement_is_proven",
+  "install_postgres_now": false,
+  "production_cutover_allowed": false,
+  "host": "backend",
+  "ipv4": "65.75.201.18",
+  "source_baseline": "docs/backend-service-baseline.json",
+  "rpo_rto": {
+    "target_rpo": "15 minutes after WAL/PITR is implemented and tested",
+    "target_rto": "4 hours for manual restore or failover after restore drills pass",
+    "current_state": "not guaranteed by this backend repo because production Supabase credentials and backup evidence are unavailable here"
+  },
+  "current_supabase_usage": {
+    "postgres": [
+      "articles",
+      "article_summaries",
+      "rss_feeds",
+      "worker_runs",
+      "article_ai_reviews",
+      "ai_usage_runs",
+      "feed_health",
+      "feed_quality_scores",
+      "public_feed_snapshot",
+      "quota_usage_events",
+      "runtime_feature_flags",
+      "release_readiness",
+      "migration_schema_contract",
+      "staging_fixture tables"
+    ],
+    "postgrest_data_api": "app uses @supabase/supabase-js with anon and service-role keys; self-hosted PostgreSQL alone is not API-compatible",
+    "rls_and_grants": "migrations and regression tests depend on anon/authenticated/service_role grants and RLS behavior",
+    "auth": "admin authentication uses NextAuth Google with JWT sessions; Supabase Auth is present in local config but no production app dependency was identified",
+    "storage": "Supabase storage is enabled in local config, but no app storage client usage was identified",
+    "realtime": "Supabase realtime is enabled in local config and CSP permits wss://*.supabase.co, but no app realtime client usage was identified",
+    "edge_functions": "no app dependency on Supabase Edge Functions was identified",
+    "search": "public search uses Postgres full-text search through public.search_articles",
+    "backups": "current app backup helper is a limited REST export and not a full database backup"
+  },
+  "target_topology": {
+    "writer": "single production writer only",
+    "standby": "optional async standby only after PITR and restore drills are proven; no multi-writer topology",
+    "pooling": "pgBouncer required if Vercel/app connection count or direct Postgres access exceeds safe limits",
+    "data_api": "choose PostgREST-compatible layer or app rewrite before cutover; do not point supabase-js at bare Postgres",
+    "network": "database and management dashboard must be private or behind a reviewed access boundary; no public database port",
+    "dashboard": "read-only/admin dashboard requires separate access-control review before exposure"
+  },
+  "feature_mapping": {
+    "Supabase Postgres tables/functions": "self-hosted PostgreSQL migrations and restore validation",
+    "Supabase REST/PostgREST API": "deploy compatible PostgREST layer or rewrite app to server-owned database APIs",
+    "anon and service_role keys": "replace with explicit JWT/RLS model or app server credentials in protected secrets",
+    "RLS/grants": "port policies and run local RLS regressions against restored non-production data",
+    "Supabase Auth": "keep NextAuth for admin unless a future app issue proves Supabase Auth is used",
+    "Supabase Storage": "keep explicitly not used; choose R2/S3/local storage only if app usage appears",
+    "Supabase Realtime": "keep explicitly not used unless a future feature requires websocket replication",
+    "Supabase Edge Functions": "keep explicitly not used",
+    "full-text search": "keep Postgres full-text search and GIN indexes",
+    "backups": "replace limited REST export with encrypted full database backups plus WAL/PITR"
+  },
+  "implementation_plan": [
+    {
+      "phase": "inventory",
+      "required_evidence": "production Supabase project ref, schema dump, row counts, extensions, grants, RLS policies, API keys inventory, storage/realtime/auth usage confirmation",
+      "mutation_allowed": false
+    },
+    {
+      "phase": "non_production_restore",
+      "required_evidence": "restore latest production-like dump to isolated Postgres and run restore_validation.sql plus app regression tests",
+      "mutation_allowed": false
+    },
+    {
+      "phase": "compatibility_layer",
+      "required_evidence": "PostgREST-compatible API or app rewrite validated against staging env vars and RLS/contract tests",
+      "mutation_allowed": false
+    },
+    {
+      "phase": "backup_pitr",
+      "required_evidence": "encrypted off-box base backups, WAL archiving, PITR restore drill, backup freshness alerts, and restore report",
+      "mutation_allowed": false
+    },
+    {
+      "phase": "read_only_rehearsal",
+      "required_evidence": "app can run against restored data in read-only staging with production writes still on Supabase",
+      "mutation_allowed": false
+    },
+    {
+      "phase": "production_cutover",
+      "required_evidence": "separate explicit approval, paused writers, final backup, final restore or replication catch-up, env switch, smoke tests, rollback window",
+      "mutation_allowed": true
+    }
+  ],
+  "rollback": {
+    "before_cutover": "discard the self-hosted target and keep Supabase",
+    "during_cutover": "switch app and worker environment variables back to Supabase, resume writers only after consistency is confirmed",
+    "after_cutover": "rollback only within the documented rollback window unless reverse replication is proven; otherwise run a forward recovery plan"
+  },
+  "blockers_for_deploy": [
+    "production Supabase credentials and project metadata are not available in this backend repo",
+    "no full production dump, WAL archive, PITR restore drill, or non-production rehearsal evidence exists here",
+    "the app currently uses Supabase/PostgREST-style APIs, so a bare PostgreSQL server is not a drop-in replacement",
+    "protected backend apply and dashboard access boundaries are not yet approved for a database deployment"
+  ],
+  "validation": {
+    "local_validator": "python3 scripts/validate_postgres_replacement_plan.py",
+    "live_verification": "read-only until a later approved protected apply"
+  }
+}

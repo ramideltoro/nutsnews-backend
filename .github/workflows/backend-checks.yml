@@ -72,6 +72,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_postgres_replacement_plan.py
 
+      - name: Run backend drift check tests
+        shell: bash
+        run: python3 -m unittest discover -s tests
+
       - name: Install Ansible in temporary venv
         shell: bash
         run: |

@@ -79,7 +79,11 @@ CREATE TABLE IF NOT EXISTS auth.users (
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 SQL
 
-sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$REHEARSAL_DATABASE" -f "$remote_dir/public-schema.sql" > "$remote_dir/schema-restore.log" 2>&1
+if ! sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$REHEARSAL_DATABASE" -f "$remote_dir/public-schema.sql" > "$remote_dir/schema-restore.log" 2>&1; then
+  echo "Schema restore failed; last schema log lines follow." >&2
+  tail -n 120 "$remote_dir/schema-restore.log" >&2 || true
+  exit 1
+fi
 sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$REHEARSAL_DATABASE" -f "$remote_dir/public-data.sql" > "$remote_dir/data-restore.log" 2>&1
 sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$REHEARSAL_DATABASE" -f "$remote_dir/backend_postgres_restore_validation.sql" > "$remote_dir/validation.log" 2>&1
 

@@ -80,6 +80,8 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("trap cleanup_remote_dir EXIT", script)
         self.assertIn("-name 'nutsnews-postgres-drill-*'", script)
         self.assertIn("shred -u", script)
+        self.assertIn("Schema restore failed; last schema log lines follow.", script)
+        self.assertNotIn("Data restore failed; last data log lines follow.", script)
 
     def test_plan_forbids_multi_writer_and_production_cutover(self):
         plan = json.loads(PLAN.read_text(encoding="utf-8"))

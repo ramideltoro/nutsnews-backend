@@ -84,6 +84,11 @@ REMOTE_COMMANDS: dict[str, str] = {
         "cat /var/lib/nutsnews/cleanup/last-cleanup.json; "
         "else echo not_configured; fi"
     ),
+    "recovery_status": (
+        "if test -r /var/lib/nutsnews/recovery/last-recovery.json; then "
+        "cat /var/lib/nutsnews/recovery/last-recovery.json; "
+        "else echo not_configured; fi"
+    ),
     "recent_errors": "journalctl -p err..alert -n 25 --no-pager 2>/dev/null || true",
     "sudo_nopasswd": "sudo -n true >/dev/null 2>&1 && echo yes || echo no",
 }
@@ -408,6 +413,38 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
                 "summary": (
                     f"last_action={cleanup_status.get('action', 'unknown')} "
                     f"last_run={cleanup_status.get('generated_at_utc', 'unknown')}"
+                ),
+            }
+        )
+
+    recovery_status_raw = command_stdout(report, "recovery_status").strip()
+    if recovery_status_raw == "not_configured" or not recovery_status_raw:
+        checks.append(
+            {
+                "name": "recovery_last_run",
+                "status": "not_configured",
+                "summary": "recovery_last_run=not_configured",
+            }
+        )
+    else:
+        recovery_status = parse_json_object(recovery_status_raw)
+        last_status = str(recovery_status.get("status") or "unknown")
+        if last_status == "pass":
+            status = "healthy"
+        elif last_status == "fail":
+            status = "critical"
+        elif last_status == "blocked":
+            status = "warning"
+        else:
+            status = "unknown"
+        checks.append(
+            {
+                "name": "recovery_last_run",
+                "status": status,
+                "summary": (
+                    f"last_action={recovery_status.get('action', 'unknown')} "
+                    f"last_mode={recovery_status.get('mode', 'unknown')} "
+                    f"last_status={last_status}"
                 ),
             }
         )

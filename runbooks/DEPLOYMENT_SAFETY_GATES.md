@@ -10,9 +10,12 @@ Backend-changing workflows are:
 - `Backend Cloudflare Routing` when `run_mode` is `apply` or `rollback`
 - `Backend Controlled Maintenance` when `action` is `security-upgrade` or `reboot`
 - `Backend Backup Maintenance` when `action` is `backup`, `verify`, or `restore-drill`
+- `Backend Recovery` when `mode` is `apply` and the selected action is mutating
 
 Read-only workflows such as `Backend Drift Check`, `Backend Health Report`, and
-`Backend Credential Readiness` do not mutate the host or providers.
+`Backend Credential Readiness` do not mutate the host or providers. `Backend
+Recovery` is read-only only when `mode=check`, `action=diagnostics`, or
+`action=backup-status`.
 
 ## Gate Model
 
@@ -116,6 +119,40 @@ Recovery path:
 4. Do not delete old snapshots until the latest backup verifies and a restore
    drill passes.
 
+### Backend Recovery
+
+The recovery workflow has its own fixed action runner:
+
+```text
+scripts/backend_recovery_workflow.py
+```
+
+Allowed actions are only:
+
+- `diagnostics`
+- `backup-status`
+- `trigger-backup`
+- `trigger-restore-drill`
+- `reload-caddy`
+- `restart-caddy`
+- `restart-alloy`
+- `restart-fail2ban`
+- `refresh-metrics`
+- `refresh-ops-dashboard`
+
+Mutating applies require `mode=apply`, `confirm_target=backend.nutsnews.com`,
+and `production-backend` Environment approval. Check mode runs the same fixed
+prechecks without mutation. No action accepts free-form commands, service
+names, Ansible tags, paths, or scripts.
+
+Recovery path:
+
+1. Run the intended action with `mode=check`.
+2. Review the `backend-recovery-report` artifact for blockers.
+3. Run `mode=apply` only for a fixed mutating action that passes check mode.
+4. Verify the postchecks and the health report `recovery_last_run` state.
+5. Reconcile any break-glass manual change through this repository.
+
 ## Current Expected Non-Configured Surfaces
 
 Until the related issues land, Docker, the backend app, and active-alert state
@@ -130,6 +167,7 @@ components through the protected path.
 Run locally:
 
 ```bash
+python3 scripts/validate_recovery_workflows.py
 python3 -m unittest discover -s tests
 git diff --check
 actionlint .github/workflows/*.yml
@@ -141,4 +179,5 @@ Live validation should use:
 - protected check-mode dry run for `Protected Backend Ansible Apply`;
 - Cloudflare routing check mode;
 - controlled maintenance `precheck`;
+- backend recovery `mode=check`;
 - read-only SSH verification after any approved mutation.

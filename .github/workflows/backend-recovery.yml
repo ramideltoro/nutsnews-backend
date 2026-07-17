@@ -1,0 +1,154 @@
+name: Backend Recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Fixed recovery action to check or apply.
+        required: true
+        default: diagnostics
+        type: choice
+        options:
+          - diagnostics
+          - backup-status
+          - trigger-backup
+          - trigger-restore-drill
+          - reload-caddy
+          - restart-caddy
+          - restart-alloy
+          - restart-fail2ban
+          - refresh-metrics
+          - refresh-ops-dashboard
+      mode:
+        description: Check mode is non-mutating. Apply requires approval and confirmation for mutating actions.
+        required: true
+        default: check
+        type: choice
+        options:
+          - check
+          - apply
+      confirm_target:
+        description: For mutating apply only, type backend.nutsnews.com.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-recovery
+  cancel-in-progress: false
+
+jobs:
+  recovery:
+    name: Fixed-purpose backend recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          MODE: ${{ inputs.mode }}
+          CONFIRM_TARGET: ${{ inputs.confirm_target }}
+        run: |
+          set -euo pipefail
+
+          case "$ACTION" in
+            diagnostics|backup-status|trigger-backup|trigger-restore-drill|reload-caddy|restart-caddy|restart-alloy|restart-fail2ban|refresh-metrics|refresh-ops-dashboard) ;;
+            *)
+              echo "Unsupported recovery action: $ACTION" >&2
+              exit 1
+              ;;
+          esac
+
+          case "$MODE" in
+            check|apply) ;;
+            *)
+              echo "Unsupported recovery mode: $MODE" >&2
+              exit 1
+              ;;
+          esac
+
+          case "$ACTION:$MODE" in
+            diagnostics:apply|backup-status:apply|*:check) ;;
+            *)
+              if [[ "$CONFIRM_TARGET" != "backend.nutsnews.com" ]]; then
+                echo "Mutating recovery action $ACTION requires confirm_target to be exactly backend.nutsnews.com." >&2
+                exit 1
+              fi
+              ;;
+          esac
+
+      - name: Prepare SSH material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for secret_name in NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
+            if [[ -z "${!secret_name}" ]]; then
+              echo "Missing required production-backend environment secret: $secret_name" >&2
+              missing=1
+            fi
+          done
+          if [[ "$missing" -ne 0 ]]; then
+            exit "$missing"
+          fi
+
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Run fixed recovery action
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          MODE: ${{ inputs.mode }}
+          CONFIRM_TARGET: ${{ inputs.confirm_target }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          args=(
+            --action "$ACTION"
+            --mode "$MODE"
+            --confirm-target "$CONFIRM_TARGET"
+            --ssh-host "$NUTSNEWS_BACKEND_HOST"
+            --ssh-user "${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+            --ssh-key "$HOME/.ssh/nutsnews_backend"
+            --known-hosts "$HOME/.ssh/known_hosts"
+            --output "$RUNNER_TEMP/backend-recovery-report.json"
+            --summary "$GITHUB_STEP_SUMMARY"
+            --actor "$GITHUB_ACTOR"
+            --run-url "$run_url"
+          )
+
+          python3 scripts/backend_recovery_workflow.py "${args[@]}"
+
+      - name: Upload recovery report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-recovery-report
+          path: ${{ runner.temp }}/backend-recovery-report.json
+          if-no-files-found: ignore

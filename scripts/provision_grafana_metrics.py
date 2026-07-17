@@ -21,6 +21,7 @@ ALLOWED_DATASOURCES = {"prometheus", "loki"}
 MANAGED_LOKI_DATASOURCE_NAME = "grafanacloud-nutsnews-backend-loki"
 MANAGED_LOKI_DATASOURCE_UID = "grafanacloud-loki"
 EXPRESSION_DATASOURCE_UID = "-100"
+MAX_GRAFANA_ALERT_UID_LENGTH = 40
 ALLOWED_ALERT_STATES = {"Alerting", "Error", "KeepLast", "NoData", "OK"}
 HIGH_CARDINALITY_LABELS = {
     "container_id",
@@ -89,6 +90,8 @@ def validate_spec(spec: dict[str, Any]) -> list[str]:
         datasource_type = str(alert.get("datasource", "prometheus"))
         if not uid or not title or not expr:
             errors.append("each alert requires uid, title, and expr")
+        if len(uid) > MAX_GRAFANA_ALERT_UID_LENGTH:
+            errors.append(f"alert uid exceeds {MAX_GRAFANA_ALERT_UID_LENGTH} characters: {uid}")
         if uid in seen_alert_uids:
             errors.append(f"duplicate alert uid: {uid}")
         seen_alert_uids.add(uid)

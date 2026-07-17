@@ -127,7 +127,7 @@
       "summary": "Grafana Cloud is not receiving backend host metrics from Alloy."
     },
     {
-      "uid": "nutsnews-backend-public-endpoint-unhealthy",
+      "uid": "nn-backend-endpoint-unhealthy",
       "title": "NutsNews backend public endpoint unhealthy",
       "severity": "critical",
       "service": "caddy",
@@ -140,7 +140,7 @@
       "summary": "The backend /healthz endpoint is failing from the host probe."
     },
     {
-      "uid": "nutsnews-backend-failed-systemd-units",
+      "uid": "nn-backend-failed-units",
       "title": "NutsNews backend failed systemd units",
       "severity": "critical",
       "service": "systemd",
@@ -153,7 +153,7 @@
       "summary": "One or more backend systemd units are failed."
     },
     {
-      "uid": "nutsnews-backend-backup-unhealthy",
+      "uid": "nn-backend-backup-unhealthy",
       "title": "NutsNews backend backup or restore coverage unhealthy",
       "severity": "critical",
       "service": "backup",
@@ -166,7 +166,7 @@
       "summary": "A backend backup, verification, or restore-drill stage is unhealthy."
     },
     {
-      "uid": "nutsnews-backend-root-disk-warning",
+      "uid": "nn-backend-root-disk-warning",
       "title": "NutsNews backend root disk warning",
       "severity": "warning",
       "service": "host",
@@ -179,7 +179,7 @@
       "summary": "Backend root filesystem usage is above the warning threshold."
     },
     {
-      "uid": "nutsnews-backend-reboot-required-warning",
+      "uid": "nn-backend-reboot-required",
       "title": "NutsNews backend reboot required outside maintenance",
       "severity": "warning",
       "service": "updates",
@@ -192,7 +192,7 @@
       "summary": "The backend host has needed a reboot for more than one day."
     },
     {
-      "uid": "nutsnews-backend-journal-logs-missing",
+      "uid": "nn-backend-journal-logs-missing",
       "title": "NutsNews backend journal logs missing in Loki",
       "severity": "warning",
       "service": "alloy",
@@ -206,7 +206,7 @@
       "summary": "Grafana Cloud Loki is not receiving backend journal logs."
     },
     {
-      "uid": "nutsnews-backend-log-volume-warning",
+      "uid": "nn-backend-log-volume-warning",
       "title": "NutsNews backend log volume warning",
       "severity": "warning",
       "service": "alloy",

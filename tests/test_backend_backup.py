@@ -90,6 +90,10 @@ class BackendBackupTests(unittest.TestCase):
         self.assertNotIn("remote_command", workflow)
         self.assertNotIn("command_input", workflow)
 
+    def test_ansible_backup_env_installs_restic_provider(self):
+        task = Path("ansible/roles/backend_baseline/tasks/backup.yml").read_text(encoding="utf-8")
+        self.assertIn("NUTSNEWS_BACKUP_RESTIC_PROVIDER={{ backend_backup_restic_provider | quote }}", task)
+
 
 if __name__ == "__main__":
     unittest.main()

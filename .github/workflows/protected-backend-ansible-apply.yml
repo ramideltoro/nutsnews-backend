@@ -210,6 +210,10 @@ jobs:
           NUTSNEWS_BACKUP_CHECK_READ_DATA_SUBSET: ${{ vars.NUTSNEWS_BACKUP_CHECK_READ_DATA_SUBSET || '1%' }}
           NUTSNEWS_BACKUP_STALE_AFTER_HOURS: ${{ vars.NUTSNEWS_BACKUP_STALE_AFTER_HOURS || '30' }}
           NUTSNEWS_BACKUP_QUOTA_WARN_BYTES: ${{ vars.NUTSNEWS_BACKUP_QUOTA_WARN_BYTES || '0' }}
+          NUTSNEWS_BACKEND_POSTGRES_ENABLED: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_ENABLED || 'true' }}
+          NUTSNEWS_BACKEND_DB_DASHBOARD_ENABLED: ${{ vars.NUTSNEWS_BACKEND_DB_DASHBOARD_ENABLED || 'true' }}
+          NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD }}
+          NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD }}
         run: |
           set -euo pipefail
 
@@ -271,7 +275,7 @@ jobs:
               extra_vars["backend_logs_enabled"] = True
               extra_vars.update(logs_values)
 
-          postgres_enabled = os.environ.get("NUTSNEWS_BACKEND_POSTGRES_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+          postgres_enabled = os.environ.get("NUTSNEWS_BACKEND_POSTGRES_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
           if postgres_enabled:
               app_password = os.environ.get("NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD", "")
               readonly_password = os.environ.get("NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD", "")

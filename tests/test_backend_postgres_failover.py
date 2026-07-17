@@ -47,9 +47,18 @@ class BackendPostgresFailoverTests(unittest.TestCase):
 
     def test_protected_apply_wires_postgres_secrets_without_values(self):
         workflow = APPLY_WORKFLOW.read_text(encoding="utf-8")
+        build_step = workflow.split("- name: Build runtime extra vars", 1)[1].split(
+            "- name: Run backend Ansible baseline",
+            1,
+        )[0]
         self.assertIn("NUTSNEWS_BACKEND_POSTGRES_ENABLED", workflow)
         self.assertIn("NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD", workflow)
         self.assertIn("NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD", workflow)
+        self.assertIn("NUTSNEWS_BACKEND_POSTGRES_ENABLED", build_step)
+        self.assertIn("NUTSNEWS_BACKEND_DB_DASHBOARD_ENABLED", build_step)
+        self.assertIn("NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD", build_step)
+        self.assertIn("NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD", build_step)
+        self.assertIn('os.environ.get("NUTSNEWS_BACKEND_POSTGRES_ENABLED", "true")', build_step)
         self.assertIn('"backend_postgres_enabled"] = True', workflow)
         self.assertNotIn("postgres://", workflow)
 

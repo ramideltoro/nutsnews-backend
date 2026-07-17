@@ -1,0 +1,90 @@
+name: Backend Synthetic Monitor
+
+on:
+  workflow_dispatch:
+    inputs:
+      send_email:
+        description: Send an email only when a synthetic check fails.
+        required: true
+        default: true
+        type: boolean
+  schedule:
+    - cron: "23 * * * *"
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: backend-synthetic-monitor
+  cancel-in-progress: false
+
+jobs:
+  synthetic:
+    name: Run off-box synthetic checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Download previous synthetic state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$RUNNER_TEMP/previous-synthetic"
+          previous_run="$(
+            gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow backend-synthetic-monitor.yml \
+              --branch main \
+              --status success \
+              --limit 5 \
+              --json databaseId \
+            | jq -r --arg current "$GITHUB_RUN_ID" '[.[] | select((.databaseId | tostring) != $current)][0].databaseId // empty'
+          )"
+          if [[ -n "$previous_run" ]]; then
+            gh run download "$previous_run" \
+              --repo "$GITHUB_REPOSITORY" \
+              --name backend-synthetic-report \
+              --dir "$RUNNER_TEMP/previous-synthetic" || true
+          fi
+
+      - name: Run synthetic checks
+        shell: bash
+        env:
+          NUTSNEWS_REPORT_SMTP_HOST: ${{ secrets.NUTSNEWS_REPORT_SMTP_HOST }}
+          NUTSNEWS_REPORT_SMTP_USERNAME: ${{ secrets.NUTSNEWS_REPORT_SMTP_USERNAME }}
+          NUTSNEWS_REPORT_SMTP_PASSWORD: ${{ secrets.NUTSNEWS_REPORT_SMTP_PASSWORD }}
+          NUTSNEWS_REPORT_EMAIL_FROM: ${{ secrets.NUTSNEWS_REPORT_EMAIL_FROM }}
+          NUTSNEWS_REPORT_EMAIL_TO: ${{ secrets.NUTSNEWS_REPORT_EMAIL_TO }}
+          NUTSNEWS_REPORT_SMTP_PORT: ${{ vars.NUTSNEWS_REPORT_SMTP_PORT || '587' }}
+          NUTSNEWS_REPORT_SMTP_STARTTLS: ${{ vars.NUTSNEWS_REPORT_SMTP_STARTTLS || 'true' }}
+          NUTSNEWS_REPORT_SUBJECT_PREFIX: ${{ vars.NUTSNEWS_REPORT_SUBJECT_PREFIX || '[NutsNews backend]' }}
+          SEND_EMAIL_INPUT: ${{ github.event_name == 'schedule' && 'true' || inputs.send_email }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            --output "$RUNNER_TEMP/backend-synthetic-report.json"
+            --summary "$GITHUB_STEP_SUMMARY"
+            --previous-state "$RUNNER_TEMP/previous-synthetic/backend-synthetic-report.json"
+          )
+          if [[ "$SEND_EMAIL_INPUT" == "true" ]]; then
+            args+=(--send-email)
+          fi
+          python3 scripts/backend_synthetic_monitor.py "${args[@]}"
+
+      - name: Upload synthetic report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-synthetic-report
+          path: ${{ runner.temp }}/backend-synthetic-report.json
+          if-no-files-found: error

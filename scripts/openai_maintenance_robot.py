@@ -207,6 +207,12 @@ def collect_todos(repo_path: Path, max_items: int) -> list[dict[str, Any]]:
             match = todo_re.search(line)
             if not match:
                 continue
+            prefix = line[: match.start()].strip()
+            if not (
+                prefix.startswith(("#", "//", "/*", "*", "<!--", "--"))
+                or re.match(r"^[-*]\s*$", prefix)
+            ):
+                continue
             body = match.group(2).strip()
             if len(body) < 12:
                 continue

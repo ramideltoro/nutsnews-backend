@@ -56,7 +56,7 @@ REMOTE_COMMANDS: dict[str, str] = {
     "swap": "swapon --show=NAME --noheadings 2>/dev/null || true",
     "reboot_required": "test -e /var/run/reboot-required && echo yes || echo no",
     "ufw_status": "ufw status verbose 2>&1 || true",
-    "managed_files": "for path in /etc/ssh/sshd_config.d/00-nutsnews-hardening.conf /etc/fail2ban/jail.d/nutsnews-sshd.local /etc/sysctl.d/99-nutsnews-backend-swap.conf /etc/systemd/journald.conf.d/99-nutsnews-backend.conf /etc/logrotate.d/nutsnews-backend /usr/local/sbin/nutsnews-backend-smoke /usr/local/sbin/nutsnews-backup /etc/nutsnews-backup/service-matrix.json /etc/nutsnews-backup/restic.env /etc/systemd/system/nutsnews-backup.service /etc/systemd/system/nutsnews-backup.timer /etc/systemd/system/nutsnews-backup-verify.service /etc/systemd/system/nutsnews-backup-verify.timer /etc/systemd/system/nutsnews-restore-drill.service /etc/systemd/system/nutsnews-restore-drill.timer; do stat -c '%a %U %G %n' \"$path\" 2>/dev/null || echo \"missing $path\"; done",
+    "managed_files": "for path in /etc/ssh/sshd_config.d/00-nutsnews-hardening.conf /etc/fail2ban/jail.d/nutsnews-sshd.local /etc/sysctl.d/99-nutsnews-backend-swap.conf /etc/systemd/journald.conf.d/99-nutsnews-backend.conf /etc/logrotate.d/nutsnews-backend /usr/local/sbin/nutsnews-backend-smoke /usr/local/sbin/nutsnews-backup /etc/nutsnews-backup/service-matrix.json /etc/nutsnews-backup/restic.env /etc/systemd/system/nutsnews-backup.service /etc/systemd/system/nutsnews-backup.timer /etc/systemd/system/nutsnews-backup-verify.service /etc/systemd/system/nutsnews-backup-verify.timer /etc/systemd/system/nutsnews-restore-drill.service /etc/systemd/system/nutsnews-restore-drill.timer; do stat -c '%a %U %G %n' \"$path\" 2>/dev/null || { sudo -n test -e \"$path\" 2>/dev/null && echo \"present_root_only $path\" || echo \"missing $path\"; }; done",
 }
 
 
@@ -312,6 +312,16 @@ def classify_managed_files(evidence: dict[str, Any]) -> list[dict[str, Any]]:
                     "expected": "present after protected apply",
                     "observed": "missing",
                     "acceptable_until": "#10 protected apply succeeds",
+                }
+            )
+        elif line.startswith("present_root_only "):
+            checks.append(
+                {
+                    "surface": f"managed_file:{line.removeprefix('present_root_only ')}",
+                    "status": "expected",
+                    "severity": "info",
+                    "expected": "present",
+                    "observed": "present_root_only",
                 }
             )
         else:

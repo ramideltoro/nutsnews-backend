@@ -85,6 +85,14 @@ class BackendDriftCheckTests(unittest.TestCase):
         _, summary = backend_drift_check.classify(fixture, BASELINE)
         self.assertIn("failed_systemd_units", summary["high_priority_unexpected"])
 
+    def test_root_only_managed_files_count_as_expected(self):
+        fixture = evidence(managed_files={"stdout": "present_root_only /etc/nutsnews-backup/restic.env\n"})
+        checks, summary = backend_drift_check.classify(fixture, BASELINE)
+        managed = next(item for item in checks if item["surface"] == "managed_file:/etc/nutsnews-backup/restic.env")
+        self.assertEqual(managed["status"], "expected")
+        self.assertEqual(managed["observed"], "present_root_only")
+        self.assertEqual(summary["unexpected"], 0)
+
     def test_ops_dashboard_units_do_not_count_as_backend_app_deployed(self):
         fixture = evidence(
             backend_units={

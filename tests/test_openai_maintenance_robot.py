@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import tempfile
 import unittest
 from types import SimpleNamespace
+from pathlib import Path
 from unittest import mock
 
 from scripts import openai_maintenance_robot as robot
@@ -98,6 +100,23 @@ class OpenAIMaintenanceRobotTests(unittest.TestCase):
         )
         self.assertIn("## Possible duplicate", normalized["body"])
         self.assertIn("possible duplicate of #123", normalized["body"])
+
+    def test_todo_collection_only_keeps_comment_like_lines(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "notes.md").write_text(
+                "This prose mentions TODO/FIXME/HACK markers.\n"
+                "- TODO: convert this checklist item into tracked work.\n",
+                encoding="utf-8",
+            )
+            (root / "script.py").write_text(
+                'todo_re = r"TODO|FIXME|HACK"\n'
+                "# FIXME: handle the documented retry case in this helper.\n",
+                encoding="utf-8",
+            )
+            todos = robot.collect_todos(root, max_items=10)
+        self.assertEqual(len(todos), 2)
+        self.assertEqual({item["file"] for item in todos}, {"notes.md", "script.py"})
 
     def test_issue_creation_failure_creates_followup_when_possible(self):
         normalized = robot.normalize_candidate(candidate(), "scan+2026-07-16T21-30-00Z")

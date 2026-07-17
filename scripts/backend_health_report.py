@@ -79,6 +79,11 @@ REMOTE_COMMANDS: dict[str, str] = {
         "/usr/local/sbin/nutsnews-backup status 2>/dev/null || sudo -n /usr/local/sbin/nutsnews-backup status 2>/dev/null || true; "
         "else echo not_configured; fi"
     ),
+    "cleanup_status": (
+        "if test -r /var/lib/nutsnews/cleanup/last-cleanup.json; then "
+        "cat /var/lib/nutsnews/cleanup/last-cleanup.json; "
+        "else echo not_configured; fi"
+    ),
     "recent_errors": "journalctl -p err..alert -n 25 --no-pager 2>/dev/null || true",
     "sudo_nopasswd": "sudo -n true >/dev/null 2>&1 && echo yes || echo no",
 }
@@ -381,6 +386,31 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
             },
         ]
     )
+
+    cleanup_status_raw = command_stdout(report, "cleanup_status").strip()
+    if cleanup_status_raw == "not_configured" or not cleanup_status_raw:
+        checks.append(
+            {
+                "name": "cleanup_last_run",
+                "status": "not_configured",
+                "summary": "cleanup_last_run=not_configured",
+            }
+        )
+    else:
+        cleanup_status = parse_json_object(cleanup_status_raw)
+        status = str(cleanup_status.get("status") or "unknown")
+        if status not in {"healthy", "warning", "critical", "unknown"}:
+            status = "unknown"
+        checks.append(
+            {
+                "name": "cleanup_last_run",
+                "status": status,
+                "summary": (
+                    f"last_action={cleanup_status.get('action', 'unknown')} "
+                    f"last_run={cleanup_status.get('generated_at_utc', 'unknown')}"
+                ),
+            }
+        )
 
     sudo_state = command_stdout(report, "sudo_nopasswd").strip()
     checks.append(

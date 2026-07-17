@@ -44,7 +44,7 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --workflow backend-synthetic-monitor.yml \
               --branch main \
-              --status success \
+              --status completed \
               --limit 5 \
               --json databaseId \
             | jq -r --arg current "$GITHUB_RUN_ID" '[.[] | select((.databaseId | tostring) != $current)][0].databaseId // empty'

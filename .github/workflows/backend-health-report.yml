@@ -12,6 +12,7 @@ on:
     - cron: "17 12 * * *"
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -59,6 +60,31 @@ jobs:
           ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend_report" > /dev/null
           ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
 
+      - name: Download previous health report state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$RUNNER_TEMP/previous-health"
+          previous_run="$(
+            gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow backend-health-report.yml \
+              --branch main \
+              --status completed \
+              --limit 5 \
+              --json databaseId \
+            | jq -r --arg current "$GITHUB_RUN_ID" '[.[] | select((.databaseId | tostring) != $current)][0].databaseId // empty'
+          )"
+          if [[ -n "$previous_run" ]]; then
+            gh run download "$previous_run" \
+              --repo "$GITHUB_REPOSITORY" \
+              --name backend-health-report \
+              --dir "$RUNNER_TEMP/previous-health" || true
+          fi
+
       - name: Generate report
         shell: bash
         env:
@@ -83,6 +109,7 @@ jobs:
             --known-hosts "$HOME/.ssh/known_hosts"
             --output "$RUNNER_TEMP/backend-health-report.json"
             --summary "$GITHUB_STEP_SUMMARY"
+            --previous-state "$RUNNER_TEMP/previous-health/backend-health-report.json"
           )
 
           if [[ "$SEND_EMAIL_INPUT" == "true" ]]; then

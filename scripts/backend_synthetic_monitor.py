@@ -20,10 +20,15 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 
+try:
+    from scripts import backend_alert_state
+except ModuleNotFoundError:  # pragma: no cover - script-path execution
+    import backend_alert_state
 
-TOKEN_RE = re.compile(r"(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+|[A-Za-z0-9_-]{20,}\\.[A-Za-z0-9_-]{20,}\\.[A-Za-z0-9_-]{20,})")
-EMAIL_RE = re.compile(r"\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b")
-URL_SECRET_RE = re.compile(r"([a-z][a-z0-9+.-]*://[^:/\\s]+:)([^@\\s]+)(@)", re.IGNORECASE)
+
+TOKEN_RE = re.compile(r"(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+|[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})")
+EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+URL_SECRET_RE = re.compile(r"([a-z][a-z0-9+.-]*://[^:/\s]+:)([^@\s]+)(@)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -60,7 +65,7 @@ def utc_now() -> str:
 
 def redact(value: str) -> str:
     redacted = TOKEN_RE.sub("<redacted-token>", value)
-    redacted = URL_SECRET_RE.sub(r"\\1<redacted>\\3", redacted)
+    redacted = URL_SECRET_RE.sub(r"\1<redacted>\3", redacted)
     redacted = EMAIL_RE.sub("<redacted-email>", redacted)
     return redacted
 
@@ -106,14 +111,9 @@ def public_checks() -> list[SyntheticCheck]:
 
 
 def load_previous(path: Path | None) -> dict[str, str]:
-    if path is None or not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
+    report = load_previous_report(path)
     previous: dict[str, str] = {}
-    for check in data.get("checks", []):
+    for check in report.get("checks", []):
         if not isinstance(check, dict):
             continue
         name = str(check.get("name", ""))
@@ -121,6 +121,16 @@ def load_previous(path: Path | None) -> dict[str, str]:
         if name and last_success:
             previous[name] = last_success
     return previous
+
+
+def load_previous_report(path: Path | None) -> dict[str, Any]:
+    if path is None or not path.exists():
+        return {}
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return report if isinstance(report, dict) else {}
 
 
 def opener_for(check: SyntheticCheck) -> urllib.request.OpenerDirector:
@@ -229,13 +239,14 @@ def smtp_config_from_env() -> SmtpConfig | None:
 
 
 def send_failure_email(config: SmtpConfig, report: dict[str, Any]) -> dict[str, str]:
-    failures = [check for check in report["checks"] if check["status"] != "healthy"]
-    if not failures:
-        return {"status": "skipped", "detail": "no failures"}
+    notifications = report.get("alerting", {}).get("notifications", [])
+    if not notifications:
+        suppressed = report.get("alerting", {}).get("summary", {}).get("suppressed_count", 0)
+        return {"status": "skipped", "detail": f"no unsuppressed notifications; suppressed={suppressed}"}
 
     prefix = os.environ.get("NUTSNEWS_REPORT_SUBJECT_PREFIX", "[NutsNews backend]")
     message = EmailMessage()
-    message["Subject"] = f"{prefix} synthetic monitor failure"
+    message["Subject"] = f"{prefix} synthetic monitor alert: {len(notifications)} notification(s)"
     message["From"] = config.sender
     message["To"] = ", ".join(config.recipients)
     lines = [
@@ -246,29 +257,49 @@ def send_failure_email(config: SmtpConfig, report: dict[str, Any]) -> dict[str, 
         f"Run URL: {report['source'].get('run_url') or 'unknown'}",
         "",
     ]
-    for failure in failures:
+    for notification in notifications:
         lines.extend(
             [
-                f"- endpoint: {failure['name']}",
-                f"  status: {failure.get('http_status')}",
-                f"  failure_class: {failure.get('failure_class')}",
-                f"  last_success_at: {failure.get('last_success_at') or 'unknown'}",
-                f"  detail: {failure.get('failure_detail')}",
+                f"- service: {notification.get('service')}",
+                f"  status: {notification.get('status')}",
+                f"  severity: {notification.get('severity')}",
+                f"  failure_class: {notification.get('failure_class')}",
+                f"  fingerprint: {notification.get('fingerprint')}",
+                f"  reason: {notification.get('notification_reason')}",
+                f"  message: {notification.get('message')}",
             ]
         )
-    message.set_content(redact("\\n".join(lines)))
+    message.set_content(redact("\n".join(lines)))
 
     with smtplib.SMTP(config.host, config.port, timeout=20) as smtp:
         if config.starttls:
             smtp.starttls()
         smtp.login(config.username, config.password)
         smtp.send_message(message)
-    return {"status": "sent", "detail": f"failures={len(failures)}"}
+    return {"status": "sent", "detail": f"notifications={len(notifications)}"}
+
+
+def current_alerts_from_checks(checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    alerts = []
+    for check in checks:
+        if check["status"] == "healthy":
+            continue
+        alerts.append(
+            {
+                "source": "synthetic",
+                "service": check["name"],
+                "severity": "critical",
+                "failure_class": check.get("failure_class") or "unknown",
+                "message": check.get("failure_detail") or f"{check['name']} status={check.get('http_status')}",
+            }
+        )
+    return alerts
 
 
 def write_summary(path: Path | None, report: dict[str, Any]) -> None:
     if path is None:
         return
+    alert_summary = report.get("alerting", {}).get("summary", {})
     lines = [
         "# Backend Synthetic Monitor",
         "",
@@ -276,6 +307,12 @@ def write_summary(path: Path | None, report: dict[str, Any]) -> None:
         f"- healthy: `{report['summary']['healthy']}`",
         f"- critical: `{report['summary']['critical']}`",
         f"- source: `{report['source']['provider']}` / `{report['source']['location']}`",
+        f"- active alerts: `{alert_summary.get('active_alert_count', 0)}`",
+        f"- notifications: `{alert_summary.get('notification_count', 0)}`",
+        f"- suppressed: `{alert_summary.get('suppressed_count', 0)}`",
+        f"- recovered: `{alert_summary.get('recovered_count', 0)}`",
+        f"- last sent: `{alert_summary.get('last_sent_at') or 'none'}`",
+        f"- last error: `{alert_summary.get('last_error') or 'none'}`",
         "",
         "| Endpoint | Status | HTTP | Failure class | Last success |",
         "| --- | --- | ---: | --- | --- |",
@@ -284,7 +321,7 @@ def write_summary(path: Path | None, report: dict[str, Any]) -> None:
         lines.append(
             f"| `{check['name']}` | `{check['status']}` | `{check.get('http_status')}` | `{check.get('failure_class') or ''}` | `{check.get('last_success_at') or ''}` |"
         )
-    path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def parse_args() -> argparse.Namespace:
@@ -299,9 +336,16 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     generated_at = utc_now()
+    previous_report = load_previous_report(args.previous_state)
     previous = load_previous(args.previous_state)
     checks = [run_check(check, previous.get(check.name), generated_at) for check in public_checks()]
     critical = sum(1 for check in checks if check["status"] == "critical")
+    alerting = backend_alert_state.evaluate_alerts(
+        previous_report,
+        current_alerts_from_checks(checks),
+        generated_at,
+        cooldown_seconds=60 * 60,
+    )
     report: dict[str, Any] = {
         "schema_version": 1,
         "generated_at_utc": generated_at,
@@ -317,6 +361,8 @@ def main() -> int:
         "status": "critical" if critical else "healthy",
         "summary": {"total": len(checks), "healthy": len(checks) - critical, "critical": critical},
         "checks": checks,
+        "alerting": {"summary": alerting["summary"], "notifications": alerting["notifications"], "suppressed": alerting["suppressed"]},
+        "alert_state": alerting["state"],
         "delivery": {"status": "skipped", "detail": "send_email=false"},
     }
 
@@ -328,7 +374,7 @@ def main() -> int:
             report["delivery"] = send_failure_email(config, report)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+    args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     write_summary(args.summary, report)
     print(json.dumps(report, indent=2, sort_keys=True))
     return 2 if critical else 0

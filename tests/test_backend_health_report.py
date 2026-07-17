@@ -142,6 +142,47 @@ class BackendHealthReportTests(unittest.TestCase):
         self.assertIn("- warning:", text)
         self.assertIn("package_updates", text)
 
+    def test_current_alerts_preserve_distinct_failure_classes(self):
+        alerts = backend_health_report.current_alerts_from_checks(
+            [
+                {"name": "backup_freshness", "status": "critical", "summary": "snapshot=abc"},
+                {"name": "backup_verification", "status": "warning", "summary": "snapshot=abc"},
+                {"name": "backup_storage_quota", "status": "warning", "summary": "quota_status=warning"},
+                {"name": "root_disk_used_percent", "status": "warning", "summary": "root_disk_used_percent=82%"},
+                {"name": "service_fail2ban", "status": "warning", "summary": "fail2ban=inactive"},
+                {"name": "memory_used_percent", "status": "unknown", "summary": "memory_used_percent=unknown"},
+                {"name": "backup_tooling", "status": "not_configured", "summary": "restic=missing"},
+            ]
+        )
+        by_service = {alert["service"]: alert for alert in alerts}
+        self.assertEqual(by_service["backup_freshness"]["failure_class"], "backup_freshness")
+        self.assertEqual(by_service["backup_verification"]["failure_class"], "backup_verification")
+        self.assertEqual(by_service["backup_storage_quota"]["failure_class"], "backup_storage_quota")
+        self.assertEqual(by_service["root_disk_used_percent"]["failure_class"], "disk_pressure")
+        self.assertEqual(by_service["service_fail2ban"]["failure_class"], "service_down")
+        self.assertEqual(by_service["memory_used_percent"]["failure_class"], "missing_data")
+        self.assertNotIn("backup_tooling", by_service)
+
+    def test_render_text_exposes_alerting_status(self):
+        report = fixture_report()
+        checks, summary = backend_health_report.classify(report)
+        report["checks"] = checks
+        report["summary"] = summary
+        report["alerting"] = {
+            "summary": {
+                "active_alert_count": 2,
+                "notification_count": 1,
+                "suppressed_count": 1,
+                "recovered_count": 0,
+                "last_sent_at": "2026-07-17T01:00:00Z",
+                "last_error": "fail2ban=inactive",
+            }
+        }
+        text = backend_health_report.render_text(report)
+        self.assertIn("Alerting:", text)
+        self.assertIn("active_alert_count: 2", text)
+        self.assertIn("last_error: fail2ban=inactive", text)
+
 
 if __name__ == "__main__":
     unittest.main()

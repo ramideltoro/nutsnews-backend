@@ -7,7 +7,12 @@
     "max_dashboards": 10,
     "max_panels_per_dashboard": 12,
     "max_total_panels": 80,
-    "max_unique_queries": 100
+    "max_unique_queries": 100,
+    "max_alert_rules": 12
+  },
+  "alert_group": {
+    "name": "NutsNews Backend Guardrails",
+    "interval_seconds": 60
   },
   "dashboards": [
     {
@@ -105,6 +110,114 @@
         {"title": "Backup And Timer Logs", "datasource": "loki", "type": "logs", "expr": "{host=\"backend.nutsnews.com\",service=~\"backup|timer\"}"},
         {"title": "Log Volume By Source", "datasource": "loki", "unit": "short", "expr": "sum by (source) (count_over_time({host=\"backend.nutsnews.com\"}[15m]))"}
       ]
+    }
+  ],
+  "alerts": [
+    {
+      "uid": "nutsnews-backend-host-metrics-missing",
+      "title": "NutsNews backend host metrics missing",
+      "severity": "critical",
+      "service": "alloy",
+      "expr": "absent(up{job=\"nutsnews-backend-host\"})",
+      "threshold": 0,
+      "evaluator": "gt",
+      "for": "5m",
+      "range_seconds": 600,
+      "no_data_state": "OK",
+      "summary": "Grafana Cloud is not receiving backend host metrics from Alloy."
+    },
+    {
+      "uid": "nutsnews-backend-public-endpoint-unhealthy",
+      "title": "NutsNews backend public endpoint unhealthy",
+      "severity": "critical",
+      "service": "caddy",
+      "expr": "min_over_time(nutsnews_backend_public_endpoint_healthy{job=\"nutsnews-backend-host\"}[5m])",
+      "threshold": 1,
+      "evaluator": "lt",
+      "for": "5m",
+      "range_seconds": 600,
+      "no_data_state": "OK",
+      "summary": "The backend /healthz endpoint is failing from the host probe."
+    },
+    {
+      "uid": "nutsnews-backend-failed-systemd-units",
+      "title": "NutsNews backend failed systemd units",
+      "severity": "critical",
+      "service": "systemd",
+      "expr": "nutsnews_backend_failed_systemd_units{job=\"nutsnews-backend-host\"}",
+      "threshold": 0,
+      "evaluator": "gt",
+      "for": "2m",
+      "range_seconds": 600,
+      "no_data_state": "OK",
+      "summary": "One or more backend systemd units are failed."
+    },
+    {
+      "uid": "nutsnews-backend-backup-unhealthy",
+      "title": "NutsNews backend backup or restore coverage unhealthy",
+      "severity": "critical",
+      "service": "backup",
+      "expr": "min(nutsnews_backend_backup_stage_healthy{job=\"nutsnews-backend-host\"})",
+      "threshold": 1,
+      "evaluator": "lt",
+      "for": "15m",
+      "range_seconds": 1800,
+      "no_data_state": "OK",
+      "summary": "A backend backup, verification, or restore-drill stage is unhealthy."
+    },
+    {
+      "uid": "nutsnews-backend-root-disk-warning",
+      "title": "NutsNews backend root disk warning",
+      "severity": "warning",
+      "service": "host",
+      "expr": "1 - (node_filesystem_avail_bytes{job=\"nutsnews-backend-host\",mountpoint=\"/\",fstype!=\"\"} / node_filesystem_size_bytes{job=\"nutsnews-backend-host\",mountpoint=\"/\",fstype!=\"\"})",
+      "threshold": 0.8,
+      "evaluator": "gt",
+      "for": "15m",
+      "range_seconds": 1800,
+      "no_data_state": "OK",
+      "summary": "Backend root filesystem usage is above the warning threshold."
+    },
+    {
+      "uid": "nutsnews-backend-reboot-required-warning",
+      "title": "NutsNews backend reboot required outside maintenance",
+      "severity": "warning",
+      "service": "updates",
+      "expr": "nutsnews_backend_reboot_required{job=\"nutsnews-backend-host\"}",
+      "threshold": 0,
+      "evaluator": "gt",
+      "for": "24h",
+      "range_seconds": 86400,
+      "no_data_state": "OK",
+      "summary": "The backend host has needed a reboot for more than one day."
+    },
+    {
+      "uid": "nutsnews-backend-journal-logs-missing",
+      "title": "NutsNews backend journal logs missing in Loki",
+      "severity": "warning",
+      "service": "alloy",
+      "datasource": "loki",
+      "expr": "sum(count_over_time({host=\"backend.nutsnews.com\",source=\"journal\"}[2h]))",
+      "threshold": 1,
+      "evaluator": "lt",
+      "for": "15m",
+      "range_seconds": 7200,
+      "no_data_state": "Alerting",
+      "summary": "Grafana Cloud Loki is not receiving backend journal logs."
+    },
+    {
+      "uid": "nutsnews-backend-log-volume-warning",
+      "title": "NutsNews backend log volume warning",
+      "severity": "warning",
+      "service": "alloy",
+      "datasource": "loki",
+      "expr": "sum(count_over_time({host=\"backend.nutsnews.com\"}[1h]))",
+      "threshold": 10000,
+      "evaluator": "gt",
+      "for": "15m",
+      "range_seconds": 3600,
+      "no_data_state": "OK",
+      "summary": "Backend log volume is above the free-tier guardrail threshold."
     }
   ]
 }

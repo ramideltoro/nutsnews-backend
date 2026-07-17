@@ -33,10 +33,12 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertEqual(provision_grafana_metrics.validate_spec(spec), [])
         self.assertEqual(spec["folder"]["uid"], "nutsnews-backend-ops")
         self.assertGreaterEqual(len(spec["dashboards"]), 9)
+        self.assertGreaterEqual(len(spec["alerts"]), 8)
 
         logs_dashboard = next(item for item in spec["dashboards"] if item["uid"] == "nutsnews-backend-logs")
         self.assertTrue(logs_dashboard["panels"])
         self.assertTrue(all(panel.get("datasource") == "loki" for panel in logs_dashboard["panels"]))
+        self.assertTrue(any(alert.get("datasource") == "loki" for alert in spec["alerts"]))
 
     def test_grafana_dashboard_spec_rejects_high_cardinality_log_labels(self):
         spec = {
@@ -52,6 +54,22 @@ class BackendMetricsTests(unittest.TestCase):
         }
         errors = provision_grafana_metrics.validate_spec(spec)
         self.assertIn("high-cardinality label request_id", "\n".join(errors))
+
+    def test_grafana_alert_model_uses_expression_condition(self):
+        spec = provision_grafana_metrics.load_spec(GRAFANA_SPEC)
+        alert = next(item for item in spec["alerts"] if item["uid"] == "nutsnews-backend-root-disk-warning")
+        model = provision_grafana_metrics.alert_rule_model(
+            alert,
+            spec["folder"]["uid"],
+            spec["alert_group"]["name"],
+            {"prometheus": "prometheus-uid", "loki": "loki-uid"},
+        )
+        self.assertEqual(model["folderUID"], "nutsnews-backend-ops")
+        self.assertEqual(model["ruleGroup"], "NutsNews Backend Guardrails")
+        self.assertEqual(model["condition"], "B")
+        self.assertEqual(model["data"][0]["datasourceUid"], "prometheus-uid")
+        self.assertEqual(model["data"][1]["datasourceUid"], "-100")
+        self.assertEqual(model["labels"]["severity"], "warning")
 
     def test_loki_remote_write_url_is_normalized_for_query_datasource(self):
         self.assertEqual(

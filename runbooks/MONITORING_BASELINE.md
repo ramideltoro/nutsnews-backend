@@ -119,6 +119,29 @@ managed fallback datasource named `grafanacloud-nutsnews-backend-loki`
 (`grafanacloud-loki`) from the same Loki secret names. The provisioner
 intentionally avoids Grafana's alert-state-history Loki datasource.
 
+## Grafana Alert Guardrails
+
+Backend issue #25 adds repo-managed Grafana alert rules through the same
+`Backend Grafana Observability` workflow. The managed rule group is
+`NutsNews Backend Guardrails` in the `NutsNews Backend Ops` folder.
+
+Initial rules cover:
+
+- missing backend host metrics;
+- unhealthy `/healthz` endpoint;
+- failed systemd units;
+- unhealthy backup, verification, or restore-drill stages;
+- root disk warning above 80%;
+- reboot-required warning after 24 hours;
+- missing backend journal logs in Loki;
+- backend log volume above the free-tier guardrail threshold.
+
+These rules intentionally distinguish known not-configured states from failures
+by using the textfile metrics and `noDataState` settings that avoid alerting for
+services that are intentionally absent today. Notification contact points,
+deduplication, cooldowns, and recovery-message policy are handled by the
+separate alert-routing work.
+
 ## Alert Delivery
 
 Alert delivery uses `.github/workflows/backend-health-report.yml`. The manual

@@ -20,6 +20,8 @@ DEFAULT_SPEC = ROOT / "grafana" / "backend-metrics" / "dashboards.json"
 ALLOWED_DATASOURCES = {"prometheus", "loki"}
 MANAGED_LOKI_DATASOURCE_NAME = "grafanacloud-nutsnews-backend-loki"
 MANAGED_LOKI_DATASOURCE_UID = "grafanacloud-loki"
+EXPRESSION_DATASOURCE_UID = "-100"
+ALLOWED_ALERT_STATES = {"Alerting", "Error", "KeepLast", "NoData", "OK"}
 HIGH_CARDINALITY_LABELS = {
     "container_id",
     "error",
@@ -40,6 +42,7 @@ def validate_spec(spec: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     folder = spec.get("folder", {})
     dashboards = spec.get("dashboards", [])
+    alerts = spec.get("alerts", [])
     guardrails = spec.get("guardrails", {})
     if not folder.get("uid") or not folder.get("title"):
         errors.append("folder.uid and folder.title are required")
@@ -47,6 +50,8 @@ def validate_spec(spec: dict[str, Any]) -> list[str]:
         errors.append("at least one dashboard is required")
     if len(dashboards) > int(guardrails.get("max_dashboards", 10)):
         errors.append("dashboard count exceeds guardrail")
+    if len(alerts) > int(guardrails.get("max_alert_rules", 20)):
+        errors.append("alert rule count exceeds guardrail")
 
     total_panels = 0
     queries: set[str] = set()
@@ -76,6 +81,27 @@ def validate_spec(spec: dict[str, Any]) -> list[str]:
                 if f"{label}=" in expr or f"{label}=~" in expr:
                     errors.append(f"{uid} panel {panel.get('title', '<untitled>')} uses high-cardinality label {label}")
             queries.add(expr)
+    seen_alert_uids: set[str] = set()
+    for alert in alerts:
+        uid = str(alert.get("uid", ""))
+        title = str(alert.get("title", ""))
+        expr = str(alert.get("expr", "")).strip()
+        datasource_type = str(alert.get("datasource", "prometheus"))
+        if not uid or not title or not expr:
+            errors.append("each alert requires uid, title, and expr")
+        if uid in seen_alert_uids:
+            errors.append(f"duplicate alert uid: {uid}")
+        seen_alert_uids.add(uid)
+        if datasource_type not in ALLOWED_DATASOURCES:
+            errors.append(f"alert {uid or '<missing>'} uses unsupported datasource {datasource_type}")
+        for state_field in ("no_data_state", "exec_err_state"):
+            state = str(alert.get(state_field, "OK" if state_field == "no_data_state" else "Error"))
+            if state not in ALLOWED_ALERT_STATES:
+                errors.append(f"alert {uid or '<missing>'} has invalid {state_field}: {state}")
+        for label in HIGH_CARDINALITY_LABELS:
+            if f"{label}=" in expr or f"{label}=~" in expr:
+                errors.append(f"alert {uid or '<missing>'} uses high-cardinality label {label}")
+        queries.add(expr)
     if total_panels > int(guardrails.get("max_total_panels", 80)):
         errors.append("total panel count exceeds guardrail")
     if len(queries) > int(guardrails.get("max_unique_queries", 100)):
@@ -113,6 +139,8 @@ def datasource_types(spec: dict[str, Any]) -> set[str]:
     for dashboard in spec.get("dashboards", []):
         for panel in dashboard.get("panels", []):
             types.add(str(panel.get("datasource", "prometheus")))
+    for alert in spec.get("alerts", []):
+        types.add(str(alert.get("datasource", "prometheus")))
     return types
 
 
@@ -272,6 +300,112 @@ def upsert_dashboards(client: GrafanaClient, spec: dict[str, Any], datasource_ui
     return results
 
 
+def alert_rule_model(alert: dict[str, Any], folder_uid: str, group_name: str, datasource_uids: dict[str, str]) -> dict[str, Any]:
+    datasource_type = str(alert.get("datasource", "prometheus"))
+    datasource_uid = datasource_uids[datasource_type]
+    labels = {
+        "component": "backend-observability",
+        "managed_by": "nutsnews-backend",
+        "severity": str(alert.get("severity", "warning")),
+        "service": str(alert.get("service", "backend")),
+    }
+    labels.update(alert.get("labels", {}))
+    annotations = {
+        "summary": alert.get("summary", alert["title"]),
+        "runbook_url": alert.get("runbook_url", "https://github.com/ramideltoro/nutsnews-backend/blob/main/runbooks/MONITORING_BASELINE.md"),
+    }
+    if alert.get("description"):
+        annotations["description"] = alert["description"]
+    return {
+        "uid": alert["uid"],
+        "title": alert["title"],
+        "folderUID": folder_uid,
+        "ruleGroup": group_name,
+        "condition": "B",
+        "for": str(alert.get("for", "5m")),
+        "keepFiringFor": str(alert.get("keep_firing_for", "5m")),
+        "noDataState": str(alert.get("no_data_state", "OK")),
+        "execErrState": str(alert.get("exec_err_state", "Error")),
+        "annotations": annotations,
+        "labels": labels,
+        "data": [
+            {
+                "refId": "A",
+                "queryType": str(alert.get("query_type", "range" if datasource_type == "loki" else "")),
+                "relativeTimeRange": {"from": int(alert.get("range_seconds", 600)), "to": 0},
+                "datasourceUid": datasource_uid,
+                "model": {
+                    "datasource": {"type": datasource_type, "uid": datasource_uid},
+                    "expr": alert["expr"],
+                    "hide": False,
+                    "intervalMs": 1000,
+                    "maxDataPoints": 43200,
+                    "refId": "A",
+                },
+            },
+            {
+                "refId": "B",
+                "queryType": "",
+                "relativeTimeRange": {"from": 0, "to": 0},
+                "datasourceUid": EXPRESSION_DATASOURCE_UID,
+                "model": {
+                    "conditions": [
+                        {
+                            "evaluator": {"params": [float(alert.get("threshold", 0))], "type": str(alert.get("evaluator", "gt"))},
+                            "operator": {"type": "and"},
+                            "query": {"params": ["A"]},
+                            "reducer": {"params": [], "type": str(alert.get("reducer", "last"))},
+                            "type": "query",
+                        }
+                    ],
+                    "datasource": {"type": "__expr__", "uid": EXPRESSION_DATASOURCE_UID},
+                    "hide": False,
+                    "intervalMs": 1000,
+                    "maxDataPoints": 43200,
+                    "refId": "B",
+                    "type": "classic_conditions",
+                },
+            },
+        ],
+    }
+
+
+def upsert_alert_rules(client: GrafanaClient, spec: dict[str, Any], datasource_uids: dict[str, str], apply: bool) -> list[dict[str, str]]:
+    results = []
+    folder_uid = spec["folder"]["uid"]
+    group_name = spec.get("alert_group", {}).get("name", "NutsNews Backend Guardrails")
+    for alert in spec.get("alerts", []):
+        if not apply:
+            results.append({"uid": alert["uid"], "title": alert["title"], "status": "validated"})
+            continue
+        model = alert_rule_model(alert, folder_uid, group_name, datasource_uids)
+        try:
+            client.request("GET", f"/api/v1/provisioning/alert-rules/{urllib.parse.quote(alert['uid'])}")
+        except RuntimeError as exc:
+            if "failed with 404" not in str(exc):
+                raise
+            client.request("POST", "/api/v1/provisioning/alert-rules", model)
+            results.append({"uid": alert["uid"], "title": alert["title"], "status": "created"})
+        else:
+            client.request("PUT", f"/api/v1/provisioning/alert-rules/{urllib.parse.quote(alert['uid'])}", model)
+            results.append({"uid": alert["uid"], "title": alert["title"], "status": "updated"})
+    return results
+
+
+def verify_alert_rules(client: GrafanaClient, spec: dict[str, Any]) -> list[dict[str, str]]:
+    results = []
+    for alert in spec.get("alerts", []):
+        try:
+            response = client.request("GET", f"/api/v1/provisioning/alert-rules/{urllib.parse.quote(alert['uid'])}")
+        except RuntimeError as exc:
+            if "failed with 404" in str(exc):
+                results.append({"uid": alert["uid"], "title": alert["title"], "status": "missing"})
+                continue
+            raise
+        results.append({"uid": alert["uid"], "title": response.get("title", alert["title"]), "status": "present"})
+    return results
+
+
 def verify_prometheus_query(client: GrafanaClient, datasource_uid: str, query: str) -> dict[str, Any]:
     encoded = urllib.parse.urlencode({"query": query})
     response = client.request("GET", f"/api/datasources/proxy/uid/{urllib.parse.quote(datasource_uid)}/api/v1/query?{encoded}")
@@ -339,6 +473,7 @@ def main() -> int:
         "guardrails": spec.get("guardrails", {}),
         "dashboard_count": len(spec.get("dashboards", [])),
         "panel_count": sum(len(item.get("panels", [])) for item in spec.get("dashboards", [])),
+        "alert_count": len(spec.get("alerts", [])),
         "status": "validated",
     }
 
@@ -367,15 +502,17 @@ def main() -> int:
         report["datasources"][datasource_type] = {"uid": datasource["uid"], "name": datasource.get("name"), "type": datasource.get("type")}
     report["folder_result"] = ensure_folder(client, spec["folder"], args.apply)
     report["dashboards"] = upsert_dashboards(client, spec, datasource_uids, args.apply)
+    report["alerts"] = upsert_alert_rules(client, spec, datasource_uids, args.apply)
 
     if args.verify:
+        report["alerts"] = verify_alert_rules(client, spec)
         report["verification"] = [
             verify_prometheus_query(client, datasource_uids["prometheus"], 'up{job="nutsnews-backend-host"}'),
             verify_prometheus_query(client, datasource_uids["prometheus"], 'nutsnews_backend_backup_stage_healthy{job="nutsnews-backend-host",stage="backup"}'),
             verify_prometheus_query(client, datasource_uids["prometheus"], 'nutsnews_backend_public_endpoint_healthy{job="nutsnews-backend-host"}'),
             verify_loki_query_range(client, datasource_uids["loki"], '{host="backend.nutsnews.com",source="journal"}'),
         ]
-        if any(item["result_count"] < 1 for item in report["verification"]):
+        if any(item["result_count"] < 1 for item in report["verification"]) or any(item["status"] != "present" for item in report["alerts"]):
             report["status"] = "missing_observability_data"
         else:
             report["status"] = "verified"

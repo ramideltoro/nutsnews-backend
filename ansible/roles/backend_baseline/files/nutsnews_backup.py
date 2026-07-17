@@ -198,6 +198,16 @@ def alert_list(*, backup_status: str, stale: bool, verified: bool, quota: dict[s
     return alerts
 
 
+def snapshot_ids_match(left: str | None, right: str | None) -> bool:
+    if not left or not right:
+        return False
+    left = left.strip()
+    right = right.strip()
+    if len(left) < 8 or len(right) < 8:
+        return False
+    return left == right or left.startswith(right) or right.startswith(left)
+
+
 def latest_backup_is_verified(state_dir: Path, snapshot_id: str | None) -> bool:
     if not snapshot_id:
         return False
@@ -208,7 +218,29 @@ def latest_backup_is_verified(state_dir: Path, snapshot_id: str | None) -> bool:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return False
-    return data.get("status") == "healthy" and data.get("snapshot_id") == snapshot_id
+    return data.get("status") == "healthy" and snapshot_ids_match(str(data.get("snapshot_id") or ""), snapshot_id)
+
+
+def mark_backup_verified(state_dir: Path, snapshot_id: str | None, verified_at: str) -> None:
+    if not snapshot_id:
+        return
+    path = state_dir / STATUS_FILES["backup"]
+    if not path.exists():
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return
+    if not snapshot_ids_match(str(data.get("snapshot_id") or ""), snapshot_id):
+        return
+    alerts = [
+        alert
+        for alert in data.get("alerts", [])
+        if alert.get("kind") != "unverified_latest_snapshot"
+    ]
+    data["alerts"] = alerts
+    data["latest_snapshot_verified_at_utc"] = verified_at
+    write_json(path, data)
 
 
 def action_backup(args: argparse.Namespace) -> dict[str, Any]:
@@ -302,12 +334,13 @@ def action_verify(args: argparse.Namespace) -> dict[str, Any]:
         check_args.extend(["--read-data-subset", args.read_data_subset])
     result = run_restic(check_args, timeout=7200)
     healthy = result.returncode == 0
+    finished_at = utc_now()
     status = {
         "schema_version": 1,
         "action": "verify",
         "status": "healthy" if healthy else "critical",
         "started_at_utc": started_at,
-        "finished_at_utc": utc_now(),
+        "finished_at_utc": finished_at,
         "snapshot_id": snapshot_id,
         "read_data_subset": args.read_data_subset,
         "alerts": [] if healthy else [{"kind": "unverified_latest_snapshot", "status": "critical"}],
@@ -315,6 +348,8 @@ def action_verify(args: argparse.Namespace) -> dict[str, Any]:
         "stderr_tail": redact_restic_text(result.stderr[-1000:]) if result.returncode != 0 else "",
     }
     write_json(args.state_dir / STATUS_FILES["verification"], status)
+    if healthy:
+        mark_backup_verified(args.state_dir, snapshot_id, finished_at)
     return status
 
 

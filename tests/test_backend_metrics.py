@@ -36,6 +36,11 @@ class BackendMetricsTests(unittest.TestCase):
         rendered = metrics.metric("nutsnews_test", 1, {"unit": 'a"b\\c'})
         self.assertEqual(rendered, 'nutsnews_test{unit="a\\"b\\\\c"} 1')
 
+    def test_metrics_tasks_skip_alloy_package_when_repo_is_new_in_check_mode(self):
+        task = Path("ansible/roles/backend_baseline/tasks/metrics.yml").read_text(encoding="utf-8")
+        self.assertIn("backend_metrics_alloy_manageable", task)
+        self.assertIn("when: backend_metrics_alloy_manageable | bool", task)
+
     def test_textfile_exporter_writes_backup_metrics_without_secret_content(self):
         metrics = load_metrics_module()
         with tempfile.TemporaryDirectory() as tmpdir:

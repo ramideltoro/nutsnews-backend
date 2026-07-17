@@ -23,6 +23,7 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("backend_postgres_listen_addresses: localhost", defaults)
         self.assertIn("backend_db_dashboard_bind: 127.0.0.1", defaults)
         self.assertIn('backend_db_dashboard_port: "8082"', defaults)
+        self.assertIn("  - acl", defaults)
 
     def test_postgres_tasks_keep_database_and_dashboard_loopback_only(self):
         tasks = POSTGRES_TASKS.read_text(encoding="utf-8")

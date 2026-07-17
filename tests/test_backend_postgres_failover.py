@@ -82,6 +82,9 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("shred -u", script)
         self.assertIn("Schema restore failed; last schema log lines follow.", script)
         self.assertNotIn("Data restore failed; last data log lines follow.", script)
+        self.assertIn("sudo -n chgrp postgres", script)
+        self.assertIn("chmod 0750", script)
+        self.assertIn("chmod 0640", script)
 
     def test_plan_forbids_multi_writer_and_production_cutover(self):
         plan = json.loads(PLAN.read_text(encoding="utf-8"))

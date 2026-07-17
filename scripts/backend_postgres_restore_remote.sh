@@ -44,6 +44,16 @@ sudo -n find /tmp \
   ! -path "$remote_dir" \
   -exec rm -rf -- {} +
 
+sudo -n chgrp postgres "$remote_dir" \
+  "$remote_dir/public-schema.sql" \
+  "$remote_dir/public-data.sql" \
+  "$remote_dir/backend_postgres_restore_validation.sql"
+chmod 0750 "$remote_dir"
+chmod 0640 \
+  "$remote_dir/public-schema.sql" \
+  "$remote_dir/public-data.sql" \
+  "$remote_dir/backend_postgres_restore_validation.sql"
+
 sudo -n -u postgres psql -v ON_ERROR_STOP=1 postgres <<SQL
 SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${REHEARSAL_DATABASE}';
 DROP DATABASE IF EXISTS "${REHEARSAL_DATABASE}";

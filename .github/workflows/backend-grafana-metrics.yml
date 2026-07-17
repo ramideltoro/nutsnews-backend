@@ -1,0 +1,101 @@
+name: Backend Grafana Metrics
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Validate, apply, or verify Grafana metrics dashboards.
+        required: true
+        default: check
+        type: choice
+        options:
+          - check
+          - apply
+          - verify
+      confirm_apply:
+        description: For apply only, type backend.nutsnews.com.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-grafana-metrics
+  cancel-in-progress: false
+
+jobs:
+  grafana:
+    name: Backend Grafana metrics
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          CONFIRM_APPLY: ${{ inputs.confirm_apply }}
+        run: |
+          set -euo pipefail
+
+          case "$ACTION" in
+            check|apply|verify) ;;
+            *)
+              echo "Unsupported action: $ACTION" >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ "$ACTION" == "apply" && "$CONFIRM_APPLY" != "backend.nutsnews.com" ]]; then
+            echo "Grafana apply requires confirm_apply to be exactly backend.nutsnews.com." >&2
+            exit 1
+          fi
+
+      - name: Validate dashboard specs
+        shell: bash
+        run: python3 scripts/provision_grafana_metrics.py --check --output "$RUNNER_TEMP/backend-grafana-metrics-report.json"
+
+      - name: Apply or verify Grafana dashboards
+        if: inputs.action != 'check'
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          GRAFANA_URL: ${{ secrets.GRAFANA_URL }}
+          GRAFANA_SERVICE_ACCOUNT_TOKEN: ${{ secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for secret_name in GRAFANA_URL GRAFANA_SERVICE_ACCOUNT_TOKEN; do
+            if [[ -z "${!secret_name}" ]]; then
+              echo "Missing required production-backend environment secret: $secret_name" >&2
+              missing=1
+            fi
+          done
+          if [[ "$missing" -ne 0 ]]; then
+            exit "$missing"
+          fi
+
+          args=(--output "$RUNNER_TEMP/backend-grafana-metrics-report.json")
+          if [[ "$ACTION" == "apply" ]]; then
+            args+=(--apply)
+          else
+            args+=(--verify --wait-seconds 60)
+          fi
+          python3 scripts/provision_grafana_metrics.py "${args[@]}"
+
+      - name: Upload Grafana metrics report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-grafana-metrics-report
+          path: ${{ runner.temp }}/backend-grafana-metrics-report.json
+          if-no-files-found: ignore

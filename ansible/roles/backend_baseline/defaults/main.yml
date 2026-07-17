@@ -74,3 +74,18 @@ backend_backup_restic_init_if_missing: true
 backend_backup_calendar: "*-*-* 03:17:00"
 backend_backup_verify_calendar: "*-*-* 04:17:00"
 backend_backup_restore_drill_calendar: "Sun *-*-* 05:17:00"
+backend_metrics_enabled: false
+backend_metrics_alloy_config_path: /etc/alloy/config.alloy
+backend_metrics_alloy_env_path: /etc/alloy/nutsnews-prometheus.env
+backend_metrics_prometheus_remote_write_url: ""
+backend_metrics_prometheus_username: ""
+backend_metrics_prometheus_password: ""
+backend_metrics_environment_label: production
+backend_metrics_instance_label: backend.nutsnews.com
+backend_metrics_scrape_interval: 60s
+backend_metrics_textfile_dir: /var/lib/nutsnews/metrics
+backend_metrics_textfile_exporter_path: /usr/local/bin/nutsnews-metrics-textfile
+backend_metrics_textfile_calendar: "*:0/1:00"
+backend_metrics_remote_write_capacity: 2500
+backend_metrics_remote_write_max_samples_per_send: 500
+backend_metrics_remote_write_max_shards: 2

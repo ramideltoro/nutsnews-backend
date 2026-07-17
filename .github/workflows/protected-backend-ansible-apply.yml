@@ -142,6 +142,9 @@ jobs:
           RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          GRAFANA_CLOUD_PROMETHEUS_URL: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_URL }}
+          GRAFANA_CLOUD_PROMETHEUS_USERNAME: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_USERNAME }}
+          GRAFANA_CLOUD_PROMETHEUS_PASSWORD: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_PASSWORD }}
         run: |
           set -euo pipefail
 
@@ -167,6 +170,9 @@ jobs:
             --required-secret RESTIC_PASSWORD \
             --required-secret AWS_ACCESS_KEY_ID \
             --required-secret AWS_SECRET_ACCESS_KEY \
+            --required-secret GRAFANA_CLOUD_PROMETHEUS_URL \
+            --required-secret GRAFANA_CLOUD_PROMETHEUS_USERNAME \
+            --required-secret GRAFANA_CLOUD_PROMETHEUS_PASSWORD \
             --output "$RUNNER_TEMP/backend-deployment-safety-pre.json" \
             --summary "$RUNNER_TEMP/backend-deployment-safety-pre.md"
 
@@ -181,8 +187,13 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          GRAFANA_CLOUD_PROMETHEUS_URL: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_URL }}
+          GRAFANA_CLOUD_PROMETHEUS_USERNAME: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_USERNAME }}
+          GRAFANA_CLOUD_PROMETHEUS_PASSWORD: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_PASSWORD }}
           B2_ACCOUNT_ID: ${{ secrets.B2_ACCOUNT_ID }}
           B2_ACCOUNT_KEY: ${{ secrets.B2_ACCOUNT_KEY }}
+          NUTSNEWS_BACKEND_ENVIRONMENT: ${{ vars.NUTSNEWS_BACKEND_ENVIRONMENT || 'production' }}
+          NUTSNEWS_BACKEND_DOMAIN: ${{ vars.NUTSNEWS_BACKEND_DOMAIN || 'backend.nutsnews.com' }}
           NUTSNEWS_BACKUP_CHECK_READ_DATA_SUBSET: ${{ vars.NUTSNEWS_BACKUP_CHECK_READ_DATA_SUBSET || '1%' }}
           NUTSNEWS_BACKUP_STALE_AFTER_HOURS: ${{ vars.NUTSNEWS_BACKUP_STALE_AFTER_HOURS || '30' }}
           NUTSNEWS_BACKUP_QUOTA_WARN_BYTES: ${{ vars.NUTSNEWS_BACKUP_QUOTA_WARN_BYTES || '0' }}
@@ -227,6 +238,17 @@ jobs:
                       backup_environment[name] = value
               extra_vars["backend_backup_environment"] = backup_environment
 
+          metrics_values = {
+              "backend_metrics_prometheus_remote_write_url": os.environ.get("GRAFANA_CLOUD_PROMETHEUS_URL", "").strip(),
+              "backend_metrics_prometheus_username": os.environ.get("GRAFANA_CLOUD_PROMETHEUS_USERNAME", "").strip(),
+              "backend_metrics_prometheus_password": os.environ.get("GRAFANA_CLOUD_PROMETHEUS_PASSWORD", ""),
+          }
+          if all(metrics_values.values()):
+              extra_vars["backend_metrics_enabled"] = True
+              extra_vars.update(metrics_values)
+              extra_vars["backend_metrics_environment_label"] = os.environ.get("NUTSNEWS_BACKEND_ENVIRONMENT", "production").strip() or "production"
+              extra_vars["backend_metrics_instance_label"] = os.environ.get("NUTSNEWS_BACKEND_DOMAIN", "backend.nutsnews.com").strip() or "backend.nutsnews.com"
+
           path = Path(os.environ["RUNNER_TEMP"]) / "backend-extra-vars.json"
           path.write_text(json.dumps(extra_vars), encoding="utf-8")
           path.chmod(0o600)
@@ -265,6 +287,9 @@ jobs:
           RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          GRAFANA_CLOUD_PROMETHEUS_URL: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_URL }}
+          GRAFANA_CLOUD_PROMETHEUS_USERNAME: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_USERNAME }}
+          GRAFANA_CLOUD_PROMETHEUS_PASSWORD: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_PASSWORD }}
         run: |
           set -euo pipefail
 
@@ -283,6 +308,9 @@ jobs:
             --required-secret RESTIC_PASSWORD \
             --required-secret AWS_ACCESS_KEY_ID \
             --required-secret AWS_SECRET_ACCESS_KEY \
+            --required-secret GRAFANA_CLOUD_PROMETHEUS_URL \
+            --required-secret GRAFANA_CLOUD_PROMETHEUS_USERNAME \
+            --required-secret GRAFANA_CLOUD_PROMETHEUS_PASSWORD \
             --output "$RUNNER_TEMP/backend-deployment-safety-post.json" \
             --summary "$RUNNER_TEMP/backend-deployment-safety-post.md"
 

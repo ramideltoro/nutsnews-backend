@@ -107,6 +107,8 @@
         {"title": "Log Volume By Service", "datasource": "loki", "unit": "short", "expr": "sum by (service) (count_over_time({host=\"backend.nutsnews.com\"}[15m]))"},
         {"title": "Warnings And Errors", "datasource": "loki", "type": "logs", "expr": "{host=\"backend.nutsnews.com\",severity=~\"warning|error|crit|alert|emerg\"}"},
         {"title": "Security Logs", "datasource": "loki", "type": "logs", "expr": "{host=\"backend.nutsnews.com\",service=\"security\"}"},
+        {"title": "SSH Auth Failure Volume", "datasource": "loki", "unit": "short", "expr": "sum(count_over_time({host=\"backend.nutsnews.com\",service=\"security\"} |~ \"(?i)(failed password|invalid user|authentication failure|maximum authentication attempts)\" [15m]))"},
+        {"title": "Fail2ban Ban Events", "datasource": "loki", "unit": "short", "expr": "sum(count_over_time({host=\"backend.nutsnews.com\",service=\"security\"} |~ \"(?i)(notice.*\\bban\\b|sshd.*\\bban\\b)\" [15m]))"},
         {"title": "Backup And Timer Logs", "datasource": "loki", "type": "logs", "expr": "{host=\"backend.nutsnews.com\",service=~\"backup|timer\"}"},
         {"title": "Log Volume By Source", "datasource": "loki", "unit": "short", "expr": "sum by (source) (count_over_time({host=\"backend.nutsnews.com\"}[15m]))"}
       ]
@@ -204,6 +206,36 @@
       "range_seconds": 7200,
       "no_data_state": "Alerting",
       "summary": "Grafana Cloud Loki is not receiving backend journal logs."
+    },
+    {
+      "uid": "nn-backend-ssh-auth-spike",
+      "title": "NutsNews backend SSH auth failure spike",
+      "severity": "warning",
+      "service": "security",
+      "datasource": "loki",
+      "expr": "sum(count_over_time({host=\"backend.nutsnews.com\",service=\"security\"} |~ \"(?i)(failed password|invalid user|authentication failure|maximum authentication attempts)\" [15m]))",
+      "threshold": 25,
+      "evaluator": "gt",
+      "for": "5m",
+      "range_seconds": 1800,
+      "no_data_state": "OK",
+      "runbook_url": "https://github.com/ramideltoro/nutsnews-backend/blob/main/runbooks/ABUSE_PROTECTION.md",
+      "summary": "SSH authentication failures are above the detection threshold. This is report-only and does not add new blocking."
+    },
+    {
+      "uid": "nn-backend-fail2ban-ban-events",
+      "title": "NutsNews backend fail2ban ban events",
+      "severity": "warning",
+      "service": "security",
+      "datasource": "loki",
+      "expr": "sum(count_over_time({host=\"backend.nutsnews.com\",service=\"security\"} |~ \"(?i)(notice.*\\bban\\b|sshd.*\\bban\\b)\" [15m]))",
+      "threshold": 0,
+      "evaluator": "gt",
+      "for": "5m",
+      "range_seconds": 1800,
+      "no_data_state": "OK",
+      "runbook_url": "https://github.com/ramideltoro/nutsnews-backend/blob/main/runbooks/ABUSE_PROTECTION.md",
+      "summary": "Fail2ban reported one or more SSH ban events. This surfaces existing SSH enforcement activity without changing enforcement."
     },
     {
       "uid": "nn-backend-log-volume-warning",

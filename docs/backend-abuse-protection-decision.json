@@ -25,6 +25,22 @@
     "initial_http_mode_when_added": "detection-or-report-only",
     "production_blocking_before_approval": false
   },
+  "maintenance_automation": {
+    "issue": 40,
+    "mode": "detection-report-only",
+    "enforcement_change": false,
+    "grafana_alert_uids": [
+      "nn-backend-ssh-auth-spike",
+      "nn-backend-fail2ban-ban-events"
+    ],
+    "event_sources": [
+      "Grafana Loki security logs from auth.log, fail2ban.log, and security journal units",
+      "backend health report service-state checks for ssh, ufw, fail2ban, caddy, and alloy",
+      "off-box synthetic checks for backend.nutsnews.com /healthz"
+    ],
+    "blocked_event_visibility": "fail2ban ban events are reported from Loki without adding IP, path, user, or request labels",
+    "http_blocking_status": "not_enabled"
+  },
   "allowlists": {
     "ssh": [
       "127.0.0.1/8",

@@ -43,6 +43,8 @@ union all
 select 'feed_health', count(*)::bigint from public.feed_health
 order by object_name;
 
+refresh materialized view public.public_feed_snapshot;
+
 select count(*)::bigint as public_feed_snapshot_rows from public.public_feed_snapshot;
 select count(*)::bigint as best_feed_rows from public.best_feeds;
 select count(*)::bigint as bad_feed_rows from public.bad_feeds;

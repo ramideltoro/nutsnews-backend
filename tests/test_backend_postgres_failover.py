@@ -75,6 +75,7 @@ class BackendPostgresFailoverTests(unittest.TestCase):
 
     def test_restore_runner_has_supabase_auth_shim_and_cleans_dumps(self):
         script = (ROOT / "scripts/backend_postgres_restore_remote.sh").read_text(encoding="utf-8")
+        validation = (ROOT / "scripts/backend_postgres_restore_validation.sql").read_text(encoding="utf-8")
         self.assertIn("CREATE SCHEMA IF NOT EXISTS auth", script)
         self.assertIn("CREATE TABLE IF NOT EXISTS auth.users", script)
         self.assertIn("trap cleanup_remote_dir EXIT", script)
@@ -85,6 +86,7 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("sudo -n chgrp postgres", script)
         self.assertIn("chmod 0750", script)
         self.assertIn("chmod 0640", script)
+        self.assertIn("refresh materialized view public.public_feed_snapshot", validation)
 
     def test_plan_forbids_multi_writer_and_production_cutover(self):
         plan = json.loads(PLAN.read_text(encoding="utf-8"))

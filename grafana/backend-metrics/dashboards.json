@@ -93,6 +93,18 @@
         {"title": "Synthetic Probe Duration", "unit": "s", "expr": "probe_duration_seconds{job=~\".*nutsnews.*|.*backend.*\"}"},
         {"title": "Missing Backend Metrics", "unit": "short", "expr": "absent(up{job=\"nutsnews-backend-host\"})"}
       ]
+    },
+    {
+      "title": "NutsNews Backend Logs",
+      "uid": "nutsnews-backend-logs",
+      "panels": [
+        {"title": "Recent Systemd Journal Logs", "datasource": "loki", "type": "logs", "expr": "{host=\"backend.nutsnews.com\",source=\"journal\"}"},
+        {"title": "Log Volume By Service", "datasource": "loki", "unit": "short", "expr": "sum by (service) (count_over_time({host=\"backend.nutsnews.com\"}[15m]))"},
+        {"title": "Warnings And Errors", "datasource": "loki", "type": "logs", "expr": "{host=\"backend.nutsnews.com\",severity=~\"warning|error|crit|alert|emerg\"}"},
+        {"title": "Security Logs", "datasource": "loki", "type": "logs", "expr": "{host=\"backend.nutsnews.com\",service=\"security\"}"},
+        {"title": "Backup And Timer Logs", "datasource": "loki", "type": "logs", "expr": "{host=\"backend.nutsnews.com\",service=~\"backup|timer\"}"},
+        {"title": "Log Volume By Source", "datasource": "loki", "unit": "short", "expr": "sum by (source) (count_over_time({host=\"backend.nutsnews.com\"}[15m]))"}
+      ]
     }
   ]
 }

@@ -145,6 +145,9 @@ jobs:
           GRAFANA_CLOUD_PROMETHEUS_URL: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_URL }}
           GRAFANA_CLOUD_PROMETHEUS_USERNAME: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_USERNAME }}
           GRAFANA_CLOUD_PROMETHEUS_PASSWORD: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_PASSWORD }}
+          GRAFANA_CLOUD_LOKI_URL: ${{ secrets.GRAFANA_CLOUD_LOKI_URL }}
+          GRAFANA_CLOUD_LOKI_USERNAME: ${{ secrets.GRAFANA_CLOUD_LOKI_USERNAME }}
+          GRAFANA_CLOUD_LOKI_PASSWORD: ${{ secrets.GRAFANA_CLOUD_LOKI_PASSWORD }}
         run: |
           set -euo pipefail
 
@@ -173,6 +176,9 @@ jobs:
             --required-secret GRAFANA_CLOUD_PROMETHEUS_URL \
             --required-secret GRAFANA_CLOUD_PROMETHEUS_USERNAME \
             --required-secret GRAFANA_CLOUD_PROMETHEUS_PASSWORD \
+            --required-secret GRAFANA_CLOUD_LOKI_URL \
+            --required-secret GRAFANA_CLOUD_LOKI_USERNAME \
+            --required-secret GRAFANA_CLOUD_LOKI_PASSWORD \
             --output "$RUNNER_TEMP/backend-deployment-safety-pre.json" \
             --summary "$RUNNER_TEMP/backend-deployment-safety-pre.md"
 
@@ -190,6 +196,9 @@ jobs:
           GRAFANA_CLOUD_PROMETHEUS_URL: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_URL }}
           GRAFANA_CLOUD_PROMETHEUS_USERNAME: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_USERNAME }}
           GRAFANA_CLOUD_PROMETHEUS_PASSWORD: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_PASSWORD }}
+          GRAFANA_CLOUD_LOKI_URL: ${{ secrets.GRAFANA_CLOUD_LOKI_URL }}
+          GRAFANA_CLOUD_LOKI_USERNAME: ${{ secrets.GRAFANA_CLOUD_LOKI_USERNAME }}
+          GRAFANA_CLOUD_LOKI_PASSWORD: ${{ secrets.GRAFANA_CLOUD_LOKI_PASSWORD }}
           B2_ACCOUNT_ID: ${{ secrets.B2_ACCOUNT_ID }}
           B2_ACCOUNT_KEY: ${{ secrets.B2_ACCOUNT_KEY }}
           NUTSNEWS_BACKEND_ENVIRONMENT: ${{ vars.NUTSNEWS_BACKEND_ENVIRONMENT || 'production' }}
@@ -249,6 +258,15 @@ jobs:
               extra_vars["backend_metrics_environment_label"] = os.environ.get("NUTSNEWS_BACKEND_ENVIRONMENT", "production").strip() or "production"
               extra_vars["backend_metrics_instance_label"] = os.environ.get("NUTSNEWS_BACKEND_DOMAIN", "backend.nutsnews.com").strip() or "backend.nutsnews.com"
 
+          logs_values = {
+              "backend_logs_loki_url": os.environ.get("GRAFANA_CLOUD_LOKI_URL", "").strip(),
+              "backend_logs_loki_username": os.environ.get("GRAFANA_CLOUD_LOKI_USERNAME", "").strip(),
+              "backend_logs_loki_password": os.environ.get("GRAFANA_CLOUD_LOKI_PASSWORD", ""),
+          }
+          if all(logs_values.values()):
+              extra_vars["backend_logs_enabled"] = True
+              extra_vars.update(logs_values)
+
           path = Path(os.environ["RUNNER_TEMP"]) / "backend-extra-vars.json"
           path.write_text(json.dumps(extra_vars), encoding="utf-8")
           path.chmod(0o600)
@@ -290,6 +308,9 @@ jobs:
           GRAFANA_CLOUD_PROMETHEUS_URL: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_URL }}
           GRAFANA_CLOUD_PROMETHEUS_USERNAME: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_USERNAME }}
           GRAFANA_CLOUD_PROMETHEUS_PASSWORD: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_PASSWORD }}
+          GRAFANA_CLOUD_LOKI_URL: ${{ secrets.GRAFANA_CLOUD_LOKI_URL }}
+          GRAFANA_CLOUD_LOKI_USERNAME: ${{ secrets.GRAFANA_CLOUD_LOKI_USERNAME }}
+          GRAFANA_CLOUD_LOKI_PASSWORD: ${{ secrets.GRAFANA_CLOUD_LOKI_PASSWORD }}
         run: |
           set -euo pipefail
 
@@ -311,6 +332,9 @@ jobs:
             --required-secret GRAFANA_CLOUD_PROMETHEUS_URL \
             --required-secret GRAFANA_CLOUD_PROMETHEUS_USERNAME \
             --required-secret GRAFANA_CLOUD_PROMETHEUS_PASSWORD \
+            --required-secret GRAFANA_CLOUD_LOKI_URL \
+            --required-secret GRAFANA_CLOUD_LOKI_USERNAME \
+            --required-secret GRAFANA_CLOUD_LOKI_PASSWORD \
             --output "$RUNNER_TEMP/backend-deployment-safety-post.json" \
             --summary "$RUNNER_TEMP/backend-deployment-safety-post.md"
 

@@ -1,10 +1,10 @@
-name: Backend Grafana Metrics
+name: Backend Grafana Observability
 
 on:
   workflow_dispatch:
     inputs:
       action:
-        description: Validate, apply, or verify Grafana metrics dashboards.
+        description: Validate, apply, or verify Grafana observability dashboards.
         required: true
         default: check
         type: choice
@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   grafana:
-    name: Backend Grafana metrics
+    name: Backend Grafana observability
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production-backend

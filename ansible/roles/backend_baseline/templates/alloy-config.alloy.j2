@@ -78,3 +78,116 @@ prometheus.relabel "backend" {
     replacement  = "{{ backend_metrics_environment_label }}"
   }
 }
+
+{% if backend_logs_enabled | bool %}
+loki.write "grafana_cloud_loki" {
+  max_streams = {{ backend_logs_loki_max_streams }}
+
+  endpoint {
+    url        = sys.env("GRAFANA_CLOUD_LOKI_URL")
+    batch_size = "{{ backend_logs_loki_batch_size }}"
+    batch_wait = "{{ backend_logs_loki_batch_wait }}"
+
+    basic_auth {
+      username = sys.env("GRAFANA_CLOUD_LOKI_USERNAME")
+      password = sys.env("GRAFANA_CLOUD_LOKI_PASSWORD")
+    }
+  }
+}
+
+loki.relabel "journal_context" {
+  forward_to = []
+
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "severity"
+  }
+}
+
+local.file_match "backend_logs" {
+  path_targets = [
+{% for target in backend_logs_file_targets %}
+    {
+      "__path__" = "{{ target.path }}",
+      environment = "{{ backend_metrics_environment_label }}",
+      host = "{{ backend_metrics_instance_label }}",
+      source = "file",
+      service = "{{ target.service }}",
+      unit = "{{ target.unit }}",
+    },
+{% endfor %}
+  ]
+  ignore_older_than = "{{ backend_logs_file_ignore_older_than }}"
+}
+
+loki.source.file "backend_logs" {
+  targets    = local.file_match.backend_logs.targets
+  forward_to = [loki.process.backend_logs.receiver]
+}
+
+{% for source in backend_logs_journal_units %}
+loki.source.journal "{{ source.unit | regex_replace('[^A-Za-z0-9_]', '_') }}" {
+  max_age       = "{{ backend_logs_journal_max_age }}"
+  matches       = "_SYSTEMD_UNIT={{ source.unit }}"
+  relabel_rules = loki.relabel.journal_context.rules
+  labels        = {
+    environment = "{{ backend_metrics_environment_label }}",
+    host        = "{{ backend_metrics_instance_label }}",
+    source      = "journal",
+    service     = "{{ source.service }}",
+    unit        = "{{ source.unit }}",
+  }
+  forward_to = [loki.process.backend_logs.receiver]
+}
+
+{% endfor %}
+loki.process "backend_logs" {
+  forward_to = [loki.write.grafana_cloud_loki.receiver]
+
+  stage.drop {
+    expression          = "(?i)(BEGIN (RSA|DSA|EC|OPENSSH|PRIVATE) KEY|PRIVATE KEY-----)"
+    drop_counter_reason = "private_key_marker"
+  }
+
+  stage.drop {
+    longer_than         = "{{ backend_logs_line_drop_max_size }}"
+    drop_counter_reason = "oversized_log_line"
+  }
+
+  stage.replace {
+    expression = "(?i)authorization[:=][[:space:]]*(?:bearer|basic)[[:space:]]+([^[:space:]\\\"']+)"
+    replace    = "[REDACTED]"
+  }
+
+  stage.replace {
+    expression = "(?i)(?:cookie|set-cookie)[:=][[:space:]]*([^\\n\\r]+)"
+    replace    = "[REDACTED]"
+  }
+
+  stage.replace {
+    expression = "(?i)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|oauth[_-]?(?:code|token)|password|passwd|pwd|secret|session|token)[[:space:]]*[:=][[:space:]]*([^[:space:],&\\\"']+)"
+    replace    = "[REDACTED]"
+  }
+
+  stage.replace {
+    expression = "([?][^[:space:]\\\"']+)"
+    replace    = "?[REDACTED_QUERY]"
+  }
+
+  stage.replace {
+    expression = "([A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,})"
+    replace    = "[REDACTED_EMAIL]"
+  }
+
+  stage.truncate {
+    rule {
+      limit  = "{{ backend_logs_line_truncate_limit }}"
+      suffix = "...[TRUNCATED]"
+    }
+  }
+
+  stage.label_keep {
+    values = ["environment", "host", "source", "service", "unit", "severity", "filename", "job"]
+  }
+}
+{% endif %}

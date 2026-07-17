@@ -68,6 +68,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_abuse_protection_decision.py
 
+      - name: Validate recovery workflow guardrails
+        shell: bash
+        run: python3 scripts/validate_recovery_workflows.py
+
       - name: Validate Redis Valkey decision
         shell: bash
         run: python3 scripts/validate_redis_valkey_decision.py

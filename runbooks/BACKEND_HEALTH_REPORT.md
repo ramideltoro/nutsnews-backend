@@ -68,8 +68,10 @@ The JSON report includes:
 - `alert_state.alerts`
 - cleanup last-run status when `/var/lib/nutsnews/cleanup/last-cleanup.json`
   exists
+- recovery last-run status when `/var/lib/nutsnews/recovery/last-recovery.json`
+  exists
 - fixed-command SSH evidence
-- classified checks for host resources, failed units, reboot/update state, core services, backup tooling, backup freshness, backup verification, restore drill status, storage quota status, and sudo readiness
+- classified checks for host resources, failed units, reboot/update state, core services, backup tooling, backup freshness, backup verification, restore drill status, storage quota status, recovery status, and sudo readiness
 
 Statuses are:
 

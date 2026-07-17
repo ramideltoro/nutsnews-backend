@@ -57,7 +57,7 @@ class BackendMetricsTests(unittest.TestCase):
 
     def test_grafana_alert_model_uses_expression_condition(self):
         spec = provision_grafana_metrics.load_spec(GRAFANA_SPEC)
-        alert = next(item for item in spec["alerts"] if item["uid"] == "nutsnews-backend-root-disk-warning")
+        alert = next(item for item in spec["alerts"] if item["uid"] == "nn-backend-root-disk-warning")
         model = provision_grafana_metrics.alert_rule_model(
             alert,
             spec["folder"]["uid"],
@@ -70,6 +70,11 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertEqual(model["data"][0]["datasourceUid"], "prometheus-uid")
         self.assertEqual(model["data"][1]["datasourceUid"], "-100")
         self.assertEqual(model["labels"]["severity"], "warning")
+
+    def test_grafana_alert_uids_fit_api_limit(self):
+        spec = provision_grafana_metrics.load_spec(GRAFANA_SPEC)
+        for alert in spec["alerts"]:
+            self.assertLessEqual(len(alert["uid"]), provision_grafana_metrics.MAX_GRAFANA_ALERT_UID_LENGTH)
 
     def test_loki_remote_write_url_is_normalized_for_query_datasource(self):
         self.assertEqual(

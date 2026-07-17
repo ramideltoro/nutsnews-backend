@@ -61,6 +61,7 @@ backend_postgres_enabled: false
 backend_postgres_major_version: "18"
 backend_postgres_service_name: postgresql
 backend_postgres_packages:
+  - acl
   - postgresql
   - postgresql-client
   - postgresql-contrib

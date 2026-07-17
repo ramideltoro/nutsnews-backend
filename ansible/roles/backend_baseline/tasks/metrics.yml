@@ -45,6 +45,28 @@
     cache_valid_time: "{{ backend_apt_cache_valid_time }}"
   when: backend_metrics_alloy_manageable | bool
 
+- name: Validate Grafana Cloud Loki settings
+  ansible.builtin.assert:
+    that:
+      - backend_logs_loki_url | length > 0
+      - backend_logs_loki_username | length > 0
+      - backend_logs_loki_password | length > 0
+    fail_msg: Grafana Cloud Loki URL, username, and password are required when backend_logs_enabled is true.
+  no_log: true
+  when: backend_logs_enabled | bool
+
+- name: Allow Alloy to read journal and adm-owned log files
+  ansible.builtin.user:
+    name: alloy
+    groups:
+      - adm
+      - systemd-journal
+    append: true
+  when:
+    - backend_logs_enabled | bool
+    - not ansible_check_mode
+  notify: Restart alloy
+
 - name: Ensure Alloy config directory exists
   ansible.builtin.file:
     path: /etc/alloy
@@ -115,6 +137,11 @@
       GRAFANA_CLOUD_PROMETHEUS_URL={{ backend_metrics_prometheus_remote_write_url | quote }}
       GRAFANA_CLOUD_PROMETHEUS_USERNAME={{ backend_metrics_prometheus_username | quote }}
       GRAFANA_CLOUD_PROMETHEUS_PASSWORD={{ backend_metrics_prometheus_password | quote }}
+      {% if backend_logs_enabled | bool %}
+      GRAFANA_CLOUD_LOKI_URL={{ backend_logs_loki_url | quote }}
+      GRAFANA_CLOUD_LOKI_USERNAME={{ backend_logs_loki_username | quote }}
+      GRAFANA_CLOUD_LOKI_PASSWORD={{ backend_logs_loki_password | quote }}
+      {% endif %}
   no_log: true
   notify: Restart alloy
 
@@ -182,8 +209,10 @@
   ansible.builtin.debug:
     msg:
       enabled: "{{ backend_metrics_enabled }}"
+      logs_enabled: "{{ backend_logs_enabled }}"
       alloy_config_path: "{{ backend_metrics_alloy_config_path }}"
       textfile_dir: "{{ backend_metrics_textfile_dir }}"
       scrape_interval: "{{ backend_metrics_scrape_interval }}"
       endpoint: grafana_cloud_prometheus_remote_write
+      logs_endpoint: "{{ 'grafana_cloud_loki' if backend_logs_enabled else 'disabled' }}"
       alloy_package_manageable: "{{ backend_metrics_alloy_manageable }}"

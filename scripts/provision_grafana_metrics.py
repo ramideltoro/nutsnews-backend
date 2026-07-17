@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate, provision, and verify NutsNews backend Grafana metrics dashboards."""
+"""Validate, provision, and verify NutsNews backend Grafana observability dashboards."""
 
 from __future__ import annotations
 
@@ -17,6 +17,17 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SPEC = ROOT / "grafana" / "backend-metrics" / "dashboards.json"
+ALLOWED_DATASOURCES = {"prometheus", "loki"}
+HIGH_CARDINALITY_LABELS = {
+    "container_id",
+    "error",
+    "ip",
+    "message",
+    "path",
+    "request_id",
+    "trace_id",
+    "user_id",
+}
 
 
 def load_spec(path: Path) -> dict[str, Any]:
@@ -52,10 +63,16 @@ def validate_spec(spec: dict[str, Any]) -> list[str]:
         total_panels += len(panels)
         for panel in panels:
             expr = str(panel.get("expr", "")).strip()
+            datasource_type = str(panel.get("datasource", "prometheus"))
             if not panel.get("title") or not expr:
                 errors.append(f"{uid} contains a panel without title or expr")
             if "$" in expr:
                 errors.append(f"{uid} contains an unrendered variable in expression")
+            if datasource_type not in ALLOWED_DATASOURCES:
+                errors.append(f"{uid} panel {panel.get('title', '<untitled>')} uses unsupported datasource {datasource_type}")
+            for label in HIGH_CARDINALITY_LABELS:
+                if f"{label}=" in expr or f"{label}=~" in expr:
+                    errors.append(f"{uid} panel {panel.get('title', '<untitled>')} uses high-cardinality label {label}")
             queries.add(expr)
     if total_panels > int(guardrails.get("max_total_panels", 80)):
         errors.append("total panel count exceeds guardrail")
@@ -89,13 +106,21 @@ class GrafanaClient:
         return json.loads(raw) if raw else {}
 
 
-def choose_prometheus_datasource(client: GrafanaClient) -> dict[str, Any]:
+def datasource_types(spec: dict[str, Any]) -> set[str]:
+    types = {"prometheus"}
+    for dashboard in spec.get("dashboards", []):
+        for panel in dashboard.get("panels", []):
+            types.add(str(panel.get("datasource", "prometheus")))
+    return types
+
+
+def choose_datasource(client: GrafanaClient, datasource_type: str) -> dict[str, Any]:
     datasources = client.request("GET", "/api/datasources")
-    prometheus = [item for item in datasources if item.get("type") == "prometheus" and item.get("uid")]
-    if not prometheus:
-        raise RuntimeError("no Prometheus datasource found in Grafana")
-    default = next((item for item in prometheus if item.get("isDefault")), None)
-    return default or prometheus[0]
+    matches = [item for item in datasources if item.get("type") == datasource_type and item.get("uid")]
+    if not matches:
+        raise RuntimeError(f"no {datasource_type} datasource found in Grafana")
+    default = next((item for item in matches if item.get("isDefault")), None)
+    return default or matches[0]
 
 
 def ensure_folder(client: GrafanaClient, folder: dict[str, str], apply: bool) -> dict[str, Any]:
@@ -113,10 +138,23 @@ def ensure_folder(client: GrafanaClient, folder: dict[str, str], apply: bool) ->
     return existing
 
 
-def panel_model(panel: dict[str, Any], panel_id: int, datasource: dict[str, str], x: int, y: int) -> dict[str, Any]:
+def panel_model(panel: dict[str, Any], panel_id: int, datasources: dict[str, dict[str, str]], x: int, y: int) -> dict[str, Any]:
+    datasource_type = str(panel.get("datasource", "prometheus"))
+    datasource = datasources[datasource_type]
+    panel_type = str(panel.get("type", "timeseries"))
+    target = {
+        "datasource": datasource,
+        "expr": panel["expr"],
+        "refId": "A",
+    }
+    if datasource_type == "prometheus":
+        target["legendFormat"] = "{{unit}}{{stage}}{{device}}{{name}}{{__name__}}"
+    else:
+        target["queryType"] = str(panel.get("query_type", "range"))
+
     return {
         "id": panel_id,
-        "type": "timeseries",
+        "type": panel_type,
         "title": panel["title"],
         "datasource": datasource,
         "gridPos": {"h": 8, "w": 12, "x": x, "y": y},
@@ -124,29 +162,25 @@ def panel_model(panel: dict[str, Any], panel_id: int, datasource: dict[str, str]
             "defaults": {"unit": panel.get("unit", "short")},
             "overrides": [],
         },
-        "targets": [
-            {
-                "datasource": datasource,
-                "expr": panel["expr"],
-                "legendFormat": "{{unit}}{{stage}}{{device}}{{name}}{{__name__}}",
-                "refId": "A",
-            }
-        ],
+        "targets": [target],
         "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "single"}},
     }
 
 
-def dashboard_model(spec: dict[str, Any], datasource_uid: str) -> dict[str, Any]:
-    datasource = {"type": "prometheus", "uid": datasource_uid}
+def dashboard_model(spec: dict[str, Any], datasource_uids: dict[str, str]) -> dict[str, Any]:
+    datasources = {name: {"type": name, "uid": uid} for name, uid in datasource_uids.items()}
     panels = []
     for idx, panel in enumerate(spec["panels"], start=1):
         x = 0 if idx % 2 == 1 else 12
         y = ((idx - 1) // 2) * 8
-        panels.append(panel_model(panel, idx, datasource, x, y))
+        panels.append(panel_model(panel, idx, datasources, x, y))
+    tags = ["nutsnews", "backend", "metrics"]
+    if any(str(panel.get("datasource", "prometheus")) == "loki" for panel in spec.get("panels", [])):
+        tags.append("logs")
     return {
         "uid": spec["uid"],
         "title": spec["title"],
-        "tags": ["nutsnews", "backend", "metrics"],
+        "tags": tags,
         "timezone": "browser",
         "schemaVersion": 41,
         "version": 1,
@@ -156,11 +190,11 @@ def dashboard_model(spec: dict[str, Any], datasource_uid: str) -> dict[str, Any]
     }
 
 
-def upsert_dashboards(client: GrafanaClient, spec: dict[str, Any], datasource_uid: str, apply: bool) -> list[dict[str, str]]:
+def upsert_dashboards(client: GrafanaClient, spec: dict[str, Any], datasource_uids: dict[str, str], apply: bool) -> list[dict[str, str]]:
     folder_uid = spec["folder"]["uid"]
     results = []
     for dashboard in spec["dashboards"]:
-        model = dashboard_model(dashboard, datasource_uid)
+        model = dashboard_model(dashboard, datasource_uids)
         if apply:
             response = client.request(
                 "POST",
@@ -173,7 +207,7 @@ def upsert_dashboards(client: GrafanaClient, spec: dict[str, Any], datasource_ui
     return results
 
 
-def verify_query(client: GrafanaClient, datasource_uid: str, query: str) -> dict[str, Any]:
+def verify_prometheus_query(client: GrafanaClient, datasource_uid: str, query: str) -> dict[str, Any]:
     encoded = urllib.parse.urlencode({"query": query})
     response = client.request("GET", f"/api/datasources/proxy/uid/{urllib.parse.quote(datasource_uid)}/api/v1/query?{encoded}")
     data = response.get("data", {})
@@ -182,6 +216,35 @@ def verify_query(client: GrafanaClient, datasource_uid: str, query: str) -> dict
         "query": query,
         "status": response.get("status", "unknown"),
         "result_count": len(result) if isinstance(result, list) else 0,
+    }
+
+
+def verify_loki_query_range(client: GrafanaClient, datasource_uid: str, query: str, hours: int = 6) -> dict[str, Any]:
+    end = int(time.time() * 1_000_000_000)
+    start = end - (hours * 60 * 60 * 1_000_000_000)
+    encoded = urllib.parse.urlencode(
+        {
+            "query": query,
+            "start": str(start),
+            "end": str(end),
+            "limit": "20",
+            "direction": "backward",
+        }
+    )
+    response = client.request("GET", f"/api/datasources/proxy/uid/{urllib.parse.quote(datasource_uid)}/loki/api/v1/query_range?{encoded}")
+    data = response.get("data", {})
+    result = data.get("result", []) if isinstance(data, dict) else []
+    values = 0
+    if isinstance(result, list):
+        for stream in result:
+            stream_values = stream.get("values", []) if isinstance(stream, dict) else []
+            if isinstance(stream_values, list):
+                values += len(stream_values)
+    return {
+        "query": query,
+        "status": response.get("status", "unknown"),
+        "result_count": len(result) if isinstance(result, list) else 0,
+        "line_count": values,
     }
 
 
@@ -231,20 +294,24 @@ def main() -> int:
 
     client = GrafanaClient(url, token)
     report["grafana_health"] = client.request("GET", "/api/health")
-    datasource = choose_prometheus_datasource(client)
-    datasource_uid = datasource["uid"]
-    report["datasource"] = {"uid": datasource_uid, "name": datasource.get("name"), "type": datasource.get("type")}
+    datasource_uids: dict[str, str] = {}
+    report["datasources"] = {}
+    for datasource_type in sorted(datasource_types(spec)):
+        datasource = choose_datasource(client, datasource_type)
+        datasource_uids[datasource_type] = datasource["uid"]
+        report["datasources"][datasource_type] = {"uid": datasource["uid"], "name": datasource.get("name"), "type": datasource.get("type")}
     report["folder_result"] = ensure_folder(client, spec["folder"], args.apply)
-    report["dashboards"] = upsert_dashboards(client, spec, datasource_uid, args.apply)
+    report["dashboards"] = upsert_dashboards(client, spec, datasource_uids, args.apply)
 
     if args.verify:
         report["verification"] = [
-            verify_query(client, datasource_uid, 'up{job="nutsnews-backend-host"}'),
-            verify_query(client, datasource_uid, 'nutsnews_backend_backup_stage_healthy{job="nutsnews-backend-host",stage="backup"}'),
-            verify_query(client, datasource_uid, 'nutsnews_backend_public_endpoint_healthy{job="nutsnews-backend-host"}'),
+            verify_prometheus_query(client, datasource_uids["prometheus"], 'up{job="nutsnews-backend-host"}'),
+            verify_prometheus_query(client, datasource_uids["prometheus"], 'nutsnews_backend_backup_stage_healthy{job="nutsnews-backend-host",stage="backup"}'),
+            verify_prometheus_query(client, datasource_uids["prometheus"], 'nutsnews_backend_public_endpoint_healthy{job="nutsnews-backend-host"}'),
+            verify_loki_query_range(client, datasource_uids["loki"], '{host="backend.nutsnews.com",source="journal"}'),
         ]
         if any(item["result_count"] < 1 for item in report["verification"]):
-            report["status"] = "missing_metrics"
+            report["status"] = "missing_observability_data"
         else:
             report["status"] = "verified"
     elif args.apply:
@@ -254,7 +321,7 @@ def main() -> int:
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return 0 if report["status"] != "missing_metrics" else 2
+    return 0 if report["status"] != "missing_observability_data" else 2
 
 
 if __name__ == "__main__":

@@ -13,6 +13,9 @@ from scripts import provision_grafana_metrics
 
 METRICS_PATH = Path("ansible/roles/backend_baseline/files/nutsnews_metrics_textfile.py")
 GRAFANA_SPEC = Path("grafana/backend-metrics/dashboards.json")
+ALLOY_TEMPLATE = Path("ansible/roles/backend_baseline/templates/alloy-config.alloy.j2")
+METRICS_TASKS = Path("ansible/roles/backend_baseline/tasks/metrics.yml")
+PROTECTED_APPLY_WORKFLOW = Path(".github/workflows/protected-backend-ansible-apply.yml")
 
 
 def load_metrics_module():
@@ -29,7 +32,26 @@ class BackendMetricsTests(unittest.TestCase):
         spec = provision_grafana_metrics.load_spec(GRAFANA_SPEC)
         self.assertEqual(provision_grafana_metrics.validate_spec(spec), [])
         self.assertEqual(spec["folder"]["uid"], "nutsnews-backend-ops")
-        self.assertGreaterEqual(len(spec["dashboards"]), 8)
+        self.assertGreaterEqual(len(spec["dashboards"]), 9)
+
+        logs_dashboard = next(item for item in spec["dashboards"] if item["uid"] == "nutsnews-backend-logs")
+        self.assertTrue(logs_dashboard["panels"])
+        self.assertTrue(all(panel.get("datasource") == "loki" for panel in logs_dashboard["panels"]))
+
+    def test_grafana_dashboard_spec_rejects_high_cardinality_log_labels(self):
+        spec = {
+            "folder": {"uid": "test", "title": "Test"},
+            "guardrails": {"max_dashboards": 10, "max_panels_per_dashboard": 12, "max_total_panels": 80, "max_unique_queries": 100},
+            "dashboards": [
+                {
+                    "uid": "bad",
+                    "title": "Bad",
+                    "panels": [{"title": "Bad", "datasource": "loki", "expr": "{host=\"backend.nutsnews.com\",request_id=\"abc\"}"}],
+                }
+            ],
+        }
+        errors = provision_grafana_metrics.validate_spec(spec)
+        self.assertIn("high-cardinality label request_id", "\n".join(errors))
 
     def test_textfile_metric_label_escaping(self):
         metrics = load_metrics_module()
@@ -37,9 +59,35 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertEqual(rendered, 'nutsnews_test{unit="a\\"b\\\\c"} 1')
 
     def test_metrics_tasks_skip_alloy_package_when_repo_is_new_in_check_mode(self):
-        task = Path("ansible/roles/backend_baseline/tasks/metrics.yml").read_text(encoding="utf-8")
+        task = METRICS_TASKS.read_text(encoding="utf-8")
         self.assertIn("backend_metrics_alloy_manageable", task)
         self.assertIn("when: backend_metrics_alloy_manageable | bool", task)
+
+    def test_alloy_loki_template_has_redaction_and_cardinality_guardrails(self):
+        template = ALLOY_TEMPLATE.read_text(encoding="utf-8")
+        self.assertIn('loki.write "grafana_cloud_loki"', template)
+        self.assertIn('sys.env("GRAFANA_CLOUD_LOKI_PASSWORD")', template)
+        self.assertIn('stage.drop', template)
+        self.assertIn('stage.replace', template)
+        self.assertIn('stage.truncate', template)
+        self.assertIn('stage.label_keep', template)
+        self.assertNotIn("request_id", template)
+        self.assertNotIn("loki.source.docker", template)
+        self.assertNotIn("/var/run/docker.sock", template)
+
+    def test_alloy_log_access_is_least_privilege(self):
+        task = METRICS_TASKS.read_text(encoding="utf-8")
+        self.assertIn("Allow Alloy to read journal and adm-owned log files", task)
+        self.assertIn("- adm", task)
+        self.assertIn("- systemd-journal", task)
+        self.assertNotIn("chmod 666", task)
+        self.assertNotIn("become_user: root", task)
+
+    def test_protected_apply_wires_loki_secret_names(self):
+        workflow = PROTECTED_APPLY_WORKFLOW.read_text(encoding="utf-8")
+        for name in ("GRAFANA_CLOUD_LOKI_URL", "GRAFANA_CLOUD_LOKI_USERNAME", "GRAFANA_CLOUD_LOKI_PASSWORD"):
+            self.assertIn(name, workflow)
+        self.assertIn('"backend_logs_enabled"] = True', workflow)
 
     def test_textfile_exporter_writes_backup_metrics_without_secret_content(self):
         metrics = load_metrics_module()

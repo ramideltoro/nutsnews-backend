@@ -89,3 +89,57 @@ backend_metrics_textfile_calendar: "*:0/1:00"
 backend_metrics_remote_write_capacity: 2500
 backend_metrics_remote_write_max_samples_per_send: 500
 backend_metrics_remote_write_max_shards: 2
+backend_logs_enabled: false
+backend_logs_loki_url: ""
+backend_logs_loki_username: ""
+backend_logs_loki_password: ""
+backend_logs_journal_max_age: 24h
+backend_logs_file_ignore_older_than: 48h
+backend_logs_line_drop_max_size: 16KiB
+backend_logs_line_truncate_limit: 4KiB
+backend_logs_loki_max_streams: 64
+backend_logs_loki_batch_size: 256KiB
+backend_logs_loki_batch_wait: 5s
+backend_logs_journal_units:
+  - service: caddy
+    unit: caddy.service
+  - service: alloy
+    unit: alloy.service
+  - service: backup
+    unit: nutsnews-backup.service
+  - service: backup
+    unit: nutsnews-backup-verify.service
+  - service: backup
+    unit: nutsnews-restore-drill.service
+  - service: timer
+    unit: nutsnews-metrics-textfile.service
+  - service: timer
+    unit: nutsnews-ops-dashboard-collect.service
+  - service: security
+    unit: fail2ban.service
+  - service: security
+    unit: ufw.service
+  - service: security
+    unit: ssh.service
+  - service: updates
+    unit: unattended-upgrades.service
+  - service: updates
+    unit: apt-daily.service
+  - service: updates
+    unit: apt-daily-upgrade.service
+backend_logs_file_targets:
+  - service: security
+    unit: auth.log
+    path: /var/log/auth.log
+  - service: security
+    unit: fail2ban.log
+    path: /var/log/fail2ban.log
+  - service: caddy
+    unit: caddy-access.log
+    path: /var/log/caddy/access.log
+  - service: caddy
+    unit: caddy-error.log
+    path: /var/log/caddy/error.log
+  - service: backend
+    unit: nutsnews-app
+    path: /var/log/nutsnews/*.log

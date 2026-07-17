@@ -1,0 +1,173 @@
+---
+- name: Ensure Grafana Alloy apt prerequisites are installed
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - gpg
+    state: present
+    update_cache: true
+    cache_valid_time: "{{ backend_apt_cache_valid_time }}"
+
+- name: Ensure apt keyring directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install Grafana apt repository key
+  ansible.builtin.get_url:
+    url: https://apt.grafana.com/gpg.key
+    dest: /etc/apt/keyrings/grafana.asc
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure Grafana apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main"
+    filename: grafana
+    state: present
+    update_cache: true
+
+- name: Install Grafana Alloy
+  ansible.builtin.apt:
+    name: alloy
+    state: present
+    update_cache: true
+    cache_valid_time: "{{ backend_apt_cache_valid_time }}"
+
+- name: Ensure NutsNews metrics textfile directory exists
+  ansible.builtin.file:
+    path: "{{ backend_metrics_textfile_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install NutsNews textfile metrics exporter
+  ansible.builtin.copy:
+    src: nutsnews_metrics_textfile.py
+    dest: "{{ backend_metrics_textfile_exporter_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install NutsNews textfile metrics service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nutsnews-metrics-textfile.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      [Unit]
+      Description=NutsNews backend Prometheus textfile metrics
+
+      [Service]
+      Type=oneshot
+      ExecStart={{ backend_metrics_textfile_exporter_path }} --output {{ backend_metrics_textfile_dir }}/nutsnews.prom
+  notify: Reload systemd
+
+- name: Install NutsNews textfile metrics timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nutsnews-metrics-textfile.timer
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      [Unit]
+      Description=Refresh NutsNews backend Prometheus textfile metrics
+
+      [Timer]
+      OnCalendar={{ backend_metrics_textfile_calendar }}
+      Persistent=true
+      Unit=nutsnews-metrics-textfile.service
+
+      [Install]
+      WantedBy=timers.target
+  notify: Reload systemd
+
+- name: Install Alloy remote write environment
+  ansible.builtin.copy:
+    dest: "{{ backend_metrics_alloy_env_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      GRAFANA_CLOUD_PROMETHEUS_URL={{ backend_metrics_prometheus_remote_write_url | quote }}
+      GRAFANA_CLOUD_PROMETHEUS_USERNAME={{ backend_metrics_prometheus_username | quote }}
+      GRAFANA_CLOUD_PROMETHEUS_PASSWORD={{ backend_metrics_prometheus_password | quote }}
+  no_log: true
+  notify: Restart alloy
+
+- name: Install Alloy systemd environment drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/alloy.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install Alloy systemd environment drop-in
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/alloy.service.d/10-nutsnews-prometheus.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      [Service]
+      EnvironmentFile={{ backend_metrics_alloy_env_path }}
+  notify:
+    - Reload systemd
+    - Restart alloy
+
+- name: Install Alloy metrics configuration
+  ansible.builtin.template:
+    src: alloy-config.alloy.j2
+    dest: "{{ backend_metrics_alloy_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart alloy
+
+- name: Validate Alloy metrics configuration
+  ansible.builtin.command: "alloy validate {{ backend_metrics_alloy_config_path }}"
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Flush handlers before running metrics services
+  ansible.builtin.meta: flush_handlers
+
+- name: Generate NutsNews textfile metrics once
+  ansible.builtin.command: "{{ backend_metrics_textfile_exporter_path }} --output {{ backend_metrics_textfile_dir }}/nutsnews.prom"
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Ensure NutsNews textfile metrics timer is enabled and started
+  ansible.builtin.systemd:
+    name: nutsnews-metrics-textfile.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: not ansible_check_mode
+
+- name: Ensure Alloy is enabled and started
+  ansible.builtin.systemd:
+    name: alloy
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: not ansible_check_mode
+
+- name: Report backend metrics summary
+  ansible.builtin.debug:
+    msg:
+      enabled: "{{ backend_metrics_enabled }}"
+      alloy_config_path: "{{ backend_metrics_alloy_config_path }}"
+      textfile_dir: "{{ backend_metrics_textfile_dir }}"
+      scrape_interval: "{{ backend_metrics_scrape_interval }}"
+      endpoint: grafana_cloud_prometheus_remote_write

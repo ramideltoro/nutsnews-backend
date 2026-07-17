@@ -60,6 +60,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backup_service_matrix.py
 
+      - name: Validate Grafana metrics dashboards
+        shell: bash
+        run: python3 scripts/provision_grafana_metrics.py --check
+
       - name: Validate abuse protection decision
         shell: bash
         run: python3 scripts/validate_abuse_protection_decision.py

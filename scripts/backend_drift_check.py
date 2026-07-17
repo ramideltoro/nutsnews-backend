@@ -22,6 +22,8 @@ ALLOWED_NUTSNEWS_NON_APP_UNITS = {
     "nutsnews-backup.timer",
     "nutsnews-backup-verify.service",
     "nutsnews-backup-verify.timer",
+    "nutsnews-metrics-textfile.service",
+    "nutsnews-metrics-textfile.timer",
     "nutsnews-ops-dashboard-collect.service",
     "nutsnews-ops-dashboard-collect.timer",
     "nutsnews-restore-drill.service",
@@ -56,7 +58,7 @@ REMOTE_COMMANDS: dict[str, str] = {
     "swap": "swapon --show=NAME --noheadings 2>/dev/null || true",
     "reboot_required": "test -e /var/run/reboot-required && echo yes || echo no",
     "ufw_status": "ufw status verbose 2>&1 || true",
-    "managed_files": "for path in /etc/ssh/sshd_config.d/00-nutsnews-hardening.conf /etc/fail2ban/jail.d/nutsnews-sshd.local /etc/sysctl.d/99-nutsnews-backend-swap.conf /etc/systemd/journald.conf.d/99-nutsnews-backend.conf /etc/logrotate.d/nutsnews-backend /usr/local/sbin/nutsnews-backend-smoke /usr/local/sbin/nutsnews-backup /etc/nutsnews-backup/service-matrix.json /etc/nutsnews-backup/restic.env /etc/systemd/system/nutsnews-backup.service /etc/systemd/system/nutsnews-backup.timer /etc/systemd/system/nutsnews-backup-verify.service /etc/systemd/system/nutsnews-backup-verify.timer /etc/systemd/system/nutsnews-restore-drill.service /etc/systemd/system/nutsnews-restore-drill.timer; do stat -c '%a %U %G %n' \"$path\" 2>/dev/null || { sudo -n test -e \"$path\" 2>/dev/null && echo \"present_root_only $path\" || echo \"missing $path\"; }; done",
+    "managed_files": "for path in /etc/ssh/sshd_config.d/00-nutsnews-hardening.conf /etc/fail2ban/jail.d/nutsnews-sshd.local /etc/sysctl.d/99-nutsnews-backend-swap.conf /etc/systemd/journald.conf.d/99-nutsnews-backend.conf /etc/logrotate.d/nutsnews-backend /usr/local/sbin/nutsnews-backend-smoke /usr/local/sbin/nutsnews-backup /usr/local/bin/nutsnews-metrics-textfile /etc/nutsnews-backup/service-matrix.json /etc/nutsnews-backup/restic.env /etc/alloy/config.alloy /etc/alloy/nutsnews-prometheus.env /etc/systemd/system/alloy.service.d/10-nutsnews-prometheus.conf /etc/systemd/system/nutsnews-backup.service /etc/systemd/system/nutsnews-backup.timer /etc/systemd/system/nutsnews-backup-verify.service /etc/systemd/system/nutsnews-backup-verify.timer /etc/systemd/system/nutsnews-restore-drill.service /etc/systemd/system/nutsnews-restore-drill.timer /etc/systemd/system/nutsnews-metrics-textfile.service /etc/systemd/system/nutsnews-metrics-textfile.timer; do stat -c '%a %U %G %n' \"$path\" 2>/dev/null || { sudo -n test -e \"$path\" 2>/dev/null && echo \"present_root_only $path\" || echo \"missing $path\"; }; done",
 }
 
 

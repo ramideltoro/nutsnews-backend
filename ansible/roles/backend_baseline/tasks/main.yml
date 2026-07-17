@@ -21,6 +21,10 @@
   ansible.builtin.import_tasks: backup.yml
   when: backend_backup_enabled | bool
 
+- name: Configure Grafana Cloud backend metrics
+  ansible.builtin.import_tasks: metrics.yml
+  when: backend_metrics_enabled | bool
+
 - name: Configure read-only ops dashboard
   ansible.builtin.import_tasks: ops_dashboard.yml
   when: backend_ops_dashboard_enabled | bool

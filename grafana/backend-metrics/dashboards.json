@@ -1,0 +1,98 @@
+{
+  "folder": {
+    "title": "NutsNews Backend Ops",
+    "uid": "nutsnews-backend-ops"
+  },
+  "guardrails": {
+    "max_dashboards": 10,
+    "max_panels_per_dashboard": 12,
+    "max_total_panels": 80,
+    "max_unique_queries": 100
+  },
+  "dashboards": [
+    {
+      "title": "NutsNews Backend Host Overview",
+      "uid": "nutsnews-backend-host",
+      "panels": [
+        {"title": "CPU Busy", "unit": "percentunit", "expr": "1 - avg(rate(node_cpu_seconds_total{job=\"nutsnews-backend-host\",mode=\"idle\"}[5m]))"},
+        {"title": "Load Per CPU", "unit": "short", "expr": "node_load1{job=\"nutsnews-backend-host\"} / count(count by (cpu) (node_cpu_seconds_total{job=\"nutsnews-backend-host\",mode=\"idle\"}))"},
+        {"title": "Memory Used", "unit": "percentunit", "expr": "1 - (node_memory_MemAvailable_bytes{job=\"nutsnews-backend-host\"} / node_memory_MemTotal_bytes{job=\"nutsnews-backend-host\"})"},
+        {"title": "Swap Used", "unit": "percentunit", "expr": "1 - (node_memory_SwapFree_bytes{job=\"nutsnews-backend-host\"} / node_memory_SwapTotal_bytes{job=\"nutsnews-backend-host\"})"},
+        {"title": "Root Disk Used", "unit": "percentunit", "expr": "1 - (node_filesystem_avail_bytes{job=\"nutsnews-backend-host\",mountpoint=\"/\",fstype!=\"\"} / node_filesystem_size_bytes{job=\"nutsnews-backend-host\",mountpoint=\"/\",fstype!=\"\"})"},
+        {"title": "Root Inodes Used", "unit": "percentunit", "expr": "1 - (node_filesystem_files_free{job=\"nutsnews-backend-host\",mountpoint=\"/\"} / node_filesystem_files{job=\"nutsnews-backend-host\",mountpoint=\"/\"})"},
+        {"title": "Network Receive", "unit": "Bps", "expr": "sum by (device) (rate(node_network_receive_bytes_total{job=\"nutsnews-backend-host\",device!~\"lo|veth.*|docker.*\"}[5m]))"},
+        {"title": "Network Transmit", "unit": "Bps", "expr": "sum by (device) (rate(node_network_transmit_bytes_total{job=\"nutsnews-backend-host\",device!~\"lo|veth.*|docker.*\"}[5m]))"}
+      ]
+    },
+    {
+      "title": "NutsNews Backend Docker and Runtime",
+      "uid": "nutsnews-backend-docker-runtime",
+      "panels": [
+        {"title": "Docker Service Active", "unit": "short", "expr": "nutsnews_backend_service_active{job=\"nutsnews-backend-host\",unit=\"docker\"}"},
+        {"title": "Containerd Service Active", "unit": "short", "expr": "node_systemd_unit_state{job=\"nutsnews-backend-host\",name=\"containerd.service\",state=\"active\"}"},
+        {"title": "Backend Units", "unit": "short", "expr": "node_systemd_unit_state{job=\"nutsnews-backend-host\",name=~\"nutsnews-.+\",state=\"active\"}"},
+        {"title": "Unit Restarts", "unit": "short", "expr": "increase(node_systemd_service_restart_total{job=\"nutsnews-backend-host\",name=~\"docker.service|containerd.service|nutsnews-.+\"}[24h])"}
+      ]
+    },
+    {
+      "title": "NutsNews Backend Caddy and Edge",
+      "uid": "nutsnews-backend-caddy-edge",
+      "panels": [
+        {"title": "Caddy Active", "unit": "short", "expr": "nutsnews_backend_service_active{job=\"nutsnews-backend-host\",unit=\"caddy\"}"},
+        {"title": "Public Endpoint Healthy", "unit": "short", "expr": "nutsnews_backend_public_endpoint_healthy{job=\"nutsnews-backend-host\"}"},
+        {"title": "HTTP/HTTPS Listeners", "unit": "short", "expr": "node_netstat_Tcp_CurrEstab{job=\"nutsnews-backend-host\"}"},
+        {"title": "Failed Units", "unit": "short", "expr": "nutsnews_backend_failed_systemd_units{job=\"nutsnews-backend-host\"}"}
+      ]
+    },
+    {
+      "title": "NutsNews Backend Service Health",
+      "uid": "nutsnews-backend-service-health",
+      "panels": [
+        {"title": "Core Service Active", "unit": "short", "expr": "nutsnews_backend_service_active{job=\"nutsnews-backend-host\",unit=~\"ssh|ufw|fail2ban|caddy|alloy|sysstat\"}"},
+        {"title": "NutsNews Timers Active", "unit": "short", "expr": "nutsnews_backend_service_active{job=\"nutsnews-backend-host\",unit=~\"nutsnews-.+timer\"}"},
+        {"title": "Systemd Active State", "unit": "short", "expr": "node_systemd_unit_state{job=\"nutsnews-backend-host\",name=~\"ssh.service|ufw.service|fail2ban.service|caddy.service|alloy.service|sysstat.service|nutsnews-.+\",state=\"active\"}"},
+        {"title": "Host Up", "unit": "short", "expr": "up{job=\"nutsnews-backend-host\"}"}
+      ]
+    },
+    {
+      "title": "NutsNews Backend Backups",
+      "uid": "nutsnews-backend-backups",
+      "panels": [
+        {"title": "Backup Stage Healthy", "unit": "short", "expr": "nutsnews_backend_backup_stage_healthy{job=\"nutsnews-backend-host\"}"},
+        {"title": "Latest Snapshot Verified", "unit": "short", "expr": "nutsnews_backend_backup_latest_snapshot_verified{job=\"nutsnews-backend-host\"}"},
+        {"title": "Backup Storage Quota Configured", "unit": "short", "expr": "nutsnews_backend_backup_storage_quota_configured{job=\"nutsnews-backend-host\"}"},
+        {"title": "Backup Timers Active", "unit": "short", "expr": "nutsnews_backend_service_active{job=\"nutsnews-backend-host\",unit=~\"nutsnews-backup.*timer|nutsnews-restore-drill.timer\"}"}
+      ]
+    },
+    {
+      "title": "NutsNews Backend OS Updates",
+      "uid": "nutsnews-backend-os-updates",
+      "panels": [
+        {"title": "Reboot Required", "unit": "short", "expr": "nutsnews_backend_reboot_required{job=\"nutsnews-backend-host\"}"},
+        {"title": "Upgradable Packages", "unit": "short", "expr": "nutsnews_backend_upgradable_packages{job=\"nutsnews-backend-host\"}"},
+        {"title": "Boot Time", "unit": "dateTimeAsIso", "expr": "node_boot_time_seconds{job=\"nutsnews-backend-host\"}"},
+        {"title": "Uptime", "unit": "s", "expr": "time() - node_boot_time_seconds{job=\"nutsnews-backend-host\"}"}
+      ]
+    },
+    {
+      "title": "NutsNews Backend Metrics Quota",
+      "uid": "nutsnews-backend-metrics-quota",
+      "panels": [
+        {"title": "Series Count By Metric", "unit": "short", "expr": "topk(20, count by (__name__) ({job=\"nutsnews-backend-host\"}))"},
+        {"title": "Unique Metric Names", "unit": "short", "expr": "count(count by (__name__) ({job=\"nutsnews-backend-host\"}))"},
+        {"title": "Alloy Remote Write Pending Samples", "unit": "short", "expr": "prometheus_remote_storage_samples_pending{job=\"nutsnews-backend-host\"}"},
+        {"title": "Alloy Remote Write Failed Samples", "unit": "short", "expr": "increase(prometheus_remote_storage_samples_failed_total{job=\"nutsnews-backend-host\"}[1h])"}
+      ]
+    },
+    {
+      "title": "NutsNews Backend Alert and Synthetic Health",
+      "uid": "nutsnews-backend-alert-synthetic",
+      "panels": [
+        {"title": "Grafana Alert State", "unit": "short", "expr": "ALERTS{alertname=~\"NutsNews.*\"}"},
+        {"title": "Synthetic Probe Success", "unit": "short", "expr": "probe_success{job=~\".*nutsnews.*|.*backend.*\"}"},
+        {"title": "Synthetic Probe Duration", "unit": "s", "expr": "probe_duration_seconds{job=~\".*nutsnews.*|.*backend.*\"}"},
+        {"title": "Missing Backend Metrics", "unit": "short", "expr": "absent(up{job=\"nutsnews-backend-host\"})"}
+      ]
+    }
+  ]
+}

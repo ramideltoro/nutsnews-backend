@@ -104,6 +104,8 @@ class BackendDriftCheckTests(unittest.TestCase):
                         "nutsnews-backup.timer loaded active waiting Run NutsNews service-aware restic backup",
                         "nutsnews-backup-verify.service loaded inactive dead NutsNews restic repository verification",
                         "nutsnews-backup-verify.timer loaded active waiting Verify NutsNews latest restic backup",
+                        "nutsnews-metrics-textfile.service loaded inactive dead NutsNews backend Prometheus textfile metrics",
+                        "nutsnews-metrics-textfile.timer loaded active waiting Refresh NutsNews backend Prometheus textfile metrics",
                         "nutsnews-restore-drill.service loaded inactive dead NutsNews lightweight restore drill",
                         "nutsnews-restore-drill.timer loaded active waiting Run NutsNews lightweight restore drill",
                     ]
@@ -114,7 +116,7 @@ class BackendDriftCheckTests(unittest.TestCase):
         backend_check = next(item for item in checks if item["surface"] == "not_deployed:backend app")
         self.assertEqual(backend_check["status"], "expected")
         self.assertEqual(backend_check["observed"], [])
-        self.assertEqual(len(backend_check["allowed_observed"]), 8)
+        self.assertEqual(len(backend_check["allowed_observed"]), 10)
 
     def test_unexpected_nutsnews_service_counts_as_backend_app_deployed(self):
         fixture = evidence(

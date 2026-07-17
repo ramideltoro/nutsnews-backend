@@ -1,0 +1,80 @@
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+prometheus.remote_write "grafana_cloud" {
+  endpoint {
+    name = "grafana-cloud-prometheus"
+    url  = sys.env("GRAFANA_CLOUD_PROMETHEUS_URL")
+
+    basic_auth {
+      username = sys.env("GRAFANA_CLOUD_PROMETHEUS_USERNAME")
+      password = sys.env("GRAFANA_CLOUD_PROMETHEUS_PASSWORD")
+    }
+
+    queue_config {
+      capacity             = {{ backend_metrics_remote_write_capacity }}
+      max_samples_per_send = {{ backend_metrics_remote_write_max_samples_per_send }}
+      min_shards           = 1
+      max_shards           = {{ backend_metrics_remote_write_max_shards }}
+    }
+  }
+}
+
+prometheus.exporter.unix "host" {
+  set_collectors = [
+    "cpu",
+    "diskstats",
+    "filesystem",
+    "loadavg",
+    "meminfo",
+    "netdev",
+    "pressure",
+    "stat",
+    "systemd",
+    "textfile",
+    "time",
+    "uname",
+    "vmstat",
+  ]
+
+  filesystem {
+    mount_points_exclude = "^/(dev|proc|run|sys|var/lib/docker/.+)($|/)"
+    fs_types_exclude     = "^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$"
+  }
+
+  systemd {
+    enable_restarts = true
+    unit_include    = "^(ssh|ufw|fail2ban|caddy|docker|postgresql|alloy|sysstat|nutsnews-.+)\\.(service|timer)$"
+  }
+
+  textfile {
+    directory = "{{ backend_metrics_textfile_dir }}"
+  }
+}
+
+prometheus.scrape "host" {
+  targets         = prometheus.exporter.unix.host.targets
+  scrape_interval = "{{ backend_metrics_scrape_interval }}"
+  forward_to      = [prometheus.relabel.backend.receiver]
+}
+
+prometheus.relabel "backend" {
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+  rule {
+    target_label = "job"
+    replacement  = "nutsnews-backend-host"
+  }
+
+  rule {
+    target_label = "instance"
+    replacement  = "{{ backend_metrics_instance_label }}"
+  }
+
+  rule {
+    target_label = "environment"
+    replacement  = "{{ backend_metrics_environment_label }}"
+  }
+}

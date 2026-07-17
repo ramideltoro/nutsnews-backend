@@ -23,6 +23,7 @@
     owner: root
     group: root
     mode: "0644"
+  register: backend_metrics_repo_key
 
 - name: Configure Grafana apt repository
   ansible.builtin.apt_repository:
@@ -30,6 +31,11 @@
     filename: grafana
     state: present
     update_cache: true
+  register: backend_metrics_apt_repo
+
+- name: Track whether Alloy package can be managed in this run
+  ansible.builtin.set_fact:
+    backend_metrics_alloy_manageable: "{{ (not ansible_check_mode) or not ((backend_metrics_repo_key is changed) or (backend_metrics_apt_repo is changed)) }}"
 
 - name: Install Grafana Alloy
   ansible.builtin.apt:
@@ -37,6 +43,15 @@
     state: present
     update_cache: true
     cache_valid_time: "{{ backend_apt_cache_valid_time }}"
+  when: backend_metrics_alloy_manageable | bool
+
+- name: Ensure Alloy config directory exists
+  ansible.builtin.file:
+    path: /etc/alloy
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
 
 - name: Ensure NutsNews metrics textfile directory exists
   ansible.builtin.file:
@@ -171,3 +186,4 @@
       textfile_dir: "{{ backend_metrics_textfile_dir }}"
       scrape_interval: "{{ backend_metrics_scrape_interval }}"
       endpoint: grafana_cloud_prometheus_remote_write
+      alloy_package_manageable: "{{ backend_metrics_alloy_manageable }}"

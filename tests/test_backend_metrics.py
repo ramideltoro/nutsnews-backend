@@ -76,6 +76,33 @@ class BackendMetricsTests(unittest.TestCase):
         for alert in spec["alerts"]:
             self.assertLessEqual(len(alert["uid"]), provision_grafana_metrics.MAX_GRAFANA_ALERT_UID_LENGTH)
 
+    def test_abuse_detection_alerts_are_report_only_and_low_cardinality(self):
+        spec = provision_grafana_metrics.load_spec(GRAFANA_SPEC)
+        alerts = {alert["uid"]: alert for alert in spec["alerts"]}
+        for uid in ("nn-backend-ssh-auth-spike", "nn-backend-fail2ban-ban-events"):
+            alert = alerts[uid]
+            self.assertEqual(alert["datasource"], "loki")
+            self.assertEqual(alert["service"], "security")
+            self.assertEqual(alert["severity"], "warning")
+            self.assertEqual(alert["no_data_state"], "OK")
+            self.assertIn("runbooks/ABUSE_PROTECTION.md", alert["runbook_url"])
+            for label in provision_grafana_metrics.HIGH_CARDINALITY_LABELS:
+                self.assertNotIn(f"{label}=", alert["expr"])
+                self.assertNotIn(f"{label}=~", alert["expr"])
+
+    def test_logs_dashboard_surfaces_abuse_detection_without_ip_labels(self):
+        spec = provision_grafana_metrics.load_spec(GRAFANA_SPEC)
+        logs_dashboard = next(item for item in spec["dashboards"] if item["uid"] == "nutsnews-backend-logs")
+        titles = {panel["title"]: panel for panel in logs_dashboard["panels"]}
+        self.assertIn("SSH Auth Failure Volume", titles)
+        self.assertIn("Fail2ban Ban Events", titles)
+        for title in ("SSH Auth Failure Volume", "Fail2ban Ban Events"):
+            expr = titles[title]["expr"]
+            self.assertIn('service="security"', expr)
+            self.assertNotIn("ip=", expr)
+            self.assertNotIn("path=", expr)
+            self.assertNotIn("user_id=", expr)
+
     def test_loki_remote_write_url_is_normalized_for_query_datasource(self):
         self.assertEqual(
             provision_grafana_metrics.loki_query_url("https://logs.example.net/loki/api/v1/push"),

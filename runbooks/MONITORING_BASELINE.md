@@ -134,13 +134,20 @@ Initial rules cover:
 - root disk warning above 80%;
 - reboot-required warning after 24 hours;
 - missing backend journal logs in Loki;
-- backend log volume above the free-tier guardrail threshold.
+- backend log volume above the free-tier guardrail threshold;
+- SSH authentication failure spikes;
+- fail2ban SSH ban events.
 
 These rules intentionally distinguish known not-configured states from failures
 by using the textfile metrics and `noDataState` settings that avoid alerting for
 services that are intentionally absent today. Notification contact points,
 deduplication, cooldowns, and recovery-message policy are handled by the
 separate alert-routing work.
+
+The abuse-detection rules are report-only. They do not mutate UFW, Caddy,
+Cloudflare, fail2ban, or host firewall policy. They use low-cardinality Loki
+queries scoped to `host="backend.nutsnews.com"` and `service="security"` and do
+not label or route on IP address, path, user, request ID, or raw message text.
 
 ## Alert Delivery
 

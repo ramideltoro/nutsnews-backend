@@ -1,6 +1,6 @@
 # Backend Abuse Protection Decision
 
-This runbook covers backend issue #24 for `65.75.201.18`.
+This runbook covers backend issues #24 and #40 for `65.75.201.18`.
 
 ## Acceptance Criteria
 
@@ -14,6 +14,16 @@ This runbook covers backend issue #24 for `65.75.201.18`.
 
 The current service-baseline attestation allows SSH plus the Caddy-managed
 HTTP/HTTPS `/healthz` endpoint.
+
+Read-only verification on 2026-07-17 showed:
+
+- `ssh`, `ufw`, `fail2ban`, `caddy`, and `alloy` are active;
+- `backend.nutsnews.com/healthz` returns `ok`;
+- public `/` and `/readyz` return `404` while the backend app is absent;
+- `/var/log/auth.log` and `/var/log/fail2ban.log` exist as `adm`-owned logs
+  and are collected by Alloy/Loki;
+- `/var/log/caddy/access.log` and `/var/log/caddy/error.log` are not present
+  yet because there is no deployed backend app route with access logging.
 
 Not deployed yet:
 
@@ -29,8 +39,14 @@ must remain observable and unblocked.
 
 Use fail2ban for SSH in the current phase.
 
-Defer CrowdSec and HTTP/Caddy enforcement until a later reviewed PR adds backend
-app routes, app/admin probes, and real route log sources.
+Add report-only Grafana/Loki detection for:
+
+- SSH authentication failure spikes;
+- fail2ban SSH ban events.
+
+Defer CrowdSec, Cloudflare blocking rules, and HTTP/Caddy enforcement until a
+later reviewed PR adds backend app routes, app/admin probes, and real route log
+sources.
 
 Machine-readable record:
 
@@ -48,6 +64,17 @@ The validator intentionally fails if the service baseline starts exposing ports
 outside SSH plus HTTP/HTTPS health routing while this decision is still in the
 observe-only HTTP phase.
 
+Grafana detection rules:
+
+```text
+nn-backend-ssh-auth-spike
+nn-backend-fail2ban-ban-events
+```
+
+These rules use low-cardinality Loki queries scoped to
+`host="backend.nutsnews.com"` and `service="security"`. They do not label,
+group, or route on IP address, path, user, request ID, or raw message text.
+
 ## CrowdSec Versus Fail2ban
 
 | Area | Fail2ban now | CrowdSec later |
@@ -58,6 +85,29 @@ observe-only HTTP phase.
 | UFW integration | Existing backend role already manages UFW and fail2ban separately | Needs bouncer policy and rollback path |
 | Metrics | Basic jail status now | Better later if dashboards and labels are designed |
 | Maintenance | Small config surface | More moving parts and upstream scenario updates |
+
+## Report-Only Maintenance Automation
+
+The #40 implementation is detection/report-only. It does not mutate UFW, Caddy,
+Cloudflare, fail2ban jail behavior, or provider firewall policy.
+
+Detection runs through the existing `Backend Grafana Observability` workflow:
+
+```bash
+gh workflow run backend-grafana-metrics.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f action=apply \
+  -f confirm_apply=backend.nutsnews.com
+
+gh workflow run backend-grafana-metrics.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f action=verify
+```
+
+The workflow uses the `production-backend` Environment for Grafana credentials.
+It does not need SSH or host mutation for these detection rules.
 
 ## Allowlist Policy
 
@@ -95,6 +145,7 @@ Current non-mutating checks:
 
 ```bash
 python3 scripts/validate_abuse_protection_decision.py
+python3 scripts/provision_grafana_metrics.py --check
 cd ansible
 ansible-playbook playbooks/bootstrap.yml --syntax-check -i inventories/production/hosts.yml
 ```
@@ -111,6 +162,12 @@ Controlled ban testing must use a disposable test source IP and immediately unba
 ## Rollback
 
 Preferred rollback is a git revert followed by protected apply.
+
+For #40 Grafana-only detection changes, preferred rollback is:
+
+1. Revert the Grafana spec/runbook PR.
+2. Run `Backend Grafana Observability` with `action=apply`.
+3. Run `Backend Grafana Observability` with `action=verify`.
 
 Unban one IP:
 

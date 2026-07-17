@@ -54,6 +54,22 @@ def main() -> int:
     if enforcement.get("production_blocking_before_approval") is not False:
         errors.append("production blocking before approval must be false")
 
+    automation = decision.get("maintenance_automation", {})
+    if automation.get("mode") != "detection-report-only":
+        errors.append("maintenance automation must remain detection-report-only")
+    if automation.get("enforcement_change") is not False:
+        errors.append("maintenance automation must not change enforcement")
+    if automation.get("http_blocking_status") != "not_enabled":
+        errors.append("HTTP blocking must stay disabled for the current maintenance automation")
+    alert_uids = set(automation.get("grafana_alert_uids", []))
+    for uid in ("nn-backend-ssh-auth-spike", "nn-backend-fail2ban-ban-events"):
+        if uid not in alert_uids:
+            errors.append(f"missing abuse detection Grafana alert uid: {uid}")
+    visibility = str(automation.get("blocked_event_visibility", "")).lower()
+    for blocked_label in (" ip", " path", " user", " request"):
+        if blocked_label not in visibility:
+            errors.append(f"blocked event visibility must mention no {blocked_label.strip()} labels")
+
     ssh_allowlist = set(decision.get("allowlists", {}).get("ssh", []))
     if not {"127.0.0.1/8", "::1"}.issubset(ssh_allowlist):
         errors.append("SSH allowlist must include localhost IPv4 and IPv6")

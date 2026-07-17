@@ -112,10 +112,12 @@ environment, host, source, service, unit, severity, filename, job
 
 The managed Grafana folder is `NutsNews Backend Ops` (`nutsnews-backend-ops`).
 The logs dashboard is `NutsNews Backend Logs` (`nutsnews-backend-logs`) and uses
-the managed Loki datasource `grafanacloud-nutsnews-backend-loki`
-(`grafanacloud-loki`). The provisioner creates that datasource from the same
-Loki secret names and intentionally avoids Grafana's alert-state-history Loki
-datasource.
+the Grafana Cloud Logs datasource when available. Live verification on
+2026-07-17 used `grafanacloud-kindcantaloupe2036-logs` (`grafanacloud-logs`).
+If no non-alert-history Loki datasource exists, the provisioner creates a
+managed fallback datasource named `grafanacloud-nutsnews-backend-loki`
+(`grafanacloud-loki`) from the same Loki secret names. The provisioner
+intentionally avoids Grafana's alert-state-history Loki datasource.
 
 ## Alert Delivery
 

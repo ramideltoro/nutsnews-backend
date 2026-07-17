@@ -12,7 +12,38 @@ remote_dir="${REMOTE_DIR:?REMOTE_DIR is required}"
 source_ref="${SOURCE_REF:?SOURCE_REF is required}"
 run_id="${GITHUB_RUN_ID:?GITHUB_RUN_ID is required}"
 
+cleanup_remote_dir() {
+  if [[ "${remote_dir:-}" != /tmp/nutsnews-postgres-drill-* ]]; then
+    return
+  fi
+
+  for dump_path in "$remote_dir/public-schema.sql" "$remote_dir/public-data.sql"; do
+    if [[ -e "$dump_path" ]]; then
+      shred -u "$dump_path" 2>/dev/null || rm -f "$dump_path"
+    fi
+  done
+  rm -f \
+    "$remote_dir/backend_postgres_restore_remote.sh" \
+    "$remote_dir/backend_postgres_restore_validation.sql" \
+    "$remote_dir/data-restore.log" \
+    "$remote_dir/schema-restore.log" \
+    "$remote_dir/status.json" \
+    "$remote_dir/validation.log" 2>/dev/null || true
+  rmdir "$remote_dir" 2>/dev/null || true
+}
+trap cleanup_remote_dir EXIT
+
 sudo -n true
+remote_owner="$(id -un)"
+sudo -n find /tmp \
+  -maxdepth 1 \
+  -mindepth 1 \
+  -type d \
+  -user "$remote_owner" \
+  -name 'nutsnews-postgres-drill-*' \
+  ! -path "$remote_dir" \
+  -exec rm -rf -- {} +
+
 sudo -n -u postgres psql -v ON_ERROR_STOP=1 postgres <<SQL
 SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${REHEARSAL_DATABASE}';
 DROP DATABASE IF EXISTS "${REHEARSAL_DATABASE}";
@@ -41,6 +72,10 @@ END
 SQL
 
 sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$REHEARSAL_DATABASE" <<SQL
+CREATE SCHEMA IF NOT EXISTS auth;
+CREATE TABLE IF NOT EXISTS auth.users (
+  id uuid PRIMARY KEY
+);
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 SQL
 
@@ -103,11 +138,6 @@ PY
 sudo -n install -m 0644 -o root -g root "$remote_dir/status.json" /var/lib/nutsnews/postgres/status.json
 sudo -n /usr/local/bin/nutsnews-ops-dashboard-collect --output /var/www/nutsnews-ops-dashboard/status.json >/dev/null 2>&1 || true
 sudo -n systemctl start nutsnews-metrics-textfile.service >/dev/null 2>&1 || true
-for dump_path in "$remote_dir/public-schema.sql" "$remote_dir/public-data.sql"; do
-  if [[ -e "$dump_path" ]]; then
-    shred -u "$dump_path" 2>/dev/null || rm -f "$dump_path"
-  fi
-done
 
 python3 - <<'PY'
 import json

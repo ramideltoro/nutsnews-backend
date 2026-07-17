@@ -73,6 +73,14 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertNotIn("NUTSNEWS_PRODUCTION_SUPABASE_DB_URL", workflow)
         self.assertNotIn("source_project_ref:", workflow.split("permissions:", 1)[0])
 
+    def test_restore_runner_has_supabase_auth_shim_and_cleans_dumps(self):
+        script = (ROOT / "scripts/backend_postgres_restore_remote.sh").read_text(encoding="utf-8")
+        self.assertIn("CREATE SCHEMA IF NOT EXISTS auth", script)
+        self.assertIn("CREATE TABLE IF NOT EXISTS auth.users", script)
+        self.assertIn("trap cleanup_remote_dir EXIT", script)
+        self.assertIn("-name 'nutsnews-postgres-drill-*'", script)
+        self.assertIn("shred -u", script)
+
     def test_plan_forbids_multi_writer_and_production_cutover(self):
         plan = json.loads(PLAN.read_text(encoding="utf-8"))
         self.assertEqual(plan["decision"], "deploy_private_restore_verified_failover_target")

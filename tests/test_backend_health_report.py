@@ -41,6 +41,7 @@ def fixture_report(**overrides):
         "backend_health": command("ok\n"),
         "backup_tools": command("restic=missing\nrclone=missing\npg_dump=missing\ndocker=missing\ncaddy=missing\nalloy=missing\n"),
         "backup_status": command("not_configured\n"),
+        "cleanup_status": command("not_configured\n"),
         "sudo_nopasswd": command("no\n"),
     }
     commands.update(overrides)
@@ -80,8 +81,21 @@ class BackendHealthReportTests(unittest.TestCase):
         self.assertEqual(by_name["backup_freshness"]["status"], "not_configured")
         self.assertEqual(by_name["backup_verification"]["status"], "not_configured")
         self.assertEqual(by_name["backup_restore_drill"]["status"], "not_configured")
+        self.assertEqual(by_name["cleanup_last_run"]["status"], "not_configured")
         self.assertEqual(by_name["sudo_nopasswd"]["status"], "warning")
         self.assertGreaterEqual(summary["warning"], 2)
+
+    def test_cleanup_status_is_exposed_when_present(self):
+        checks, _ = backend_health_report.classify(
+            fixture_report(
+                cleanup_status=command(
+                    '{"status":"healthy","action":"apply","generated_at_utc":"2026-07-17T02:00:00Z"}\n'
+                )
+            )
+        )
+        by_name = {item["name"]: item for item in checks}
+        self.assertEqual(by_name["cleanup_last_run"]["status"], "healthy")
+        self.assertIn("last_action=apply", by_name["cleanup_last_run"]["summary"])
 
     def test_backup_status_checks_are_distinct(self):
         checks, _ = backend_health_report.classify(

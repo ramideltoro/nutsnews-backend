@@ -1,0 +1,120 @@
+name: Backend Cleanup Maintenance
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Fixed cleanup action to run.
+        required: true
+        default: report
+        type: choice
+        options:
+          - report
+          - dry-run
+          - apply
+      confirm_apply:
+        description: For apply only, type backend.nutsnews.com.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-cleanup-maintenance
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Backend cleanup maintenance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          CONFIRM_APPLY: ${{ inputs.confirm_apply }}
+        run: |
+          set -euo pipefail
+
+          case "$ACTION" in
+            report|dry-run|apply) ;;
+            *)
+              echo "Unsupported action: $ACTION" >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ "$ACTION" == "apply" && "$CONFIRM_APPLY" != "backend.nutsnews.com" ]]; then
+            echo "Cleanup apply requires confirm_apply to be exactly backend.nutsnews.com." >&2
+            exit 1
+          fi
+
+      - name: Prepare SSH material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for secret_name in NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
+            if [[ -z "${!secret_name}" ]]; then
+              echo "Missing required production-backend environment secret: $secret_name" >&2
+              missing=1
+            fi
+          done
+          if [[ "$missing" -ne 0 ]]; then
+            exit "$missing"
+          fi
+
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Run fixed cleanup action
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          CONFIRM_APPLY: ${{ inputs.confirm_apply }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            --action "$ACTION"
+            --confirm-target "$CONFIRM_APPLY"
+            --ssh-host "$NUTSNEWS_BACKEND_HOST"
+            --ssh-user "${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+            --ssh-key "$HOME/.ssh/nutsnews_backend"
+            --known-hosts "$HOME/.ssh/known_hosts"
+            --output "$RUNNER_TEMP/backend-cleanup-maintenance-report.json"
+            --summary "$GITHUB_STEP_SUMMARY"
+          )
+
+          python3 scripts/backend_cleanup_maintenance.py "${args[@]}"
+
+      - name: Upload cleanup report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-cleanup-maintenance-report
+          path: ${{ runner.temp }}/backend-cleanup-maintenance-report.json
+          if-no-files-found: ignore

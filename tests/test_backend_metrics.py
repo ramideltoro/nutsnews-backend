@@ -53,6 +53,16 @@ class BackendMetricsTests(unittest.TestCase):
         errors = provision_grafana_metrics.validate_spec(spec)
         self.assertIn("high-cardinality label request_id", "\n".join(errors))
 
+    def test_loki_remote_write_url_is_normalized_for_query_datasource(self):
+        self.assertEqual(
+            provision_grafana_metrics.loki_query_url("https://logs.example.net/loki/api/v1/push"),
+            "https://logs.example.net",
+        )
+
+    def test_alert_history_loki_datasource_is_not_selected_for_backend_logs(self):
+        self.assertTrue(provision_grafana_metrics.datasource_is_alert_history({"uid": "grafanacloud-alert-state-history"}))
+        self.assertFalse(provision_grafana_metrics.datasource_is_alert_history({"uid": "grafanacloud-loki", "name": "Backend Logs"}))
+
     def test_textfile_metric_label_escaping(self):
         metrics = load_metrics_module()
         rendered = metrics.metric("nutsnews_test", 1, {"unit": 'a"b\\c'})

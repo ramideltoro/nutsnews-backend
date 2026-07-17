@@ -18,6 +18,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SPEC = ROOT / "grafana" / "backend-metrics" / "dashboards.json"
 ALLOWED_DATASOURCES = {"prometheus", "loki"}
+MANAGED_LOKI_DATASOURCE_NAME = "grafanacloud-nutsnews-backend-loki"
+MANAGED_LOKI_DATASOURCE_UID = "grafanacloud-loki"
 HIGH_CARDINALITY_LABELS = {
     "container_id",
     "error",
@@ -114,11 +116,74 @@ def datasource_types(spec: dict[str, Any]) -> set[str]:
     return types
 
 
-def choose_datasource(client: GrafanaClient, datasource_type: str) -> dict[str, Any]:
+def loki_query_url(remote_write_url: str) -> str:
+    url = remote_write_url.rstrip("/")
+    for suffix in ("/loki/api/v1/push", "/api/prom/push"):
+        if url.endswith(suffix):
+            return url[: -len(suffix)]
+    return url
+
+
+def datasource_is_alert_history(datasource: dict[str, Any]) -> bool:
+    identity = f"{datasource.get('uid', '')} {datasource.get('name', '')}".lower()
+    return "alert-state-history" in identity or "alert state history" in identity
+
+
+def upsert_managed_loki_datasource(client: GrafanaClient, apply: bool) -> dict[str, Any]:
+    try:
+        existing = client.request("GET", f"/api/datasources/uid/{urllib.parse.quote(MANAGED_LOKI_DATASOURCE_UID)}")
+    except RuntimeError as exc:
+        if "failed with 404" not in str(exc):
+            raise
+        existing = {}
+
+    if existing and existing.get("type") == "loki":
+        return existing
+
+    remote_write_url = os.environ.get("GRAFANA_CLOUD_LOKI_URL", "").strip()
+    username = os.environ.get("GRAFANA_CLOUD_LOKI_USERNAME", "").strip()
+    password = os.environ.get("GRAFANA_CLOUD_LOKI_PASSWORD", "")
+    if not (remote_write_url and username and password):
+        raise RuntimeError(
+            "no non-alert-history Loki datasource found and GRAFANA_CLOUD_LOKI_URL, "
+            "GRAFANA_CLOUD_LOKI_USERNAME, and GRAFANA_CLOUD_LOKI_PASSWORD are required to create one"
+        )
+    if not apply:
+        raise RuntimeError("managed Loki datasource is missing; run apply before verify")
+
+    client.request(
+        "POST",
+        "/api/datasources",
+        {
+            "access": "proxy",
+            "basicAuth": True,
+            "basicAuthUser": username,
+            "isDefault": False,
+            "jsonData": {"maxLines": 1000},
+            "name": MANAGED_LOKI_DATASOURCE_NAME,
+            "secureJsonData": {"basicAuthPassword": password},
+            "type": "loki",
+            "uid": MANAGED_LOKI_DATASOURCE_UID,
+            "url": loki_query_url(remote_write_url),
+        },
+    )
+    return client.request("GET", f"/api/datasources/uid/{urllib.parse.quote(MANAGED_LOKI_DATASOURCE_UID)}")
+
+
+def choose_datasource(client: GrafanaClient, datasource_type: str, apply: bool) -> dict[str, Any]:
     datasources = client.request("GET", "/api/datasources")
     matches = [item for item in datasources if item.get("type") == datasource_type and item.get("uid")]
     if not matches:
+        if datasource_type == "loki":
+            return upsert_managed_loki_datasource(client, apply)
         raise RuntimeError(f"no {datasource_type} datasource found in Grafana")
+    if datasource_type == "loki":
+        managed = next((item for item in matches if item.get("uid") == MANAGED_LOKI_DATASOURCE_UID), None)
+        if managed:
+            return managed
+        matches = [item for item in matches if not datasource_is_alert_history(item)]
+        if not matches:
+            return upsert_managed_loki_datasource(client, apply)
     default = next((item for item in matches if item.get("isDefault")), None)
     return default or matches[0]
 
@@ -297,7 +362,7 @@ def main() -> int:
     datasource_uids: dict[str, str] = {}
     report["datasources"] = {}
     for datasource_type in sorted(datasource_types(spec)):
-        datasource = choose_datasource(client, datasource_type)
+        datasource = choose_datasource(client, datasource_type, args.apply)
         datasource_uids[datasource_type] = datasource["uid"]
         report["datasources"][datasource_type] = {"uid": datasource["uid"], "name": datasource.get("name"), "type": datasource.get("type")}
     report["folder_result"] = ensure_folder(client, spec["folder"], args.apply)

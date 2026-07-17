@@ -70,11 +70,20 @@ jobs:
           ACTION: ${{ inputs.action }}
           GRAFANA_URL: ${{ secrets.GRAFANA_URL }}
           GRAFANA_SERVICE_ACCOUNT_TOKEN: ${{ secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN }}
+          GRAFANA_CLOUD_LOKI_URL: ${{ secrets.GRAFANA_CLOUD_LOKI_URL }}
+          GRAFANA_CLOUD_LOKI_USERNAME: ${{ secrets.GRAFANA_CLOUD_LOKI_USERNAME }}
+          GRAFANA_CLOUD_LOKI_PASSWORD: ${{ secrets.GRAFANA_CLOUD_LOKI_PASSWORD }}
         run: |
           set -euo pipefail
 
           missing=0
-          for secret_name in GRAFANA_URL GRAFANA_SERVICE_ACCOUNT_TOKEN; do
+          for secret_name in \
+            GRAFANA_URL \
+            GRAFANA_SERVICE_ACCOUNT_TOKEN \
+            GRAFANA_CLOUD_LOKI_URL \
+            GRAFANA_CLOUD_LOKI_USERNAME \
+            GRAFANA_CLOUD_LOKI_PASSWORD
+          do
             if [[ -z "${!secret_name}" ]]; then
               echo "Missing required production-backend environment secret: $secret_name" >&2
               missing=1

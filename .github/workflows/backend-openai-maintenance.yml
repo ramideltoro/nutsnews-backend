@@ -1,0 +1,149 @@
+name: Backend OpenAI Maintenance Robot
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: dry-run plans issues, test creates in the backend repo, create routes to production repos.
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - test
+          - create
+      scan_label:
+        description: Optional scan+ timestamp label override for reruns.
+        required: false
+        default: ""
+        type: string
+  schedule:
+    - cron: "43 11 * * *"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: backend-openai-maintenance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    name: OpenAI maintenance scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout backend repo
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          repository: ramideltoro/nutsnews-backend
+          path: repos/nutsnews-backend
+          token: ${{ secrets.NUTSNEWS_MAINTENANCE_GITHUB_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Checkout app repo
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          repository: ramideltoro/nutsnews
+          path: repos/nutsnews
+          token: ${{ secrets.NUTSNEWS_MAINTENANCE_GITHUB_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Checkout infra repo
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          repository: ramideltoro/nutsnews-infra
+          path: repos/nutsnews-infra
+          token: ${{ secrets.NUTSNEWS_MAINTENANCE_GITHUB_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Checkout docs repo
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          repository: ramideltoro/nutsnews-docs
+          path: repos/nutsnews-docs
+          token: ${{ secrets.NUTSNEWS_MAINTENANCE_GITHUB_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Prepare read-only SSH material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for secret_name in NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
+            if [[ -z "${!secret_name}" ]]; then
+              echo "Missing required repository secret: $secret_name" >&2
+              missing=1
+            fi
+          done
+          if [[ "$missing" -ne 0 ]]; then
+            exit "$missing"
+          fi
+
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend_robot"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend_robot"
+
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend_robot" > /dev/null
+          ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Run maintenance robot
+        shell: bash
+        working-directory: repos/nutsnews-backend
+        env:
+          REQUESTED_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'create' }}
+          SCAN_LABEL_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.scan_label || '' }}
+          NUTSNEWS_MAINTENANCE_GITHUB_TOKEN: ${{ secrets.NUTSNEWS_MAINTENANCE_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_ORG_ID: ${{ secrets.OPENAI_ORG_ID }}
+          OPENAI_PROJECT: ${{ secrets.OPENAI_PROJECT }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5.6' }}
+          OPENAI_REASONING_EFFORT: ${{ vars.OPENAI_REASONING_EFFORT || 'low' }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            --mode "$REQUESTED_MODE"
+            --repo-root "ramideltoro/nutsnews=../nutsnews"
+            --repo-root "ramideltoro/nutsnews-backend=."
+            --repo-root "ramideltoro/nutsnews-infra=../nutsnews-infra"
+            --repo-root "ramideltoro/nutsnews-docs=../nutsnews-docs"
+            --ssh-host "$NUTSNEWS_BACKEND_HOST"
+            --ssh-user "${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+            --ssh-key "$HOME/.ssh/nutsnews_backend_robot"
+            --known-hosts "$HOME/.ssh/known_hosts"
+            --output "$RUNNER_TEMP/backend-openai-maintenance-report.json"
+            --summary "$GITHUB_STEP_SUMMARY"
+          )
+
+          if [[ -n "$SCAN_LABEL_INPUT" ]]; then
+            case "$SCAN_LABEL_INPUT" in
+              scan+????-??-??T??-??-??Z) args+=(--scan-label "$SCAN_LABEL_INPUT") ;;
+              *)
+                echo "scan_label must match scan+YYYY-MM-DDTHH-MM-SSZ" >&2
+                exit 1
+                ;;
+            esac
+          fi
+
+          python3 scripts/openai_maintenance_robot.py "${args[@]}"
+
+      - name: Upload maintenance robot report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-openai-maintenance-report
+          path: ${{ runner.temp }}/backend-openai-maintenance-report.json
+          if-no-files-found: error

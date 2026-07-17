@@ -66,6 +66,7 @@ Use [runbooks/BACKEND_HEALTH_REPORT.md](runbooks/BACKEND_HEALTH_REPORT.md) for t
 Use [runbooks/BACKEND_SYNTHETIC_MONITORING.md](runbooks/BACKEND_SYNTHETIC_MONITORING.md) for off-box public endpoint synthetic monitoring.
 Use [runbooks/BACKEND_CLEANUP_MAINTENANCE.md](runbooks/BACKEND_CLEANUP_MAINTENANCE.md) before running cleanup report, dry-run, or apply actions.
 Use [runbooks/BACKEND_RECOVERY.md](runbooks/BACKEND_RECOVERY.md) before running fixed-purpose recovery checks or approved recovery actions.
+Use [runbooks/BACKEND_OPENAI_MAINTENANCE_ROBOT.md](runbooks/BACKEND_OPENAI_MAINTENANCE_ROBOT.md) before changing the daily OpenAI maintenance issue robot.
 Use [runbooks/SERVICE_BASELINE_ATTESTATION.md](runbooks/SERVICE_BASELINE_ATTESTATION.md) before adding optional backend services.
 Use [runbooks/REDIS_VALKEY_DECISION.md](runbooks/REDIS_VALKEY_DECISION.md) before adding Redis or Valkey.
 Use [runbooks/SEARCH_SERVICE_DECISION.md](runbooks/SEARCH_SERVICE_DECISION.md) before adding a dedicated search service.

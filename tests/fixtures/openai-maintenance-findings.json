@@ -1,0 +1,32 @@
+{
+  "findings": [
+    {
+      "title": "Fixture finding for maintenance robot dry-run validation",
+      "fingerprint": "mnt-fixture-001",
+      "detected_repo": "ramideltoro/nutsnews-backend",
+      "target_repo": "ramideltoro/nutsnews-backend",
+      "category": "documentation",
+      "severity": "low",
+      "confidence": "low",
+      "possible_noise": "Fixture-only finding used to validate rendering and artifacts.",
+      "evidence": "tests/fixtures/openai-maintenance-findings.json",
+      "why_matters": "The robot needs a deterministic fixture path for local validation.",
+      "suggested_fix": "Keep the fixture available for unit and dry-run tests.",
+      "acceptance_criteria": [
+        "Dry-run mode renders this fixture as a planned issue."
+      ],
+      "validation_ideas": [
+        "Run scripts/openai_maintenance_robot.py with --openai-response-fixture."
+      ],
+      "related_files": [
+        "scripts/openai_maintenance_robot.py",
+        "tests/test_openai_maintenance_robot.py"
+      ],
+      "secret_redaction_status": "fixture contains no secrets",
+      "labels": [
+        "documentation"
+      ],
+      "possible_duplicate": ""
+    }
+  ]
+}

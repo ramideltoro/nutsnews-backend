@@ -47,7 +47,7 @@ REMOTE_COMMANDS: dict[str, str] = {
     "root_inodes": "df -Pi / | tail -n +2",
     "reboot_required": "test -e /var/run/reboot-required && echo yes || echo no",
     "service_states": (
-        "for unit in ssh ufw fail2ban caddy alloy "
+        "for unit in ssh ufw fail2ban caddy postgresql alloy "
         "nutsnews-backup.service nutsnews-backup-verify.service nutsnews-restore-drill.service "
         "nutsnews-metrics-textfile.service nutsnews-ops-dashboard-collect.service; do "
         "load=$(systemctl show -p LoadState --value \"$unit\" 2>/dev/null || true); "
@@ -383,6 +383,7 @@ def classify_checks(evidence: dict[str, Any]) -> list[dict[str, Any]]:
         ("ufw", True),
         ("fail2ban", True),
         ("caddy", True),
+        ("postgresql", False),
         ("alloy", True),
         ("nutsnews-backup.service", False),
         ("nutsnews-backup-verify.service", False),

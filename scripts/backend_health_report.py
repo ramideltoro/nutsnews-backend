@@ -89,6 +89,11 @@ REMOTE_COMMANDS: dict[str, str] = {
         "cat /var/lib/nutsnews/recovery/last-recovery.json; "
         "else echo not_configured; fi"
     ),
+    "postgres_status": (
+        "if test -r /var/lib/nutsnews/postgres/status.json; then "
+        "cat /var/lib/nutsnews/postgres/status.json; "
+        "else echo not_configured; fi"
+    ),
     "recent_errors": "journalctl -p err..alert -n 25 --no-pager 2>/dev/null || true",
     "sudo_nopasswd": "sudo -n true >/dev/null 2>&1 && echo yes || echo no",
 }
@@ -445,6 +450,35 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
                     f"last_action={recovery_status.get('action', 'unknown')} "
                     f"last_mode={recovery_status.get('mode', 'unknown')} "
                     f"last_status={last_status}"
+                ),
+            }
+        )
+
+    postgres_status_raw = command_stdout(report, "postgres_status").strip()
+    if postgres_status_raw == "not_configured" or not postgres_status_raw:
+        checks.append(
+            {
+                "name": "postgres_restore_readiness",
+                "status": "not_configured",
+                "summary": "postgres_restore_readiness=not_configured",
+            }
+        )
+    else:
+        postgres_status = parse_json_object(postgres_status_raw)
+        last_restore = postgres_status.get("last_restore_drill", {})
+        restore_status = str(last_restore.get("status") or "unknown") if isinstance(last_restore, dict) else "unknown"
+        if restore_status not in {"healthy", "warning", "critical", "unknown", "not_configured"}:
+            restore_status = "unknown"
+        replication = postgres_status.get("replication", {})
+        lag_status = str(replication.get("lag_status") or "not_configured") if isinstance(replication, dict) else "not_configured"
+        checks.append(
+            {
+                "name": "postgres_restore_readiness",
+                "status": restore_status,
+                "summary": (
+                    f"database={postgres_status.get('database', 'unknown')} "
+                    f"restore_drill={restore_status} "
+                    f"replication_lag={lag_status}"
                 ),
             }
         )

@@ -50,7 +50,8 @@ The snapshot distinguishes:
 It includes host uptime, boot time, OS/kernel, load, memory, swap, root disk,
 root inodes, pending reboot, package update count, service states, backup
 freshness, backup verification, restore-drill status, failed units, relevant
-timers, backend `/healthz`, and public TCP listener summaries.
+timers, backend `/healthz`, PostgreSQL failover restore readiness, replication
+lag status for the selected topology, and public TCP listener summaries.
 
 The snapshot excludes secrets, full environment output, private keys, tokens,
 raw auth logs, and unrestricted command output.

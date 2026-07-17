@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "ramideltoro/nutsnews-backend",
-  "updated_at_utc": "2026-07-16",
+  "updated_at_utc": "2026-07-17",
   "status_file_dir": "/var/lib/nutsnews/backups",
   "restic": {
     "repository_secret": "RESTIC_REPOSITORY",
@@ -112,14 +112,15 @@
     {
       "id": "postgresql_data",
       "title": "PostgreSQL data",
-      "current_state": "not_configured",
-      "criticality": "future_critical",
+      "current_state": "configured",
+      "criticality": "critical",
       "data_sources": [
-        "/var/lib/postgresql"
+        "/var/lib/postgresql",
+        "/var/lib/nutsnews/postgres/status.json"
       ],
-      "backup_method": "future_pg_dump_and_or_basebackup_plus_restic",
-      "restore_method": "restore_to_isolated_postgres_and_run_integrity_checks",
-      "verification_method": "future_restore_validation_sql",
+      "backup_method": "restic_paths_plus_supabase_logical_dump_restore_for_rehearsal",
+      "restore_method": "protected_backend_postgres_failover_drill_restores_staging_public_schema_to_rehearsal_database",
+      "verification_method": "restore_drill_required_tables_views_counts_and_status_json",
       "exclusion_rationale": ""
     },
     {

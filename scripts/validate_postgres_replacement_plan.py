@@ -27,11 +27,11 @@ def main() -> int:
     baseline = load_json(BASELINE_PATH)
     errors: list[str] = []
 
-    if plan.get("decision") != "keep_supabase_until_replacement_is_proven":
-        errors.append("decision must keep Supabase until the replacement is proven")
+    if plan.get("decision") != "deploy_private_restore_verified_failover_target":
+        errors.append("decision must deploy the private restore-verified failover target")
 
-    if plan.get("install_postgres_now") is not False:
-        errors.append("install_postgres_now must be false")
+    if plan.get("install_postgres_now") is not True:
+        errors.append("install_postgres_now must be true")
 
     if plan.get("production_cutover_allowed") is not False:
         errors.append("production_cutover_allowed must be false")
@@ -41,8 +41,8 @@ def main() -> int:
         errors.append(f"service baseline exposes unsupported public ports while PostgreSQL is not deployed: {sorted(public_ports)}")
 
     not_deployed = set(baseline.get("not_deployed", []))
-    if "PostgreSQL" not in not_deployed:
-        errors.append("service baseline no longer marks PostgreSQL as not_deployed; update this plan")
+    if "PostgreSQL" in not_deployed:
+        errors.append("service baseline must no longer mark PostgreSQL as not_deployed")
 
     rpo_rto = plan.get("rpo_rto", {})
     for field in ("target_rpo", "target_rto", "current_state"):
@@ -59,10 +59,18 @@ def main() -> int:
         errors.append("target topology must enforce a single production writer")
     if "no multi-writer" not in topology.get("standby", ""):
         errors.append("standby topology must explicitly forbid multi-writer")
-    if "bare Postgres" not in topology.get("data_api", ""):
+    if "bare Postgres" not in topology.get("data_api", "") and "bare PostgreSQL" not in topology.get("data_api", ""):
         errors.append("data API mapping must state bare Postgres is not enough")
     if "no public database port" not in topology.get("network", ""):
         errors.append("network topology must forbid public database ports")
+    if "SSH tunnel" not in topology.get("dashboard", ""):
+        errors.append("dashboard topology must document SSH tunnel access")
+
+    operating_mode = plan.get("initial_operating_mode", {})
+    if operating_mode.get("writer") != "Supabase remains the only production writer.":
+        errors.append("initial operating mode must keep Supabase as the production writer")
+    if operating_mode.get("multi_writer") != "forbidden":
+        errors.append("initial operating mode must forbid multi-writer")
 
     feature_mapping = plan.get("feature_mapping", {})
     for feature in (
@@ -81,24 +89,38 @@ def main() -> int:
             errors.append(f"missing feature mapping: {feature}")
 
     phases = [phase.get("phase") for phase in plan.get("implementation_plan", [])]
-    for phase in ("inventory", "non_production_restore", "compatibility_layer", "backup_pitr", "read_only_rehearsal", "production_cutover"):
+    for phase in ("private_postgres_install", "dashboard_install", "non_production_restore", "observability", "production_cutover"):
         if phase not in phases:
             errors.append(f"missing implementation phase: {phase}")
 
     for phase in plan.get("implementation_plan", []):
-        if phase.get("phase") != "production_cutover" and phase.get("mutation_allowed") is not False:
-            errors.append(f"phase must be non-mutating before cutover: {phase.get('phase')}")
+        if phase.get("phase") == "production_cutover" and phase.get("mutation_allowed") is not False:
+            errors.append("production_cutover must remain disabled in this issue")
+
+    failover = plan.get("failover", {})
+    for field in ("trigger", "app_switch", "production_data_restore", "rpo", "rto"):
+        if field not in failover:
+            errors.append(f"missing failover field: {field}")
+
+    failback = plan.get("failback", {})
+    if failback.get("sync_back_supported") is not False:
+        errors.append("failback must document that sync-back is not supported yet")
+    if "bidirectional sync" not in failback.get("reason", ""):
+        errors.append("failback reason must explain bidirectional sync risk")
 
     rollback = plan.get("rollback", {})
     for field in ("before_cutover", "during_cutover", "after_cutover"):
         if field not in rollback:
             errors.append(f"missing rollback field: {field}")
 
-    if len(plan.get("blockers_for_deploy", [])) < 3:
-        errors.append("plan must document concrete blockers for deployment")
+    if len(plan.get("manual_approvals_before_production_use", [])) < 3:
+        errors.append("plan must document manual approvals before production use")
 
-    if plan.get("validation", {}).get("live_verification") != "read-only until a later approved protected apply":
-        errors.append("live verification must remain read-only until approved protected apply")
+    validation = plan.get("validation", {})
+    if validation.get("drill_workflow") != ".github/workflows/backend-postgres-failover-drill.yml":
+        errors.append("validation must name the backend PostgreSQL restore drill workflow")
+    if "protected apply" not in validation.get("live_verification", ""):
+        errors.append("live verification must include protected apply evidence")
 
     if errors:
         for error in errors:

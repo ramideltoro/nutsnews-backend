@@ -1,16 +1,38 @@
 {
-  "issue": 28,
-  "decision_date_utc": "2026-07-16",
-  "decision": "keep_supabase_until_replacement_is_proven",
-  "install_postgres_now": false,
+  "issue": 13,
+  "decision_date_utc": "2026-07-17",
+  "decision": "deploy_private_restore_verified_failover_target",
+  "install_postgres_now": true,
   "production_cutover_allowed": false,
   "host": "backend",
   "ipv4": "65.75.201.18",
   "source_baseline": "docs/backend-service-baseline.json",
+  "initial_operating_mode": {
+    "writer": "Supabase remains the only production writer.",
+    "self_hosted_role": "private PostgreSQL restore and failover rehearsal target",
+    "sync_mode": "manual logical dump and restore for the first release",
+    "multi_writer": "forbidden",
+    "split_brain_guard": "production writers must be paused before any cutover; no bidirectional writes are configured"
+  },
   "rpo_rto": {
-    "target_rpo": "15 minutes after WAL/PITR is implemented and tested",
-    "target_rto": "4 hours for manual restore or failover after restore drills pass",
-    "current_state": "not guaranteed by this backend repo because production Supabase credentials and backup evidence are unavailable here"
+    "target_rpo": "15 minutes after WAL/PITR or reviewed continuous replication is implemented and tested; manual dump/restore RPO is the age of the latest approved dump until then",
+    "target_rto": "4 hours for controlled restore and app failover after restore drills pass",
+    "current_state": "staging Supabase public schema/data can be restored to the backend rehearsal database; production cutover remains disabled pending a separate approval"
+  },
+  "supabase_capabilities_verified": {
+    "checked_at_utc": "2026-07-17",
+    "sources": [
+      "https://supabase.com/docs/guides/platform/backups",
+      "https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore",
+      "https://supabase.com/docs/guides/database/postgres/setup-replication-external",
+      "https://supabase.com/docs/guides/database/replication"
+    ],
+    "findings": [
+      "Supabase supports CLI logical dumps for backup and restore workflows.",
+      "Supabase daily backups and PITR are provider-side recovery paths; Storage API objects are not included in database backups.",
+      "Supabase documents external logical replication to another PostgreSQL database, but it requires reviewed publication/slot setup and does not solve application failback conflicts by itself.",
+      "Supabase read replicas are managed read-only Supabase Postgres replicas, not this self-hosted backend target."
+    ]
   },
   "current_supabase_usage": {
     "postgres": [
@@ -29,80 +51,89 @@
       "migration_schema_contract",
       "staging_fixture tables"
     ],
-    "postgrest_data_api": "app uses @supabase/supabase-js with anon and service-role keys; self-hosted PostgreSQL alone is not API-compatible",
-    "rls_and_grants": "migrations and regression tests depend on anon/authenticated/service_role grants and RLS behavior",
+    "postgrest_data_api": "app uses @supabase/supabase-js with anon and service-role keys; self-hosted PostgreSQL alone is not API-compatible for production traffic",
+    "rls_and_grants": "public schema dumps include public RLS/grants; restore drills create Supabase API roles before replaying schema",
     "auth": "admin authentication uses NextAuth Google with JWT sessions; Supabase Auth is present in local config but no production app dependency was identified",
-    "storage": "Supabase storage is enabled in local config, but no app storage client usage was identified",
-    "realtime": "Supabase realtime is enabled in local config and CSP permits wss://*.supabase.co, but no app realtime client usage was identified",
+    "storage": "Supabase Storage metadata is excluded from the first restore drill because no app storage client usage was identified and Supabase database backups do not restore object bytes",
+    "realtime": "Supabase Realtime is not part of the first failover target because no app realtime client usage was identified",
     "edge_functions": "no app dependency on Supabase Edge Functions was identified",
     "search": "public search uses Postgres full-text search through public.search_articles",
-    "backups": "current app backup helper is a limited REST export and not a full database backup"
+    "backups": "existing REST backup helper remains diagnostic only; the backend drill uses Supabase CLI logical dump/restore"
   },
   "target_topology": {
     "writer": "single production writer only",
-    "standby": "optional async standby only after PITR and restore drills are proven; no multi-writer topology",
-    "pooling": "pgBouncer required if Vercel/app connection count or direct Postgres access exceeds safe limits",
-    "data_api": "choose PostgREST-compatible layer or app rewrite before cutover; do not point supabase-js at bare Postgres",
-    "network": "database and management dashboard must be private or behind a reviewed access boundary; no public database port",
-    "dashboard": "read-only/admin dashboard requires separate access-control review before exposure"
+    "standby": "private self-hosted PostgreSQL restore target; no multi-writer topology",
+    "pooling": "not enabled for the first release because the database port is private and app traffic is not cut over",
+    "data_api": "production app cutover requires a reviewed PostgREST-compatible layer or app-owned database API rewrite; do not point supabase-js at bare PostgreSQL",
+    "network": "database and Adminer management dashboard are loopback-only with SSH tunnel access; no public database port",
+    "dashboard": "Adminer is bound to 127.0.0.1:8082 through Caddy/PHP-FPM and requires an SSH tunnel plus database credentials"
   },
   "feature_mapping": {
-    "Supabase Postgres tables/functions": "self-hosted PostgreSQL migrations and restore validation",
-    "Supabase REST/PostgREST API": "deploy compatible PostgREST layer or rewrite app to server-owned database APIs",
-    "anon and service_role keys": "replace with explicit JWT/RLS model or app server credentials in protected secrets",
-    "RLS/grants": "port policies and run local RLS regressions against restored non-production data",
-    "Supabase Auth": "keep NextAuth for admin unless a future app issue proves Supabase Auth is used",
-    "Supabase Storage": "keep explicitly not used; choose R2/S3/local storage only if app usage appears",
-    "Supabase Realtime": "keep explicitly not used unless a future feature requires websocket replication",
-    "Supabase Edge Functions": "keep explicitly not used",
-    "full-text search": "keep Postgres full-text search and GIN indexes",
-    "backups": "replace limited REST export with encrypted full database backups plus WAL/PITR"
+    "Supabase Postgres tables/functions": "public schema/data are restored to the backend rehearsal database and validated",
+    "Supabase REST/PostgREST API": "not cut over; requires later PostgREST-compatible layer or app rewrite",
+    "anon and service_role keys": "role names are recreated for schema replay only; production secret replacement is deferred until cutover design",
+    "RLS/grants": "public RLS policies and grants are replayed by logical schema restore",
+    "Supabase Auth": "not restored for the first release because the app uses NextAuth for admin sessions",
+    "Supabase Storage": "excluded from first release; object-byte recovery requires separate storage backup design if app usage appears",
+    "Supabase Realtime": "excluded until app usage appears",
+    "Supabase Edge Functions": "excluded because no app dependency was identified",
+    "full-text search": "pg_trgm is installed and public search objects are restored",
+    "backups": "service-aware restic covers host state; Supabase CLI dump/restore drill proves database restore mechanics"
   },
   "implementation_plan": [
     {
-      "phase": "inventory",
-      "required_evidence": "production Supabase project ref, schema dump, row counts, extensions, grants, RLS policies, API keys inventory, storage/realtime/auth usage confirmation",
-      "mutation_allowed": false
+      "phase": "private_postgres_install",
+      "required_evidence": "protected Ansible check/apply installs PostgreSQL with localhost listen_addresses, no UFW 5432 rule, and generated local role passwords from GitHub Environment secrets",
+      "mutation_allowed": true
+    },
+    {
+      "phase": "dashboard_install",
+      "required_evidence": "Adminer is installed behind Caddy/PHP-FPM on 127.0.0.1:8082 only and documented as SSH-tunnel-only",
+      "mutation_allowed": true
     },
     {
       "phase": "non_production_restore",
-      "required_evidence": "restore latest production-like dump to isolated Postgres and run restore_validation.sql plus app regression tests",
-      "mutation_allowed": false
+      "required_evidence": "backend-postgres-failover-drill restore-staging dumps the staging Supabase public schema/data, restores to nutsnews_restore_rehearsal, validates required tables/views/counts, and writes /var/lib/nutsnews/postgres/status.json",
+      "mutation_allowed": true
     },
     {
-      "phase": "compatibility_layer",
-      "required_evidence": "PostgREST-compatible API or app rewrite validated against staging env vars and RLS/contract tests",
-      "mutation_allowed": false
-    },
-    {
-      "phase": "backup_pitr",
-      "required_evidence": "encrypted off-box base backups, WAL archiving, PITR restore drill, backup freshness alerts, and restore report",
-      "mutation_allowed": false
-    },
-    {
-      "phase": "read_only_rehearsal",
-      "required_evidence": "app can run against restored data in read-only staging with production writes still on Supabase",
-      "mutation_allowed": false
+      "phase": "observability",
+      "required_evidence": "ops dashboard, textfile metrics, and health report expose restore readiness, backup state, and replication lag status",
+      "mutation_allowed": true
     },
     {
       "phase": "production_cutover",
-      "required_evidence": "separate explicit approval, paused writers, final backup, final restore or replication catch-up, env switch, smoke tests, rollback window",
-      "mutation_allowed": true
+      "required_evidence": "separate explicit approval, paused writers, final production dump or reviewed replication catch-up, app compatibility layer, env switch, smoke tests, and rollback window",
+      "mutation_allowed": false
     }
   ],
-  "rollback": {
-    "before_cutover": "discard the self-hosted target and keep Supabase",
-    "during_cutover": "switch app and worker environment variables back to Supabase, resume writers only after consistency is confirmed",
-    "after_cutover": "rollback only within the documented rollback window unless reverse replication is proven; otherwise run a forward recovery plan"
+  "failover": {
+    "trigger": "manual incident decision after Supabase outage or data-access failure exceeds the incident threshold",
+    "app_switch": "not automatic; requires a later reviewed app/API compatibility change before production writes can move",
+    "production_data_restore": "manual protected workflow using production Supabase credentials is intentionally not enabled until staging restore evidence and cutover approval are reviewed",
+    "rpo": "manual dump age until PITR/WAL/replication is implemented",
+    "rto": "target 4 hours after drills pass"
   },
-  "blockers_for_deploy": [
-    "production Supabase credentials and project metadata are not available in this backend repo",
-    "no full production dump, WAL archive, PITR restore drill, or non-production rehearsal evidence exists here",
-    "the app currently uses Supabase/PostgREST-style APIs, so a bare PostgreSQL server is not a drop-in replacement",
-    "protected backend apply and dashboard access boundaries are not yet approved for a database deployment"
+  "failback": {
+    "sync_back_supported": false,
+    "reason": "bidirectional sync is not proven safe for the current Supabase/PostgREST application model and could create write conflicts",
+    "controlled_recovery_path": "prefer forward recovery: pause writers, compare row counts and migration head, choose the authoritative database, then restore or migrate once through a reviewed production procedure"
+  },
+  "rollback": {
+    "before_cutover": "disable backend_postgres_enabled or discard the rehearsal database and keep Supabase as the production writer",
+    "during_cutover": "switch app and worker environment variables back to Supabase, resume writers only after consistency is confirmed",
+    "after_cutover": "rollback only inside the documented rollback window unless reverse replication is proven; otherwise run a forward recovery plan"
+  },
+  "manual_approvals_before_production_use": [
+    "approval to enable a production Supabase dump/restore workflow",
+    "approval for app/API compatibility work such as PostgREST or an app-owned data API",
+    "approval of final production cutover timing and writer pause",
+    "approval of any reverse sync or failback procedure"
   ],
   "validation": {
     "local_validator": "python3 scripts/validate_postgres_replacement_plan.py",
-    "live_verification": "read-only until a later approved protected apply"
+    "ansible_syntax": "/tmp/nutsnews-ansible-venv/bin/ansible-playbook playbooks/bootstrap.yml --syntax-check -i inventories/production/hosts.yml",
+    "drill_workflow": ".github/workflows/backend-postgres-failover-drill.yml",
+    "live_verification": "protected apply plus read-only SSH listener checks and restore-drill status"
   }
 }

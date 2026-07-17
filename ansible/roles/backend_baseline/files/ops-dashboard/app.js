@@ -97,6 +97,26 @@ function renderBackup(backup) {
   }
 }
 
+function renderPostgres(postgres) {
+  const target = document.getElementById("postgres");
+  target.replaceChildren();
+  const restoreStatus = postgres?.last_restore_drill?.status || postgres?.status || "not_configured";
+  const rows = [
+    ["Target", postgres?.database || "not_configured", postgres?.status || "not_configured"],
+    ["Restore Drill", postgres?.last_restore_drill?.completed_at_utc || "not run", restoreStatus],
+    ["Replication", postgres?.replication?.mode || "not_configured", postgres?.replication?.lag_status || "not_configured"],
+    ["Dashboard", postgres?.dashboard?.access_boundary || "not_configured", postgres?.dashboard ? "healthy" : "not_configured"],
+  ];
+  for (const [labelText, detailText, status] of rows) {
+    const row = document.createElement("div");
+    row.className = "status-row";
+    const label = document.createElement("strong");
+    label.textContent = labelText;
+    row.append(label, pill(status, String(detailText || status)));
+    target.append(row);
+  }
+}
+
 function overallStatus(data) {
   const statuses = [
     data.endpoint?.status,
@@ -108,6 +128,7 @@ function overallStatus(data) {
     backupStatus(data.backup?.backup),
     backupStatus(data.backup?.verification),
     backupStatus(data.backup?.restore_drill),
+    data.postgres?.last_restore_drill?.status || data.postgres?.status,
     ...(data.services || []).map((service) => service.status),
   ];
   return statuses.sort((a, b) => (statusRank[b] ?? 2) - (statusRank[a] ?? 2))[0] || "unknown";
@@ -155,6 +176,7 @@ function render(data) {
   renderServices(data.services);
   renderNetwork(data.network);
   renderBackup(data.backup);
+  renderPostgres(data.postgres);
   setText("timers", (data.systemd?.timers || []).join("\n") || "No relevant timers reported.");
 }
 

@@ -1,0 +1,228 @@
+---
+- name: Install PostgreSQL failover target packages
+  ansible.builtin.apt:
+    name: "{{ backend_postgres_packages }}"
+    state: present
+    update_cache: true
+  register: backend_postgres_package_result
+
+- name: Install database dashboard packages
+  ansible.builtin.apt:
+    name: "{{ backend_db_dashboard_packages }}"
+    state: present
+    update_cache: true
+  register: backend_db_dashboard_package_result
+  when: backend_db_dashboard_enabled | bool
+
+- name: Track whether PostgreSQL can be configured in this run
+  ansible.builtin.set_fact:
+    backend_postgres_manageable: "{{ (not ansible_check_mode) or not (backend_postgres_package_result is changed) }}"
+    backend_db_dashboard_manageable: >-
+      {{
+        (not backend_db_dashboard_enabled | bool)
+        or (not ansible_check_mode)
+        or (
+          backend_db_dashboard_package_result is defined
+          and not (backend_db_dashboard_package_result is changed)
+        )
+      }}
+
+- name: Ensure PostgreSQL state directory exists
+  ansible.builtin.file:
+    path: "{{ backend_postgres_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: backend_postgres_manageable | bool
+
+- name: Keep PostgreSQL bound to loopback only
+  ansible.builtin.lineinfile:
+    path: "{{ backend_postgres_config_path }}"
+    regexp: "^#?listen_addresses\\s*="
+    line: "listen_addresses = '{{ backend_postgres_listen_addresses }}'"
+    owner: postgres
+    group: postgres
+    mode: "0644"
+  notify: Restart postgresql
+  when: backend_postgres_manageable | bool
+
+- name: Require SCRAM password hashing for PostgreSQL roles
+  ansible.builtin.lineinfile:
+    path: "{{ backend_postgres_config_path }}"
+    regexp: "^#?password_encryption\\s*="
+    line: "password_encryption = 'scram-sha-256'"
+    owner: postgres
+    group: postgres
+    mode: "0644"
+  notify: Restart postgresql
+  when: backend_postgres_manageable | bool
+
+- name: Allow only loopback TCP PostgreSQL password auth
+  ansible.builtin.blockinfile:
+    path: "{{ backend_postgres_hba_path }}"
+    marker: "# {mark} NUTSNEWS LOOPBACK POSTGRES"
+    block: |
+      host all all 127.0.0.1/32 scram-sha-256
+      host all all ::1/128 scram-sha-256
+  notify: Restart postgresql
+  when: backend_postgres_manageable | bool
+
+- name: Flush PostgreSQL restart before role and database management
+  ansible.builtin.meta: flush_handlers
+  when: backend_postgres_manageable | bool
+
+- name: Ensure PostgreSQL service is enabled and started
+  ansible.builtin.service:
+    name: "{{ backend_postgres_service_name }}"
+    enabled: true
+    state: started
+  when: backend_postgres_manageable | bool
+
+- name: Ensure failover application role exists
+  community.postgresql.postgresql_user:
+    name: "{{ backend_postgres_app_user }}"
+    password: "{{ backend_postgres_app_password }}"
+    role_attr_flags: LOGIN
+    state: present
+  become_user: postgres
+  no_log: true
+  when: backend_postgres_manageable | bool
+
+- name: Ensure failover read-only role exists
+  community.postgresql.postgresql_user:
+    name: "{{ backend_postgres_readonly_user }}"
+    password: "{{ backend_postgres_readonly_password }}"
+    role_attr_flags: LOGIN
+    state: present
+  become_user: postgres
+  no_log: true
+  when: backend_postgres_manageable | bool
+
+- name: Ensure failover database exists
+  community.postgresql.postgresql_db:
+    name: "{{ backend_postgres_database }}"
+    owner: "{{ backend_postgres_app_user }}"
+    encoding: UTF8
+    state: present
+  become_user: postgres
+  when: backend_postgres_manageable | bool
+
+- name: Ensure required PostgreSQL extensions exist in the failover database
+  community.postgresql.postgresql_ext:
+    name: "{{ item }}"
+    db: "{{ backend_postgres_database }}"
+    state: present
+  loop: "{{ backend_postgres_required_extensions }}"
+  become_user: postgres
+  when: backend_postgres_manageable | bool
+
+- name: Allow read-only role to connect to the failover database
+  community.postgresql.postgresql_privs:
+    db: "{{ backend_postgres_database }}"
+    type: database
+    privs: CONNECT
+    roles: "{{ backend_postgres_readonly_user }}"
+    state: present
+  become_user: postgres
+  when: backend_postgres_manageable | bool
+
+- name: Allow read-only role to use the public schema
+  community.postgresql.postgresql_privs:
+    db: "{{ backend_postgres_database }}"
+    type: schema
+    objs: public
+    privs: USAGE
+    roles: "{{ backend_postgres_readonly_user }}"
+    state: present
+  become_user: postgres
+  when: backend_postgres_manageable | bool
+
+- name: Preserve initial PostgreSQL readiness status
+  ansible.builtin.copy:
+    dest: "{{ backend_postgres_state_dir }}/status.json"
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+    content: |
+      {
+        "status": "warning",
+        "database": "{{ backend_postgres_database }}",
+        "rehearsal_database": "{{ backend_postgres_rehearsal_database }}",
+        "source_of_truth": "Supabase remains the only production writer until a protected cutover is separately approved.",
+        "last_restore_drill": {
+          "status": "not_configured"
+        },
+        "replication": {
+          "mode": "manual_dump_restore",
+          "lag_status": "not_configured",
+          "split_brain_guard": "no multi-writer topology"
+        },
+        "dashboard": {
+          "tool": "Adminer",
+          "access_boundary": "loopback_only_ssh_tunnel",
+          "url": "http://{{ backend_db_dashboard_bind }}:{{ backend_db_dashboard_port }}/"
+        }
+      }
+  when: backend_postgres_manageable | bool
+
+- name: Install loopback-only Adminer PHP-FPM pool
+  ansible.builtin.copy:
+    dest: "{{ backend_db_dashboard_php_fpm_pool_dir }}/nutsnews-adminer.conf"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      ; Managed by ramideltoro/nutsnews-backend.
+      [nutsnews-adminer]
+      user = www-data
+      group = www-data
+      listen = {{ backend_db_dashboard_php_fpm_listen }}
+      listen.allowed_clients = 127.0.0.1
+      pm = ondemand
+      pm.max_children = 3
+      pm.process_idle_timeout = 30s
+      pm.max_requests = 200
+      php_admin_value[open_basedir] = {{ backend_db_dashboard_root }}:/tmp
+      php_admin_value[session.save_path] = /tmp
+  notify: Restart database dashboard php-fpm
+  when:
+    - backend_db_dashboard_enabled | bool
+    - backend_db_dashboard_manageable | bool
+
+- name: Flush PHP-FPM restart before Caddy validation
+  ansible.builtin.meta: flush_handlers
+  when:
+    - backend_db_dashboard_enabled | bool
+    - backend_db_dashboard_manageable | bool
+
+- name: Ensure database dashboard PHP-FPM service is enabled and started
+  ansible.builtin.service:
+    name: "{{ backend_db_dashboard_php_fpm_service }}"
+    enabled: true
+    state: started
+  when:
+    - backend_db_dashboard_enabled | bool
+    - backend_db_dashboard_manageable | bool
+
+- name: Capture PostgreSQL loopback listener status
+  ansible.builtin.command: "ss -H -ltn sport = :5432"
+  register: backend_postgres_listener
+  changed_when: false
+  failed_when: false
+  when:
+    - backend_postgres_manageable | bool
+    - not ansible_check_mode
+
+- name: Report PostgreSQL failover target summary
+  ansible.builtin.debug:
+    msg:
+      enabled: "{{ backend_postgres_enabled }}"
+      database: "{{ backend_postgres_database }}"
+      rehearsal_database: "{{ backend_postgres_rehearsal_database }}"
+      listen_addresses: "{{ backend_postgres_listen_addresses }}"
+      dashboard_enabled: "{{ backend_db_dashboard_enabled }}"
+      dashboard_route: "http://{{ backend_db_dashboard_bind }}:{{ backend_db_dashboard_port }}/"
+      access_boundary: loopback_only_ssh_tunnel
+      listener: "{{ backend_postgres_listener.stdout_lines | default([]) }}"

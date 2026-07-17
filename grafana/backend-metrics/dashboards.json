@@ -70,6 +70,16 @@
       ]
     },
     {
+      "title": "NutsNews Backend PostgreSQL Failover",
+      "uid": "nutsnews-backend-postgres-failover",
+      "panels": [
+        {"title": "PostgreSQL Service Active", "unit": "short", "expr": "nutsnews_backend_service_active{job=\"nutsnews-backend-host\",unit=\"postgresql\"}"},
+        {"title": "Failover Restore Ready", "unit": "short", "expr": "nutsnews_backend_postgres_failover_ready{job=\"nutsnews-backend-host\"}"},
+        {"title": "Restore Drill Healthy", "unit": "short", "expr": "nutsnews_backend_postgres_restore_drill_healthy{job=\"nutsnews-backend-host\"}"},
+        {"title": "Replication Lag Configured", "unit": "short", "expr": "nutsnews_backend_postgres_replication_lag_configured{job=\"nutsnews-backend-host\"}"}
+      ]
+    },
+    {
       "title": "NutsNews Backend OS Updates",
       "uid": "nutsnews-backend-os-updates",
       "panels": [
@@ -166,6 +176,19 @@
       "range_seconds": 1800,
       "no_data_state": "OK",
       "summary": "A backend backup, verification, or restore-drill stage is unhealthy."
+    },
+    {
+      "uid": "nn-backend-postgres-restore-not-ready",
+      "title": "NutsNews backend PostgreSQL restore drill not ready",
+      "severity": "warning",
+      "service": "postgresql",
+      "expr": "nutsnews_backend_postgres_failover_ready{job=\"nutsnews-backend-host\"}",
+      "threshold": 1,
+      "evaluator": "lt",
+      "for": "30m",
+      "range_seconds": 3600,
+      "no_data_state": "OK",
+      "summary": "The private PostgreSQL failover target does not have a healthy restore drill."
     },
     {
       "uid": "nn-backend-root-disk-warning",

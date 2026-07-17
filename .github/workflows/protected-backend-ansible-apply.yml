@@ -148,6 +148,10 @@ jobs:
           GRAFANA_CLOUD_LOKI_URL: ${{ secrets.GRAFANA_CLOUD_LOKI_URL }}
           GRAFANA_CLOUD_LOKI_USERNAME: ${{ secrets.GRAFANA_CLOUD_LOKI_USERNAME }}
           GRAFANA_CLOUD_LOKI_PASSWORD: ${{ secrets.GRAFANA_CLOUD_LOKI_PASSWORD }}
+          NUTSNEWS_BACKEND_POSTGRES_ENABLED: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_ENABLED || 'true' }}
+          NUTSNEWS_BACKEND_DB_DASHBOARD_ENABLED: ${{ vars.NUTSNEWS_BACKEND_DB_DASHBOARD_ENABLED || 'true' }}
+          NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD }}
+          NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD }}
         run: |
           set -euo pipefail
 
@@ -266,6 +270,27 @@ jobs:
           if all(logs_values.values()):
               extra_vars["backend_logs_enabled"] = True
               extra_vars.update(logs_values)
+
+          postgres_enabled = os.environ.get("NUTSNEWS_BACKEND_POSTGRES_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+          if postgres_enabled:
+              app_password = os.environ.get("NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD", "")
+              readonly_password = os.environ.get("NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD", "")
+              missing = [
+                  name
+                  for name, value in (
+                      ("NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD", app_password),
+                      ("NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD", readonly_password),
+                  )
+                  if not value
+              ]
+              if missing:
+                  raise SystemExit(f"Missing required PostgreSQL environment secret names: {', '.join(missing)}")
+              extra_vars["backend_postgres_enabled"] = True
+              extra_vars["backend_db_dashboard_enabled"] = (
+                  os.environ.get("NUTSNEWS_BACKEND_DB_DASHBOARD_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
+              )
+              extra_vars["backend_postgres_app_password"] = app_password
+              extra_vars["backend_postgres_readonly_password"] = readonly_password
 
           path = Path(os.environ["RUNNER_TEMP"]) / "backend-extra-vars.json"
           path.write_text(json.dumps(extra_vars), encoding="utf-8")

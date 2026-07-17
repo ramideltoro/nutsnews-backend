@@ -57,6 +57,14 @@ class AnsibleCheckModeGuardTests(unittest.TestCase):
         self.assertIn("when: not ansible_check_mode", backup)
         self.assertIn("no_log: true", backup)
 
+    def test_postgres_skips_service_management_when_check_mode_packages_are_pending(self):
+        postgres = read_role_file("ansible/roles/backend_baseline/tasks/postgres.yml")
+        self.assertIn("register: backend_postgres_package_result", postgres)
+        self.assertIn("backend_postgres_manageable", postgres)
+        self.assertIn("not (backend_postgres_package_result is changed)", postgres)
+        self.assertIn("backend_db_dashboard_manageable", postgres)
+        self.assertIn("when: backend_postgres_manageable | bool", postgres)
+
 
 if __name__ == "__main__":
     unittest.main()

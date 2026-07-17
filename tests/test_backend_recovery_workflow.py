@@ -28,6 +28,7 @@ def evidence(**overrides):
             "ufw=loaded/active\n"
             "fail2ban=loaded/active\n"
             "caddy=loaded/active\n"
+            "postgresql=loaded/active\n"
             "alloy=loaded/active\n"
             "nutsnews-backup.service=loaded/inactive\n"
             "nutsnews-backup-verify.service=loaded/inactive\n"
@@ -91,6 +92,7 @@ class BackendRecoveryWorkflowTests(unittest.TestCase):
         by_name = {item["name"]: item for item in checks}
         self.assertEqual(by_name["service_ssh"]["status"], "healthy")
         self.assertEqual(by_name["service_caddy"]["status"], "healthy")
+        self.assertEqual(by_name["service_postgresql"]["status"], "healthy")
         self.assertEqual(by_name["caddy_config"]["status"], "healthy")
         self.assertEqual(by_name["alloy_config"]["status"], "healthy")
         self.assertEqual(by_name["backup_action_surface"]["status"], "healthy")

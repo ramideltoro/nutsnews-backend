@@ -154,6 +154,8 @@ class BackendMetricsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             state_dir = Path(tmpdir) / "backups"
             state_dir.mkdir()
+            postgres_dir = Path(tmpdir) / "postgres"
+            postgres_dir.mkdir()
             (state_dir / "last-backup.json").write_text(
                 json.dumps(
                     {
@@ -167,11 +169,28 @@ class BackendMetricsTests(unittest.TestCase):
             )
             (state_dir / "last-verification.json").write_text(json.dumps({"status": "healthy"}), encoding="utf-8")
             (state_dir / "last-restore-verification.json").write_text(json.dumps({"status": "healthy"}), encoding="utf-8")
-            with mock.patch.object(metrics, "BACKUP_STATE_DIR", state_dir), mock.patch.object(metrics, "shell", return_value="0"), mock.patch.object(metrics, "service_active", return_value=1):
+            (postgres_dir / "status.json").write_text(
+                json.dumps(
+                    {
+                        "status": "healthy",
+                        "last_restore_drill": {"status": "healthy"},
+                        "replication": {"lag_status": "not_configured"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(metrics, "BACKUP_STATE_DIR", state_dir),
+                mock.patch.object(metrics, "POSTGRES_STATE_DIR", postgres_dir),
+                mock.patch.object(metrics, "shell", return_value="0"),
+                mock.patch.object(metrics, "service_active", return_value=1),
+            ):
                 lines = metrics.collect()
         output = "\n".join(lines)
         self.assertIn('nutsnews_backend_backup_stage_healthy{stage="backup"} 1', output)
         self.assertIn("nutsnews_backend_backup_latest_snapshot_verified 1", output)
+        self.assertIn("nutsnews_backend_postgres_failover_ready 1", output)
+        self.assertIn('nutsnews_backend_postgres_replication_lag_configured{status="not_configured"} 0', output)
         self.assertNotIn("password", output.lower())
 
 

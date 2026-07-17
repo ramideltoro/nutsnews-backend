@@ -1,5 +1,5 @@
 {
-  "observed_at_utc": "2026-07-16T21:15:00Z",
+  "observed_at_utc": "2026-07-17T03:20:00Z",
   "host": "backend",
   "ipv4": "65.75.201.18",
   "kernel": "7.0.0-28-generic",
@@ -56,13 +56,32 @@
       "port": 323,
       "address": "::1",
       "purpose": "local chrony"
+    },
+    {
+      "port": 5432,
+      "address": "127.0.0.1",
+      "purpose": "private PostgreSQL failover target"
+    },
+    {
+      "port": 8081,
+      "address": "127.0.0.1",
+      "purpose": "loopback-only read-only ops dashboard"
+    },
+    {
+      "port": 8082,
+      "address": "127.0.0.1",
+      "purpose": "loopback-only Adminer database dashboard"
+    },
+    {
+      "port": 9085,
+      "address": "127.0.0.1",
+      "purpose": "loopback-only Adminer PHP-FPM pool"
     }
   ],
   "not_deployed": [
     "backend app",
     "Docker Engine",
     "Docker Compose",
-    "PostgreSQL",
     "Redis or Valkey",
     "search service"
   ],
@@ -77,6 +96,9 @@
     "backup policy",
     "service-aware backup desired state",
     "ops dashboard",
+    "private PostgreSQL failover target",
+    "loopback-only Adminer database dashboard",
+    "staging Supabase restore drill workflow",
     "protected apply workflow"
   ],
   "requires_protected_apply": [
@@ -88,6 +110,8 @@
     "monitoring and log retention installation",
     "Caddy health endpoint installation",
     "service-aware backup installation",
+    "PostgreSQL failover target installation",
+    "database dashboard installation",
     "public HTTP/HTTPS firewall enablement"
   ]
 }

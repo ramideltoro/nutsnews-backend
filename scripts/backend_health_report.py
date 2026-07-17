@@ -20,6 +20,11 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 
+try:
+    from scripts import backend_alert_state
+except ModuleNotFoundError:  # pragma: no cover - script-path execution
+    import backend_alert_state
+
 
 TOKEN_RE = re.compile(
     r"(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+|[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})"
@@ -174,6 +179,19 @@ def parse_json_object(text: str) -> dict[str, Any]:
     try:
         data = json.loads(stripped)
     except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def load_previous_report(path: str) -> dict[str, Any]:
+    if not path:
+        return {}
+    previous_path = Path(path)
+    if not previous_path.exists():
+        return {}
+    try:
+        data = json.loads(previous_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -457,6 +475,22 @@ def render_text(report: dict[str, Any]) -> str:
     for check in report["checks"]:
         lines.append(f"- {check['status']}: {check['name']} - {check['summary']}")
 
+    alerting = report.get("alerting", {})
+    if alerting:
+        summary = alerting.get("summary", {})
+        lines.extend(
+            [
+                "",
+                "Alerting:",
+                f"- active_alert_count: {summary.get('active_alert_count', 0)}",
+                f"- notification_count: {summary.get('notification_count', 0)}",
+                f"- suppressed_count: {summary.get('suppressed_count', 0)}",
+                f"- recovered_count: {summary.get('recovered_count', 0)}",
+                f"- last_sent_at: {summary.get('last_sent_at') or 'none'}",
+                f"- last_error: {summary.get('last_error') or report.get('last_error') or 'none'}",
+            ]
+        )
+
     lines.extend(
         [
             "",
@@ -484,6 +518,22 @@ def write_summary(report: dict[str, Any], path: Path) -> None:
     ]
     for key in ("critical", "warning", "unknown", "not_configured", "healthy"):
         lines.append(f"| `{key}` | {report['summary'][key]} |")
+    alerting = report.get("alerting", {})
+    if alerting:
+        summary = alerting.get("summary", {})
+        lines.extend(
+            [
+                "",
+                "## Alerting",
+                "",
+                f"- Active alerts: `{summary.get('active_alert_count', 0)}`",
+                f"- Notifications: `{summary.get('notification_count', 0)}`",
+                f"- Suppressed: `{summary.get('suppressed_count', 0)}`",
+                f"- Recovered: `{summary.get('recovered_count', 0)}`",
+                f"- Last sent: `{summary.get('last_sent_at') or 'none'}`",
+                f"- Last error: `{summary.get('last_error') or report.get('last_error') or 'none'}`",
+            ]
+        )
     lines.extend(["", "## Checks", "", "| Status | Check |", "| --- | --- |"])
     for check in report["checks"]:
         lines.append(f"| `{check['status']}` | {check['summary']} |")
@@ -502,6 +552,41 @@ def send_email(config: SmtpConfig, subject: str, body: str) -> None:
             client.starttls()
         client.login(config.username, config.password)
         client.send_message(message)
+
+
+def failure_class_for_check(check: dict[str, Any]) -> str:
+    name = str(check.get("name", ""))
+    if check.get("status") == "unknown":
+        return "missing_data"
+    if name.startswith("backup_"):
+        return name
+    if "disk" in name or "inode" in name:
+        return "disk_pressure"
+    if name.startswith("service_"):
+        return "service_down"
+    if name == "backend_endpoint_health":
+        return "backend_health"
+    if name in {"reboot_required", "package_updates", "kernel_alignment", "sudo_nopasswd"}:
+        return "maintenance"
+    return name or "unknown"
+
+
+def current_alerts_from_checks(checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    alerts = []
+    for check in checks:
+        status = str(check.get("status", "unknown"))
+        if status in {"healthy", "not_configured"}:
+            continue
+        alerts.append(
+            {
+                "source": "health_report",
+                "service": check.get("name"),
+                "severity": status,
+                "failure_class": failure_class_for_check(check),
+                "message": check.get("summary", check.get("name", "")),
+            }
+        )
+    return alerts
 
 
 def build_report(args: argparse.Namespace) -> dict[str, Any]:
@@ -528,6 +613,14 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     checks, summary = classify(report)
     report["checks"] = checks
     report["summary"] = summary
+    alerting = backend_alert_state.evaluate_alerts(
+        load_previous_report(args.previous_state),
+        current_alerts_from_checks(checks),
+        run_at,
+        cooldown_seconds=args.alert_cooldown_hours * 60 * 60,
+    )
+    report["alerting"] = {"summary": alerting["summary"], "notifications": alerting["notifications"], "suppressed": alerting["suppressed"]}
+    report["alert_state"] = alerting["state"]
 
     if args.send_email:
         config, missing, shape_errors = smtp_config_from_env()
@@ -539,9 +632,16 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         elif config is not None:
             try:
                 subject_prefix = os.environ.get("NUTSNEWS_REPORT_SUBJECT_PREFIX", "[NutsNews backend]").strip()
-                subject = f"{subject_prefix} health report: {summary['critical']} critical, {summary['warning']} warning"
-                send_email(config, subject, render_text(report))
-                report["delivery"] = {"status": "sent", "detail": f"sent_to_count={len(config.recipients)}"}
+                notification_count = report["alerting"]["summary"]["notification_count"]
+                if notification_count > 0:
+                    subject = f"{subject_prefix} health alert: {notification_count} notification(s)"
+                    send_email(config, subject, render_text(report))
+                    report["delivery"] = {"status": "sent", "detail": f"sent_to_count={len(config.recipients)} notifications={notification_count}"}
+                else:
+                    report["delivery"] = {
+                        "status": "skipped",
+                        "detail": f"no unsuppressed notifications; suppressed={report['alerting']['summary']['suppressed_count']}",
+                    }
             except Exception as exc:  # pragma: no cover - network/provider dependent
                 report["delivery"] = {"status": "error", "detail": redact(str(exc))}
                 report["last_error"] = report["delivery"]["detail"]
@@ -564,6 +664,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--next-run-interval-hours", type=int, default=24)
     parser.add_argument("--output", required=True)
     parser.add_argument("--summary", default="")
+    parser.add_argument("--previous-state", default="")
+    parser.add_argument("--alert-cooldown-hours", type=int, default=24)
     parser.add_argument("--send-email", action="store_true")
     return parser.parse_args(argv)
 

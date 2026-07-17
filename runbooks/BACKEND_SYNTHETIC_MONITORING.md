@@ -36,11 +36,15 @@ and records:
 - status and failure class;
 - HTTP status;
 - source provider and runner location;
-- last successful check timestamp when a previous successful report artifact is
+- last successful check timestamp when a previous completed report artifact is
   available.
 
-When `send_email=true`, email is sent only for failures through the existing
-NutsNews reporting SMTP secret names:
+The workflow downloads the previous completed `backend-synthetic-report`
+artifact from `main`. This includes prior failed monitor runs when their
+artifacts were uploaded, which lets repeated failures share cooldown state.
+
+When `send_email=true`, email is sent only for unsuppressed alert notifications
+through the existing NutsNews reporting SMTP secret names:
 
 - `NUTSNEWS_REPORT_SMTP_HOST`
 - `NUTSNEWS_REPORT_SMTP_USERNAME`
@@ -49,8 +53,18 @@ NutsNews reporting SMTP secret names:
 - `NUTSNEWS_REPORT_EMAIL_TO`
 
 The authoritative reporting surface is the GitHub Actions run and its uploaded
-artifact. Notification deduplication and cooldown policy are handled by the
-separate alert-routing work.
+artifact.
+
+Alert fingerprints use the synthetic source, endpoint service name, severity,
+failure class, and normalized failure detail with volatile timestamps, long hex
+IDs, and numbers replaced. Repeated identical failures are suppressed for `1`
+hour. Suppression is visible in `alerting.suppressed` and each active alert
+record carries a cumulative `suppressed_count`.
+
+Recovered endpoint checks emit `severity=recovered` notifications when a
+previously active fingerprint clears. The JSON artifact and step summary expose
+active alert count, notification count, suppressed count, recovered count, last
+sent timestamp, and last error.
 
 ## Validation
 

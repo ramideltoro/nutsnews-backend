@@ -79,6 +79,37 @@ class BackendBackupTests(unittest.TestCase):
         self.assertNotIn("s3.example.test", runner.redact_restic_text(text))
         self.assertIn("URL_REDACTED", runner.redact_restic_text(text))
 
+    def test_snapshot_ids_match_short_and_full_restic_ids(self):
+        runner = load_runner()
+        full_id = "1a999564872b8b31d3ef4a7159316f3541708e6b99f9ba5fa78d53bce7af0c51"
+        self.assertTrue(runner.snapshot_ids_match(full_id, "1a999564"))
+        self.assertTrue(runner.snapshot_ids_match("1a999564", full_id))
+        self.assertFalse(runner.snapshot_ids_match(full_id, "abcdef12"))
+
+    def test_mark_backup_verified_removes_unverified_latest_snapshot_alert(self):
+        runner = load_runner()
+        full_id = "1a999564872b8b31d3ef4a7159316f3541708e6b99f9ba5fa78d53bce7af0c51"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir)
+            backup_path = state_dir / runner.STATUS_FILES["backup"]
+            backup_path.write_text(
+                json.dumps(
+                    {
+                        "status": "healthy",
+                        "snapshot_id": full_id,
+                        "alerts": [
+                            {"kind": "unverified_latest_snapshot", "status": "warning"},
+                            {"kind": "storage_quota_warning", "status": "not_configured"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            runner.mark_backup_verified(state_dir, "1a999564", "2026-07-17T00:08:40Z")
+            updated = json.loads(backup_path.read_text(encoding="utf-8"))
+        self.assertEqual(updated["latest_snapshot_verified_at_utc"], "2026-07-17T00:08:40Z")
+        self.assertEqual(updated["alerts"], [{"kind": "storage_quota_warning", "status": "not_configured"}])
+
     def test_backup_workflow_has_only_fixed_actions(self):
         workflow = Path(".github/workflows/backend-backup-maintenance.yml").read_text(encoding="utf-8")
         self.assertIn("- status", workflow)

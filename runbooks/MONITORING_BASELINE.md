@@ -112,7 +112,10 @@ environment, host, source, service, unit, severity, filename, job
 
 The managed Grafana folder is `NutsNews Backend Ops` (`nutsnews-backend-ops`).
 The logs dashboard is `NutsNews Backend Logs` (`nutsnews-backend-logs`) and uses
-the Grafana Loki datasource discovered by `scripts/provision_grafana_metrics.py`.
+the managed Loki datasource `grafanacloud-nutsnews-backend-loki`
+(`grafanacloud-loki`). The provisioner creates that datasource from the same
+Loki secret names and intentionally avoids Grafana's alert-state-history Loki
+datasource.
 
 ## Alert Delivery
 

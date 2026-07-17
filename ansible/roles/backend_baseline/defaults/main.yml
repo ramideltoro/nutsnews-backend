@@ -57,6 +57,38 @@ backend_ops_dashboard_status_path: /var/www/nutsnews-ops-dashboard/status.json
 backend_ops_dashboard_bind: 127.0.0.1
 backend_ops_dashboard_port: "8081"
 backend_ops_dashboard_collect_interval: "*:0/2:00"
+backend_postgres_enabled: false
+backend_postgres_major_version: "18"
+backend_postgres_service_name: postgresql
+backend_postgres_packages:
+  - postgresql
+  - postgresql-client
+  - postgresql-contrib
+  - python3-psycopg2
+backend_postgres_config_path: "/etc/postgresql/{{ backend_postgres_major_version }}/main/postgresql.conf"
+backend_postgres_hba_path: "/etc/postgresql/{{ backend_postgres_major_version }}/main/pg_hba.conf"
+backend_postgres_state_dir: /var/lib/nutsnews/postgres
+backend_postgres_database: nutsnews_failover
+backend_postgres_rehearsal_database: nutsnews_restore_rehearsal
+backend_postgres_app_user: nutsnews_app
+backend_postgres_readonly_user: nutsnews_readonly
+backend_postgres_app_password: ""
+backend_postgres_readonly_password: ""
+backend_postgres_listen_addresses: localhost
+backend_postgres_required_extensions:
+  - pg_trgm
+backend_db_dashboard_enabled: false
+backend_db_dashboard_bind: 127.0.0.1
+backend_db_dashboard_port: "8082"
+backend_db_dashboard_php_version: "8.5"
+backend_db_dashboard_php_fpm_service: "php{{ backend_db_dashboard_php_version }}-fpm"
+backend_db_dashboard_php_fpm_pool_dir: "/etc/php/{{ backend_db_dashboard_php_version }}/fpm/pool.d"
+backend_db_dashboard_php_fpm_listen: 127.0.0.1:9085
+backend_db_dashboard_root: /usr/share/adminer
+backend_db_dashboard_packages:
+  - adminer
+  - php-fpm
+  - php-pgsql
 backend_backup_enabled: false
 backend_backup_config_dir: /etc/nutsnews-backup
 backend_backup_state_dir: /var/lib/nutsnews/backups

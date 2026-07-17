@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULTS = ROOT / "ansible/roles/backend_baseline/defaults/main.yml"
+POSTGRES_TASKS = ROOT / "ansible/roles/backend_baseline/tasks/postgres.yml"
+CADDY_TASKS = ROOT / "ansible/roles/backend_baseline/tasks/caddy.yml"
+FIREWALL_TASKS = ROOT / "ansible/roles/backend_baseline/tasks/firewall.yml"
+APPLY_WORKFLOW = ROOT / ".github/workflows/protected-backend-ansible-apply.yml"
+DRILL_WORKFLOW = ROOT / ".github/workflows/backend-postgres-failover-drill.yml"
+PLAN = ROOT / "docs/backend-postgres-replacement-plan.json"
+
+
+class BackendPostgresFailoverTests(unittest.TestCase):
+    def test_postgres_defaults_are_private_and_opt_in(self):
+        defaults = DEFAULTS.read_text(encoding="utf-8")
+        self.assertIn("backend_postgres_enabled: false", defaults)
+        self.assertIn("backend_postgres_listen_addresses: localhost", defaults)
+        self.assertIn("backend_db_dashboard_bind: 127.0.0.1", defaults)
+        self.assertIn('backend_db_dashboard_port: "8082"', defaults)
+
+    def test_postgres_tasks_keep_database_and_dashboard_loopback_only(self):
+        tasks = POSTGRES_TASKS.read_text(encoding="utf-8")
+        self.assertIn("listen_addresses = '{{ backend_postgres_listen_addresses }}'", tasks)
+        self.assertIn("host all all 127.0.0.1/32 scram-sha-256", tasks)
+        self.assertIn("listen.allowed_clients = 127.0.0.1", tasks)
+        self.assertIn("backend_db_dashboard_php_fpm_listen", tasks)
+        self.assertIn("no multi-writer topology", tasks)
+
+    def test_caddy_exposes_adminer_only_on_loopback(self):
+        caddy = CADDY_TASKS.read_text(encoding="utf-8")
+        self.assertIn("http://{{ backend_db_dashboard_bind }}:{{ backend_db_dashboard_port }}", caddy)
+        self.assertIn("bind {{ backend_db_dashboard_bind }}", caddy)
+        self.assertIn("php_fastcgi {{ backend_db_dashboard_php_fpm_listen }}", caddy)
+        self.assertNotIn("{{ backend_domain }}/adminer", caddy)
+
+    def test_firewall_does_not_open_database_or_dashboard_ports(self):
+        firewall = FIREWALL_TASKS.read_text(encoding="utf-8")
+        self.assertNotIn("5432", firewall)
+        self.assertNotIn("8082", firewall)
+        self.assertNotIn("9085", firewall)
+
+    def test_protected_apply_wires_postgres_secrets_without_values(self):
+        workflow = APPLY_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("NUTSNEWS_BACKEND_POSTGRES_ENABLED", workflow)
+        self.assertIn("NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD", workflow)
+        self.assertIn("NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD", workflow)
+        self.assertIn('"backend_postgres_enabled"] = True', workflow)
+        self.assertNotIn("postgres://", workflow)
+
+    def test_restore_drill_has_fixed_modes_and_staging_source(self):
+        workflow = DRILL_WORKFLOW.read_text(encoding="utf-8")
+        for mode in ("status", "dry-run", "restore-staging"):
+            self.assertIn(f"- {mode}", workflow)
+        self.assertIn("restore-staging-to-backend-postgres", workflow)
+        self.assertIn("NUTSNEWS_STAGING_SUPABASE_PROJECT_REF", workflow)
+        self.assertIn("supabase db dump --linked --schema public", workflow)
+        self.assertNotIn("NUTSNEWS_PRODUCTION_SUPABASE_DB_URL", workflow)
+        self.assertNotIn("source_project_ref:", workflow.split("permissions:", 1)[0])
+
+    def test_plan_forbids_multi_writer_and_production_cutover(self):
+        plan = json.loads(PLAN.read_text(encoding="utf-8"))
+        self.assertEqual(plan["decision"], "deploy_private_restore_verified_failover_target")
+        self.assertTrue(plan["install_postgres_now"])
+        self.assertFalse(plan["production_cutover_allowed"])
+        self.assertEqual(plan["initial_operating_mode"]["multi_writer"], "forbidden")
+        self.assertFalse(plan["failback"]["sync_back_supported"])
+
+
+if __name__ == "__main__":
+    unittest.main()

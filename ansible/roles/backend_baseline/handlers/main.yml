@@ -49,3 +49,15 @@
     name: caddy
     state: reloaded
   when: not ansible_check_mode
+
+- name: Restart postgresql
+  ansible.builtin.service:
+    name: "{{ backend_postgres_service_name }}"
+    state: restarted
+  when: not ansible_check_mode
+
+- name: Restart database dashboard php-fpm
+  ansible.builtin.service:
+    name: "{{ backend_db_dashboard_php_fpm_service }}"
+    state: restarted
+  when: not ansible_check_mode

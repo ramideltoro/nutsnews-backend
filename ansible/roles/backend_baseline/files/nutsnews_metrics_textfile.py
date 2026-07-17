@@ -15,6 +15,7 @@ from typing import Any
 
 DEFAULT_OUTPUT = Path("/var/lib/nutsnews/metrics/nutsnews.prom")
 BACKUP_STATE_DIR = Path("/var/lib/nutsnews/backups")
+POSTGRES_STATE_DIR = Path("/var/lib/nutsnews/postgres")
 SERVICES = (
     "ssh",
     "ufw",
@@ -82,6 +83,13 @@ def service_active(service: str) -> int:
 def backup_stage_status(stage: str, data: dict[str, Any]) -> tuple[str, int]:
     status = str(data.get("freshness_status") or data.get("status") or "not_configured")
     return status, STATUS_VALUE.get(status, 0)
+
+
+def postgres_status_value(data: dict[str, Any]) -> str:
+    status = str(data.get("status") or "not_configured")
+    if status in STATUS_VALUE:
+        return status
+    return "unknown"
 
 
 def collect() -> list[str]:
@@ -153,6 +161,26 @@ def collect() -> list[str]:
             "# HELP nutsnews_backend_backup_storage_quota_configured Whether backup storage quota guardrail is configured.",
             "# TYPE nutsnews_backend_backup_storage_quota_configured gauge",
             metric("nutsnews_backend_backup_storage_quota_configured", 0 if quota_status == "not_configured" else 1),
+        ]
+    )
+
+    postgres = read_json(POSTGRES_STATE_DIR / "status.json")
+    restore_drill_status = postgres_status_value(postgres.get("last_restore_drill", {}) if isinstance(postgres.get("last_restore_drill"), dict) else {})
+    postgres_status = postgres_status_value(postgres)
+    replication = postgres.get("replication", {}) if isinstance(postgres, dict) else {}
+    lag_status = str(replication.get("lag_status") or "not_configured") if isinstance(replication, dict) else "not_configured"
+    failover_ready = 1 if postgres_status == "healthy" and restore_drill_status == "healthy" else 0
+    lines.extend(
+        [
+            "# HELP nutsnews_backend_postgres_failover_ready Whether the private PostgreSQL failover target has a healthy restore drill.",
+            "# TYPE nutsnews_backend_postgres_failover_ready gauge",
+            metric("nutsnews_backend_postgres_failover_ready", failover_ready),
+            "# HELP nutsnews_backend_postgres_restore_drill_healthy Whether the latest PostgreSQL restore drill is healthy.",
+            "# TYPE nutsnews_backend_postgres_restore_drill_healthy gauge",
+            metric("nutsnews_backend_postgres_restore_drill_healthy", STATUS_VALUE.get(restore_drill_status, 0), {"status": restore_drill_status}),
+            "# HELP nutsnews_backend_postgres_replication_lag_configured Whether continuous replication lag is configured for the selected topology.",
+            "# TYPE nutsnews_backend_postgres_replication_lag_configured gauge",
+            metric("nutsnews_backend_postgres_replication_lag_configured", 0 if lag_status == "not_configured" else 1, {"status": lag_status}),
         ]
     )
 

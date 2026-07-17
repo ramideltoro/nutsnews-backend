@@ -1,21 +1,24 @@
-# PostgreSQL Replacement Plan
+# PostgreSQL Failover Target
 
-This runbook covers backend issue #28 for `65.75.201.18`.
+This runbook covers backend issue #13 for `65.75.201.18`.
 
 ## Acceptance Criteria
 
-- A decision record and implementation plan exist before any production PostgreSQL install.
-- The plan includes RPO/RTO goals, backup/PITR/restore drill, failover behavior, and rollback.
-- Supabase-specific features are mapped to replacements or kept explicitly.
-- No database cutover, migration, `Protected Ansible Apply`, or production mutation is run without separate explicit approval.
+- A decision record and implementation plan exist before production use.
+- PostgreSQL is installed only through the protected backend Ansible pipeline.
+- PostgreSQL listens on loopback only; no public `5432` rule is allowed.
+- The database dashboard is reachable only through an SSH tunnel.
+- A non-production Supabase restore drill proves the restore path before production use.
+- Production cutover remains disabled until a separate reviewed approval covers the app/API compatibility layer, writer pause, final restore/catch-up, smoke tests, and rollback window.
 
 ## Decision
 
-Keep Supabase until a replacement is proven in non-production.
+Deploy a private restore-verified PostgreSQL failover target on the backend host.
 
-Do not install PostgreSQL on the backend host now. Do not cut production traffic over now.
-Public backend HTTP/HTTPS health routing does not change this decision; no
-database process, database dashboard, or database TCP port is deployed.
+Supabase remains the only production writer. The backend PostgreSQL service is not
+active-active, not bidirectional, and not a public database endpoint. The first
+safe operating mode is manual logical dump and restore into a private rehearsal
+database using staging Supabase data.
 
 Machine-readable plan:
 
@@ -29,70 +32,180 @@ Validator:
 python3 scripts/validate_postgres_replacement_plan.py
 ```
 
-## Current Supabase Usage Inventory
+## Supabase Capability Check
 
-Evidence from `ramideltoro/nutsnews` shows:
+Current Supabase documentation supports these safe paths:
 
-- the app uses `@supabase/supabase-js`;
-- public reads use Supabase URL plus anon key;
-- server/admin reads and writes use Supabase URL plus service-role key;
-- the app relies on Supabase/PostgREST-style `.from(...)` and `.rpc(...)` calls;
-- migrations define article, summary, feed, worker, AI usage, review, snapshot, quota, feature flag, release readiness, and migration-contract tables/functions;
-- RLS/grant behavior is covered by regressions;
-- public search uses Postgres full-text search through `public.search_articles`;
-- the current REST backup helper is useful for diagnostics but is not a full database backup.
+- CLI logical dump and restore for migrations and backup/restore workflows;
+- provider daily backups and PITR for supported plans;
+- external logical replication to another PostgreSQL database when a publication
+  and replication slot are explicitly configured;
+- managed Supabase read replicas for read-only capacity inside Supabase.
 
-No app dependency was identified for Supabase Storage, Supabase Realtime, or Supabase Edge Functions. Admin auth currently uses NextAuth Google with JWT sessions, not a Redis or Supabase session store.
+The first backend implementation uses CLI logical dump/restore because it is
+the lowest-risk path to prove self-hosted restore mechanics without introducing
+write conflicts.
 
 ## Target Topology
 
-- One production writer.
-- No multi-writer topology.
-- Optional async standby only after PITR and restore drills are proven.
-- pgBouncer if app connection count or direct Postgres access requires pooling.
-- Database and management dashboard private-only or behind a reviewed access boundary.
-- No public database port.
-- A PostgREST-compatible data API or app rewrite is required before cutover; bare PostgreSQL is not a drop-in replacement for current `supabase-js` usage.
+- Production writer: Supabase only.
+- Backend target: local PostgreSQL on `127.0.0.1:5432`.
+- Rehearsal database: `nutsnews_restore_rehearsal`.
+- Dashboard: Adminer behind Caddy/PHP-FPM on `127.0.0.1:8082`.
+- Secure transport: SSH tunnel to loopback; no remote database TCP access.
+- Public ports: only 22, 80, and 443.
+- Continuous replication: not enabled in this issue; lag is reported as
+  `not_configured`.
+
+## Protected Apply
+
+The normal backend baseline workflow enables PostgreSQL when the
+`production-backend` Environment has:
+
+```text
+NUTSNEWS_BACKEND_POSTGRES_ENABLED=true
+NUTSNEWS_BACKEND_DB_DASHBOARD_ENABLED=true
+NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD
+NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD
+NUTSNEWS_STAGING_SUPABASE_PROJECT_REF
+SUPABASE_ACCESS_TOKEN
+```
+
+Run check mode first:
+
+```bash
+gh workflow run protected-backend-ansible-apply.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f run_mode=check
+```
+
+Apply only after checks are reviewed:
+
+```bash
+gh workflow run protected-backend-ansible-apply.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f run_mode=apply \
+  -f confirm_apply=backend.nutsnews.com
+```
+
+## Dashboard Access
+
+Adminer is not public. Access it with an SSH tunnel:
+
+```bash
+ssh -i ~/.ssh/servercheap_65_75_201_18 \
+  -L 8082:127.0.0.1:8082 \
+  rami@65.75.201.18
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8082/
+```
+
+Use the local PostgreSQL role credentials stored in the protected GitHub
+Environment. Never paste database passwords into issues, PRs, screenshots,
+logs, or run summaries.
+
+## Restore Drill
+
+Dry-run/status:
+
+```bash
+gh workflow run backend-postgres-failover-drill.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f mode=dry-run
+```
+
+Restore staging Supabase public schema/data into the backend rehearsal database:
+
+```bash
+gh workflow run backend-postgres-failover-drill.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f mode=restore-staging \
+  -f confirm_restore=restore-staging-to-backend-postgres
+```
+
+The workflow:
+
+1. links to the staging Supabase project using `SUPABASE_ACCESS_TOKEN`;
+2. dumps only the `public` schema and data;
+3. copies the dump over SSH to the backend host;
+4. recreates `nutsnews_restore_rehearsal`;
+5. restores schema and data as the local `postgres` system user;
+6. validates required NutsNews tables/views and row counts;
+7. writes `/var/lib/nutsnews/postgres/status.json`;
+8. refreshes the ops dashboard and textfile metrics.
+
+## Observability
+
+PostgreSQL readiness appears in:
+
+- `/var/lib/nutsnews/postgres/status.json`;
+- the loopback ops dashboard at `127.0.0.1:8081`;
+- textfile metrics:
+  - `nutsnews_backend_postgres_failover_ready`;
+  - `nutsnews_backend_postgres_restore_drill_healthy`;
+  - `nutsnews_backend_postgres_replication_lag_configured`;
+- recurring backend health reports as `postgres_restore_readiness`.
+
+Backup status remains visible through the existing backup status files and
+Grafana dashboard. The restore drill is database-specific and complements
+service-aware host backups.
 
 ## RPO And RTO
 
-Target after implementation:
+Current tested state:
 
-- RPO: 15 minutes after WAL archiving/PITR is implemented and tested.
-- RTO: 4 hours for manual restore or failover after restore drills pass.
+- RPO: the age of the latest manual/approved dump.
+- RTO: target 4 hours after restore drills pass.
 
-Current backend repo state does not guarantee those targets because production Supabase credentials, full dump evidence, WAL/PITR, and restore drill evidence are not available here.
+Future target:
 
-## Supabase Feature Mapping
+- RPO: 15 minutes after PITR/WAL or reviewed continuous replication is
+  implemented and tested.
+- RTO: 4 hours for controlled restore and app failover.
 
-| Supabase feature | Replacement or explicit keep |
-| --- | --- |
-| Postgres tables/functions | Self-hosted PostgreSQL migrations and restore validation. |
-| REST/PostgREST API | Deploy compatible PostgREST layer or rewrite app to server-owned database APIs. |
-| anon and service-role keys | Replace with explicit JWT/RLS model or app server credentials in protected secrets. |
-| RLS/grants | Port policies and run local RLS regressions against restored non-production data. |
-| Auth | Keep NextAuth for admin unless a future app issue proves Supabase Auth is used. |
-| Storage | Keep explicitly not used; choose R2/S3/local storage only if app usage appears. |
-| Realtime | Keep explicitly not used unless a future feature requires websocket replication. |
-| Edge Functions | Keep explicitly not used. |
-| Full-text search | Keep Postgres full-text search and GIN indexes. |
-| Backups | Replace limited REST export with encrypted full database backups plus WAL/PITR. |
+## Failover
 
-## Implementation Phases
+Failover is not automatic.
 
-1. Inventory production Supabase project metadata, schema, extensions, grants, RLS, row counts, backup state, and secrets.
-2. Restore a production-like dump to an isolated non-production Postgres instance.
-3. Run `supabase/restore_validation.sql`, migration-contract tests, RLS regressions, API contract tests, and app smoke tests against the restored target.
-4. Build either a PostgREST-compatible API layer or an app-owned database API rewrite.
-5. Add encrypted off-box base backups, WAL archiving, PITR restore drills, backup freshness alerts, and restore reports.
-6. Run read-only staging against restored data while production writes remain on Supabase.
-7. Only after separate explicit approval, pause writers, take a final backup, restore or catch up replication, switch env vars, run smoke tests, and monitor.
+Before any production failover:
+
+1. declare the incident and pause production writers if possible;
+2. choose the authoritative source of truth;
+3. run an approved production dump/restore or reviewed replication catch-up;
+4. verify migration head, required tables/views, row counts, and public feed
+   queries;
+5. switch app/worker environment only after the app/API compatibility layer is
+   ready;
+6. smoke-test public reads and protected admin operations;
+7. monitor PostgreSQL, backups, and app errors.
+
+Bare PostgreSQL is not a drop-in replacement for the current Supabase
+PostgREST data API. A production cutover requires a reviewed PostgREST-compatible
+layer or app-owned API change.
+
+## Failback
+
+Sync-back to Supabase is not supported yet.
+
+Bidirectional writes are explicitly forbidden because conflict resolution and
+split-brain prevention are not proven. The safe recovery path is forward-only:
+pause writers, compare evidence, choose one authoritative database, then restore
+or migrate once through a reviewed production procedure.
 
 ## Rollback
 
-Before cutover:
+Before production cutover:
 
-- discard the self-hosted target and keep Supabase.
+- disable `NUTSNEWS_BACKEND_POSTGRES_ENABLED` and run protected apply; or
+- leave PostgreSQL installed but unused and keep Supabase as the writer.
 
 During cutover:
 
@@ -101,12 +214,5 @@ During cutover:
 
 After cutover:
 
-- rollback only inside the documented rollback window unless reverse replication is proven;
-- otherwise run a forward recovery plan.
-
-## Current Blockers For Deployment
-
-- Production Supabase credentials and project metadata are not available in this backend repo.
-- No full production dump, WAL archive, PITR restore drill, or non-production rehearsal evidence exists here.
-- The app currently uses Supabase/PostgREST-style APIs, so a bare PostgreSQL server is not a drop-in replacement.
-- Protected backend apply and dashboard access boundaries are not yet approved for a database deployment.
+- rollback only inside the documented rollback window unless reverse replication
+  is separately proven.

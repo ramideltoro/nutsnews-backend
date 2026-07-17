@@ -37,6 +37,16 @@
           file_server
       }
       {% endif %}
+      {% if backend_db_dashboard_enabled | bool %}
+
+      http://{{ backend_db_dashboard_bind }}:{{ backend_db_dashboard_port }} {
+          bind {{ backend_db_dashboard_bind }}
+          root * {{ backend_db_dashboard_root }}
+          header Cache-Control "no-store"
+          rewrite * /adminer.php
+          php_fastcgi {{ backend_db_dashboard_php_fpm_listen }}
+      }
+      {% endif %}
   notify: Reload caddy
   when: backend_caddy_manageable | bool
 

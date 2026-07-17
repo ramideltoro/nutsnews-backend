@@ -27,6 +27,7 @@ EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 
 
 SERVICES = ("ssh", "ufw", "fail2ban", "caddy", "docker", "postgresql", "alloy", "nutsnews-backup.timer")
+POSTGRES_STATE_DIR = Path("/var/lib/nutsnews/postgres")
 
 
 def utc_now() -> str:
@@ -247,6 +248,7 @@ def collect() -> dict[str, Any]:
         "verification": read_json(backup_dir / "last-verification.json"),
         "restore_drill": read_json(backup_dir / "last-restore-verification.json"),
     }
+    postgres = read_json(POSTGRES_STATE_DIR / "status.json")
 
     return {
         "schema_version": 1,
@@ -285,6 +287,7 @@ def collect() -> dict[str, Any]:
             "timers": [line for line in timers.splitlines() if line.strip()][:20],
         },
         "backup": backup,
+        "postgres": postgres,
         "network": {
             "public_tcp_listeners": listeners,
             "expected_public_tcp_ports": [22, 80, 443],

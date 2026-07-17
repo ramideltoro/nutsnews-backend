@@ -4,9 +4,10 @@ This runbook covers backend backup and restore for `65.75.201.18`.
 
 ## Current State
 
-The backend host has no deployed app runtime, database service, upload storage,
-or other production backend app state yet. It does now have host baseline,
-Caddy, dashboard, and backup-status state that must be covered.
+The backend host has no deployed app runtime, upload storage, or other
+production backend app state yet. It does have host baseline, Caddy, dashboard,
+backup-status state, and a private PostgreSQL restore/failover target that must
+be covered.
 
 The service-aware matrix is:
 
@@ -37,7 +38,7 @@ Provider snapshots are supplemental only. They are useful for fast whole-server 
 | Ops dashboard snapshots | Generated on host | Back up `status.json` for incident evidence; collectors can regenerate |
 | Backup status metadata | Backup runner | Back up `/var/lib/nutsnews/backups` status JSON |
 | Application uploads or local files | Future backend issue | Must use off-server backups before production use |
-| PostgreSQL data | Future database issue | Must use off-server encrypted backups plus restore drills before production use |
+| PostgreSQL data | Backend issue #13 | Host state is covered by service-aware restic paths; database readiness is proven by the protected staging Supabase restore drill before production use |
 | Logs | Host log retention plus future off-server policy | Back up `/var/log/nutsnews` only; avoid unbounded raw logs |
 
 ## Off-Server Target
@@ -73,7 +74,7 @@ Until a workload-specific issue chooses different values:
 | Monthly | 12 |
 | Yearly | 2 |
 
-Retention must be revisited before PostgreSQL or uploads become production dependencies.
+Retention must be revisited before PostgreSQL stores production-writer data or uploads become production dependencies.
 
 ## Restore Test Gate
 
@@ -83,11 +84,13 @@ Minimum restore test:
 
 1. Restore the latest backup to an isolated path or non-production host.
 2. Verify file ownership and permissions.
-3. For database backups, start a non-production PostgreSQL instance and run integrity checks.
+3. For database backups, run `backend-postgres-failover-drill.yml` in `restore-staging` mode and verify `/var/lib/nutsnews/postgres/status.json`.
 4. Confirm the restored data can satisfy the documented RPO/RTO for that workload.
 5. Record the backup snapshot ID, restore target, validation commands, and result in the relevant issue or PR.
 
-No backend database, upload store, or other stateful production service should be enabled until this gate is satisfied.
+No production database cutover, upload store, or other stateful production
+service should depend on this backend host until this gate is satisfied with the
+relevant production-like data.
 
 ## GitOps Components
 

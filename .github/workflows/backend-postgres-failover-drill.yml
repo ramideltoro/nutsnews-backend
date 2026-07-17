@@ -1,0 +1,232 @@
+name: Backend PostgreSQL Failover Drill
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Inspect readiness, dry-run the drill, or restore staging data into the backend rehearsal database.
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - status
+          - dry-run
+          - restore-staging
+      confirm_restore:
+        description: For restore-staging only, type restore-staging-to-backend-postgres.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-backend-postgres-failover-drill
+  cancel-in-progress: false
+
+jobs:
+  drill:
+    name: PostgreSQL failover restore drill
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRM_RESTORE: ${{ inputs.confirm_restore }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            status|dry-run|restore-staging) ;;
+            *) echo "Unsupported mode: $MODE" >&2; exit 1 ;;
+          esac
+          if [[ "$MODE" == "restore-staging" && "$CONFIRM_RESTORE" != "restore-staging-to-backend-postgres" ]]; then
+            echo "restore-staging requires confirm_restore to be exactly restore-staging-to-backend-postgres." >&2
+            exit 1
+          fi
+
+      - name: Validate required secret and variable names
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          NUTSNEWS_STAGING_SUPABASE_PROJECT_REF: ${{ vars.NUTSNEWS_STAGING_SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing required production-backend secret: $name" >&2
+              missing=1
+            fi
+          done
+          if [[ "$MODE" == "restore-staging" ]]; then
+            for name in SUPABASE_ACCESS_TOKEN NUTSNEWS_STAGING_SUPABASE_PROJECT_REF; do
+              if [[ -z "${!name}" ]]; then
+                echo "Missing required production-backend secret or variable: $name" >&2
+                missing=1
+              fi
+            done
+            if [[ -n "$NUTSNEWS_STAGING_SUPABASE_PROJECT_REF" && ! "$NUTSNEWS_STAGING_SUPABASE_PROJECT_REF" =~ ^[a-z0-9]{20}$ ]]; then
+              echo "NUTSNEWS_STAGING_SUPABASE_PROJECT_REF must be a 20-character Supabase project ref." >&2
+              missing=1
+            fi
+          fi
+          exit "$missing"
+
+      - name: Prepare SSH material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Inspect backend PostgreSQL readiness
+        id: status
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            'set -eu
+             echo "postgresql=$(systemctl is-active postgresql 2>/dev/null || true)"
+             echo "adminer_listener=$(ss -H -ltn sport = :8082 2>/dev/null | wc -l | tr -d " ")"
+             echo "postgres_listener=$(ss -H -ltn sport = :5432 2>/dev/null | wc -l | tr -d " ")"
+             if test -r /var/lib/nutsnews/postgres/status.json; then
+               python3 -c "import json; from pathlib import Path; data=json.loads(Path(\"/var/lib/nutsnews/postgres/status.json\").read_text()); last=data.get(\"last_restore_drill\") or {}; replication=data.get(\"replication\") or {}; print(\"status=\" + str(data.get(\"status\", \"unknown\"))); print(\"last_restore_drill=\" + str(last.get(\"status\", \"not_configured\"))); print(\"replication_lag=\" + str(replication.get(\"lag_status\", \"not_configured\")))"
+             else
+               echo "status=not_configured"
+               echo "last_restore_drill=not_configured"
+               echo "replication_lag=not_configured"
+             fi'
+
+      - name: Summarize status-only or dry-run mode
+        if: inputs.mode != 'restore-staging'
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Backend PostgreSQL failover drill"
+            echo
+            echo "- Mode: \`${MODE}\`"
+            echo "- Status inspection completed."
+            echo "- No Supabase dump, database restore, database drop/create, or backend mutation was requested."
+            echo "- The restore mode is fixed to staging Supabase data and requires protected environment approval plus confirmation."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stop before mutation for non-restore modes
+        if: inputs.mode != 'restore-staging'
+        shell: bash
+        run: exit 0
+
+      - name: Install restore drill tooling
+        if: inputs.mode == 'restore-staging'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+          npm install --global supabase@2.105.0
+
+      - name: Dump staging Supabase public schema and data
+        if: inputs.mode == 'restore-staging'
+        shell: bash
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          NUTSNEWS_STAGING_SUPABASE_PROJECT_REF: ${{ vars.NUTSNEWS_STAGING_SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          workdir="$RUNNER_TEMP/supabase-drill"
+          mkdir -p "$workdir/supabase"
+          printf 'project_id = "nutsnews-backend-failover-drill"\n' > "$workdir/supabase/config.toml"
+          supabase link --project-ref "$NUTSNEWS_STAGING_SUPABASE_PROJECT_REF" --workdir "$workdir"
+          supabase db dump --linked --schema public --file "$RUNNER_TEMP/public-schema.sql" --workdir "$workdir"
+          supabase db dump --linked --schema public --data-only --use-copy --file "$RUNNER_TEMP/public-data.sql" --workdir "$workdir"
+
+      - name: Restore staging dump into backend rehearsal database
+        if: inputs.mode == 'restore-staging'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          NUTSNEWS_STAGING_SUPABASE_PROJECT_REF: ${{ vars.NUTSNEWS_STAGING_SUPABASE_PROJECT_REF }}
+          NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE || 'nutsnews_restore_rehearsal' }}
+        run: |
+          set -euo pipefail
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          rehearsal_database="$NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE"
+          if [[ ! "$rehearsal_database" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            echo "Unsafe rehearsal database name." >&2
+            exit 1
+          fi
+
+          remote_dir="/tmp/nutsnews-postgres-drill-${GITHUB_RUN_ID}"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "install -m 0700 -d '$remote_dir'"
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$RUNNER_TEMP/public-schema.sql" \
+            "$RUNNER_TEMP/public-data.sql" \
+            "scripts/backend_postgres_restore_validation.sql" \
+            "scripts/backend_postgres_restore_remote.sh" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/"
+
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "REHEARSAL_DATABASE='$rehearsal_database' REMOTE_DIR='$remote_dir' SOURCE_REF='$NUTSNEWS_STAGING_SUPABASE_PROJECT_REF' GITHUB_RUN_ID='$GITHUB_RUN_ID' bash '$remote_dir/backend_postgres_restore_remote.sh'"
+
+      - name: Summarize completed restore drill
+        if: inputs.mode == 'restore-staging'
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Backend PostgreSQL failover restore drill"
+            echo
+            echo "- Mode: \`restore-staging\`"
+            echo "- Source: protected staging Supabase public schema/data."
+            echo "- Target: backend loopback-only PostgreSQL rehearsal database."
+            echo "- Result: restore and validation completed, and the backend ops dashboard status file was refreshed."
+            echo "- Production Supabase remained the only writer; no production Supabase dump or app cutover was performed."
+          } >> "$GITHUB_STEP_SUMMARY"

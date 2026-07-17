@@ -17,6 +17,10 @@
 - name: Configure monitoring and log retention baseline
   ansible.builtin.import_tasks: monitoring.yml
 
+- name: Configure private PostgreSQL failover target
+  ansible.builtin.import_tasks: postgres.yml
+  when: backend_postgres_enabled | bool
+
 - name: Configure service-aware backup baseline
   ansible.builtin.import_tasks: backup.yml
   when: backend_backup_enabled | bool

@@ -100,6 +100,10 @@ jobs:
         shell: bash
         run: python3 scripts/backend_postgres_parity_validate.py --offline
 
+      - name: Validate backend API compatibility contract
+        shell: bash
+        run: python3 scripts/validate_backend_api_compatibility_contract.py
+
       - name: Validate PostgreSQL smoke tests offline mode
         shell: bash
         run: python3 scripts/backend_postgres_smoke_tests.py --offline

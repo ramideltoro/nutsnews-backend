@@ -1,0 +1,136 @@
+{
+  "contract_id": "backend-api-compatibility-contract",
+  "issue": 111,
+  "decision": "app_owned_backend_api",
+  "status": "backend_contract_committed",
+  "production_cutover_blocker": true,
+  "chosen_pattern": {
+    "summary": "Replace Supabase Data API assumptions with app-owned backend APIs and worker data APIs backed by backend PostgreSQL.",
+    "reject_bare_postgres_for_clients": true,
+    "reject_supabase_js_against_bare_postgres": true,
+    "postgrest_drop_in": "deferred_not_selected_for_cutover",
+    "reason": "The current web and worker code depends on Supabase PostgREST URLs, anon/service-role keys, and RPC paths. Backend PostgreSQL alone cannot satisfy those HTTP and authorization semantics safely."
+  },
+  "provider_modes": [
+    {
+      "mode": "supabase_primary",
+      "writer": "supabase",
+      "serves_production_responses": true,
+      "backend_postgres_writes_allowed": false
+    },
+    {
+      "mode": "backend_postgres_shadow",
+      "writer": "supabase",
+      "serves_production_responses": false,
+      "backend_postgres_writes_allowed": false,
+      "purpose": "Read backend PostgreSQL for comparison only."
+    },
+    {
+      "mode": "backend_postgres_primary",
+      "writer": "backend_postgres",
+      "serves_production_responses": true,
+      "backend_postgres_writes_allowed": true,
+      "requires_cutover_approval": true
+    }
+  ],
+  "required_capabilities": [
+    {
+      "id": "public_feed",
+      "owner_repo": "ramideltoro/nutsnews",
+      "access": "public_read",
+      "supabase_dependency": "public_feed_snapshot PostgREST reads",
+      "backend_contract": "HTTP API returns published feed rows from backend PostgreSQL without exposing database credentials.",
+      "validated_by": "backend_postgres_smoke_tests public_feed"
+    },
+    {
+      "id": "article_detail",
+      "owner_repo": "ramideltoro/nutsnews",
+      "access": "public_read",
+      "supabase_dependency": "articles and article_summaries PostgREST reads",
+      "backend_contract": "HTTP API returns article detail and summaries from backend PostgreSQL.",
+      "validated_by": "backend_postgres_smoke_tests article_detail"
+    },
+    {
+      "id": "public_search",
+      "owner_repo": "ramideltoro/nutsnews",
+      "access": "public_read",
+      "supabase_dependency": "PostgREST filtered article queries",
+      "backend_contract": "HTTP API uses reviewed SQL or database functions for search, with bounded limits.",
+      "validated_by": "backend_postgres_smoke_tests search"
+    },
+    {
+      "id": "admin_readiness",
+      "owner_repo": "ramideltoro/nutsnews",
+      "access": "admin_read",
+      "supabase_dependency": "service-role count and dashboard queries",
+      "backend_contract": "Server-only admin API uses least-privilege backend credentials and existing admin session checks.",
+      "validated_by": "backend_postgres_smoke_tests admin"
+    },
+    {
+      "id": "quota_and_engagement_writes",
+      "owner_repo": "ramideltoro/nutsnews",
+      "access": "server_write",
+      "supabase_dependency": "quota_usage_events insert and record_article_engagement_event RPC",
+      "backend_contract": "Server-only write endpoints execute rollback-tested backend PostgreSQL writes.",
+      "validated_by": "backend_postgres_smoke_tests quota"
+    },
+    {
+      "id": "worker_batches",
+      "owner_repo": "ramideltoro/nutsnews-worker",
+      "access": "worker_write",
+      "supabase_dependency": "worker PostgREST batch reads, upserts, and refresh_public_feed_snapshot RPC",
+      "backend_contract": "Worker API or direct server-side client uses least-privilege backend credentials, not Supabase service-role keys.",
+      "validated_by": "backend_postgres_smoke_tests worker"
+    }
+  ],
+  "authorization_replacement": {
+    "browser": "No database credential or service-role style token is exposed to browser code.",
+    "server_admin": "Admin routes keep existing app auth/session checks before using backend database credentials.",
+    "worker": "Worker credentials are scoped to worker-owned least-privilege reads/writes and rotate separately from app credentials.",
+    "rls_replacement": "Any authorization previously depending on Supabase RLS must move into backend API authorization and focused SQL grants before backend_postgres_primary."
+  },
+  "required_environment": [
+    {
+      "name": "NUTSNEWS_DATABASE_PROVIDER_MODE",
+      "scope": "app_and_worker",
+      "allowed_values": [
+        "supabase_primary",
+        "backend_postgres_shadow",
+        "backend_postgres_primary"
+      ],
+      "safe_default": "supabase_primary"
+    },
+    {
+      "name": "NUTSNEWS_BACKEND_API_URL",
+      "scope": "app_and_worker",
+      "required_for": [
+        "backend_postgres_shadow",
+        "backend_postgres_primary"
+      ]
+    },
+    {
+      "name": "NUTSNEWS_BACKEND_API_TOKEN",
+      "scope": "server_and_worker_only",
+      "required_for": [
+        "backend_postgres_shadow",
+        "backend_postgres_primary"
+      ]
+    }
+  ],
+  "companion_issues": [
+    "https://github.com/ramideltoro/nutsnews/issues/255",
+    "https://github.com/ramideltoro/nutsnews-worker/issues/27"
+  ],
+  "cutover_blockers": [
+    "All required capabilities pass against backend PostgreSQL in non-production.",
+    "App and worker repos can run backend_postgres_shadow without production response changes.",
+    "Service-role style Supabase access is removed from backend_postgres_primary paths.",
+    "Smoke tests and parity validation pass after writer pause.",
+    "Rollback to supabase_primary is documented and tested before production cutover."
+  ],
+  "validation": {
+    "local_validator": "python3 scripts/validate_backend_api_compatibility_contract.py",
+    "smoke_test": "python3 scripts/backend_postgres_smoke_tests.py --offline",
+    "live_status": "blocked until app and worker companion issues are implemented"
+  }
+}

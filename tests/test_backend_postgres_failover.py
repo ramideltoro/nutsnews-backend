@@ -126,6 +126,7 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("chmod 0750", script)
         self.assertIn("chmod 0640", script)
         self.assertIn("GRANT SELECT ON ALL TABLES IN SCHEMA public", script)
+        self.assertIn("GRANT SELECT ON ALL TABLES IN SCHEMA supabase_migrations", primary_script)
         self.assertIn("GRANT INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public", script)
         self.assertIn("GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public", script)
         self.assertIn("refresh materialized view public.public_feed_snapshot", validation)

@@ -124,8 +124,8 @@ def main() -> int:
 
     workflow = manifest.get("workflow", {})
     require_path(errors, workflow.get("path", ""), "workflow.path")
-    if workflow.get("mode") != "validate-production-shadow":
-        errors.append("workflow mode must be validate-production-shadow")
+    if workflow.get("mode") != "validate-production-shadow-behavior":
+        errors.append("workflow mode must be validate-production-shadow-behavior")
     if workflow.get("artifact") != "backend-postgres-behavior-parity-validation":
         errors.append("workflow artifact name is incorrect")
 

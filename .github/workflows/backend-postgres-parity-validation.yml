@@ -12,6 +12,7 @@ on:
           - offline
           - validate-staging
           - validate-production-shadow
+          - validate-production-shadow-behavior
 
 permissions:
   contents: read
@@ -40,7 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$MODE" in
-            offline|validate-staging|validate-production-shadow) ;;
+            offline|validate-staging|validate-production-shadow|validate-production-shadow-behavior) ;;
             *) echo "Unsupported mode: $MODE" >&2; exit 1 ;;
           esac
 
@@ -76,7 +77,7 @@ jobs:
           exit "$missing"
 
       - name: Validate protected production shadow behavior secrets
-        if: inputs.mode == 'validate-production-shadow'
+        if: inputs.mode == 'validate-production-shadow' || inputs.mode == 'validate-production-shadow-behavior'
         shell: bash
         env:
           NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
@@ -95,7 +96,7 @@ jobs:
           exit "$missing"
 
       - name: Prepare SSH material
-        if: inputs.mode == 'validate-staging' || inputs.mode == 'validate-production-shadow'
+        if: inputs.mode == 'validate-staging' || inputs.mode == 'validate-production-shadow' || inputs.mode == 'validate-production-shadow-behavior'
         shell: bash
         env:
           NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
@@ -188,9 +189,10 @@ jobs:
           exit "$rc"
 
       - name: Run protected production shadow behavior parity validation
-        if: inputs.mode == 'validate-production-shadow'
+        if: inputs.mode == 'validate-production-shadow' || inputs.mode == 'validate-production-shadow-behavior'
         shell: bash
         env:
+          MODE: ${{ inputs.mode }}
           NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
           NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE || 'nutsnews_primary_shadow' }}
@@ -242,14 +244,31 @@ jobs:
             docs/supabase-backend-postgres-behavior-parity.json \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/docs/"
           set +e
-          ssh -i "$HOME/.ssh/nutsnews_backend" \
-            -o BatchMode=yes \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
-            "cd '$remote_dir' && NUTSNEWS_PRODUCTION_SUPABASE_DB_URL='$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL' NUTSNEWS_BACKEND_TARGET_DB_URL='$target_url' python3 scripts/backend_postgres_parity_validate.py --manifest docs/supabase-backend-postgres-parity.json --source-db-url-env NUTSNEWS_PRODUCTION_SUPABASE_DB_URL --target-db-url-env NUTSNEWS_BACKEND_TARGET_DB_URL --enforce --output '$remote_dir/backend-postgres-parity-validation.json'"
-          parity_rc="$?"
+          parity_rc=0
+          if [[ "$MODE" == "validate-production-shadow" ]]; then
+            ssh -i "$HOME/.ssh/nutsnews_backend" \
+              -o BatchMode=yes \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+              "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+              "cd '$remote_dir' && NUTSNEWS_PRODUCTION_SUPABASE_DB_URL='$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL' NUTSNEWS_BACKEND_TARGET_DB_URL='$target_url' python3 scripts/backend_postgres_parity_validate.py --manifest docs/supabase-backend-postgres-parity.json --source-db-url-env NUTSNEWS_PRODUCTION_SUPABASE_DB_URL --target-db-url-env NUTSNEWS_BACKEND_TARGET_DB_URL --enforce --output '$remote_dir/backend-postgres-parity-validation.json'"
+            parity_rc="$?"
+          else
+            python3 - <<'PY' > "$RUNNER_TEMP/backend-postgres-parity-validation.json"
+          import json
+          from datetime import datetime, timezone
+
+          report = {
+              "status": "skipped_with_reason",
+              "checked_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+              "reason": "behavior_only_mode",
+              "mode": "validate-production-shadow-behavior",
+              "safe_metadata_only": True,
+          }
+          print(json.dumps(report, indent=2, sort_keys=True))
+          PY
+          fi
           ssh -i "$HOME/.ssh/nutsnews_backend" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \

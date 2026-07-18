@@ -1,0 +1,65 @@
+{
+  "slug": "backend-golden-metrics-apdex",
+  "issue": 175,
+  "dashboard": {
+    "name": "NutsNews Backend - Reliability - Golden Metrics and Apdex",
+    "description": "24 hour dashboard for backend Apdex, throughput, latency, error rate, saturation, and target rationale. Managed from ramideltoro/nutsnews-backend.",
+    "permissions": "PUBLIC_READ_ONLY",
+    "pages": [
+      {
+        "name": "Golden metrics",
+        "description": "Service quality signals for the backend PHP APM entity.",
+        "widgets": [
+          {
+            "title": "Apdex target 0.5s",
+            "layout": {"column": 1, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.billboard"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT apdex(duration, t: 0.5) FROM Transaction WHERE appName = 'nutsnews-backend-production' SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Throughput",
+            "layout": {"column": 5, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT rate(count(*), 1 minute) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Error rate",
+            "layout": {"column": 9, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT percentage(count(*), WHERE error IS true) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Latency percentiles",
+            "layout": {"column": 1, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT percentile(duration, 50, 95, 99) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Host saturation",
+            "layout": {"column": 5, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT average(cpuPercent), average(memoryUsedPercent) FROM SystemSample WHERE hostname = 'backend.nutsnews.com' TIMESERIES SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "PHP-FPM saturation",
+            "layout": {"column": 9, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT latest(php_fpm.pool.activeProcesses), latest(php_fpm.pool.listenQueue), latest(php_fpm.pool.maxChildrenReached) FROM Metric WHERE service.name = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Golden metrics by transaction",
+            "layout": {"column": 1, "row": 7, "height": 3, "width": 8},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT rate(count(*), 1 minute), percentile(duration, 95), percentage(count(*), WHERE error IS true) FROM Transaction WHERE appName = 'nutsnews-backend-production' FACET name LIMIT 10 SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Target rationale",
+            "layout": {"column": 9, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.markdown"},
+            "rawConfiguration": {"text": "Initial Apdex target is 0.5 seconds. Keep it until seven stable production days show a stronger baseline."}
+          }
+        ]
+      }
+    ]
+  }
+}

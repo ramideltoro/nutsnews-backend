@@ -1,0 +1,65 @@
+{
+  "slug": "backend-release-health-regression",
+  "issue": 166,
+  "dashboard": {
+    "name": "NutsNews Backend - Release - Health and Regression",
+    "description": "24 hour dashboard for deploy markers, before/after latency, throughput, errors, logs, new exceptions, and rollback decision signals. Managed from ramideltoro/nutsnews-backend.",
+    "permissions": "PUBLIC_READ_ONLY",
+    "pages": [
+      {
+        "name": "Release health",
+        "description": "Deploy verification and regression triage.",
+        "widgets": [
+          {
+            "title": "Recent deployment markers",
+            "layout": {"column": 1, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT latest(timestamp), latest(revision), latest(changelog), latest(user) FROM Deployment WHERE appName = 'nutsnews-backend-production' FACET deploymentId LIMIT 10 SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Latency before and after deploy",
+            "layout": {"column": 5, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT percentile(duration, 95), average(duration) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago COMPARE WITH 1 day ago"}]}
+          },
+          {
+            "title": "Throughput before and after deploy",
+            "layout": {"column": 9, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT rate(count(*), 1 minute) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago COMPARE WITH 1 day ago"}]}
+          },
+          {
+            "title": "Error rate before and after deploy",
+            "layout": {"column": 1, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT percentage(count(*), WHERE error IS true) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago COMPARE WITH 1 day ago"}]}
+          },
+          {
+            "title": "Log warnings and errors",
+            "layout": {"column": 5, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT count(*) FROM Log WHERE service.name = 'nutsnews-backend-production' AND level IN ('warning', 'error', 'critical') FACET level TIMESERIES SINCE 24 hours ago COMPARE WITH 1 day ago"}]}
+          },
+          {
+            "title": "Exception classes by deployment",
+            "layout": {"column": 9, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT count(*) FROM TransactionError WHERE appName = 'nutsnews-backend-production' FACET error.class, deployment.version LIMIT 20 SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Rollback decision signals",
+            "layout": {"column": 1, "row": 7, "height": 3, "width": 8},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT percentile(duration, 95), percentage(count(*), WHERE error IS true), count(*) FROM Transaction WHERE appName = 'nutsnews-backend-production' FACET deployment.version LIMIT 10 SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Release triage path",
+            "layout": {"column": 9, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.markdown"},
+            "rawConfiguration": {"text": "Confirm marker, compare latency, throughput, errors, and logs, then drill into APM, logs, traces, or rollback runbooks."}
+          }
+        ]
+      }
+    ]
+  }
+}

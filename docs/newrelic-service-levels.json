@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "issues": [161, 175],
+  "service": "nutsnews-backend-production",
+  "environment": "production",
+  "period_days": 30,
+  "apdex": {
+    "target_seconds": 0.5,
+    "rationale": "Initial API responsiveness target for a lightweight backend; revisit after stable production baseline data."
+  },
+  "golden_metrics": [
+    {"name": "throughput", "nrql": "SELECT rate(count(*), 1 minute) FROM Transaction WHERE appName = 'nutsnews-backend-production'"},
+    {"name": "latency", "nrql": "SELECT percentile(duration, 50, 95, 99) FROM Transaction WHERE appName = 'nutsnews-backend-production'"},
+    {"name": "error_rate", "nrql": "SELECT percentage(count(*), WHERE error IS true) FROM Transaction WHERE appName = 'nutsnews-backend-production'"},
+    {"name": "saturation", "nrql": "SELECT average(cpuPercent), average(memoryUsedPercent) FROM SystemSample WHERE hostname = 'backend.nutsnews.com'"}
+  ],
+  "service_levels": [
+    {
+      "id": "availability",
+      "name": "Backend request availability",
+      "target": 99.5,
+      "unit": "percent",
+      "good_event": "Transaction events where error IS false",
+      "valid_event": "All backend Transaction events",
+      "nrql": "SELECT percentage(count(*), WHERE error IS false) FROM Transaction WHERE appName = 'nutsnews-backend-production'"
+    },
+    {
+      "id": "latency",
+      "name": "Backend request latency",
+      "target": 95.0,
+      "unit": "percent_good_events",
+      "good_event": "Transaction events where duration <= 0.75",
+      "valid_event": "All backend Transaction events",
+      "nrql": "SELECT percentage(count(*), WHERE duration <= 0.75) FROM Transaction WHERE appName = 'nutsnews-backend-production'"
+    },
+    {
+      "id": "error_free",
+      "name": "Backend error-free requests",
+      "target": 99.5,
+      "unit": "percent",
+      "good_event": "Transaction events where error IS false",
+      "valid_event": "All backend Transaction events",
+      "nrql": "SELECT percentage(count(*), WHERE error IS false) FROM Transaction WHERE appName = 'nutsnews-backend-production'"
+    },
+    {
+      "id": "freshness",
+      "name": "Feed freshness",
+      "target": 99.0,
+      "unit": "percent_good_events",
+      "good_event": "Feed refresh samples where workflow.feedRefresh.ageSeconds <= 900",
+      "valid_event": "All feed refresh freshness samples",
+      "nrql": "SELECT percentage(count(*), WHERE workflow.feedRefresh.ageSeconds <= 900) FROM Metric WHERE service.name = 'nutsnews-backend-production'"
+    }
+  ],
+  "review_after": "Collect seven production days before tightening targets."
+}

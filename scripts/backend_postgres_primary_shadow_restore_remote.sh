@@ -90,9 +90,12 @@ done
 if sudo -n -u postgres psql -v ON_ERROR_STOP=1 -At -d "$TARGET_DATABASE" -c "select 1" >/dev/null 2>&1; then
   while IFS= read -r subscription_name; do
     [[ -n "$subscription_name" ]] || continue
-    sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$TARGET_DATABASE" -v subscription="$subscription_name" <<'SQL'
+    sudo -n -u postgres psql -d "$TARGET_DATABASE" -v subscription="$subscription_name" >/dev/null 2>&1 <<'SQL' || true
 ALTER SUBSCRIPTION :"subscription" DISABLE;
-DROP SUBSCRIPTION :"subscription";
+ALTER SUBSCRIPTION :"subscription" SET (slot_name = NONE);
+SQL
+    sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$TARGET_DATABASE" -v subscription="$subscription_name" <<'SQL'
+DROP SUBSCRIPTION IF EXISTS :"subscription";
 SQL
   done < <(
     sudo -n -u postgres psql -v ON_ERROR_STOP=1 -At -d "$TARGET_DATABASE" <<'SQL'

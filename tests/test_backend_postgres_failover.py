@@ -109,6 +109,9 @@ class BackendPostgresFailoverTests(unittest.TestCase):
 
     def test_restore_runner_has_supabase_auth_shim_and_cleans_dumps(self):
         script = (ROOT / "scripts/backend_postgres_restore_remote.sh").read_text(encoding="utf-8")
+        primary_script = (ROOT / "scripts/backend_postgres_primary_shadow_restore_remote.sh").read_text(
+            encoding="utf-8"
+        )
         validation = (ROOT / "scripts/backend_postgres_restore_validation.sql").read_text(encoding="utf-8")
         tasks = POSTGRES_TASKS.read_text(encoding="utf-8")
         self.assertIn("CREATE SCHEMA IF NOT EXISTS auth", script)
@@ -126,6 +129,8 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("GRANT INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public", script)
         self.assertIn("GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public", script)
         self.assertIn("refresh materialized view public.public_feed_snapshot", validation)
+        self.assertIn("ALTER SUBSCRIPTION :\"subscription\" SET (slot_name = NONE);", primary_script)
+        self.assertIn("DROP SUBSCRIPTION IF EXISTS :\"subscription\";", primary_script)
 
     def test_plan_forbids_multi_writer_and_production_cutover(self):
         plan = json.loads(PLAN.read_text(encoding="utf-8"))

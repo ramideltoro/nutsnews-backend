@@ -239,3 +239,29 @@ jobs:
             echo "- Result: restore and validation completed, and the backend ops dashboard status file was refreshed."
             echo "- Production Supabase remained the only writer; no production Supabase dump or app cutover was performed."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Collect restore drill status artifact
+        if: always() && inputs.mode == 'restore-staging'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "sudo -n cat /var/lib/nutsnews/postgres/status.json" \
+            > "$RUNNER_TEMP/backend-postgres-failover-drill-status.json"
+
+      - name: Upload restore drill status
+        if: always() && inputs.mode == 'restore-staging'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-postgres-failover-drill-status
+          path: ${{ runner.temp }}/backend-postgres-failover-drill-status.json
+          if-no-files-found: ignore

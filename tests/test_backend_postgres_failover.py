@@ -33,6 +33,21 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("backend_db_dashboard_php_fpm_listen", tasks)
         self.assertIn("no multi-writer topology", tasks)
 
+    def test_database_connect_grants_target_database_objects_explicitly(self):
+        tasks = POSTGRES_TASKS.read_text(encoding="utf-8")
+        failover_grant = tasks.split("- name: Allow read-only role to connect to the failover database", 1)[1].split(
+            "- name: Allow migration roles to connect to the future-primary shadow database",
+            1,
+        )[0]
+        shadow_grant = tasks.split(
+            "- name: Allow migration roles to connect to the future-primary shadow database",
+            1,
+        )[1].split("- name: Allow read-only role to use the public schema", 1)[0]
+        self.assertIn('objs: "{{ backend_postgres_database }}"', failover_grant)
+        self.assertIn('objs: "{{ backend_postgres_primary_shadow_database }}"', shadow_grant)
+        self.assertIn("{{ backend_postgres_app_user }}", shadow_grant)
+        self.assertIn("{{ backend_postgres_replication_user }}", shadow_grant)
+
     def test_caddy_exposes_adminer_only_on_loopback(self):
         caddy = CADDY_TASKS.read_text(encoding="utf-8")
         self.assertIn("http://{{ backend_db_dashboard_bind }}:{{ backend_db_dashboard_port }}", caddy)

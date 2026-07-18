@@ -11,6 +11,14 @@ on:
         options:
           - status
           - run-proof
+      source_database:
+        description: Source database to back up and restore into an isolated proof target.
+        required: true
+        default: primary-shadow
+        type: choice
+        options:
+          - primary-shadow
+          - rehearsal
       confirm_restore:
         description: For run-proof only, type prove-backend-postgres-backup-restore.
         required: false
@@ -41,12 +49,17 @@ jobs:
         shell: bash
         env:
           MODE: ${{ inputs.mode }}
+          SOURCE_DATABASE: ${{ inputs.source_database }}
           CONFIRM_RESTORE: ${{ inputs.confirm_restore }}
         run: |
           set -euo pipefail
           case "$MODE" in
             status|run-proof) ;;
             *) echo "Unsupported mode: $MODE" >&2; exit 1 ;;
+          esac
+          case "$SOURCE_DATABASE" in
+            primary-shadow|rehearsal) ;;
+            *) echo "Unsupported source_database: $SOURCE_DATABASE" >&2; exit 1 ;;
           esac
           if [[ "$MODE" == "run-proof" && "$CONFIRM_RESTORE" != "prove-backend-postgres-backup-restore" ]]; then
             echo "run-proof requires confirm_restore to be exactly prove-backend-postgres-backup-restore." >&2
@@ -113,10 +126,27 @@ jobs:
           NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
           NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
           NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE || 'nutsnews_restore_rehearsal' }}
+          NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE || 'nutsnews_primary_shadow' }}
+          SOURCE_DATABASE_KIND: ${{ inputs.source_database }}
         run: |
           set -euo pipefail
           ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
-          proof_database="nutsnews_backup_restore_proof"
+          case "$SOURCE_DATABASE_KIND" in
+            rehearsal)
+              source_database="$NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE"
+              proof_database="nutsnews_backup_restore_proof"
+              restore_scope="backend_postgresql_rehearsal_database"
+              ;;
+            primary-shadow)
+              source_database="$NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE"
+              if [[ "$source_database" != "nutsnews_primary_shadow" ]]; then
+                echo "Primary shadow backup proof is fixed to nutsnews_primary_shadow." >&2
+                exit 1
+              fi
+              proof_database="nutsnews_primary_shadow_backup_restore_proof"
+              restore_scope="backend_postgresql_primary_shadow_database"
+              ;;
+          esac
           remote_dir="/tmp/nutsnews-postgres-backup-proof-${GITHUB_RUN_ID}"
           manifest_version="$(python3 - <<'PY'
           import json
@@ -146,14 +176,18 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
-            "sudo -n env REHEARSAL_DATABASE='$NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE' PROOF_DATABASE='$proof_database' REMOTE_DIR='$remote_dir' GITHUB_RUN_ID='$GITHUB_RUN_ID' GITHUB_REPOSITORY='$GITHUB_REPOSITORY' MANIFEST_VERSION='$manifest_version' bash '$remote_dir/backend_postgres_backup_restore_proof_remote.sh'"
+            "sudo -n env SOURCE_DATABASE='$source_database' PROOF_DATABASE='$proof_database' RESTORE_SCOPE='$restore_scope' REMOTE_DIR='$remote_dir' GITHUB_RUN_ID='$GITHUB_RUN_ID' GITHUB_REPOSITORY='$GITHUB_REPOSITORY' MANIFEST_VERSION='$manifest_version' bash '$remote_dir/backend_postgres_backup_restore_proof_remote.sh'"
+          proof_status_path="/var/lib/nutsnews/postgres/backup-restore-proof.json"
+          if [[ "$SOURCE_DATABASE_KIND" == "primary-shadow" ]]; then
+            proof_status_path="/var/lib/nutsnews/postgres/primary-shadow-backup-restore-proof.json"
+          fi
           ssh -i "$HOME/.ssh/nutsnews_backend" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
-            "sudo -n cat /var/lib/nutsnews/postgres/backup-restore-proof.json" \
+            "sudo -n cat '$proof_status_path'" \
             | tee "$RUNNER_TEMP/backend-postgres-backup-restore-proof.json"
 
       - name: Validate proof artifact shape
@@ -174,6 +208,7 @@ jobs:
             echo "## Backend PostgreSQL backup restore proof"
             echo
             echo "- Mode: \`${{ inputs.mode }}\`"
+            echo "- Source database: \`${{ inputs.source_database }}\`"
             echo "- Report artifact contains safe metadata only."
             echo "- Database URLs, passwords, tokens, dumps, and row data are not printed."
           } >> "$GITHUB_STEP_SUMMARY"

@@ -64,6 +64,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backend_postgres_backup_proof.py
 
+      - name: Validate PostgreSQL primary shadow backup restore proof plan
+        shell: bash
+        run: python3 scripts/validate_backend_postgres_primary_shadow_backup_restore_proof_plan.py
+
       - name: Validate Grafana metrics dashboards
         shell: bash
         run: python3 scripts/provision_grafana_metrics.py --check

@@ -88,6 +88,25 @@ backup-proof databases. Restore evidence must include:
 - RPO/RTO seconds;
 - protected workflow operator and workflow URL.
 
+## Primary shadow backup/restore proof
+
+After #212 restores `nutsnews_primary_shadow`, prove backend-owned backup and
+restore into an isolated proof database:
+
+```bash
+gh workflow run backend-postgres-backup-restore-proof.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f mode=run-proof \
+  -f source_database=primary-shadow \
+  -f confirm_restore=prove-backend-postgres-backup-restore
+```
+
+The source is `nutsnews_primary_shadow`; the isolated restore target is
+`nutsnews_primary_shadow_backup_restore_proof`. The workflow must record
+snapshot id, restore target, duration, validation result, RPO/RTO, and operator
+without uploading dump files or row data.
+
 ## Cleanup
 
 Each workflow must remove temporary dump files before completion. If cleanup

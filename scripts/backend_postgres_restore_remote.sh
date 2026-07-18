@@ -9,8 +9,12 @@ case "${REHEARSAL_DATABASE:-}" in
 esac
 
 remote_dir="${REMOTE_DIR:?REMOTE_DIR is required}"
-source_ref="${SOURCE_REF:?SOURCE_REF is required}"
-run_id="${GITHUB_RUN_ID:?GITHUB_RUN_ID is required}"
+: "${SOURCE_REF:?SOURCE_REF is required}"
+: "${GITHUB_RUN_ID:?GITHUB_RUN_ID is required}"
+manifest_version="${MANIFEST_VERSION:-unknown}"
+schema_dump_sha256="${SCHEMA_DUMP_SHA256:-unknown}"
+data_dump_sha256="${DATA_DUMP_SHA256:-unknown}"
+started_epoch="$(date -u +%s)"
 
 cleanup_remote_dir() {
   if [[ "${remote_dir:-}" != /tmp/nutsnews-postgres-drill-* ]]; then
@@ -89,12 +93,15 @@ CREATE TABLE IF NOT EXISTS auth.users (
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 SQL
 
+# shellcheck disable=SC2024
 if ! sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$REHEARSAL_DATABASE" -f "$remote_dir/public-schema.sql" > "$remote_dir/schema-restore.log" 2>&1; then
   echo "Schema restore failed; last schema log lines follow." >&2
   tail -n 120 "$remote_dir/schema-restore.log" >&2 || true
   exit 1
 fi
+# shellcheck disable=SC2024
 sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$REHEARSAL_DATABASE" -f "$remote_dir/public-data.sql" > "$remote_dir/data-restore.log" 2>&1
+# shellcheck disable=SC2024
 sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$REHEARSAL_DATABASE" -f "$remote_dir/backend_postgres_restore_validation.sql" > "$remote_dir/validation.log" 2>&1
 
 row_counts=$(sudo -n -u postgres psql -At -d "$REHEARSAL_DATABASE" <<'SQL'
@@ -118,7 +125,9 @@ SQL
 )
 
 completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-ROW_COUNTS="$row_counts" COMPLETED_AT="$completed_at" python3 - <<'PY' > "$remote_dir/status.json"
+completed_epoch="$(date -u +%s)"
+duration_seconds=$((completed_epoch - started_epoch))
+ROW_COUNTS="$row_counts" COMPLETED_AT="$completed_at" DURATION_SECONDS="$duration_seconds" MANIFEST_VERSION="$manifest_version" SCHEMA_DUMP_SHA256="$schema_dump_sha256" DATA_DUMP_SHA256="$data_dump_sha256" python3 - <<'PY' > "$remote_dir/status.json"
 import json
 import os
 
@@ -132,7 +141,13 @@ status = {
         "source": "supabase_staging_public_schema",
         "source_project_ref": os.environ["SOURCE_REF"],
         "completed_at_utc": os.environ["COMPLETED_AT"],
+        "duration_seconds": int(os.environ["DURATION_SECONDS"]),
         "workflow_run_id": os.environ["GITHUB_RUN_ID"],
+        "manifest_version": os.environ["MANIFEST_VERSION"],
+        "dump_checksums": {
+            "public_schema_sha256": os.environ["SCHEMA_DUMP_SHA256"],
+            "public_data_sha256": os.environ["DATA_DUMP_SHA256"],
+        },
         "row_counts": json.loads(os.environ["ROW_COUNTS"] or "{}"),
     },
     "replication": {

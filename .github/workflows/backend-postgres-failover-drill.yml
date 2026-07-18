@@ -208,13 +208,22 @@ jobs:
             "scripts/backend_postgres_restore_remote.sh" \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/"
 
+          schema_sha256="$(sha256sum "$RUNNER_TEMP/public-schema.sql" | awk '{print $1}')"
+          data_sha256="$(sha256sum "$RUNNER_TEMP/public-data.sql" | awk '{print $1}')"
+          manifest_version="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          print(json.loads(Path("docs/supabase-backend-postgres-parity.json").read_text()).get("version", "unknown"))
+          PY
+          )"
+
           ssh -i "$HOME/.ssh/nutsnews_backend" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
-            "REHEARSAL_DATABASE='$rehearsal_database' REMOTE_DIR='$remote_dir' SOURCE_REF='$NUTSNEWS_STAGING_SUPABASE_PROJECT_REF' GITHUB_RUN_ID='$GITHUB_RUN_ID' bash '$remote_dir/backend_postgres_restore_remote.sh'"
+            "REHEARSAL_DATABASE='$rehearsal_database' REMOTE_DIR='$remote_dir' SOURCE_REF='$NUTSNEWS_STAGING_SUPABASE_PROJECT_REF' GITHUB_RUN_ID='$GITHUB_RUN_ID' MANIFEST_VERSION='$manifest_version' SCHEMA_DUMP_SHA256='$schema_sha256' DATA_DUMP_SHA256='$data_sha256' bash '$remote_dir/backend_postgres_restore_remote.sh'"
 
       - name: Summarize completed restore drill
         if: inputs.mode == 'restore-staging'

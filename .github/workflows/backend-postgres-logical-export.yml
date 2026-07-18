@@ -1,0 +1,167 @@
+name: Backend PostgreSQL Logical Export
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Plan export metadata or export staging Supabase into ephemeral runner storage.
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - export-staging
+      confirm_export:
+        description: For export-staging only, type export-staging-supabase.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-postgres-logical-export
+  cancel-in-progress: false
+
+jobs:
+  export:
+    name: Supabase logical export
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate inputs
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRM_EXPORT: ${{ inputs.confirm_export }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            plan|export-staging) ;;
+            *) echo "Unsupported mode: $MODE" >&2; exit 1 ;;
+          esac
+          if [[ "$MODE" == "export-staging" && "$CONFIRM_EXPORT" != "export-staging-supabase" ]]; then
+            echo "export-staging requires confirm_export to be exactly export-staging-supabase." >&2
+            exit 1
+          fi
+
+      - name: Plan export without dumping data
+        if: inputs.mode == 'plan'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' > "$RUNNER_TEMP/supabase-logical-export-metadata.json"
+          import json
+          from datetime import datetime, timezone
+
+          now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+          print(json.dumps({
+              "status": "planned",
+              "checked_at_utc": now,
+              "mode": "plan",
+              "safe_metadata_only": True,
+              "notes": [
+                  "No Supabase link, dump, restore, or database mutation was performed.",
+                  "export-staging requires protected environment approval and exact confirmation."
+              ]
+          }, indent=2, sort_keys=True))
+          PY
+          cat "$RUNNER_TEMP/supabase-logical-export-metadata.json"
+
+      - name: Validate staging export secrets
+        if: inputs.mode == 'export-staging'
+        shell: bash
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          NUTSNEWS_STAGING_SUPABASE_PROJECT_REF: ${{ vars.NUTSNEWS_STAGING_SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in SUPABASE_ACCESS_TOKEN NUTSNEWS_STAGING_SUPABASE_PROJECT_REF; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing required production-backend secret or variable: $name" >&2
+              missing=1
+            fi
+          done
+          if [[ -n "$NUTSNEWS_STAGING_SUPABASE_PROJECT_REF" && ! "$NUTSNEWS_STAGING_SUPABASE_PROJECT_REF" =~ ^[a-z0-9]{20}$ ]]; then
+            echo "NUTSNEWS_STAGING_SUPABASE_PROJECT_REF must be a 20-character Supabase project ref." >&2
+            missing=1
+          fi
+          exit "$missing"
+
+      - name: Install export tooling
+        if: inputs.mode == 'export-staging'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+          npm install --global supabase@2.105.0
+
+      - name: Export staging Supabase logical dumps
+        if: inputs.mode == 'export-staging'
+        shell: bash
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          NUTSNEWS_STAGING_SUPABASE_PROJECT_REF: ${{ vars.NUTSNEWS_STAGING_SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          workdir="$RUNNER_TEMP/supabase-export"
+          mkdir -p "$workdir/supabase"
+          printf 'project_id = "nutsnews-backend-logical-export"\n' > "$workdir/supabase/config.toml"
+          supabase link --project-ref "$NUTSNEWS_STAGING_SUPABASE_PROJECT_REF" --workdir "$workdir"
+          supabase db dump --linked --role-only --file "$RUNNER_TEMP/roles.sql" --workdir "$workdir"
+          supabase db dump --linked --schema public --file "$RUNNER_TEMP/public-schema.sql" --workdir "$workdir"
+          supabase db dump --linked --schema public --data-only --use-copy --file "$RUNNER_TEMP/public-data.sql" --workdir "$workdir"
+          supabase db dump --linked --schema supabase_migrations --file "$RUNNER_TEMP/supabase-migrations.sql" --workdir "$workdir" || true
+
+          python3 scripts/supabase_logical_export_metadata.py \
+            --source-environment staging \
+            --source-project-ref "$NUTSNEWS_STAGING_SUPABASE_PROJECT_REF" \
+            --started-at-utc "$started_at" \
+            --roles-dump "$RUNNER_TEMP/roles.sql" \
+            --schema-dump "$RUNNER_TEMP/public-schema.sql" \
+            --data-dump "$RUNNER_TEMP/public-data.sql" \
+            --migration-history-dump "$RUNNER_TEMP/supabase-migrations.sql" \
+            --output "$RUNNER_TEMP/supabase-logical-export-metadata.json"
+
+      - name: Remove temporary dump files
+        if: always() && inputs.mode == 'export-staging'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for dump_path in "$RUNNER_TEMP/roles.sql" "$RUNNER_TEMP/public-schema.sql" "$RUNNER_TEMP/public-data.sql" "$RUNNER_TEMP/supabase-migrations.sql"; do
+            if [[ -e "$dump_path" ]]; then
+              shred -u "$dump_path" 2>/dev/null || rm -f "$dump_path"
+            fi
+          done
+
+      - name: Summarize safe metadata
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Supabase logical export"
+            echo
+            echo "- Mode: \`${{ inputs.mode }}\`"
+            echo "- Only safe metadata is uploaded."
+            echo "- Dump files, database URLs, tokens, passwords, service-role keys, and row data are not uploaded."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload export metadata
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: supabase-logical-export-metadata
+          path: ${{ runner.temp }}/supabase-logical-export-metadata.json
+          if-no-files-found: ignore

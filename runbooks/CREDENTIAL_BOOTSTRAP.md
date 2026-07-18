@@ -110,6 +110,7 @@ Supabase:
 - `NUTSNEWS_PRODUCTION_SUPABASE_ANON_KEY`
 - `NUTSNEWS_PRODUCTION_SUPABASE_SERVICE_ROLE_KEY`
 - `NUTSNEWS_PRODUCTION_SUPABASE_DB_URL`
+- `NUTSNEWS_STAGING_SUPABASE_DB_URL`
 
 Use a Supabase personal access token for CLI and Management API automation. Keep the service role key and database URL only in protected secrets.
 

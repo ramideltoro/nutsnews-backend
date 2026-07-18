@@ -89,6 +89,17 @@ def first_json_object(raw: str | None) -> dict[str, Any]:
     return {}
 
 
+def first_data_line(raw: str | None) -> str:
+    for line in (raw or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(("INSERT ", "UPDATE ", "DELETE ")):
+            continue
+        return stripped
+    return ""
+
+
 def column_metadata(db_url: str, schema: str, table: str) -> tuple[list[dict[str, Any]], str | None]:
     sql = f"""
 with pk as (
@@ -321,7 +332,8 @@ where {where_sql}
 returning {qident(update_column['name'])}::text
 """
         updated_text, error = run_psql(source_url, update_sql)
-        if error or not updated_text:
+        updated_value = first_data_line(updated_text)
+        if error or not updated_value:
             blockers.append("source_probe_update_failed")
             return {
                 "table": table_name,
@@ -337,7 +349,7 @@ returning {qident(update_column['name'])}::text
         update_ok, seconds, poll_error = poll(
             target_url,
             f"select coalesce((select {qident(update_column['name'])}::text from {qtable(schema, table)} where {where_sql} limit 1), '')",
-            updated_text.strip(),
+            updated_value,
             poll_timeout,
         )
         timings["update_seconds"] = seconds

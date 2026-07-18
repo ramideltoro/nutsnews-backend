@@ -179,9 +179,14 @@ class BackendMetricsTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            (postgres_dir / "replication-health.json").write_text(
+                json.dumps({"replication": {"lag_status": "healthy", "max_lag_seconds": 12, "blockers": []}}),
+                encoding="utf-8",
+            )
             with (
                 mock.patch.object(metrics, "BACKUP_STATE_DIR", state_dir),
                 mock.patch.object(metrics, "POSTGRES_STATE_DIR", postgres_dir),
+                mock.patch.object(metrics, "POSTGRES_REPLICATION_HEALTH_PATH", postgres_dir / "replication-health.json"),
                 mock.patch.object(metrics, "shell", return_value="0"),
                 mock.patch.object(metrics, "service_active", return_value=1),
             ):
@@ -190,7 +195,9 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertIn('nutsnews_backend_backup_stage_healthy{stage="backup"} 1', output)
         self.assertIn("nutsnews_backend_backup_latest_snapshot_verified 1", output)
         self.assertIn("nutsnews_backend_postgres_failover_ready 1", output)
-        self.assertIn('nutsnews_backend_postgres_replication_lag_configured{status="not_configured"} 0', output)
+        self.assertIn('nutsnews_backend_postgres_replication_lag_configured{status="healthy"} 1', output)
+        self.assertIn("nutsnews_backend_postgres_replication_blockers 0", output)
+        self.assertIn("nutsnews_backend_postgres_replication_max_lag_seconds 12", output)
         self.assertNotIn("password", output.lower())
 
 

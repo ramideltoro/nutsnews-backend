@@ -58,6 +58,26 @@
   notify: Restart postgresql
   when: backend_postgres_manageable | bool
 
+- name: Configure PostgreSQL benchmark and maintenance observability
+  ansible.builtin.lineinfile:
+    path: "{{ backend_postgres_config_path }}"
+    regexp: "^#?{{ item.name }}\\s*="
+    line: "{{ item.name }} = {{ item.value }}"
+    owner: postgres
+    group: postgres
+    mode: "0644"
+  loop:
+    - name: log_min_duration_statement
+      value: "{{ backend_postgres_log_min_duration_statement }}"
+    - name: log_autovacuum_min_duration
+      value: "{{ backend_postgres_log_autovacuum_min_duration }}"
+    - name: track_io_timing
+      value: "{{ backend_postgres_track_io_timing }}"
+    - name: autovacuum
+      value: "{{ backend_postgres_autovacuum }}"
+  notify: Restart postgresql
+  when: backend_postgres_manageable | bool
+
 - name: Allow only loopback TCP PostgreSQL password auth
   ansible.builtin.blockinfile:
     path: "{{ backend_postgres_hba_path }}"

@@ -120,6 +120,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_supabase_backend_postgres_parity.py
 
+      - name: Validate Supabase backend PostgreSQL behavior parity manifest
+        shell: bash
+        run: python3 scripts/validate_supabase_backend_postgres_behavior_parity.py
+
       - name: Validate Supabase platform parity decision
         shell: bash
         run: python3 scripts/validate_supabase_platform_parity_decision.py
@@ -135,6 +139,10 @@ jobs:
       - name: Validate parity comparison offline mode
         shell: bash
         run: python3 scripts/backend_postgres_parity_validate.py --offline
+
+      - name: Validate behavior parity comparison offline mode
+        shell: bash
+        run: python3 scripts/backend_postgres_behavior_parity_validate.py --offline
 
       - name: Validate backend API compatibility contract
         shell: bash

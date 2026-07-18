@@ -1,0 +1,122 @@
+{
+  "manifest_id": "supabase-backend-postgres-behavior-parity",
+  "version": 1,
+  "issue": 215,
+  "tracking_issue": 120,
+  "updated_at_utc": "2026-07-18",
+  "source": {
+    "environment": "production",
+    "db_url_secret": "NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL",
+    "direct_connection_required": true
+  },
+  "target": {
+    "database": "nutsnews_primary_shadow",
+    "db_url_env": "NUTSNEWS_BACKEND_TARGET_DB_URL",
+    "network_path": "ssh_tunnel_to_loopback_postgresql",
+    "public_5432_allowed": false
+  },
+  "safe_metadata_only": true,
+  "comparison_method": "compare_catalog_query_sha256",
+  "required_categories": [
+    "schemas",
+    "extensions",
+    "routines",
+    "triggers",
+    "indexes",
+    "constraints",
+    "sequences",
+    "rls_policies",
+    "grants",
+    "default_privileges",
+    "roles",
+    "migration_history"
+  ],
+  "catalog_checks": [
+    {
+      "id": "schemas",
+      "category": "schemas",
+      "sensitivity": "metadata_hash_only",
+      "query": "select coalesce(jsonb_agg(jsonb_build_object('schema', nspname) order by nspname), '[]'::jsonb)::text from pg_namespace where nspname in ('public', 'supabase_migrations')"
+    },
+    {
+      "id": "extensions",
+      "category": "extensions",
+      "sensitivity": "metadata_hash_only",
+      "query": "select coalesce(jsonb_agg(jsonb_build_object('name', e.extname, 'version', e.extversion, 'schema', n.nspname) order by e.extname), '[]'::jsonb)::text from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname in ('pg_trgm')"
+    },
+    {
+      "id": "routines",
+      "category": "routines",
+      "sensitivity": "metadata_hash_only",
+      "query": "select coalesce(jsonb_agg(jsonb_build_object('schema', n.nspname, 'name', p.proname, 'args', pg_get_function_identity_arguments(p.oid), 'return_type', pg_get_function_result(p.oid), 'definition_md5', md5(pg_get_functiondef(p.oid))) order by n.nspname, p.proname, pg_get_function_identity_arguments(p.oid)), '[]'::jsonb)::text from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public'"
+    },
+    {
+      "id": "triggers",
+      "category": "triggers",
+      "sensitivity": "metadata_hash_only",
+      "query": "select coalesce(jsonb_agg(jsonb_build_object('schema', n.nspname, 'table', c.relname, 'name', t.tgname, 'enabled', t.tgenabled, 'definition_md5', md5(pg_get_triggerdef(t.oid))) order by n.nspname, c.relname, t.tgname), '[]'::jsonb)::text from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace where not t.tgisinternal and n.nspname = 'public'"
+    },
+    {
+      "id": "indexes",
+      "category": "indexes",
+      "sensitivity": "metadata_hash_only",
+      "query": "select coalesce(jsonb_agg(jsonb_build_object('schema', schemaname, 'table', tablename, 'index', indexname, 'definition_md5', md5(indexdef)) order by schemaname, tablename, indexname), '[]'::jsonb)::text from pg_indexes where schemaname = 'public'"
+    },
+    {
+      "id": "constraints",
+      "category": "constraints",
+      "sensitivity": "metadata_hash_only",
+      "query": "select coalesce(jsonb_agg(jsonb_build_object('schema', n.nspname, 'table', c.relname, 'constraint', con.conname, 'type', con.contype, 'definition_md5', md5(pg_get_constraintdef(con.oid))) order by n.nspname, c.relname, con.conname), '[]'::jsonb)::text from pg_constraint con join pg_class c on c.oid = con.conrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public'"
+    },
+    {
+      "id": "sequences",
+      "category": "sequences",
+      "sensitivity": "metadata_hash_only",
+      "query": "select coalesce(jsonb_agg(jsonb_build_object('schema', schemaname, 'sequence', sequencename, 'data_type', data_type, 'start_value', start_value, 'min_value', min_value, 'max_value', max_value, 'increment_by', increment_by, 'cycle', cycle, 'cache_size', cache_size, 'last_value', last_value) order by schemaname, sequencename), '[]'::jsonb)::text from pg_sequences where schemaname = 'public'"
+    },
+    {
+      "id": "rls_policies",
+      "category": "rls_policies",
+      "sensitivity": "metadata_hash_only",
+      "query": "select coalesce(jsonb_agg(jsonb_build_object('schema', schemaname, 'table', tablename, 'policy', policyname, 'permissive', permissive, 'roles', roles, 'cmd', cmd, 'qual_md5', md5(coalesce(qual, '')), 'with_check_md5', md5(coalesce(with_check, ''))) order by schemaname, tablename, policyname), '[]'::jsonb)::text from pg_policies where schemaname = 'public'"
+    },
+    {
+      "id": "grants",
+      "category": "grants",
+      "sensitivity": "metadata_hash_only",
+      "query": "select coalesce(jsonb_agg(jsonb_build_object('schema', table_schema, 'table', table_name, 'grantee', grantee, 'privilege', privilege_type, 'grantable', is_grantable) order by table_schema, table_name, grantee, privilege_type), '[]'::jsonb)::text from information_schema.role_table_grants where table_schema = 'public' and grantee in ('anon', 'authenticated', 'service_role', 'nutsnews_readonly', 'nutsnews_migration_validation', 'nutsnews_app')"
+    },
+    {
+      "id": "default_privileges",
+      "category": "default_privileges",
+      "sensitivity": "metadata_hash_only",
+      "query": "select coalesce(jsonb_agg(jsonb_build_object('owner', r.rolname, 'schema', n.nspname, 'object_type', d.defaclobjtype, 'acl_md5', md5(coalesce(array_to_string(d.defaclacl, ','), ''))) order by r.rolname, n.nspname, d.defaclobjtype), '[]'::jsonb)::text from pg_default_acl d join pg_roles r on r.oid = d.defaclrole left join pg_namespace n on n.oid = d.defaclnamespace where n.nspname is null or n.nspname in ('public', 'supabase_migrations')"
+    },
+    {
+      "id": "roles",
+      "category": "roles",
+      "sensitivity": "metadata_hash_only",
+      "query": "select coalesce(jsonb_agg(jsonb_build_object('role', rolname, 'superuser', rolsuper, 'inherit', rolinherit, 'create_role', rolcreaterole, 'create_db', rolcreatedb, 'can_login', rolcanlogin, 'replication', rolreplication, 'bypass_rls', rolbypassrls) order by rolname), '[]'::jsonb)::text from pg_roles where rolname in ('anon', 'authenticated', 'service_role')"
+    },
+    {
+      "id": "migration_history",
+      "category": "migration_history",
+      "sensitivity": "metadata_hash_only",
+      "query": "select coalesce(jsonb_agg(jsonb_build_object('version', version, 'name_md5', md5(coalesce(name, ''))) order by version), '[]'::jsonb)::text from supabase_migrations.schema_migrations"
+    }
+  ],
+  "workflow": {
+    "path": ".github/workflows/backend-postgres-parity-validation.yml",
+    "mode": "validate-production-shadow",
+    "artifact": "backend-postgres-behavior-parity-validation"
+  },
+  "validation": {
+    "manifest_validator": "python3 scripts/validate_supabase_backend_postgres_behavior_parity.py",
+    "offline_validator": "python3 scripts/backend_postgres_behavior_parity_validate.py --offline"
+  },
+  "cutover_policy": {
+    "failed_required_check_blocks_cutover": true,
+    "supabase_remains_writer_until_issue": 119,
+    "app_worker_writes_to_backend_allowed": false
+  }
+}

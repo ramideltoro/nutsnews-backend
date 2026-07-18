@@ -79,14 +79,14 @@ jobs:
         if: inputs.mode == 'validate-production-shadow'
         shell: bash
         env:
-          NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL }}
+          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
           NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
           NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
           NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
           missing=0
-          for name in NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
+          for name in NUTSNEWS_PRODUCTION_SUPABASE_DB_URL NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
             if [[ -z "${!name}" ]]; then
               echo "Missing required production-backend secret: $name" >&2
               missing=1
@@ -191,7 +191,7 @@ jobs:
         if: inputs.mode == 'validate-production-shadow'
         shell: bash
         env:
-          NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL }}
+          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
           NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE || 'nutsnews_primary_shadow' }}
           NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
@@ -214,7 +214,7 @@ jobs:
           print(f"postgresql://{user}:{password}@127.0.0.1:5432/{database}")
           PY
           )"
-          echo "::add-mask::$NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL"
+          echo "::add-mask::$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL"
           echo "::add-mask::$target_url"
           ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
           remote_dir="/tmp/nutsnews-postgres-behavior-parity-${GITHUB_RUN_ID}"
@@ -248,7 +248,7 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
-            "cd '$remote_dir' && NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL='$NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL' NUTSNEWS_BACKEND_TARGET_DB_URL='$target_url' python3 scripts/backend_postgres_parity_validate.py --manifest docs/supabase-backend-postgres-parity.json --source-db-url-env NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL --target-db-url-env NUTSNEWS_BACKEND_TARGET_DB_URL --enforce --output '$remote_dir/backend-postgres-parity-validation.json'"
+            "cd '$remote_dir' && NUTSNEWS_PRODUCTION_SUPABASE_DB_URL='$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL' NUTSNEWS_BACKEND_TARGET_DB_URL='$target_url' python3 scripts/backend_postgres_parity_validate.py --manifest docs/supabase-backend-postgres-parity.json --source-db-url-env NUTSNEWS_PRODUCTION_SUPABASE_DB_URL --target-db-url-env NUTSNEWS_BACKEND_TARGET_DB_URL --enforce --output '$remote_dir/backend-postgres-parity-validation.json'"
           parity_rc="$?"
           ssh -i "$HOME/.ssh/nutsnews_backend" \
             -o BatchMode=yes \
@@ -256,7 +256,7 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
-            "cd '$remote_dir' && NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL='$NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL' NUTSNEWS_BACKEND_TARGET_DB_URL='$target_url' python3 scripts/backend_postgres_behavior_parity_validate.py --manifest docs/supabase-backend-postgres-behavior-parity.json --source-db-url-env NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL --target-db-url-env NUTSNEWS_BACKEND_TARGET_DB_URL --source-label production_supabase --target-label nutsnews_primary_shadow --enforce --output '$remote_dir/backend-postgres-behavior-parity-validation.json'"
+            "cd '$remote_dir' && NUTSNEWS_PRODUCTION_SUPABASE_DB_URL='$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL' NUTSNEWS_BACKEND_TARGET_DB_URL='$target_url' python3 scripts/backend_postgres_behavior_parity_validate.py --manifest docs/supabase-backend-postgres-behavior-parity.json --source-db-url-env NUTSNEWS_PRODUCTION_SUPABASE_DB_URL --target-db-url-env NUTSNEWS_BACKEND_TARGET_DB_URL --source-label production_supabase --target-label nutsnews_primary_shadow --enforce --output '$remote_dir/backend-postgres-behavior-parity-validation.json'"
           behavior_rc="$?"
           set -e
           scp -i "$HOME/.ssh/nutsnews_backend" \

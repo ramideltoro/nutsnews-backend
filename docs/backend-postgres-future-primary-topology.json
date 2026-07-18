@@ -23,7 +23,7 @@
     "environment": "production",
     "system": "Supabase Postgres",
     "authoritative_writer": "production_supabase",
-    "direct_connection_secret": "NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL",
+    "direct_connection_secret": "NUTSNEWS_PRODUCTION_SUPABASE_DB_URL",
     "pooler_connection_allowed_for_logical_replication": false,
     "project_ref_secret": "NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF",
     "access_token_secret": "SUPABASE_ACCESS_TOKEN"

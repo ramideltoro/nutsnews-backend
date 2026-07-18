@@ -67,7 +67,7 @@ gh workflow run backend-postgres-logical-replication.yml \
 Production setup uses the same workflow with `environment_name=production` and
 confirmation `setup-production-logical-replication`. Production setup is fixed
 to `nutsnews_primary_shadow`, uses
-`NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL`, creates a backend subscription
+`NUTSNEWS_PRODUCTION_SUPABASE_DB_URL`, creates a backend subscription
 with `copy_data=false`, and does not permit app or worker writes to the backend.
 
 Do not run production setup until #211 provisioning, #212 restore, and #215

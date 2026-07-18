@@ -63,7 +63,7 @@
   ],
   "source": {
     "connection_pooler_allowed": false,
-    "db_url_secret": "NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL",
+    "db_url_secret": "NUTSNEWS_PRODUCTION_SUPABASE_DB_URL",
     "direct_connection_required": true,
     "ipv4_or_ipv6_requirement_must_be_recorded": true,
     "project_ref_secret": "NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF"
@@ -78,7 +78,7 @@
     "production_writes_allowed": false,
     "required_before_production": true,
     "required_status": "streaming_or_equivalent_healthy",
-    "source_db_url_secret": "NUTSNEWS_STAGING_SUPABASE_DB_DIRECT_URL",
+    "source_db_url_secret": "NUTSNEWS_STAGING_SUPABASE_DB_URL",
     "target_database_variable": "NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE"
   },
   "production_shadow": {
@@ -88,7 +88,7 @@
       212,
       215
     ],
-    "source_db_url_secret": "NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL",
+    "source_db_url_secret": "NUTSNEWS_PRODUCTION_SUPABASE_DB_URL",
     "target_database": "nutsnews_primary_shadow",
     "target_database_variable": "NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE",
     "subscription_copy_data_after_restore": false,

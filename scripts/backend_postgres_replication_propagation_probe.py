@@ -16,6 +16,10 @@ from typing import Any
 
 CANDIDATES = [
     ("public", "runtime_feature_flags"),
+    ("public", "worker_runs"),
+    ("public", "ai_usage_runs"),
+    ("public", "quota_usage_events"),
+    ("public", "feed_health"),
     ("public", "migration_schema_contract"),
     ("public", "release_readiness"),
 ]
@@ -124,6 +128,14 @@ def value_sql(column: dict[str, Any], token: str, phase: str) -> str:
         name = str(column.get("name", ""))
         short = token[:12]
         short_suffix = "u" if phase == "updated" else "i"
+        if name in {"status", "run_status"}:
+            return literal("completed" if phase == "updated" else "started")
+        if name in {"worker", "worker_name", "job_name", "task_name"}:
+            return literal(f"codex_probe_{short}")
+        if name in {"event", "event_name", "event_type", "usage_type"}:
+            return literal("codex_probe")
+        if name in {"provider", "model", "model_name"}:
+            return literal("codex_probe")
         if name == "key":
             return literal(f"codex_probe_{short}_{short_suffix}")
         if name == "migration_head":

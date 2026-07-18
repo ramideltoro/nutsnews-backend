@@ -100,6 +100,10 @@ jobs:
         shell: bash
         run: python3 scripts/backend_postgres_parity_validate.py --offline
 
+      - name: Validate PostgreSQL smoke tests offline mode
+        shell: bash
+        run: python3 scripts/backend_postgres_smoke_tests.py --offline
+
       - name: Run backend drift check tests
         shell: bash
         run: python3 -m unittest discover -s tests

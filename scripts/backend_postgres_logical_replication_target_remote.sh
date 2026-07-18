@@ -24,8 +24,6 @@ for identifier in "$PUBLICATION_NAME" "$SLOT_NAME" "$SUBSCRIPTION_NAME"; do
   esac
 done
 
-q_publication="\"$PUBLICATION_NAME\""
-q_subscription="\"$SUBSCRIPTION_NAME\""
 started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 sudo -n -u postgres pg_isready -q -d "$target_database"
@@ -43,20 +41,26 @@ SQL
 )"
 
 if [[ "$sub_exists" == "t" || "$sub_exists" == "true" || "$sub_exists" == "1" ]]; then
-  sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$target_database" \
-    -v source_conn="$SOURCE_DB_URL" <<SQL
-alter subscription $q_subscription disable;
-alter subscription $q_subscription connection :'source_conn';
-alter subscription $q_subscription set publication $q_publication with (refresh = false);
-alter subscription $q_subscription enable;
-SQL
-else
+  echo '{"phase":"update_existing_subscription","safe_metadata_only":true}'
   sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$target_database" \
     -v source_conn="$SOURCE_DB_URL" \
-    -v slot_name="$SLOT_NAME" <<SQL
-create subscription $q_subscription
-connection :'source_conn'
-publication $q_publication
+    -v publication="$PUBLICATION_NAME" \
+    -v subscription="$SUBSCRIPTION_NAME" <<'SQL'
+ALTER SUBSCRIPTION :"subscription" DISABLE;
+ALTER SUBSCRIPTION :"subscription" CONNECTION :'source_conn';
+ALTER SUBSCRIPTION :"subscription" SET PUBLICATION :"publication" WITH (refresh = false);
+ALTER SUBSCRIPTION :"subscription" ENABLE;
+SQL
+else
+  echo '{"phase":"create_subscription","safe_metadata_only":true}'
+  sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$target_database" \
+    -v source_conn="$SOURCE_DB_URL" \
+    -v publication="$PUBLICATION_NAME" \
+    -v slot_name="$SLOT_NAME" \
+    -v subscription="$SUBSCRIPTION_NAME" <<'SQL'
+CREATE SUBSCRIPTION :"subscription"
+CONNECTION :'source_conn'
+PUBLICATION :"publication"
 with (
   slot_name = :'slot_name',
   create_slot = false,

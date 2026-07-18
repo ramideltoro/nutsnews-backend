@@ -41,18 +41,29 @@ SQL
 )"
 
 if [[ "$sub_exists" == "t" || "$sub_exists" == "true" || "$sub_exists" == "1" ]]; then
-  echo '{"phase":"update_existing_subscription","safe_metadata_only":true}'
-  sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$target_database" \
-    -v source_conn="$SOURCE_DB_URL" \
-    -v publication="$PUBLICATION_NAME" \
+  echo '{"phase":"verify_existing_subscription","safe_metadata_only":true}' >&2
+  existing_subscription_state="$(sudo -n -u postgres psql -v ON_ERROR_STOP=1 -At -d "$target_database" \
     -v subscription="$SUBSCRIPTION_NAME" <<'SQL'
-ALTER SUBSCRIPTION :"subscription" DISABLE;
-ALTER SUBSCRIPTION :"subscription" CONNECTION :'source_conn';
-ALTER SUBSCRIPTION :"subscription" SET PUBLICATION :"publication" WITH (refresh = false);
-ALTER SUBSCRIPTION :"subscription" ENABLE;
+select subenabled::text || '|' || coalesce(subslotname, '') || '|' || array_to_string(subpublications, ',')
+from pg_subscription
+where subname = :'subscription';
 SQL
+)"
+  IFS='|' read -r existing_enabled existing_slot existing_publications <<< "$existing_subscription_state"
+  if [[ "$existing_enabled" != "t" && "$existing_enabled" != "true" && "$existing_enabled" != "1" ]]; then
+    echo "Existing subscription is not enabled." >&2
+    exit 1
+  fi
+  if [[ "$existing_slot" != "$SLOT_NAME" ]]; then
+    echo "Existing subscription does not use the intended slot." >&2
+    exit 1
+  fi
+  if [[ ",$existing_publications," != *",$PUBLICATION_NAME,"* ]]; then
+    echo "Existing subscription does not use the intended publication." >&2
+    exit 1
+  fi
 else
-  echo '{"phase":"create_subscription","safe_metadata_only":true}'
+  echo '{"phase":"create_subscription","safe_metadata_only":true}' >&2
   sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$target_database" \
     -v source_conn="$SOURCE_DB_URL" \
     -v publication="$PUBLICATION_NAME" \

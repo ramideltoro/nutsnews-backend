@@ -270,6 +270,7 @@
   community.postgresql.postgresql_privs:
     db: "{{ backend_postgres_database }}"
     type: database
+    objs: "{{ backend_postgres_database }}"
     privs: CONNECT
     roles: "{{ backend_postgres_readonly_user }},{{ backend_postgres_validation_user }},{{ backend_postgres_app_rehearsal_user }}"
     state: present
@@ -283,6 +284,7 @@
   community.postgresql.postgresql_privs:
     db: "{{ backend_postgres_primary_shadow_database }}"
     type: database
+    objs: "{{ backend_postgres_primary_shadow_database }}"
     privs: CONNECT
     roles: "{{ backend_postgres_readonly_user }},{{ backend_postgres_validation_user }},{{ backend_postgres_replication_user }},{{ backend_postgres_app_user }}"
     state: present

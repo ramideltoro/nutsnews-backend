@@ -1,8 +1,8 @@
 # Backend PostgreSQL Production Cutover
 
-Issue: #116
+Issue: #119
 
-Depends on #115 and #118.
+Depends on #211, #212, #213, #214, #215, #216, and #217.
 
 ## Purpose
 
@@ -27,23 +27,25 @@ Protected workflow:
 ```bash
 gh workflow run backend-production-cutover.yml \
   --repo ramideltoro/nutsnews-backend \
-  --ref db-primary-migration-production-cutover-runbook \
+  --ref main \
   -f operation=dry-run \
   -f confirmation=plan-production-cutover-only
 ```
 
 ## Preflight Gates
 
-- backup freshness and restore proof;
-- replication health or approved final dump path;
-- parity validation;
+- primary shadow restore proof;
+- primary shadow backup freshness and restore proof;
+- production logical replication health;
+- production shadow object and behavior parity validation;
 - query smoke tests;
 - API compatibility contract;
 - provider switch contract;
+- writer pause evidence across app, worker, scheduler, and admin paths;
 - rollback guardrails;
 - ops dashboard health;
 - disk capacity;
-- staging rehearsal evidence.
+- maintenance window and rollback owner confirmation.
 
 ## Production Sequence
 
@@ -65,5 +67,15 @@ the rollback boundary is unclear.
 
 ## Current Blocker
 
-Mutating operations are intentionally blocked in the current workflow scaffold
-until #115 records staging rehearsal evidence.
+The backend database gates are complete, but mutating cutover operations remain
+blocked in the current workflow scaffold until coordinated production cutover
+ownership exists outside this backend DB-only path:
+
+- maintenance window approval;
+- app, worker, scheduler, and admin writer pause evidence;
+- app and worker provider switch owner approval;
+- final go/no-go owner approval;
+- rollback owner coverage through the rollback window.
+
+Supabase remains the production writer until the protected cutover is explicitly
+approved and executed.

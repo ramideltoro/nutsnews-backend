@@ -27,9 +27,9 @@ def main() -> int:
 
     if plan.get("plan_id") != "backend-production-cutover-plan":
         errors.append("plan_id must be backend-production-cutover-plan")
-    if plan.get("issue") != 116:
-        errors.append("issue must be 116")
-    for issue in (115, 118):
+    if plan.get("issue") != 119:
+        errors.append("issue must be 119")
+    for issue in (211, 212, 213, 214, 215, 216, 217):
         if issue not in plan.get("depends_on", []):
             errors.append(f"missing dependency issue: {issue}")
     if plan.get("production_environment") != "production-backend":
@@ -51,7 +51,7 @@ def main() -> int:
             errors.append(f"missing operation: {operation}")
 
     gates = "\n".join(plan.get("preflight_gates", []))
-    for required in ("backup", "replication", "parity", "smoke", "rollback", "staging rehearsal"):
+    for required in ("backup", "replication", "parity", "smoke", "rollback", "writer pause"):
         if required not in gates:
             errors.append(f"missing preflight gate: {required}")
 
@@ -61,9 +61,22 @@ def main() -> int:
             errors.append(f"missing production sequence step: {required}")
 
     aborts = "\n".join(plan.get("abort_criteria", []))
-    for required in ("missing staging rehearsal evidence", "writer pause", "smoke test failure"):
+    for required in ("maintenance window", "writer pause", "smoke test failure"):
         if required not in aborts:
             errors.append(f"missing abort criteria: {required}")
+
+    database_gate_issues = {item.get("issue") for item in plan.get("completed_database_gate_evidence", [])}
+    if database_gate_issues != {211, 212, 213, 214, 215, 216, 217}:
+        errors.append("completed database gate evidence must list issues 211 through 217")
+    for item in plan.get("completed_database_gate_evidence", []):
+        workflow_url = str(item.get("workflow_url", ""))
+        if not workflow_url.startswith("https://github.com/ramideltoro/nutsnews-backend/actions/runs/"):
+            errors.append(f"database gate evidence has invalid workflow URL for issue {item.get('issue')}")
+
+    remaining_blockers = "\n".join(plan.get("remaining_external_cutover_blockers", []))
+    for required in ("maintenance window", "writer pause", "provider switch", "go/no-go", "rollback owner"):
+        if required not in remaining_blockers:
+            errors.append(f"remaining external blockers must include {required}")
 
     rollback = "\n".join(plan.get("rollback_decision_points", []))
     if "forward recovery" not in rollback or "supabase_primary" not in rollback:
@@ -80,8 +93,10 @@ def main() -> int:
     validation = plan.get("validation", {})
     if validation.get("local_validator") != "python3 scripts/validate_backend_production_cutover_plan.py":
         errors.append("local_validator must name this validator")
-    if "blocked until staging rehearsal evidence" not in validation.get("live_status", ""):
-        errors.append("live_status must record staging evidence blocker")
+    live_status = validation.get("live_status", "")
+    for required in ("writer pause", "provider switch", "go/no-go", "rollback owner"):
+        if required not in live_status:
+            errors.append(f"live_status must record {required} blocker")
 
     if errors:
         for error in errors:

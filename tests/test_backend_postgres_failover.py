@@ -47,6 +47,14 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn('objs: "{{ backend_postgres_primary_shadow_database }}"', shadow_grant)
         self.assertIn("{{ backend_postgres_app_user }}", shadow_grant)
         self.assertIn("{{ backend_postgres_replication_user }}", shadow_grant)
+        enforce_grant = tasks.split("- name: Enforce future-primary shadow database CONNECT grants", 1)[1].split(
+            "- name: Allow read-only role to use the public schema",
+            1,
+        )[0]
+        self.assertIn("community.postgresql.postgresql_query", enforce_grant)
+        self.assertIn("GRANT CONNECT ON DATABASE %I TO %I", enforce_grant)
+        self.assertIn("{{ backend_postgres_primary_shadow_database }}", enforce_grant)
+        self.assertIn("not ansible_check_mode", enforce_grant)
 
     def test_caddy_exposes_adminer_only_on_loopback(self):
         caddy = CADDY_TASKS.read_text(encoding="utf-8")

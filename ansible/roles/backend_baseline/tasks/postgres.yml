@@ -294,6 +294,34 @@
     - backend_postgres_database_dependents_manageable | default(false) | bool
     - backend_postgres_privilege_roles_manageable | default(false) | bool
 
+- name: Enforce future-primary shadow database CONNECT grants
+  community.postgresql.postgresql_query:
+    login_db: postgres
+    query: |
+      DO $$
+      DECLARE
+        grant_role name;
+      BEGIN
+        FOREACH grant_role IN ARRAY ARRAY[
+          '{{ backend_postgres_readonly_user }}',
+          '{{ backend_postgres_validation_user }}',
+          '{{ backend_postgres_replication_user }}',
+          '{{ backend_postgres_app_user }}'
+        ]::name[] LOOP
+          EXECUTE format(
+            'GRANT CONNECT ON DATABASE %I TO %I',
+            '{{ backend_postgres_primary_shadow_database }}',
+            grant_role
+          );
+        END LOOP;
+      END $$;
+  become_user: postgres
+  when:
+    - backend_postgres_manageable | bool
+    - backend_postgres_database_dependents_manageable | default(false) | bool
+    - backend_postgres_privilege_roles_manageable | default(false) | bool
+    - not ansible_check_mode
+
 - name: Allow read-only role to use the public schema
   community.postgresql.postgresql_privs:
     db: "{{ backend_postgres_database }}"

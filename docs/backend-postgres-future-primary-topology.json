@@ -40,6 +40,7 @@
     ],
     "default_owner_role": "nutsnews_migration_restore",
     "validation_role": "nutsnews_migration_validation",
+    "replication_role": "nutsnews_migration_replication",
     "readonly_role": "nutsnews_readonly",
     "future_application_role": "nutsnews_app"
   },
@@ -93,6 +94,14 @@
         "runtime_application_role": false,
         "secret_names": [
           "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD"
+        ]
+      },
+      {
+        "id": "nutsnews_migration_replication",
+        "purpose": "own backend-side replication setup during the migration window where supported by PostgreSQL permissions",
+        "runtime_application_role": false,
+        "secret_names": [
+          "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD"
         ]
       },
       {

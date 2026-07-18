@@ -71,6 +71,7 @@ backend_postgres_hba_path: "/etc/postgresql/{{ backend_postgres_major_version }}
 backend_postgres_state_dir: /var/lib/nutsnews/postgres
 backend_postgres_database: nutsnews_failover
 backend_postgres_rehearsal_database: nutsnews_restore_rehearsal
+backend_postgres_primary_shadow_database: nutsnews_primary_shadow
 backend_postgres_app_user: nutsnews_app
 backend_postgres_readonly_user: nutsnews_readonly
 backend_postgres_restore_user: nutsnews_migration_restore

@@ -9,6 +9,10 @@ Migration workflows and operators reach backend PostgreSQL through SSH to
 backend host. PostgreSQL must remain bound to `localhost`; public `5432` is not
 approved.
 
+The future-primary shadow database is `nutsnews_primary_shadow`. It is kept
+separate from the restore rehearsal database and backup-restore proof database.
+Supabase remains the production writer until #119 is approved and executed.
+
 Approved tunnel pattern:
 
 ```bash
@@ -64,6 +68,8 @@ The live preflight must verify:
 - backend PostgreSQL listener is loopback-only;
 - `pg_isready` succeeds locally on the host;
 - migration roles exist without printing passwords;
+- `nutsnews_primary_shadow` exists with `nutsnews_migration_restore` as owner;
+- required migration roles have database-level `CONNECT` on the shadow target;
 - Supabase source direct-DB connectivity requirements are recorded.
 
 After each isolated restore drill, the restore runner reapplies rehearsal

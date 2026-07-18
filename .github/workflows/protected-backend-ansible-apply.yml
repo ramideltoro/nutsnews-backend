@@ -150,6 +150,7 @@ jobs:
           GRAFANA_CLOUD_LOKI_PASSWORD: ${{ secrets.GRAFANA_CLOUD_LOKI_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_ENABLED: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_ENABLED || 'true' }}
           NUTSNEWS_BACKEND_DB_DASHBOARD_ENABLED: ${{ vars.NUTSNEWS_BACKEND_DB_DASHBOARD_ENABLED || 'true' }}
+          NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE || 'nutsnews_primary_shadow' }}
           NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_MIGRATION_RESTORE_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_RESTORE_PASSWORD }}
@@ -231,9 +232,11 @@ jobs:
           python3 - <<'PY'
           import json
           import os
+          import re
           from pathlib import Path
 
           extra_vars = {}
+          identifier_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
           ansible_user = os.environ.get("NUTSNEWS_BACKEND_ANSIBLE_USER", "").strip()
           if ansible_user:
@@ -317,6 +320,10 @@ jobs:
               extra_vars["backend_db_dashboard_enabled"] = (
                   os.environ.get("NUTSNEWS_BACKEND_DB_DASHBOARD_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
               )
+              primary_shadow_database = os.environ.get("NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE", "nutsnews_primary_shadow").strip() or "nutsnews_primary_shadow"
+              if not identifier_re.match(primary_shadow_database):
+                  raise SystemExit("NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE must be a safe PostgreSQL identifier")
+              extra_vars["backend_postgres_primary_shadow_database"] = primary_shadow_database
               extra_vars["backend_postgres_app_password"] = app_password
               extra_vars["backend_postgres_readonly_password"] = readonly_password
               extra_vars["backend_postgres_restore_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_RESTORE_PASSWORD"]

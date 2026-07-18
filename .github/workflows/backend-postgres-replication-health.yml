@@ -3,6 +3,14 @@ name: Backend PostgreSQL Replication Health
 on:
   workflow_dispatch:
     inputs:
+      environment_name:
+        description: Source database environment to check.
+        required: true
+        default: staging
+        type: choice
+        options:
+          - staging
+          - production
       mode:
         description: Run offline metadata or protected backend replication health check.
         required: true
@@ -36,9 +44,11 @@ jobs:
       - name: Validate inputs
         shell: bash
         env:
+          ENVIRONMENT_NAME: ${{ inputs.environment_name }}
           MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
+          case "$ENVIRONMENT_NAME" in staging|production) ;; *) echo "Unsupported environment: $ENVIRONMENT_NAME" >&2; exit 1 ;; esac
           case "$MODE" in
             offline|simulate-broken|status) ;;
             *) echo "Unsupported mode: $MODE" >&2; exit 1 ;;
@@ -69,9 +79,11 @@ jobs:
         if: inputs.mode == 'status'
         shell: bash
         env:
+          ENVIRONMENT_NAME: ${{ inputs.environment_name }}
           NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
           NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
           NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          NUTSNEWS_STAGING_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_STAGING_SUPABASE_DB_URL }}
           NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
         run: |
           set -euo pipefail
@@ -87,9 +99,17 @@ jobs:
               missing=1
             fi
           done
+          case "$ENVIRONMENT_NAME" in
+            staging) source_name=NUTSNEWS_STAGING_SUPABASE_DB_URL ;;
+            production) source_name=NUTSNEWS_PRODUCTION_SUPABASE_DB_URL ;;
+          esac
+          if [[ -z "${!source_name}" ]]; then
+            echo "Missing required production-backend secret: $source_name" >&2
+            missing=1
+          fi
           exit "$missing"
 
-      - name: Prepare backend tunnel
+      - name: Prepare backend SSH
         if: inputs.mode == 'status'
         shell: bash
         env:
@@ -105,13 +125,15 @@ jobs:
           printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 0600 "$HOME/.ssh/known_hosts"
           ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
-          ssh -fN -L 15432:127.0.0.1:5432 \
+          remote_dir="$(ssh \
             -i "$HOME/.ssh/nutsnews_backend" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            "$ssh_user@$NUTSNEWS_BACKEND_HOST"
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            'mktemp -d /tmp/nutsnews-replication-health-XXXXXX')"
+          echo "REMOTE_REPLICATION_HEALTH_DIR=$remote_dir" >> "$GITHUB_ENV"
 
       - name: Run protected replication health check
         id: protected_replication_health
@@ -119,13 +141,15 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
+          ENVIRONMENT_NAME: ${{ inputs.environment_name }}
           NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE || 'nutsnews_restore_rehearsal' }}
+          NUTSNEWS_STAGING_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_STAGING_SUPABASE_DB_URL }}
           NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --yes postgresql-client
           target_url="$(python3 - <<'PY'
           import os
           from urllib.parse import quote
@@ -133,19 +157,49 @@ jobs:
           user = quote("nutsnews_migration_validation", safe="")
           password = quote(os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD"], safe="")
           database = quote(os.environ["NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE"], safe="")
-          print(f"postgresql://{user}:{password}@127.0.0.1:15432/{database}")
+          print(f"postgresql://{user}:{password}@127.0.0.1:5432/{database}")
           PY
           )"
+          case "$ENVIRONMENT_NAME" in
+            staging) source_url="$NUTSNEWS_STAGING_SUPABASE_DB_URL" ;;
+            production) source_url="$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL" ;;
+          esac
           echo "::add-mask::$target_url"
-          echo "::add-mask::$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL"
-          NUTSNEWS_BACKEND_TARGET_DB_URL="$target_url" \
-          NUTSNEWS_SOURCE_DB_URL="$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL" \
-            python3 scripts/backend_postgres_replication_health.py \
+          echo "::add-mask::$source_url"
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            scripts/backend_postgres_replication_health.py \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$REMOTE_REPLICATION_HEALTH_DIR/"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "NUTSNEWS_BACKEND_TARGET_DB_URL='$target_url' NUTSNEWS_SOURCE_DB_URL='$source_url' python3 '$REMOTE_REPLICATION_HEALTH_DIR/backend_postgres_replication_health.py' \
               --target-db-url-env NUTSNEWS_BACKEND_TARGET_DB_URL \
               --source-db-url-env NUTSNEWS_SOURCE_DB_URL \
-              --output "$RUNNER_TEMP/backend-postgres-replication-health.json" \
-              --textfile-output "$RUNNER_TEMP/backend-postgres-replication-health.prom" \
-              --enforce
+              --output '$REMOTE_REPLICATION_HEALTH_DIR/backend-postgres-replication-health.json' \
+              --textfile-output '$REMOTE_REPLICATION_HEALTH_DIR/backend-postgres-replication-health.prom' \
+              --enforce"
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$REMOTE_REPLICATION_HEALTH_DIR/backend-postgres-replication-health.json" \
+            "$RUNNER_TEMP/backend-postgres-replication-health.json"
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$REMOTE_REPLICATION_HEALTH_DIR/backend-postgres-replication-health.prom" \
+            "$RUNNER_TEMP/backend-postgres-replication-health.prom"
 
       - name: Publish replication health status for dashboard
         if: always() && inputs.mode == 'status'
@@ -188,6 +242,9 @@ jobs:
             sudo -n systemctl start nutsnews-metrics-textfile.service >/dev/null 2>&1 || true
             rm -f '$remote_dir/replication-health.json' '$remote_dir/replication-health.prom'
             rmdir '$remote_dir'"
+          if [[ -n "${REMOTE_REPLICATION_HEALTH_DIR:-}" ]]; then
+            "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "rm -f '$REMOTE_REPLICATION_HEALTH_DIR/backend_postgres_replication_health.py' '$REMOTE_REPLICATION_HEALTH_DIR/backend-postgres-replication-health.json' '$REMOTE_REPLICATION_HEALTH_DIR/backend-postgres-replication-health.prom'; rmdir '$REMOTE_REPLICATION_HEALTH_DIR' 2>/dev/null || true"
+          fi
 
       - name: Fail simulated broken replication check
         if: inputs.mode == 'simulate-broken' && steps.simulated_broken_replication.outcome == 'failure'

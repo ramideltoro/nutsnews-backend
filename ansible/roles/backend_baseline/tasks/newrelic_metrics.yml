@@ -97,8 +97,10 @@
   ansible.builtin.meta: flush_handlers
 
 - name: Publish New Relic background job metrics once
-  ansible.builtin.command: "{{ backend_newrelic_metric_emitter_path }} --jobs-config {{ backend_newrelic_metric_jobs_path }} --output {{ backend_newrelic_metric_output_path }}"
-  changed_when: false
+  ansible.builtin.systemd:
+    name: nutsnews-newrelic-job-metrics.service
+    state: started
+    daemon_reload: true
   when: not ansible_check_mode
 
 - name: Ensure New Relic background job metric timer is enabled and started

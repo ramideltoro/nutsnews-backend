@@ -169,6 +169,8 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertIn("nutsnews-newrelic-job-metrics.timer", tasks)
         self.assertIn("metric-api.env", defaults)
         self.assertIn("no_log: true", tasks)
+        self.assertIn("name: nutsnews-newrelic-job-metrics.service", tasks)
+        self.assertNotIn("--jobs-config {{ backend_newrelic_metric_jobs_path }}", tasks.split("- name: Publish New Relic background job metrics once", 1)[1])
         self.assertIn('"backend_newrelic_metrics_enabled"] = True', workflow)
         self.assertIn('"backend_newrelic_metric_license_key"] = new_relic_license_key', workflow)
 

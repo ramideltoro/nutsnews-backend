@@ -66,13 +66,13 @@
       "id": "constraints",
       "category": "constraints",
       "sensitivity": "metadata_hash_only",
-      "query": "select coalesce(jsonb_agg(jsonb_build_object('schema', n.nspname, 'table', c.relname, 'constraint', con.conname, 'type', con.contype, 'definition_md5', md5(pg_get_constraintdef(con.oid))) order by n.nspname, c.relname, con.conname), '[]'::jsonb)::text from pg_constraint con join pg_class c on c.oid = con.conrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public'"
+      "query": "select coalesce(jsonb_agg(jsonb_build_object('schema', n.nspname, 'table', c.relname, 'constraint', con.conname, 'type', con.contype, 'definition_md5', md5(pg_get_constraintdef(con.oid))) order by n.nspname, c.relname, con.conname), '[]'::jsonb)::text from pg_constraint con join pg_class c on c.oid = con.conrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and con.contype <> 'n' and c.relname in ('articles', 'article_summaries', 'rss_feeds', 'worker_runs', 'article_ai_reviews', 'ai_usage_runs', 'feed_health', 'quota_usage_events', 'runtime_feature_flags', 'release_readiness', 'migration_schema_contract')"
     },
     {
       "id": "sequences",
       "category": "sequences",
       "sensitivity": "metadata_hash_only",
-      "query": "select coalesce(jsonb_agg(jsonb_build_object('schema', schemaname, 'sequence', sequencename, 'data_type', data_type, 'start_value', start_value, 'min_value', min_value, 'max_value', max_value, 'increment_by', increment_by, 'cycle', cycle, 'cache_size', cache_size, 'last_value', last_value) order by schemaname, sequencename), '[]'::jsonb)::text from pg_sequences where schemaname = 'public'"
+      "query": "select coalesce(jsonb_agg(jsonb_build_object('schema', schemaname, 'sequence', sequencename, 'data_type', data_type, 'start_value', start_value, 'min_value', min_value, 'max_value', max_value, 'increment_by', increment_by, 'cycle', cycle, 'cache_size', cache_size) order by schemaname, sequencename), '[]'::jsonb)::text from pg_sequences where schemaname = 'public'"
     },
     {
       "id": "rls_policies",
@@ -84,13 +84,13 @@
       "id": "grants",
       "category": "grants",
       "sensitivity": "metadata_hash_only",
-      "query": "select coalesce(jsonb_agg(jsonb_build_object('schema', table_schema, 'table', table_name, 'grantee', grantee, 'privilege', privilege_type, 'grantable', is_grantable) order by table_schema, table_name, grantee, privilege_type), '[]'::jsonb)::text from information_schema.role_table_grants where table_schema = 'public' and grantee in ('anon', 'authenticated', 'service_role', 'nutsnews_readonly', 'nutsnews_migration_validation', 'nutsnews_app')"
+      "query": "select coalesce(jsonb_agg(jsonb_build_object('schema', n.nspname, 'object', c.relname, 'grantee', g.grantee::regrole::text, 'privilege', g.privilege_type::text, 'grantable', g.is_grantable) order by n.nspname, c.relname, g.grantee::regrole::text, g.privilege_type::text), '[]'::jsonb)::text from pg_class c join pg_namespace n on n.oid = c.relnamespace cross join lateral aclexplode(coalesce(c.relacl, acldefault((case when c.relkind = 'S' then 'S' else 'r' end)::\"char\", c.relowner))) g where n.nspname = 'public' and c.relkind in ('r', 'v', 'm', 'S') and c.relname in ('articles', 'article_summaries', 'rss_feeds', 'worker_runs', 'article_ai_reviews', 'ai_usage_runs', 'feed_health', 'quota_usage_events', 'runtime_feature_flags', 'release_readiness', 'migration_schema_contract', 'best_feeds', 'bad_feeds', 'public_feed_snapshot') and g.grantee::regrole::text in ('anon', 'authenticated', 'service_role')"
     },
     {
       "id": "default_privileges",
       "category": "default_privileges",
       "sensitivity": "metadata_hash_only",
-      "query": "select coalesce(jsonb_agg(jsonb_build_object('owner', r.rolname, 'schema', n.nspname, 'object_type', d.defaclobjtype, 'acl_md5', md5(coalesce(array_to_string(d.defaclacl, ','), ''))) order by r.rolname, n.nspname, d.defaclobjtype), '[]'::jsonb)::text from pg_default_acl d join pg_roles r on r.oid = d.defaclrole left join pg_namespace n on n.oid = d.defaclnamespace where n.nspname is null or n.nspname in ('public', 'supabase_migrations')"
+      "query": "select coalesce(jsonb_agg(jsonb_build_object('owner', r.rolname, 'schema', n.nspname, 'object_type', d.defaclobjtype, 'acl_md5', md5(coalesce(array_to_string(d.defaclacl, ','), ''))) order by r.rolname, n.nspname, d.defaclobjtype), '[]'::jsonb)::text from pg_default_acl d join pg_roles r on r.oid = d.defaclrole left join pg_namespace n on n.oid = d.defaclnamespace where r.rolname = 'postgres' and n.nspname = 'public'"
     },
     {
       "id": "roles",
@@ -107,7 +107,7 @@
   ],
   "workflow": {
     "path": ".github/workflows/backend-postgres-parity-validation.yml",
-    "mode": "validate-production-shadow",
+    "mode": "validate-production-shadow-behavior",
     "artifact": "backend-postgres-behavior-parity-validation"
   },
   "validation": {

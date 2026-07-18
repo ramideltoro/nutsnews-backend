@@ -174,6 +174,10 @@ BEGIN
     EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA public TO %I', read_role);
     EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %I', read_role);
     EXECUTE format('GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO %I', read_role);
+    IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'supabase_migrations') THEN
+      EXECUTE format('GRANT USAGE ON SCHEMA supabase_migrations TO %I', read_role);
+      EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA supabase_migrations TO %I', read_role);
+    END IF;
   END LOOP;
   EXECUTE format('GRANT CONNECT ON DATABASE %I TO nutsnews_migration_replication', current_database());
   EXECUTE format('GRANT CONNECT ON DATABASE %I TO nutsnews_app', current_database());

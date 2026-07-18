@@ -104,6 +104,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_postgres_replacement_plan.py
 
+      - name: Validate future-primary PostgreSQL topology
+        shell: bash
+        run: python3 scripts/validate_backend_postgres_future_primary_topology.py
+
       - name: Validate Supabase backend PostgreSQL parity manifest
         shell: bash
         run: python3 scripts/validate_supabase_backend_postgres_parity.py

@@ -81,6 +81,14 @@ def run_psql(db_url: str, sql: str, timeout: int = 30) -> tuple[str | None, str 
     return proc.stdout.strip(), None
 
 
+def first_json_object(raw: str | None) -> dict[str, Any]:
+    for line in (raw or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("{"):
+            return json.loads(stripped)
+    return {}
+
+
 def column_metadata(db_url: str, schema: str, table: str) -> tuple[list[dict[str, Any]], str | None]:
     sql = f"""
 with pk as (
@@ -270,7 +278,14 @@ returning jsonb_build_object(
             "schema": schema_summary,
         }
 
-    pk_values = json.loads(raw or "{}").get("pk", {})
+    pk_values = first_json_object(raw).get("pk", {})
+    if not pk_values:
+        return {
+            "table": table_name,
+            "status": "blocked",
+            "blockers": ["candidate_probe_insert_return_missing"],
+            "schema": schema_summary,
+        }
     where_sql = where_from_pk(primary_key, pk_values)
     source_cleanup_sql = f"delete from {qtable(schema, table)} where {where_sql}"
     timings: dict[str, int] = {}

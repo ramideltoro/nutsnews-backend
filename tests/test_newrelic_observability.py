@@ -54,6 +54,14 @@ class NewRelicObservabilityTests(unittest.TestCase):
         self.assertEqual(service_levels["apdex"]["target_seconds"], 0.5)
         self.assertTrue(all(sli["target"] for sli in service_levels["service_levels"]))
 
+    def test_cache_queue_and_privacy_reviews_are_explicit(self):
+        cache_queue = json.loads((ROOT / "docs" / "newrelic-cache-queue-decision.json").read_text(encoding="utf-8"))
+        self.assertEqual(cache_queue["decision"], "no_cache_or_queue_dashboard_now")
+        self.assertEqual(cache_queue["active_cache_or_queue_workloads"], [])
+        privacy = json.loads((ROOT / "docs" / "newrelic-telemetry-privacy-review.json").read_text(encoding="utf-8"))
+        self.assertIn("logs", privacy["coverage"])
+        self.assertIn("authorization", privacy["denylist"])
+
     def test_missing_new_relic_credentials_fail_closed(self):
         with mock.patch.dict("os.environ", {}, clear=True):
             with redirect_stdout(StringIO()):

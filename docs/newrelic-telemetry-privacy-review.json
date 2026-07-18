@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "issue": 171,
+  "service": "nutsnews-backend-production",
+  "coverage": {
+    "logs": "Covered by docs/newrelic-log-policy.json redaction, drop rules, required fields, excluded fields, and ingest estimates.",
+    "apm_attributes": "Only route group, environment, deployment version, request id, trace id, workflow name, status class, and bounded feature/workflow names are allowed.",
+    "custom_events": "Only low-cardinality event names, durations, success flags, failure classes, queue depth, backlog age, and bounded owner/workflow labels are allowed.",
+    "query_attributes": "Use query id, statement type, database, schema, wait category, and plan operation; avoid raw SQL text in shared dashboards.",
+    "synthetics": "Use public endpoints, response shape, status code, timing, TLS, redirect behavior, and synthetic monitor metadata; do not include production user data."
+  },
+  "allowlist": [
+    "service.name",
+    "environment",
+    "host",
+    "unit",
+    "route",
+    "route.group",
+    "http.statusCode",
+    "status.class",
+    "duration.ms",
+    "request.id",
+    "trace.id",
+    "deployment.version",
+    "exception.class",
+    "message.safe",
+    "workflow.name",
+    "workflow.status",
+    "failure.class",
+    "query_id",
+    "statement_type",
+    "database_name",
+    "schema_name",
+    "wait_category",
+    "wait_event_name"
+  ],
+  "denylist": [
+    "authorization",
+    "cookie",
+    "set-cookie",
+    "request.body",
+    "response.body",
+    "access_token",
+    "refresh_token",
+    "api_key",
+    "password",
+    "secret",
+    "email",
+    "raw_user_input",
+    "full_query_string",
+    "raw_sql_text",
+    "direct_personal_data",
+    "payment_data"
+  ],
+  "retention_assumptions": {
+    "free_tier_reference_gb_per_month": 100,
+    "review_after_days": 7,
+    "log_expected_mb_per_day": 75,
+    "keep_dashboard_payloads_metadata_only": true
+  },
+  "mitigations": [
+    "Dashboard validation rejects secret-like terms in dashboard query raw configuration.",
+    "Log policy excludes raw request/response bodies and credential-like fields.",
+    "Query dashboards facet by query id and statement type rather than raw SQL text.",
+    "Synthetic checks must use public endpoints or test-only flows.",
+    "NerdGraph scripts fail closed when New Relic credentials are missing."
+  ]
+}

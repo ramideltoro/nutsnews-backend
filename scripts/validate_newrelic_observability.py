@@ -18,6 +18,8 @@ TAXONOMY = ROOT / "docs" / "newrelic-observability-taxonomy.json"
 RUNBOOK = ROOT / "runbooks" / "NEW_RELIC_OBSERVABILITY.md"
 LOG_POLICY = ROOT / "docs" / "newrelic-log-policy.json"
 SERVICE_LEVELS = ROOT / "docs" / "newrelic-service-levels.json"
+CACHE_QUEUE_DECISION = ROOT / "docs" / "newrelic-cache-queue-decision.json"
+PRIVACY_REVIEW = ROOT / "docs" / "newrelic-telemetry-privacy-review.json"
 
 
 def main() -> int:
@@ -78,6 +80,17 @@ def main() -> int:
     for sli in service_levels.get("service_levels", []):
         if not sli.get("target") or not sli.get("nrql"):
             errors.append(f"service level {sli.get('id')} missing target or NRQL")
+    cache_queue = json.loads(CACHE_QUEUE_DECISION.read_text(encoding="utf-8"))
+    if cache_queue.get("decision") != "no_cache_or_queue_dashboard_now":
+        errors.append("cache/queue decision must avoid placeholder dashboards")
+    if cache_queue.get("active_cache_or_queue_workloads") != []:
+        errors.append("cache/queue decision must reflect no active backend-owned workloads")
+    privacy = json.loads(PRIVACY_REVIEW.read_text(encoding="utf-8"))
+    if not privacy.get("allowlist") or not privacy.get("denylist"):
+        errors.append("privacy review must define allowlist and denylist")
+    for scope in ("logs", "apm_attributes", "custom_events", "synthetics"):
+        if scope not in privacy.get("coverage", {}):
+            errors.append(f"privacy review missing coverage: {scope}")
     runbook = RUNBOOK.read_text(encoding="utf-8")
     for text in (
         "NEW_RELIC_LICENSE_KEY",
@@ -89,6 +102,8 @@ def main() -> int:
         "scripts/backend_newrelic_observability_check.py --offline",
         "docs/newrelic-log-policy.json",
         "docs/newrelic-service-levels.json",
+        "docs/newrelic-cache-queue-decision.json",
+        "docs/newrelic-telemetry-privacy-review.json",
     ):
         if text not in runbook:
             errors.append(f"runbook missing {text}")

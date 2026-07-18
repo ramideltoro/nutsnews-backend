@@ -73,6 +73,19 @@ def check_php_configuration(expected_app_name: str) -> dict[str, Any]:
     }
 
 
+def check_php_distributed_tracing() -> dict[str, Any]:
+    code, stdout, stderr = run_command(["php", "-i"])
+    if code != 0:
+        return {"name": "php_distributed_tracing", "status": "fail", "summary": stderr or "php -i failed"}
+    lines = [line.lower() for line in stdout.splitlines() if "newrelic.distributed_tracing_enabled" in line.lower()]
+    enabled = any("=> true" in line or "=> enabled" in line or "=> 1" in line for line in lines)
+    return {
+        "name": "php_distributed_tracing",
+        "status": "pass" if enabled else "fail",
+        "summary": "distributed tracing enabled" if enabled else "distributed tracing disabled or missing",
+    }
+
+
 def check_systemd_unit(unit: str) -> dict[str, Any]:
     code, stdout, _stderr = run_command(["systemctl", "is-active", unit])
     active = code == 0 and stdout.strip() == "active"
@@ -144,6 +157,7 @@ def main_args(argv: list[str] | None = None) -> int:
         checks = [
             {"name": "php_extension", "status": "skipped_with_reason", "reason": "offline mode"},
             {"name": "php_configuration", "status": "skipped_with_reason", "reason": "offline mode"},
+            {"name": "php_distributed_tracing", "status": "skipped_with_reason", "reason": "offline mode"},
             {"name": "systemd_newrelic-infra", "status": "skipped_with_reason", "reason": "offline mode"},
             {"name": "systemd_newrelic-daemon", "status": "skipped_with_reason", "reason": "offline mode"},
             {"name": "agent_logs", "status": "skipped_with_reason", "reason": "offline mode"},
@@ -153,6 +167,7 @@ def main_args(argv: list[str] | None = None) -> int:
         checks = [
             check_php_extension(),
             check_php_configuration(app_name),
+            check_php_distributed_tracing(),
             check_systemd_unit("newrelic-infra"),
             check_systemd_unit("newrelic-daemon"),
             check_logs(),

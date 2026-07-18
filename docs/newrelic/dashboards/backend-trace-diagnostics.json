@@ -1,0 +1,65 @@
+{
+  "slug": "backend-trace-diagnostics",
+  "issue": 148,
+  "dashboard": {
+    "name": "NutsNews Backend - APM - Trace Diagnostics",
+    "description": "24 hour dashboard for trace count, slow traces, error traces, database spans, outbound spans, and log correlation. Managed from ramideltoro/nutsnews-backend.",
+    "permissions": "PUBLIC_READ_ONLY",
+    "pages": [
+      {
+        "name": "Trace diagnostics",
+        "description": "Trace-level diagnosis for slow and failing backend requests.",
+        "widgets": [
+          {
+            "title": "Trace count",
+            "layout": {"column": 1, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT uniqueCount(traceId) FROM Span WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Slow trace spans",
+            "layout": {"column": 5, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT percentile(duration, 95), max(duration), count(*) FROM Span WHERE appName = 'nutsnews-backend-production' FACET traceId, name LIMIT 20 SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Error traces",
+            "layout": {"column": 9, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT count(*), latest(error.class), latest(name) FROM Span WHERE appName = 'nutsnews-backend-production' AND error IS true FACET traceId LIMIT 20 SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Database span contribution",
+            "layout": {"column": 1, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT average(duration), percentile(duration, 95) FROM Span WHERE appName = 'nutsnews-backend-production' AND db.system = 'postgresql' TIMESERIES SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Outbound span contribution",
+            "layout": {"column": 5, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT average(duration), percentile(duration, 95) FROM Span WHERE appName = 'nutsnews-backend-production' AND category IN ('external', 'http') TIMESERIES SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Trace to log pivots",
+            "layout": {"column": 9, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT count(*), latest(request.id), latest(message.safe) FROM Log WHERE service.name = 'nutsnews-backend-production' AND trace.id IS NOT NULL FACET trace.id LIMIT 20 SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Service dependencies",
+            "layout": {"column": 1, "row": 7, "height": 3, "width": 8},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT count(*), percentile(duration, 95) FROM Span WHERE appName = 'nutsnews-backend-production' FACET category, name LIMIT 20 SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Trace gaps",
+            "layout": {"column": 9, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.markdown"},
+            "rawConfiguration": {"text": "If spans are absent, run backend_newrelic_observability_check.py --enforce and verify PHP distributed tracing plus request traffic."}
+          }
+        ]
+      }
+    ]
+  }
+}

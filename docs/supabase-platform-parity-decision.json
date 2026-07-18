@@ -1,0 +1,129 @@
+{
+  "issue": 106,
+  "decision_date_utc": "2026-07-18",
+  "decision": "replace_data_api_keep_non_database_platform_features_out_of_cutover",
+  "cutover_allowed_without_app_api_replacement": false,
+  "source_inventory": "docs/supabase-backend-postgres-inventory.md",
+  "parity_manifest": "docs/supabase-backend-postgres-parity.json",
+  "runbook": "runbooks/SUPABASE_PLATFORM_PARITY.md",
+  "live_metadata_evidence": {
+    "production_auth_user_count": 0,
+    "production_storage_bucket_count": 0,
+    "production_edge_function_count": 0,
+    "staging_edge_function_count": 0,
+    "safe_metadata_only": true,
+    "collected_at_utc": "2026-07-18T12:16:00Z",
+    "notes": [
+      "Auth admin check returned x-total-count 0 and no user records were printed.",
+      "Storage bucket API returned zero buckets and no object listing was performed.",
+      "Supabase CLI functions list returned no functions for production and staging project refs."
+    ]
+  },
+  "features": {
+    "auth": {
+      "owner": "ramideltoro/nutsnews",
+      "decision": "keep_current_app_auth_model",
+      "classification": "exclude_with_reason",
+      "migration_required": false,
+      "reason": "Targeted scans found no app or worker supabase.auth client usage, production Auth has zero users, and admin authentication is handled by the current app auth model.",
+      "cutover_action": "Do not restore Supabase Auth as a runtime dependency. Preserve auth.users only as a schema compatibility shim if database foreign keys require it during restore validation.",
+      "validation": "App compatibility work must fail if a new Supabase Auth client dependency appears before cutover."
+    },
+    "storage": {
+      "owner": "ramideltoro/nutsnews",
+      "decision": "no_storage_object_migration_now",
+      "classification": "exclude_with_reason",
+      "migration_required": false,
+      "reason": "Production Storage currently has zero buckets, and targeted scans found no Supabase Storage client calls.",
+      "cutover_action": "Do not plan a Storage object-byte migration now. Reopen this decision if any app dependency on Supabase Storage appears.",
+      "validation": "Protected pre-cutover inventory must confirm bucket count remains zero or attach a new app-owned migration issue."
+    },
+    "realtime": {
+      "owner": "ramideltoro/nutsnews",
+      "decision": "remove_from_cutover_scope",
+      "classification": "exclude_with_reason",
+      "migration_required": false,
+      "reason": "Targeted scans found no Supabase Realtime client usage. Database logical replication for the migration is separate from user-facing Realtime.",
+      "cutover_action": "Do not migrate Supabase Realtime. Treat backend logical replication as migration plumbing owned by issues 109 and 110.",
+      "validation": "App and worker scans must remain free of realtime channel subscriptions before cutover."
+    },
+    "edge_functions": {
+      "owner": "ramideltoro/nutsnews",
+      "decision": "confirmed_unused",
+      "classification": "exclude_with_reason",
+      "migration_required": false,
+      "reason": "Supabase CLI listed zero Edge Functions for both known project refs, and targeted scans found no functions client calls.",
+      "cutover_action": "No Edge Function code is migrated to the backend runtime now.",
+      "validation": "Protected pre-cutover inventory must re-run functions list for the production project ref."
+    },
+    "data_api_postgrest": {
+      "owner": "ramideltoro/nutsnews-backend",
+      "decision": "replace_before_cutover",
+      "classification": "replace",
+      "migration_required": true,
+      "reason": "The web app and worker both use Supabase PostgREST/service-role data paths. Bare PostgreSQL is not a drop-in replacement for supabase-js or REST URLs.",
+      "cutover_action": "Build or select a backend PostgreSQL compatible API/runtime path before production cutover.",
+      "validation": "Issues 111 and 117 must prove app and worker compatibility in non-production before issue 119 can proceed."
+    },
+    "api_keys": {
+      "owner": "ramideltoro/nutsnews",
+      "decision": "replace_or_rotate",
+      "classification": "replace",
+      "migration_required": true,
+      "reason": "Anon and service-role keys are Supabase platform credentials, not backend PostgreSQL credentials.",
+      "cutover_action": "Replace service-role style access with least-privilege backend credentials and rotate Supabase keys after retirement.",
+      "validation": "Issue 114 must verify no production writer still uses Supabase keys before retirement."
+    }
+  },
+  "app_evidence": [
+    {
+      "repository": "ramideltoro/nutsnews",
+      "path": "web/lib/supabase.ts",
+      "finding": "Creates server and browser Supabase clients through @supabase/supabase-js."
+    },
+    {
+      "repository": "ramideltoro/nutsnews",
+      "path": "web/lib/articles.ts",
+      "finding": "Public article reads query Supabase tables and materialized views with .from(...)."
+    },
+    {
+      "repository": "ramideltoro/nutsnews",
+      "path": "web/lib/quotaUsage.ts",
+      "finding": "Quota writes insert into Supabase through the app data layer."
+    },
+    {
+      "repository": "ramideltoro/nutsnews-worker",
+      "path": "worker/src/index.ts",
+      "finding": "Worker uses SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to call PostgREST for reads, writes, and RPC refreshes."
+    }
+  ],
+  "companion_issues": [
+    {
+      "repository": "ramideltoro/nutsnews",
+      "issue": 255,
+      "url": "https://github.com/ramideltoro/nutsnews/issues/255",
+      "purpose": "Replace app Supabase API assumptions for backend PostgreSQL."
+    },
+    {
+      "repository": "ramideltoro/nutsnews-worker",
+      "issue": 27,
+      "url": "https://github.com/ramideltoro/nutsnews-worker/issues/27",
+      "purpose": "Replace worker Supabase PostgREST writes for backend PostgreSQL."
+    }
+  ],
+  "cutover_blockers": [
+    "data_api_postgrest replacement is not implemented",
+    "feature-flagged database provider switch is not implemented",
+    "staging app and worker compatibility tests have not passed",
+    "post-cutover Supabase key rotation has not been executed"
+  ],
+  "external_references": [
+    "https://supabase.com/docs/guides/platform/backups",
+    "https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore",
+    "https://supabase.com/docs/guides/database/replication"
+  ],
+  "validation": {
+    "local_validator": "python3 scripts/validate_supabase_platform_parity_decision.py",
+    "live_verification": "metadata-only checks; no production data rows or secrets are printed"
+  }
+}

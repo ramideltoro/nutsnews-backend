@@ -120,6 +120,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backend_db_rollback_guardrails.py
 
+      - name: Validate backend production cutover plan
+        shell: bash
+        run: python3 scripts/validate_backend_production_cutover_plan.py
+
       - name: Validate PostgreSQL logical replication plan
         shell: bash
         run: python3 scripts/validate_backend_postgres_logical_replication_plan.py

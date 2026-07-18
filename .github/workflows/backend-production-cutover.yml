@@ -1,0 +1,68 @@
+name: Backend Production Cutover
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Production cutover operation. Mutating operations remain blocked until staging evidence exists.
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - preflight-only
+          - final-replication-catchup
+          - final-dump-restore
+          - switch-provider
+          - rollback
+      confirmation:
+        description: Use plan-production-cutover-only for dry-run or execute-production-db-cutover for a future mutating operation.
+        required: false
+        default: ""
+        type: string
+      staging_evidence_url:
+        description: URL for #115 staging rehearsal evidence.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-production-cutover
+  cancel-in-progress: false
+
+jobs:
+  cutover:
+    name: Production cutover gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate production cutover plan
+        shell: bash
+        run: python3 scripts/validate_backend_production_cutover_plan.py
+
+      - name: Render production cutover plan
+        shell: bash
+        run: |
+          python3 scripts/backend_production_cutover_plan.py \
+            --operation "${{ inputs.operation }}" \
+            --confirmation "${{ inputs.confirmation }}" \
+            --staging-evidence-url "${{ inputs.staging_evidence_url }}" \
+            --output "$RUNNER_TEMP/backend-production-cutover-plan.json"
+
+      - name: Upload cutover plan
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-production-cutover-plan
+          path: ${{ runner.temp }}/backend-production-cutover-plan.json
+          if-no-files-found: ignore

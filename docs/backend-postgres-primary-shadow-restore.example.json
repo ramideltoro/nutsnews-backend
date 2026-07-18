@@ -1,0 +1,28 @@
+{
+  "status": "planned",
+  "snapshot_id": "pending",
+  "source": "production_supabase_public_logical_dump",
+  "target_database": "nutsnews_primary_shadow",
+  "restore_scope": "production_supabase_to_backend_primary_shadow",
+  "duration_seconds": null,
+  "validation_status": "planned",
+  "validation_report": "pending",
+  "operator": "production-backend protected workflow",
+  "completed_at_utc": null,
+  "rpo_seconds": null,
+  "rto_seconds": null,
+  "manifest_version": 1,
+  "safe_metadata_only": true,
+  "production_cutover_blocker_cleared": false,
+  "workflow_url": "pending",
+  "dump_checksums": {
+    "history_data_sha256": "pending",
+    "history_schema_sha256": "pending",
+    "public_data_sha256": "pending",
+    "public_schema_sha256": "pending"
+  },
+  "status_artifacts": [
+    "/var/lib/nutsnews/postgres/primary-shadow-restore.json",
+    "/var/lib/nutsnews/postgres/status.json"
+  ]
+}

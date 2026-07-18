@@ -158,7 +158,7 @@
             "layout": {"column": 9, "row": 10, "height": 3, "width": 4},
             "visualization": {"id": "viz.markdown"},
             "rawConfiguration": {
-              "text": "Use the PHP APM, host, Caddy, PHP-FPM, PostgreSQL, logs, synthetics, release health, and regression dashboards for drill-down. Those dashboard definitions are managed in this repository as each issue lands."
+              "text": "Start with the [NutsNews Backend Ecosystem workload](https://one.newrelic.com/redirect/entity/ODI5ODI5N3xOUjF8V09SS0xPQUR8MTEwMTIwOQ), then use the PHP APM, host, Caddy, PHP-FPM, PostgreSQL, logs, synthetics, release health, and regression dashboards for drill-down. Host and PostgreSQL samples currently report without entity GUIDs, so service-map relationship gaps remain follow-up work."
             }
           }
         ]

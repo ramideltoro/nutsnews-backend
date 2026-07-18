@@ -59,8 +59,19 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("NUTSNEWS_BACKEND_DB_DASHBOARD_ENABLED", build_step)
         self.assertIn("NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD", build_step)
         self.assertIn("NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD", build_step)
+        for secret_name in (
+            "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_RESTORE_PASSWORD",
+            "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD",
+            "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD",
+            "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD",
+        ):
+            self.assertIn(secret_name, build_step)
         self.assertIn('os.environ.get("NUTSNEWS_BACKEND_POSTGRES_ENABLED", "true")', build_step)
         self.assertIn('"backend_postgres_enabled"] = True', workflow)
+        self.assertIn('"backend_postgres_restore_password"]', build_step)
+        self.assertIn('"backend_postgres_validation_password"]', build_step)
+        self.assertIn('"backend_postgres_replication_password"]', build_step)
+        self.assertIn('"backend_postgres_app_rehearsal_password"]', build_step)
         self.assertNotIn("postgres://", workflow)
 
     def test_restore_drill_has_fixed_modes_and_staging_source(self):

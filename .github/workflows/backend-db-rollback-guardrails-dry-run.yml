@@ -1,0 +1,54 @@
+name: Backend DB Rollback Guardrails Dry Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: Migration phase to check without mutation.
+        required: true
+        default: supabase_primary
+        type: choice
+        options:
+          - supabase_primary
+          - shadow_reads
+          - final_catch_up
+          - backend_primary
+          - rollback_window
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-db-rollback-guardrails-dry-run-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dry-run:
+    name: Rollback guardrails dry run
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate rollback guardrails
+        shell: bash
+        run: python3 scripts/validate_backend_db_rollback_guardrails.py
+
+      - name: Render non-mutating guardrail plan
+        shell: bash
+        run: |
+          python3 scripts/backend_db_rollback_guardrails_plan.py \
+            --phase "${{ inputs.phase }}" \
+            --output "$RUNNER_TEMP/backend-db-rollback-guardrails.json"
+
+      - name: Upload rollback guardrail report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-db-rollback-guardrails
+          path: ${{ runner.temp }}/backend-db-rollback-guardrails.json
+          if-no-files-found: ignore

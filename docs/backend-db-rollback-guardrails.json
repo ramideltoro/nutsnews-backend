@@ -1,0 +1,98 @@
+{
+  "contract_id": "backend-db-rollback-guardrails",
+  "issue": 118,
+  "status": "backend_guardrails_committed",
+  "dependency_issues": [
+    109,
+    111,
+    117
+  ],
+  "depends_on": [
+    "docs/backend-api-compatibility-contract.json",
+    "docs/backend-database-provider-switch.json"
+  ],
+  "sync_back_to_supabase_supported": false,
+  "sync_back_reason": "Bidirectional sync is not proven safe for the current Supabase/PostgREST application model and could create write conflicts.",
+  "phases": [
+    {
+      "phase": "supabase_primary",
+      "provider_mode": "supabase_primary",
+      "authoritative_writer": "supabase",
+      "supabase_writes_allowed": true,
+      "backend_postgres_writes_allowed": false,
+      "split_brain_check": "backend_postgres writes disabled; backend PostgreSQL may only receive restore or replication data"
+    },
+    {
+      "phase": "shadow_reads",
+      "provider_mode": "backend_postgres_shadow",
+      "authoritative_writer": "supabase",
+      "supabase_writes_allowed": true,
+      "backend_postgres_writes_allowed": false,
+      "split_brain_check": "backend PostgreSQL reads are comparison-only and must not serve production responses"
+    },
+    {
+      "phase": "final_catch_up",
+      "provider_mode": "backend_postgres_shadow",
+      "authoritative_writer": "none_until_switch",
+      "supabase_writes_allowed": false,
+      "backend_postgres_writes_allowed": false,
+      "split_brain_check": "all production writers paused before final replication catch-up or final dump"
+    },
+    {
+      "phase": "backend_primary",
+      "provider_mode": "backend_postgres_primary",
+      "authoritative_writer": "backend_postgres",
+      "supabase_writes_allowed": false,
+      "backend_postgres_writes_allowed": true,
+      "split_brain_check": "Supabase service-role write paths disabled before backend PostgreSQL primary serves writes"
+    },
+    {
+      "phase": "rollback_window",
+      "provider_mode": "backend_postgres_primary",
+      "authoritative_writer": "backend_postgres_or_supabase_after_decision",
+      "supabase_writes_allowed": false,
+      "backend_postgres_writes_allowed": true,
+      "split_brain_check": "rollback requires writer pause and explicit decision before returning to supabase_primary"
+    }
+  ],
+  "writer_pause_verification": [
+    {
+      "id": "app_provider_mode",
+      "command": "backend_database_provider_switch_plan.py --mode backend_postgres_shadow --environment production",
+      "evidence": "production switch remains non-mutating before writer pause"
+    },
+    {
+      "id": "worker_paused",
+      "command": "verify worker schedules/queues are paused through the app and worker companion runbooks",
+      "evidence": "no new worker_runs rows after pause timestamp"
+    },
+    {
+      "id": "supabase_no_new_writes",
+      "command": "run parity/smoke read checks after pause and compare updated_at/max id watermarks",
+      "evidence": "no Supabase write watermark advances after pause timestamp"
+    }
+  ],
+  "rollback_window": {
+    "safe_when": [
+      "backend PostgreSQL has not accepted authoritative writes after the selected Supabase sync point",
+      "app and worker can return to supabase_primary together",
+      "Supabase smoke tests pass before production responses return"
+    ],
+    "forward_recovery_required_when": [
+      "backend PostgreSQL accepted authoritative writes that are not proven in Supabase",
+      "sync-back evidence is missing",
+      "writer pause cannot prove no concurrent writes"
+    ]
+  },
+  "cutover_blockers": [
+    "No phase may allow writes to both Supabase and backend PostgreSQL.",
+    "Production cutover is blocked until writer pause verification is attached.",
+    "Production cutover is blocked until rollback_window and forward_recovery boundaries are accepted.",
+    "Staging rehearsal must prove rollback before production cutover."
+  ],
+  "validation": {
+    "local_validator": "python3 scripts/validate_backend_db_rollback_guardrails.py",
+    "dry_run_workflow": ".github/workflows/backend-db-rollback-guardrails-dry-run.yml",
+    "live_status": "blocked until staging rehearsal proves rollback without losing test data"
+  }
+}

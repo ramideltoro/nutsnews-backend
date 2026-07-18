@@ -116,6 +116,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backend_database_provider_switch.py
 
+      - name: Validate backend DB rollback guardrails
+        shell: bash
+        run: python3 scripts/validate_backend_db_rollback_guardrails.py
+
       - name: Validate PostgreSQL logical replication plan
         shell: bash
         run: python3 scripts/validate_backend_postgres_logical_replication_plan.py

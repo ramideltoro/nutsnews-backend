@@ -35,7 +35,7 @@ database URLs into issues, PRs, logs, screenshots, or summaries.
 | `nutsnews_app` | `NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD` | Future production app owner role | Rotate at cutover and after any rollback |
 | `nutsnews_readonly` | `NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD` | Read-only inspection and dashboard checks | Keep only if operationally needed |
 | `nutsnews_migration_restore` | `NUTSNEWS_BACKEND_POSTGRES_MIGRATION_RESTORE_PASSWORD` | Protected restore/rehearsal workflows | Revoke after rehearsal/cutover |
-| `nutsnews_migration_validation` | `NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD` | Parity and smoke validation | Rotate or disable after cutover |
+| `nutsnews_migration_validation` | `NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD` | Parity and smoke validation; bypasses restored RLS for aggregate-only migration checks | Rotate or disable after cutover |
 | `nutsnews_migration_replication` | `NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD` | Backend subscription/replication setup | Drop when replication is retired |
 | `nutsnews_app_rehearsal` | `NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD` | Non-production app/API cutover rehearsal | Drop after rehearsal |
 
@@ -65,6 +65,10 @@ The live preflight must verify:
 - `pg_isready` succeeds locally on the host;
 - migration roles exist without printing passwords;
 - Supabase source direct-DB connectivity requirements are recorded.
+
+After each isolated restore drill, the restore runner reapplies rehearsal
+database grants for the read-only, validation, and app rehearsal roles because
+the rehearsal database is dropped and recreated from the dump.
 
 ## Source Connectivity
 

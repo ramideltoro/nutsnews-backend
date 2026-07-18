@@ -1,0 +1,116 @@
+{
+  "slug": "backend-postgresql-query-performance",
+  "issue": 153,
+  "dashboard": {
+    "name": "NutsNews Backend - PostgreSQL - Query Performance",
+    "description": "24 hour dashboard for query monitoring, slow query IDs, execution count, elapsed time, disk reads, disk writes, statement type, and plan row estimates. Managed from ramideltoro/nutsnews-backend.",
+    "permissions": "PUBLIC_READ_ONLY",
+    "pages": [
+      {
+        "name": "Query performance",
+        "description": "Slow and expensive query diagnostics without displaying raw SQL text.",
+        "widgets": [
+          {
+            "title": "Slow query elapsed time",
+            "layout": {"column": 1, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(avg_elapsed_time_ms), latest(execution_count) FROM PostgresSlowQueries WHERE hostname = 'backend.nutsnews.com' FACET query_id, statement_type LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Query execution count",
+            "layout": {"column": 5, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.bar"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(execution_count) FROM PostgresSlowQueries WHERE hostname = 'backend.nutsnews.com' FACET query_id LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Disk reads and writes",
+            "layout": {"column": 9, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(avg_disk_reads), latest(avg_disk_writes) FROM PostgresSlowQueries WHERE hostname = 'backend.nutsnews.com' FACET query_id, statement_type LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Individual query CPU and execution time",
+            "layout": {"column": 1, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(cpu_time_ms), latest(exec_time_ms) FROM PostgresIndividualQueries WHERE hostname = 'backend.nutsnews.com' FACET query_id, plan_id LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Plan rows by operation",
+            "layout": {"column": 5, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(plan_rows), latest(total_cost), latest(startup_cost) FROM PostgresExecutionPlanMetrics WHERE hostname = 'backend.nutsnews.com' FACET node_type, query_id LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Database and schema spread",
+            "layout": {"column": 9, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*) FROM PostgresSlowQueries WHERE hostname = 'backend.nutsnews.com' FACET database_name, schema_name, statement_type LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "APM database latency overlay",
+            "layout": {"column": 1, "row": 7, "height": 3, "width": 8},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT average(databaseDuration), percentile(duration, 95) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Query safety",
+            "layout": {"column": 9, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.markdown"},
+            "rawConfiguration": {
+              "text": "Use query id, statement type, database, schema, and plan operation for triage. Do not display raw SQL text in shared dashboards."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

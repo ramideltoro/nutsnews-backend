@@ -1,0 +1,116 @@
+{
+  "slug": "backend-postgresql-operations",
+  "issue": 154,
+  "dashboard": {
+    "name": "NutsNews Backend - PostgreSQL - Operations",
+    "description": "24 hour dashboard for PostgreSQL locks, blocking sessions, connection pressure, vacuum, bloat, storage, and optional replication metrics. Managed from ramideltoro/nutsnews-backend.",
+    "permissions": "PUBLIC_READ_ONLY",
+    "pages": [
+      {
+        "name": "Operations and maintenance",
+        "description": "Capacity and maintenance signals for database stalls, storage growth, and replication readiness.",
+        "widgets": [
+          {
+            "title": "Connection pressure",
+            "layout": {"column": 1, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(db.connections), latest(db.maxconnections) FROM PostgresqlDatabaseSample WHERE hostname = 'backend.nutsnews.com' FACET database_name TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Blocking sessions",
+            "layout": {"column": 5, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*), latest(blocked_query_id), latest(blocking_query_id) FROM PostgresBlockingSessions WHERE hostname = 'backend.nutsnews.com' FACET database_name LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Wait events",
+            "layout": {"column": 9, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT sum(total_wait_time_ms), count(*) FROM PostgresWaitEvents WHERE hostname = 'backend.nutsnews.com' FACET wait_category, wait_event_name LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Table bloat",
+            "layout": {"column": 1, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(table.bloatRatio), latest(table.bloatSizeInBytes), latest(table.deadRows) FROM PostgresqlTableSample WHERE hostname = 'backend.nutsnews.com' FACET database_name, schema_name, table_name LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Vacuum freshness",
+            "layout": {"column": 5, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(table.lastVacuum), latest(table.lastAutoVacuum), latest(table.lastAnalyze), latest(table.lastAutoAnalyze) FROM PostgresqlTableSample WHERE hostname = 'backend.nutsnews.com' FACET database_name, schema_name, table_name LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Table and index storage",
+            "layout": {"column": 9, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(table.totalSizeInBytes), latest(table.indexSizeInBytes), latest(table.dataSizeInBytes) FROM PostgresqlTableSample WHERE hostname = 'backend.nutsnews.com' FACET database_name, schema_name, table_name LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Optional replication lag",
+            "layout": {"column": 1, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(replication.lagSeconds), latest(replication.pendingBytes) FROM Metric WHERE service.name = 'nutsnews-backend-production' FACET replication.slotName TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Maintenance guidance",
+            "layout": {"column": 5, "row": 7, "height": 3, "width": 8},
+            "visualization": {"id": "viz.markdown"},
+            "rawConfiguration": {
+              "text": "Lock, blocking, wait-event, table-size, bloat, and query-monitoring widgets need the New Relic PostgreSQL integration plus optional table and statistics permissions documented in this runbook."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

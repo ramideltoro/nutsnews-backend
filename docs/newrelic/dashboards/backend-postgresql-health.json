@@ -1,0 +1,116 @@
+{
+  "slug": "backend-postgresql-health",
+  "issue": 151,
+  "dashboard": {
+    "name": "NutsNews Backend - PostgreSQL - Health",
+    "description": "24 hour dashboard for PostgreSQL availability, connections, transactions, cache behavior, deadlocks, checkpoints, and storage. Managed from ramideltoro/nutsnews-backend.",
+    "permissions": "PUBLIC_READ_ONLY",
+    "pages": [
+      {
+        "name": "Database health",
+        "description": "PostgreSQL integration overview grouped by availability, load, capacity, and storage.",
+        "widgets": [
+          {
+            "title": "Database uptime",
+            "layout": {"column": 1, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.billboard"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(db.uptimeInMilliseconds) FROM PostgresqlDatabaseSample WHERE hostname = 'backend.nutsnews.com' FACET database_name LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Connections used versus max",
+            "layout": {"column": 5, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(db.connections), latest(db.maxconnections) FROM PostgresqlDatabaseSample WHERE hostname = 'backend.nutsnews.com' FACET database_name TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Transaction rate",
+            "layout": {"column": 9, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT sum(db.commitsPerSecond), sum(db.rollbacksPerSecond) FROM PostgresqlDatabaseSample WHERE hostname = 'backend.nutsnews.com' FACET database_name TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Cache and disk reads",
+            "layout": {"column": 1, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT sum(db.bufferHitsPerSecond), sum(db.readsPerSecond) FROM PostgresqlDatabaseSample WHERE hostname = 'backend.nutsnews.com' FACET database_name TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Deadlocks and lock conflicts",
+            "layout": {"column": 5, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT sum(db.deadlocksPerSecond), sum(db.conflicts.locksPerSecond) FROM PostgresqlDatabaseSample WHERE hostname = 'backend.nutsnews.com' FACET database_name TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Checkpoint behavior",
+            "layout": {"column": 9, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT sum(bgwriter.checkpointsScheduledPerSecond), sum(bgwriter.checkpointsRequestedPerSecond), sum(bgwriter.checkpointWriteTimeInMillisecondsPerSecond) FROM PostgresqlInstanceSample WHERE hostname = 'backend.nutsnews.com' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Database storage by table",
+            "layout": {"column": 1, "row": 7, "height": 3, "width": 8},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(table.totalSizeInBytes), latest(table.indexSizeInBytes) FROM PostgresqlTableSample WHERE hostname = 'backend.nutsnews.com' FACET database_name, schema_name, table_name LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Health sections",
+            "layout": {"column": 9, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.markdown"},
+            "rawConfiguration": {
+              "text": "Read availability and connections first, then transaction load, cache behavior, checkpoint pressure, and table-level storage growth."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

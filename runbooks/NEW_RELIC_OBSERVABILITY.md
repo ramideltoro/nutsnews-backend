@@ -75,6 +75,10 @@ Versioned dashboard definitions currently managed by this repo:
 - `backend-caddy-request-traffic`: Caddy request volume, status, latency, and bounded facets for #146.
 - `backend-host-infrastructure`: backend host CPU, memory, disk, network, and process health for #147.
 - `backend-systemd-service-health`: critical service state, restarts, and service logs for #149.
+- `backend-postgresql-health`: PostgreSQL availability, connections, transaction load, cache, checkpoints, and storage for #151.
+- `backend-apm-postgresql-correlation`: APM/database latency correlation and datastore spans for #152.
+- `backend-postgresql-query-performance`: query monitoring, query IDs, execution time, reads, writes, and plan rows for #153.
+- `backend-postgresql-operations`: locks, blocking sessions, vacuum, table bloat, storage, and optional replication metrics for #154.
 
 Each dashboard keeps a 24 hour default query window and uses the
 `NutsNews Backend - ` naming prefix. Live dashboard URLs are printed by
@@ -97,6 +101,26 @@ This dashboard pack does not expose a public PHP-FPM status endpoint and does
 not change Caddy routing. If a PHP-FPM status endpoint is later approved, keep
 it local-only or otherwise access-controlled and update the dashboard queries to
 match the approved metric names.
+
+## PostgreSQL Data Sources
+
+The PostgreSQL dashboards expect the New Relic on-host PostgreSQL integration
+and use these event types:
+
+- `PostgresqlDatabaseSample` for connections, transactions, cache, deadlocks,
+  conflicts, and database-level I/O.
+- `PostgresqlInstanceSample` for checkpoint and background writer behavior.
+- `PostgresqlTableSample` for table size, table bloat, dead rows, and vacuum
+  signals.
+- `PostgresSlowQueries`, `PostgresIndividualQueries`,
+  `PostgresWaitEvents`, `PostgresBlockingSessions`, and
+  `PostgresExecutionPlanMetrics` when query monitoring is enabled.
+
+For table and index metrics, the New Relic PostgreSQL role needs `SELECT` on
+the collected tables. For query-level metrics, enable `pg_stat_statements` and
+grant `pg_read_all_stats` to the integration role. Dashboard widgets avoid raw
+SQL display and facet query diagnostics by query id, statement type, database,
+schema, wait category, or plan operation.
 
 ## Validate Reporting
 
@@ -140,3 +164,5 @@ an optional NerdGraph account query when `NEW_RELIC_USER_KEY` and
   https://docs.newrelic.com/docs/apis/intro-apis/new-relic-api-keys/
 - New Relic NerdGraph endpoints:
   https://docs.newrelic.com/docs/apis/nerdgraph/get-started/introduction-new-relic-nerdgraph/
+- New Relic PostgreSQL integration:
+  https://docs.newrelic.com/install/postgresql/

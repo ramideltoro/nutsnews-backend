@@ -46,7 +46,7 @@ class BackendProductionCutoverPlanTests(unittest.TestCase):
             report = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(exit_code, 1)
         self.assertIn("missing_staging_rehearsal_evidence", report["blockers"])
-        self.assertIn("mutation_paths_blocked_in_current_scaffold", report["blockers"])
+        self.assertIn("mutation_paths_blocked_until_coordinated_cutover", report["blockers"])
 
 
 if __name__ == "__main__":

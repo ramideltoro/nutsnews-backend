@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Production cutover operation. Mutating operations remain blocked until staging evidence exists.
+        description: Production cutover operation. Mutating operations remain blocked until coordinated writer-pause/provider-switch evidence exists.
         required: true
         default: dry-run
         type: choice

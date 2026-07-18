@@ -37,7 +37,8 @@ def main_args(argv: list[str] | None = None) -> int:
             blockers.append("missing_production_cutover_confirmation")
         if not args.staging_evidence_url:
             blockers.append("missing_staging_rehearsal_evidence")
-        blockers.append("mutation_paths_blocked_in_current_scaffold")
+        blockers.extend(plan["remaining_external_cutover_blockers"])
+        blockers.append("mutation_paths_blocked_until_coordinated_cutover")
 
     report = {
         "status": "blocked" if blockers else "dry_run_ready",
@@ -49,6 +50,8 @@ def main_args(argv: list[str] | None = None) -> int:
         "production_sequence": plan["production_sequence"],
         "abort_criteria": plan["abort_criteria"],
         "rollback_decision_points": plan["rollback_decision_points"],
+        "completed_database_gate_evidence": plan.get("completed_database_gate_evidence", []),
+        "remaining_external_cutover_blockers": plan.get("remaining_external_cutover_blockers", []),
         "staging_evidence_url": args.staging_evidence_url or None,
         "blockers": blockers,
     }

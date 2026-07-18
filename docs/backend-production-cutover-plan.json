@@ -1,10 +1,15 @@
 {
   "plan_id": "backend-production-cutover-plan",
-  "issue": 116,
-  "status": "runbook_and_dry_run_committed",
+  "issue": 119,
+  "status": "db_ready_cutover_blocked_on_writer_ownership",
   "depends_on": [
-    115,
-    118
+    211,
+    212,
+    213,
+    214,
+    215,
+    216,
+    217
   ],
   "production_environment": "production-backend",
   "mutation_confirmation": "execute-production-db-cutover",
@@ -18,16 +23,18 @@
     "rollback"
   ],
   "preflight_gates": [
-    "backup freshness and restore proof",
-    "replication health or approved final dump path",
-    "parity validation",
+    "primary shadow restore proof",
+    "primary shadow backup freshness and restore proof",
+    "production logical replication health",
+    "production shadow object and behavior parity validation",
     "query smoke tests",
     "API compatibility contract",
     "provider switch contract",
+    "writer pause evidence across app worker scheduler and admin paths",
     "rollback guardrails",
     "ops dashboard health",
     "disk capacity",
-    "staging rehearsal evidence"
+    "maintenance window and rollback owner confirmation"
   ],
   "production_sequence": [
     "announce maintenance window",
@@ -41,7 +48,9 @@
     "record go/no-go and evidence"
   ],
   "abort_criteria": [
-    "missing staging rehearsal evidence",
+    "missing coordinated maintenance window",
+    "missing app worker scheduler or admin writer pause evidence",
+    "missing app or worker provider switch owner",
     "backup or restore proof stale",
     "replication lag or slot health critical",
     "parity validation failure",
@@ -54,6 +63,50 @@
     "before backend_postgres_primary accepts writes, return to supabase_primary",
     "after backend-only authoritative writes, use forward recovery unless reviewed sync-back evidence exists"
   ],
+  "completed_database_gate_evidence": [
+    {
+      "issue": 211,
+      "summary": "primary shadow provisioned and access preflight passed",
+      "workflow_url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29657999189"
+    },
+    {
+      "issue": 212,
+      "summary": "production Supabase snapshot restored into nutsnews_primary_shadow",
+      "workflow_url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29658300343"
+    },
+    {
+      "issue": 213,
+      "summary": "production logical replication configured to nutsnews_primary_shadow",
+      "workflow_url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29659686516"
+    },
+    {
+      "issue": 214,
+      "summary": "production shadow sync, health, object parity, and behavior parity proved",
+      "workflow_url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29660835941"
+    },
+    {
+      "issue": 215,
+      "summary": "production shadow behavior parity passed",
+      "workflow_url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29659026496"
+    },
+    {
+      "issue": 216,
+      "summary": "primary shadow backup/restore proof passed",
+      "workflow_url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29660905225"
+    },
+    {
+      "issue": 217,
+      "summary": "monitoring/status/metrics and fail-closed simulation proved",
+      "workflow_url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29660962794"
+    }
+  ],
+  "remaining_external_cutover_blockers": [
+    "coordinated maintenance window approval",
+    "app worker scheduler and admin writer pause evidence",
+    "app and worker provider switch owner approval",
+    "final go/no-go owner approval",
+    "rollback owner coverage through the rollback window"
+  ],
   "workflow": {
     "path": ".github/workflows/backend-production-cutover.yml",
     "protected_environment": "production-backend",
@@ -63,6 +116,6 @@
   "validation": {
     "local_validator": "python3 scripts/validate_backend_production_cutover_plan.py",
     "plan_renderer": "python3 scripts/backend_production_cutover_plan.py --operation dry-run",
-    "live_status": "blocked until staging rehearsal evidence from #115 exists"
+    "live_status": "blocked until coordinated app worker scheduler admin writer pause, provider switch owner approval, final go/no-go, and rollback owner coverage exist"
   }
 }

@@ -32,6 +32,7 @@ PRIMARY_SHADOW_CONNECT_ROLES = [
     "nutsnews_migration_validation",
     "nutsnews_migration_replication",
 ]
+POSTGRES_TRUE_VALUES = {"1", "on", "t", "true", "yes"}
 
 
 def tcp_reachable(host: str, port: int, timeout: float = 3.0) -> bool:
@@ -65,6 +66,10 @@ def run_ssh(host: str, user: str, key: str, known_hosts: str, command: str) -> t
         timeout=30,
     )
     return proc.returncode, proc.stdout, proc.stderr
+
+
+def parse_postgres_bool(value: str) -> bool:
+    return value.strip().lower() in POSTGRES_TRUE_VALUES
 
 
 def main() -> int:
@@ -161,7 +166,7 @@ def main() -> int:
                 for line in stdout.splitlines():
                     if line.startswith("primary_shadow_connect="):
                         role_name, allowed = line.split("=", 1)[1].split(":", 1)
-                        connect_grants[role_name] = allowed == "t"
+                        connect_grants[role_name] = parse_postgres_bool(allowed)
                 missing_connect_grants = sorted(role for role in PRIMARY_SHADOW_CONNECT_ROLES if not connect_grants.get(role))
                 checks.append(
                     {

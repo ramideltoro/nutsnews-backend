@@ -1,0 +1,119 @@
+name: Backend PostgreSQL Migration Access Preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Run offline metadata checks or protected live backend access checks.
+        required: true
+        default: offline
+        type: choice
+        options:
+          - offline
+          - status
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-backend-postgres-migration-access
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Migration access preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate inputs
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            offline|status) ;;
+            *) echo "Unsupported mode: $MODE" >&2; exit 1 ;;
+          esac
+
+      - name: Prepare SSH material
+        if: inputs.mode == 'status'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for secret_name in NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
+            if [[ -z "${!secret_name}" ]]; then
+              echo "Missing required production-backend secret: $secret_name" >&2
+              missing=1
+            fi
+          done
+          if [[ "$missing" != "0" ]]; then
+            exit "$missing"
+          fi
+
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F "${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}" -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Run access preflight
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            --host "$NUTSNEWS_BACKEND_HOST"
+            --output "$RUNNER_TEMP/backend-postgres-migration-access-preflight.json"
+          )
+
+          if [[ "$MODE" == "offline" ]]; then
+            args+=(--offline)
+          else
+            args+=(
+              --user "${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+              --ssh-key "$HOME/.ssh/nutsnews_backend"
+              --known-hosts "$HOME/.ssh/known_hosts"
+              --enforce
+            )
+          fi
+
+          python3 scripts/backend_postgres_migration_access_preflight.py "${args[@]}"
+
+      - name: Summarize safe metadata
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Backend PostgreSQL migration access preflight"
+            echo
+            echo "- Mode: \`${{ inputs.mode }}\`"
+            echo "- Report artifact contains safe metadata only."
+            echo "- No database URL, password, token, dump path, or row data is printed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload access preflight report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-postgres-migration-access-preflight
+          path: ${{ runner.temp }}/backend-postgres-migration-access-preflight.json
+          if-no-files-found: ignore

@@ -26,10 +26,17 @@ Machine-readable plan:
 docs/backend-postgres-replacement-plan.json
 ```
 
+Primary migration parity contract:
+
+```text
+docs/supabase-backend-postgres-parity.json
+```
+
 Validator:
 
 ```bash
 python3 scripts/validate_postgres_replacement_plan.py
+python3 scripts/validate_supabase_backend_postgres_parity.py
 ```
 
 ## Supabase Capability Check
@@ -56,6 +63,10 @@ write conflicts.
 - Public ports: only 22, 80, and 443.
 - Continuous replication: not enabled in this issue; lag is reported as
   `not_configured`.
+
+Migration access is documented in [DB_MIGRATION_ACCESS.md](DB_MIGRATION_ACCESS.md).
+The approved path is SSH to the backend host followed by loopback PostgreSQL;
+public `5432` remains forbidden.
 
 ## Protected Apply
 

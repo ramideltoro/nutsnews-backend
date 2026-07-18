@@ -99,6 +99,46 @@
   no_log: true
   when: backend_postgres_manageable | bool
 
+- name: Ensure migration restore role exists
+  community.postgresql.postgresql_user:
+    name: "{{ backend_postgres_restore_user }}"
+    password: "{{ backend_postgres_restore_password }}"
+    role_attr_flags: LOGIN,CREATEDB
+    state: present
+  become_user: postgres
+  no_log: true
+  when: backend_postgres_manageable | bool
+
+- name: Ensure migration validation role exists
+  community.postgresql.postgresql_user:
+    name: "{{ backend_postgres_validation_user }}"
+    password: "{{ backend_postgres_validation_password }}"
+    role_attr_flags: LOGIN
+    state: present
+  become_user: postgres
+  no_log: true
+  when: backend_postgres_manageable | bool
+
+- name: Ensure migration replication role exists
+  community.postgresql.postgresql_user:
+    name: "{{ backend_postgres_replication_user }}"
+    password: "{{ backend_postgres_replication_password }}"
+    role_attr_flags: LOGIN
+    state: present
+  become_user: postgres
+  no_log: true
+  when: backend_postgres_manageable | bool
+
+- name: Ensure application rehearsal role exists
+  community.postgresql.postgresql_user:
+    name: "{{ backend_postgres_app_rehearsal_user }}"
+    password: "{{ backend_postgres_app_rehearsal_password }}"
+    role_attr_flags: LOGIN
+    state: present
+  become_user: postgres
+  no_log: true
+  when: backend_postgres_manageable | bool
+
 - name: Ensure failover database exists
   community.postgresql.postgresql_db:
     name: "{{ backend_postgres_database }}"
@@ -122,7 +162,7 @@
     db: "{{ backend_postgres_database }}"
     type: database
     privs: CONNECT
-    roles: "{{ backend_postgres_readonly_user }}"
+    roles: "{{ backend_postgres_readonly_user }},{{ backend_postgres_validation_user }},{{ backend_postgres_app_rehearsal_user }}"
     state: present
   become_user: postgres
   when: backend_postgres_manageable | bool
@@ -133,7 +173,7 @@
     type: schema
     objs: public
     privs: USAGE
-    roles: "{{ backend_postgres_readonly_user }}"
+    roles: "{{ backend_postgres_readonly_user }},{{ backend_postgres_validation_user }},{{ backend_postgres_app_rehearsal_user }}"
     state: present
   become_user: postgres
   when: backend_postgres_manageable | bool

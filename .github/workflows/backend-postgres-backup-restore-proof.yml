@@ -1,0 +1,180 @@
+name: Backend PostgreSQL Backup Restore Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Inspect current proof metadata or run the protected backend PostgreSQL backup restore proof.
+        required: true
+        default: status
+        type: choice
+        options:
+          - status
+          - run-proof
+      confirm_restore:
+        description: For run-proof only, type prove-backend-postgres-backup-restore.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-postgres-backup-restore-proof
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    name: PostgreSQL backup restore proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRM_RESTORE: ${{ inputs.confirm_restore }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            status|run-proof) ;;
+            *) echo "Unsupported mode: $MODE" >&2; exit 1 ;;
+          esac
+          if [[ "$MODE" == "run-proof" && "$CONFIRM_RESTORE" != "prove-backend-postgres-backup-restore" ]]; then
+            echo "run-proof requires confirm_restore to be exactly prove-backend-postgres-backup-restore." >&2
+            exit 1
+          fi
+
+      - name: Validate required protected material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing required production-backend secret: $name" >&2
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Prepare SSH material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Inspect current proof metadata
+        if: inputs.mode == 'status'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            'set -euo pipefail
+             if sudo -n test -r /var/lib/nutsnews/postgres/backup-restore-proof.json; then
+               sudo -n cat /var/lib/nutsnews/postgres/backup-restore-proof.json
+             else
+               printf "%s\n" "{\"status\":\"not_configured\",\"safe_metadata_only\":true}"
+             fi' | tee "$RUNNER_TEMP/backend-postgres-backup-restore-proof.json"
+
+      - name: Run protected backup restore proof
+        if: inputs.mode == 'run-proof'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE || 'nutsnews_restore_rehearsal' }}
+        run: |
+          set -euo pipefail
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          proof_database="nutsnews_backup_restore_proof"
+          remote_dir="/tmp/nutsnews-postgres-backup-proof-${GITHUB_RUN_ID}"
+          manifest_version="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          print(json.loads(Path("docs/supabase-backend-postgres-parity.json").read_text()).get("version", "unknown"))
+          PY
+          )"
+
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "install -m 0700 -d '$remote_dir'"
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            scripts/backend_postgres_backup_restore_proof_remote.sh \
+            scripts/backend_postgres_restore_validation.sql \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "REHEARSAL_DATABASE='$NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE' PROOF_DATABASE='$proof_database' REMOTE_DIR='$remote_dir' GITHUB_RUN_ID='$GITHUB_RUN_ID' GITHUB_REPOSITORY='$GITHUB_REPOSITORY' MANIFEST_VERSION='$manifest_version' bash '$remote_dir/backend_postgres_backup_restore_proof_remote.sh'" \
+            | tee "$RUNNER_TEMP/backend-postgres-backup-restore-proof.json"
+
+      - name: Validate proof artifact shape
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -s "$RUNNER_TEMP/backend-postgres-backup-restore-proof.json" ]]; then
+            python3 scripts/validate_backend_postgres_backup_proof.py "$RUNNER_TEMP/backend-postgres-backup-restore-proof.json"
+          fi
+
+      - name: Summarize safe metadata
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Backend PostgreSQL backup restore proof"
+            echo
+            echo "- Mode: \`${{ inputs.mode }}\`"
+            echo "- Report artifact contains safe metadata only."
+            echo "- Database URLs, passwords, tokens, dumps, and row data are not printed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload proof report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-postgres-backup-restore-proof
+          path: ${{ runner.temp }}/backend-postgres-backup-restore-proof.json
+          if-no-files-found: ignore

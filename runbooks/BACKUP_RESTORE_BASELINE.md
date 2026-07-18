@@ -111,6 +111,34 @@ restore target, measured RPO/RTO, parity validation status, backup freshness
 status, restore health status, and status artifact paths. It must not include
 connection strings, passwords, row data, dump paths, or tokens.
 
+Protected proof workflow:
+
+```bash
+gh workflow run backend-postgres-backup-restore-proof.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f mode=run-proof \
+  -f confirm_restore=prove-backend-postgres-backup-restore
+```
+
+The workflow creates a backend-produced logical PostgreSQL dump from the
+rehearsal database, writes that dump into the encrypted off-server restic
+repository, restores the restic snapshot into the isolated
+`nutsnews_backup_restore_proof` database, runs the backend PostgreSQL restore
+validation SQL, and writes safe metadata to:
+
+- `/var/lib/nutsnews/postgres/backup-restore-proof.json`
+- `/var/lib/nutsnews/postgres/status.json`
+
+Status-only inspection:
+
+```bash
+gh workflow run backend-postgres-backup-restore-proof.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f mode=status
+```
+
 ## GitOps Components
 
 The protected Ansible baseline installs:

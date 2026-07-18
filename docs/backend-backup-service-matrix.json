@@ -118,9 +118,9 @@
         "/var/lib/postgresql",
         "/var/lib/nutsnews/postgres/status.json"
       ],
-      "backup_method": "restic_paths_plus_supabase_logical_dump_restore_for_rehearsal",
-      "restore_method": "protected_backend_postgres_failover_drill_restores_staging_public_schema_to_rehearsal_database",
-      "verification_method": "restore_drill_required_tables_views_counts_and_status_json",
+      "backup_method": "restic_paths_plus_backend_postgresql_logical_dump_snapshot",
+      "restore_method": "protected_backend_postgres_backup_restore_proof_restores_backend_dump_to_isolated_database",
+      "verification_method": "restore_drill_required_tables_views_counts_status_json_and_backup_restore_proof_json",
       "exclusion_rationale": ""
     },
     {

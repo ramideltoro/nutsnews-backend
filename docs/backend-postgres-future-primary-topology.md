@@ -31,6 +31,7 @@ The shadow target must be provisioned with the roles required to replay Supabase
 - `postgres` for protected workflow administration.
 - `nutsnews_migration_restore` for restore ownership and protected restore operations.
 - `nutsnews_migration_validation` for metadata and aggregate validation.
+- `nutsnews_migration_replication` for backend-side replication setup during the migration window.
 - `nutsnews_readonly` for operator inspection through approved access paths.
 - `nutsnews_app` as the future application role, with writes disabled before cutover.
 - `anon`, `authenticated`, and `service_role` as compatibility role names for restored grants and RLS behavior only.

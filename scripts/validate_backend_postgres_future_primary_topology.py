@@ -159,6 +159,7 @@ def main() -> int:
         "postgres",
         "nutsnews_migration_restore",
         "nutsnews_migration_validation",
+        "nutsnews_migration_replication",
         "nutsnews_readonly",
         "nutsnews_app",
         "anon",

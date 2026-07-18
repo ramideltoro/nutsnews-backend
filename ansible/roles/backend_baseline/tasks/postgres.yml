@@ -165,19 +165,39 @@
   no_log: true
   when: backend_postgres_manageable | bool
 
+- name: Ensure Supabase compatibility roles exist
+  community.postgresql.postgresql_user:
+    name: "{{ item.name }}"
+    role_attr_flags: "{{ item.flags }}"
+    state: present
+  loop:
+    - name: anon
+      flags: NOLOGIN
+    - name: authenticated
+      flags: NOLOGIN
+    - name: service_role
+      flags: NOLOGIN,BYPASSRLS
+  become_user: postgres
+  when: backend_postgres_manageable | bool
+
 - name: Track whether PostgreSQL role-dependent tasks can run in this check
   ansible.builtin.set_fact:
     backend_postgres_database_manageable: >-
       {{
         (not ansible_check_mode)
-        or not (backend_postgres_app_user_result is changed)
+        or not (
+          (backend_postgres_app_user_result is changed)
+          or (backend_postgres_restore_user_result is changed)
+        )
       }}
     backend_postgres_privilege_roles_manageable: >-
       {{
         (not ansible_check_mode)
         or not (
-          (backend_postgres_readonly_user_result is changed)
+          (backend_postgres_app_user_result is changed)
+          or (backend_postgres_readonly_user_result is changed)
           or (backend_postgres_validation_user_result is changed)
+          or (backend_postgres_replication_user_result is changed)
           or (backend_postgres_app_rehearsal_user_result is changed)
         )
       }}
@@ -195,6 +215,18 @@
     - backend_postgres_manageable | bool
     - backend_postgres_database_manageable | default(false) | bool
 
+- name: Ensure future-primary shadow database exists
+  community.postgresql.postgresql_db:
+    name: "{{ backend_postgres_primary_shadow_database }}"
+    owner: "{{ backend_postgres_restore_user }}"
+    encoding: UTF8
+    state: present
+  become_user: postgres
+  register: backend_postgres_primary_shadow_database_result
+  when:
+    - backend_postgres_manageable | bool
+    - backend_postgres_database_manageable | default(false) | bool
+
 - name: Track whether PostgreSQL database-dependent tasks can run in this check
   ansible.builtin.set_fact:
     backend_postgres_database_dependents_manageable: >-
@@ -205,6 +237,8 @@
           or (
             backend_postgres_database_result is defined
             and not (backend_postgres_database_result is changed)
+            and backend_postgres_primary_shadow_database_result is defined
+            and not (backend_postgres_primary_shadow_database_result is changed)
           )
         )
       }}
@@ -221,12 +255,36 @@
     - backend_postgres_manageable | bool
     - backend_postgres_database_dependents_manageable | default(false) | bool
 
+- name: Ensure required PostgreSQL extensions exist in the future-primary shadow database
+  community.postgresql.postgresql_ext:
+    name: "{{ item }}"
+    db: "{{ backend_postgres_primary_shadow_database }}"
+    state: present
+  loop: "{{ backend_postgres_required_extensions }}"
+  become_user: postgres
+  when:
+    - backend_postgres_manageable | bool
+    - backend_postgres_database_dependents_manageable | default(false) | bool
+
 - name: Allow read-only role to connect to the failover database
   community.postgresql.postgresql_privs:
     db: "{{ backend_postgres_database }}"
     type: database
     privs: CONNECT
     roles: "{{ backend_postgres_readonly_user }},{{ backend_postgres_validation_user }},{{ backend_postgres_app_rehearsal_user }}"
+    state: present
+  become_user: postgres
+  when:
+    - backend_postgres_manageable | bool
+    - backend_postgres_database_dependents_manageable | default(false) | bool
+    - backend_postgres_privilege_roles_manageable | default(false) | bool
+
+- name: Allow migration roles to connect to the future-primary shadow database
+  community.postgresql.postgresql_privs:
+    db: "{{ backend_postgres_primary_shadow_database }}"
+    type: database
+    privs: CONNECT
+    roles: "{{ backend_postgres_readonly_user }},{{ backend_postgres_validation_user }},{{ backend_postgres_replication_user }},{{ backend_postgres_app_user }}"
     state: present
   become_user: postgres
   when:
@@ -248,6 +306,20 @@
     - backend_postgres_database_dependents_manageable | default(false) | bool
     - backend_postgres_privilege_roles_manageable | default(false) | bool
 
+- name: Allow validation roles to use the future-primary shadow public schema
+  community.postgresql.postgresql_privs:
+    db: "{{ backend_postgres_primary_shadow_database }}"
+    type: schema
+    objs: public
+    privs: USAGE
+    roles: "{{ backend_postgres_readonly_user }},{{ backend_postgres_validation_user }}"
+    state: present
+  become_user: postgres
+  when:
+    - backend_postgres_manageable | bool
+    - backend_postgres_database_dependents_manageable | default(false) | bool
+    - backend_postgres_privilege_roles_manageable | default(false) | bool
+
 - name: Preserve initial PostgreSQL readiness status
   ansible.builtin.copy:
     dest: "{{ backend_postgres_state_dir }}/status.json"
@@ -260,6 +332,7 @@
         "status": "warning",
         "database": "{{ backend_postgres_database }}",
         "rehearsal_database": "{{ backend_postgres_rehearsal_database }}",
+        "primary_shadow_database": "{{ backend_postgres_primary_shadow_database }}",
         "source_of_truth": "Supabase remains the only production writer until a protected cutover is separately approved.",
         "last_restore_drill": {
           "status": "not_configured"
@@ -276,6 +349,30 @@
         }
       }
   when: backend_postgres_manageable | bool
+
+- name: Write future-primary shadow provisioning status
+  ansible.builtin.copy:
+    dest: "{{ backend_postgres_state_dir }}/primary-shadow-provision.json"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {
+        "status": "provisioned",
+        "database": "{{ backend_postgres_primary_shadow_database }}",
+        "owner_role": "{{ backend_postgres_restore_user }}",
+        "validation_role": "{{ backend_postgres_validation_user }}",
+        "readonly_role": "{{ backend_postgres_readonly_user }}",
+        "replication_role": "{{ backend_postgres_replication_user }}",
+        "future_application_role": "{{ backend_postgres_app_user }}",
+        "network_path": "ssh_tunnel_to_loopback_postgresql",
+        "public_5432_allowed": false,
+        "source_of_truth": "Supabase remains the only production writer until issue 119 is explicitly approved and executed.",
+        "safe_metadata_only": true
+      }
+  when:
+    - backend_postgres_manageable | bool
+    - not ansible_check_mode
 
 - name: Install loopback-only Adminer PHP-FPM pool
   ansible.builtin.copy:
@@ -331,6 +428,7 @@
       enabled: "{{ backend_postgres_enabled }}"
       database: "{{ backend_postgres_database }}"
       rehearsal_database: "{{ backend_postgres_rehearsal_database }}"
+      primary_shadow_database: "{{ backend_postgres_primary_shadow_database }}"
       listen_addresses: "{{ backend_postgres_listen_addresses }}"
       dashboard_enabled: "{{ backend_db_dashboard_enabled }}"
       dashboard_route: "http://{{ backend_db_dashboard_bind }}:{{ backend_db_dashboard_port }}/"

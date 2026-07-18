@@ -16,6 +16,7 @@ from typing import Any
 DEFAULT_OUTPUT = Path("/var/lib/nutsnews/metrics/nutsnews.prom")
 BACKUP_STATE_DIR = Path("/var/lib/nutsnews/backups")
 POSTGRES_STATE_DIR = Path("/var/lib/nutsnews/postgres")
+POSTGRES_REPLICATION_HEALTH_PATH = POSTGRES_STATE_DIR / "replication-health.json"
 SERVICES = (
     "ssh",
     "ufw",
@@ -165,10 +166,15 @@ def collect() -> list[str]:
     )
 
     postgres = read_json(POSTGRES_STATE_DIR / "status.json")
+    replication_health = read_json(POSTGRES_REPLICATION_HEALTH_PATH)
+    if isinstance(replication_health.get("replication"), dict):
+        postgres["replication"] = replication_health["replication"]
     restore_drill_status = postgres_status_value(postgres.get("last_restore_drill", {}) if isinstance(postgres.get("last_restore_drill"), dict) else {})
     postgres_status = postgres_status_value(postgres)
     replication = postgres.get("replication", {}) if isinstance(postgres, dict) else {}
     lag_status = str(replication.get("lag_status") or "not_configured") if isinstance(replication, dict) else "not_configured"
+    max_lag_seconds = replication.get("max_lag_seconds") if isinstance(replication, dict) else None
+    blocker_count = len(replication.get("blockers", [])) if isinstance(replication.get("blockers"), list) else 0
     failover_ready = 1 if postgres_status == "healthy" and restore_drill_status == "healthy" else 0
     lines.extend(
         [
@@ -181,8 +187,19 @@ def collect() -> list[str]:
             "# HELP nutsnews_backend_postgres_replication_lag_configured Whether continuous replication lag is configured for the selected topology.",
             "# TYPE nutsnews_backend_postgres_replication_lag_configured gauge",
             metric("nutsnews_backend_postgres_replication_lag_configured", 0 if lag_status == "not_configured" else 1, {"status": lag_status}),
+            "# HELP nutsnews_backend_postgres_replication_blockers Current replication health blocker count.",
+            "# TYPE nutsnews_backend_postgres_replication_blockers gauge",
+            metric("nutsnews_backend_postgres_replication_blockers", blocker_count),
         ]
     )
+    if isinstance(max_lag_seconds, (int, float)):
+        lines.extend(
+            [
+                "# HELP nutsnews_backend_postgres_replication_max_lag_seconds Maximum observed logical replication lag.",
+                "# TYPE nutsnews_backend_postgres_replication_max_lag_seconds gauge",
+                metric("nutsnews_backend_postgres_replication_max_lag_seconds", max_lag_seconds),
+            ]
+        )
 
     return lines
 

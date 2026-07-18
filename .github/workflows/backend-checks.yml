@@ -60,6 +60,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backup_service_matrix.py
 
+      - name: Validate PostgreSQL backup restore proof example
+        shell: bash
+        run: python3 scripts/validate_backend_postgres_backup_proof.py
+
       - name: Validate Grafana metrics dashboards
         shell: bash
         run: python3 scripts/provision_grafana_metrics.py --check

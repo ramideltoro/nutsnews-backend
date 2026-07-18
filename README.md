@@ -116,4 +116,5 @@ python3 scripts/validate_supabase_backend_postgres_parity.py
 python3 scripts/check_supabase_migration_drift.py
 python3 scripts/backend_postgres_migration_access_preflight.py --offline
 python3 scripts/backend_postgres_parity_validate.py --offline
+python3 scripts/validate_backend_postgres_backup_proof.py
 ```

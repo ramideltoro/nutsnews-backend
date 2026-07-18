@@ -1,0 +1,210 @@
+name: Backend PostgreSQL Replication Health
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Run offline metadata or protected backend replication health check.
+        required: true
+        default: offline
+        type: choice
+        options:
+          - offline
+          - simulate-broken
+          - status
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-postgres-replication-health
+  cancel-in-progress: false
+
+jobs:
+  replication:
+    name: PostgreSQL replication health
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate inputs
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            offline|simulate-broken|status) ;;
+            *) echo "Unsupported mode: $MODE" >&2; exit 1 ;;
+          esac
+
+      - name: Run offline replication metadata
+        if: inputs.mode == 'offline'
+        shell: bash
+        run: |
+          python3 scripts/backend_postgres_replication_health.py \
+            --offline \
+            --output "$RUNNER_TEMP/backend-postgres-replication-health.json" \
+            --textfile-output "$RUNNER_TEMP/backend-postgres-replication-health.prom"
+
+      - name: Run simulated broken replication check
+        id: simulated_broken_replication
+        if: inputs.mode == 'simulate-broken'
+        continue-on-error: true
+        shell: bash
+        run: |
+          python3 scripts/backend_postgres_replication_health.py \
+            --simulate-broken \
+            --enforce \
+            --output "$RUNNER_TEMP/backend-postgres-replication-health.json" \
+            --textfile-output "$RUNNER_TEMP/backend-postgres-replication-health.prom"
+
+      - name: Validate protected backend secrets
+        if: inputs.mode == 'status'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in \
+            NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD \
+            NUTSNEWS_BACKEND_SSH_PRIVATE_KEY \
+            NUTSNEWS_BACKEND_KNOWN_HOSTS \
+            NUTSNEWS_PRODUCTION_SUPABASE_DB_URL
+          do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing required production-backend secret: $name" >&2
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Prepare backend tunnel
+        if: inputs.mode == 'status'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh -fN -L 15432:127.0.0.1:5432 \
+            -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST"
+
+      - name: Run protected replication health check
+        id: protected_replication_health
+        if: inputs.mode == 'status'
+        continue-on-error: true
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
+          NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE || 'nutsnews_restore_rehearsal' }}
+          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+          target_url="$(python3 - <<'PY'
+          import os
+          from urllib.parse import quote
+
+          user = quote("nutsnews_migration_validation", safe="")
+          password = quote(os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD"], safe="")
+          database = quote(os.environ["NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE"], safe="")
+          print(f"postgresql://{user}:{password}@127.0.0.1:15432/{database}")
+          PY
+          )"
+          echo "::add-mask::$target_url"
+          echo "::add-mask::$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL"
+          NUTSNEWS_BACKEND_TARGET_DB_URL="$target_url" \
+          NUTSNEWS_SOURCE_DB_URL="$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL" \
+            python3 scripts/backend_postgres_replication_health.py \
+              --target-db-url-env NUTSNEWS_BACKEND_TARGET_DB_URL \
+              --source-db-url-env NUTSNEWS_SOURCE_DB_URL \
+              --output "$RUNNER_TEMP/backend-postgres-replication-health.json" \
+              --textfile-output "$RUNNER_TEMP/backend-postgres-replication-health.prom" \
+              --enforce
+
+      - name: Publish replication health status for dashboard
+        if: always() && inputs.mode == 'status'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          if [[ ! -s "$RUNNER_TEMP/backend-postgres-replication-health.json" ]]; then
+            echo "No replication health report was produced; skipping dashboard publish."
+            exit 0
+          fi
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh_base=(
+            ssh
+            -i "$HOME/.ssh/nutsnews_backend"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+          )
+          scp_base=(
+            scp
+            -i "$HOME/.ssh/nutsnews_backend"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+          )
+          remote_dir="$("${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" 'mktemp -d')"
+          "${scp_base[@]}" "$RUNNER_TEMP/backend-postgres-replication-health.json" "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/replication-health.json"
+          "${scp_base[@]}" "$RUNNER_TEMP/backend-postgres-replication-health.prom" "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/replication-health.prom"
+          "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "set -euo pipefail
+            sudo -n install -d -m 0755 -o root -g root /var/lib/nutsnews/postgres
+            sudo -n install -m 0644 -o root -g root '$remote_dir/replication-health.json' /var/lib/nutsnews/postgres/replication-health.json
+            sudo -n install -d -m 0755 -o root -g root /var/lib/nutsnews/metrics
+            sudo -n install -m 0644 -o root -g root '$remote_dir/replication-health.prom' /var/lib/nutsnews/metrics/backend-postgres-replication-health.prom
+            sudo -n /usr/local/bin/nutsnews-ops-dashboard-collect --output /var/www/nutsnews-ops-dashboard/status.json >/dev/null 2>&1 || true
+            sudo -n systemctl start nutsnews-metrics-textfile.service >/dev/null 2>&1 || true
+            rm -f '$remote_dir/replication-health.json' '$remote_dir/replication-health.prom'
+            rmdir '$remote_dir'"
+
+      - name: Fail simulated broken replication check
+        if: inputs.mode == 'simulate-broken' && steps.simulated_broken_replication.outcome == 'failure'
+        shell: bash
+        run: exit 1
+
+      - name: Fail unhealthy protected replication check
+        if: inputs.mode == 'status' && steps.protected_replication_health.outcome == 'failure'
+        shell: bash
+        run: exit 1
+
+      - name: Upload replication health report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-postgres-replication-health
+          path: |
+            ${{ runner.temp }}/backend-postgres-replication-health.json
+            ${{ runner.temp }}/backend-postgres-replication-health.prom
+          if-no-files-found: ignore

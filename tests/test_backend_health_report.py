@@ -106,6 +106,21 @@ class BackendHealthReportTests(unittest.TestCase):
         self.assertEqual(by_name["postgres_restore_readiness"]["status"], "healthy")
         self.assertIn("database=nutsnews_failover", by_name["postgres_restore_readiness"]["summary"])
 
+    def test_postgres_replication_health_alerts_on_lag(self):
+        checks, _ = backend_health_report.classify(
+            fixture_report(
+                postgres_replication_health=command(
+                    "{"
+                    '"replication":{"status":"fail","lag_status":"lagging","max_lag_seconds":601,"blockers":["replication_lag_exceeds_threshold"]}'
+                    "}\n"
+                )
+            )
+        )
+        by_name = {item["name"]: item for item in checks}
+        self.assertEqual(by_name["postgres_replication_health"]["status"], "critical")
+        alerts = backend_health_report.current_alerts_from_checks([by_name["postgres_replication_health"]])
+        self.assertEqual(alerts[0]["failure_class"], "replication_health")
+
     def test_cleanup_status_is_exposed_when_present(self):
         checks, _ = backend_health_report.classify(
             fixture_report(

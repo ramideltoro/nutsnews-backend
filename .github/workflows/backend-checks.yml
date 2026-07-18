@@ -112,6 +112,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backend_postgres_logical_replication_plan.py
 
+      - name: Validate PostgreSQL replication health offline mode
+        shell: bash
+        run: python3 scripts/backend_postgres_replication_health.py --offline
+
       - name: Validate PostgreSQL smoke tests offline mode
         shell: bash
         run: python3 scripts/backend_postgres_smoke_tests.py --offline

@@ -37,7 +37,7 @@ def main() -> int:
         errors.append("source direct_connection_required must be true")
     if source.get("connection_pooler_allowed") is not False:
         errors.append("source connection_pooler_allowed must be false")
-    if source.get("db_url_secret") != "NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL":
+    if source.get("db_url_secret") != "NUTSNEWS_PRODUCTION_SUPABASE_DB_URL":
         errors.append("production source must use the direct Supabase DB URL secret")
     if source.get("ipv4_or_ipv6_requirement_must_be_recorded") is not True:
         errors.append("source IPv4/IPv6 requirement gate must be recorded")
@@ -80,7 +80,7 @@ def main() -> int:
         errors.append("production writes must not be allowed during replication rehearsal")
     if set(rehearsal.get("change_tests", [])) != {"insert", "update", "delete", "truncate"}:
         errors.append("staging rehearsal must cover insert, update, delete, and truncate")
-    if rehearsal.get("source_db_url_secret") != "NUTSNEWS_STAGING_SUPABASE_DB_DIRECT_URL":
+    if rehearsal.get("source_db_url_secret") != "NUTSNEWS_STAGING_SUPABASE_DB_URL":
         errors.append("staging rehearsal must use the staging direct Supabase DB URL secret")
 
     production_shadow = plan.get("production_shadow", {})
@@ -88,7 +88,7 @@ def main() -> int:
         errors.append("production shadow replication must be tracked by issue 213")
     if set(production_shadow.get("required_after_issues", [])) != {211, 212, 215}:
         errors.append("production shadow replication must require issues 211, 212, and 215")
-    if production_shadow.get("source_db_url_secret") != "NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL":
+    if production_shadow.get("source_db_url_secret") != "NUTSNEWS_PRODUCTION_SUPABASE_DB_URL":
         errors.append("production shadow must use the production direct DB URL secret")
     if production_shadow.get("target_database") != "nutsnews_primary_shadow":
         errors.append("production shadow target must be nutsnews_primary_shadow")

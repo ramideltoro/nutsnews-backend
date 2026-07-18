@@ -91,7 +91,7 @@ def validate_check(check: dict, source_db_url: str, target_db_url: str) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST))
-    parser.add_argument("--source-db-url-env", default="NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL")
+    parser.add_argument("--source-db-url-env", default="NUTSNEWS_PRODUCTION_SUPABASE_DB_URL")
     parser.add_argument("--target-db-url-env", default="NUTSNEWS_BACKEND_TARGET_DB_URL")
     parser.add_argument("--source-label", default="production_supabase")
     parser.add_argument("--target-label", default="nutsnews_primary_shadow")

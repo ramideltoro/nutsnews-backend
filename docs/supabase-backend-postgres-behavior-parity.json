@@ -6,7 +6,7 @@
   "updated_at_utc": "2026-07-18",
   "source": {
     "environment": "production",
-    "db_url_secret": "NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL",
+    "db_url_secret": "NUTSNEWS_PRODUCTION_SUPABASE_DB_URL",
     "direct_connection_required": true
   },
   "target": {

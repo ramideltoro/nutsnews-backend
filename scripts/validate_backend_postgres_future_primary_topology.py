@@ -87,7 +87,7 @@ def main() -> int:
     source = topology.get("source", {})
     if source.get("authoritative_writer") != "production_supabase":
         errors.append("source authoritative_writer must remain production_supabase")
-    if source.get("direct_connection_secret") != "NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL":
+    if source.get("direct_connection_secret") != "NUTSNEWS_PRODUCTION_SUPABASE_DB_URL":
         errors.append("source must use the production Supabase direct DB secret name")
     if source.get("pooler_connection_allowed_for_logical_replication") is not False:
         errors.append("pooler connections must be forbidden for logical replication")

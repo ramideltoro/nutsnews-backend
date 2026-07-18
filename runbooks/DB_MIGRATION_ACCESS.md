@@ -34,10 +34,10 @@ database URLs into issues, PRs, logs, screenshots, or summaries.
 | --- | --- | --- | --- |
 | `nutsnews_app` | `NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD` | Future production app owner role | Rotate at cutover and after any rollback |
 | `nutsnews_readonly` | `NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD` | Read-only inspection and dashboard checks | Keep only if operationally needed |
-| `nutsnews_migration_restore` | `NUTSNEWS_BACKEND_POSTGRES_RESTORE_PASSWORD` | Protected restore/rehearsal workflows | Revoke after rehearsal/cutover |
-| `nutsnews_migration_validation` | `NUTSNEWS_BACKEND_POSTGRES_VALIDATION_PASSWORD` | Parity and smoke validation | Rotate or disable after cutover |
-| `nutsnews_migration_replication` | `NUTSNEWS_BACKEND_POSTGRES_REPLICATION_PASSWORD` | Backend subscription/replication setup | Drop when replication is retired |
-| `nutsnews_app_rehearsal` | `NUTSNEWS_BACKEND_POSTGRES_APP_REHEARSAL_PASSWORD` | Non-production app/API cutover rehearsal | Drop after rehearsal |
+| `nutsnews_migration_restore` | `NUTSNEWS_BACKEND_POSTGRES_MIGRATION_RESTORE_PASSWORD` | Protected restore/rehearsal workflows | Revoke after rehearsal/cutover |
+| `nutsnews_migration_validation` | `NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD` | Parity and smoke validation | Rotate or disable after cutover |
+| `nutsnews_migration_replication` | `NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD` | Backend subscription/replication setup | Drop when replication is retired |
+| `nutsnews_app_rehearsal` | `NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD` | Non-production app/API cutover rehearsal | Drop after rehearsal |
 
 ## Preflight
 

@@ -152,10 +152,10 @@ jobs:
           NUTSNEWS_BACKEND_DB_DASHBOARD_ENABLED: ${{ vars.NUTSNEWS_BACKEND_DB_DASHBOARD_ENABLED || 'true' }}
           NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD }}
-          NUTSNEWS_BACKEND_POSTGRES_RESTORE_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_RESTORE_PASSWORD }}
-          NUTSNEWS_BACKEND_POSTGRES_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_VALIDATION_PASSWORD }}
-          NUTSNEWS_BACKEND_POSTGRES_REPLICATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_REPLICATION_PASSWORD }}
-          NUTSNEWS_BACKEND_POSTGRES_APP_REHEARSAL_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_APP_REHEARSAL_PASSWORD }}
+          NUTSNEWS_BACKEND_POSTGRES_MIGRATION_RESTORE_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_RESTORE_PASSWORD }}
+          NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
+          NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD }}
+          NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD }}
         run: |
           set -euo pipefail
 
@@ -288,10 +288,10 @@ jobs:
                   for name, value in (
                       ("NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD", app_password),
                       ("NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD", readonly_password),
-                      ("NUTSNEWS_BACKEND_POSTGRES_RESTORE_PASSWORD", os.environ.get("NUTSNEWS_BACKEND_POSTGRES_RESTORE_PASSWORD", "")),
-                      ("NUTSNEWS_BACKEND_POSTGRES_VALIDATION_PASSWORD", os.environ.get("NUTSNEWS_BACKEND_POSTGRES_VALIDATION_PASSWORD", "")),
-                      ("NUTSNEWS_BACKEND_POSTGRES_REPLICATION_PASSWORD", os.environ.get("NUTSNEWS_BACKEND_POSTGRES_REPLICATION_PASSWORD", "")),
-                      ("NUTSNEWS_BACKEND_POSTGRES_APP_REHEARSAL_PASSWORD", os.environ.get("NUTSNEWS_BACKEND_POSTGRES_APP_REHEARSAL_PASSWORD", "")),
+                      ("NUTSNEWS_BACKEND_POSTGRES_MIGRATION_RESTORE_PASSWORD", os.environ.get("NUTSNEWS_BACKEND_POSTGRES_MIGRATION_RESTORE_PASSWORD", "")),
+                      ("NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD", os.environ.get("NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD", "")),
+                      ("NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD", os.environ.get("NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD", "")),
+                      ("NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD", os.environ.get("NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD", "")),
                   )
                   if not value
               ]
@@ -303,10 +303,10 @@ jobs:
               )
               extra_vars["backend_postgres_app_password"] = app_password
               extra_vars["backend_postgres_readonly_password"] = readonly_password
-              extra_vars["backend_postgres_restore_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_RESTORE_PASSWORD"]
-              extra_vars["backend_postgres_validation_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_VALIDATION_PASSWORD"]
-              extra_vars["backend_postgres_replication_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_REPLICATION_PASSWORD"]
-              extra_vars["backend_postgres_app_rehearsal_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_APP_REHEARSAL_PASSWORD"]
+              extra_vars["backend_postgres_restore_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_RESTORE_PASSWORD"]
+              extra_vars["backend_postgres_validation_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD"]
+              extra_vars["backend_postgres_replication_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD"]
+              extra_vars["backend_postgres_app_rehearsal_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD"]
 
           path = Path(os.environ["RUNNER_TEMP"]) / "backend-extra-vars.json"
           path.write_text(json.dumps(extra_vars), encoding="utf-8")

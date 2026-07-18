@@ -96,6 +96,10 @@ jobs:
         shell: bash
         run: python3 scripts/backend_postgres_migration_access_preflight.py --offline
 
+      - name: Validate parity comparison offline mode
+        shell: bash
+        run: python3 scripts/backend_postgres_parity_validate.py --offline
+
       - name: Run backend drift check tests
         shell: bash
         run: python3 -m unittest discover -s tests

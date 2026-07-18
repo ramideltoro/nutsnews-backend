@@ -37,6 +37,7 @@ Validator:
 ```bash
 python3 scripts/validate_postgres_replacement_plan.py
 python3 scripts/validate_supabase_backend_postgres_parity.py
+python3 scripts/backend_postgres_parity_validate.py --offline
 ```
 
 ## Supabase Capability Check

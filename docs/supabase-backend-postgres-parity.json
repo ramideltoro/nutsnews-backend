@@ -227,7 +227,7 @@
       "migration_status": "required",
       "validation": {
         "method": "refresh_and_row_count",
-        "query": "refresh materialized view public.public_feed_snapshot",
+        "query": "select count(*)::bigint from public.public_feed_snapshot",
         "sensitivity": "aggregate_only"
       }
     },

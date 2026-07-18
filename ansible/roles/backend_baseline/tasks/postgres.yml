@@ -106,6 +106,7 @@
     role_attr_flags: LOGIN
     state: present
   become_user: postgres
+  register: backend_postgres_app_user_result
   no_log: true
   when: backend_postgres_manageable | bool
 
@@ -116,6 +117,7 @@
     role_attr_flags: LOGIN
     state: present
   become_user: postgres
+  register: backend_postgres_readonly_user_result
   no_log: true
   when: backend_postgres_manageable | bool
 
@@ -126,6 +128,7 @@
     role_attr_flags: LOGIN,CREATEDB
     state: present
   become_user: postgres
+  register: backend_postgres_restore_user_result
   no_log: true
   when: backend_postgres_manageable | bool
 
@@ -136,6 +139,7 @@
     role_attr_flags: LOGIN
     state: present
   become_user: postgres
+  register: backend_postgres_validation_user_result
   no_log: true
   when: backend_postgres_manageable | bool
 
@@ -146,6 +150,7 @@
     role_attr_flags: LOGIN
     state: present
   become_user: postgres
+  register: backend_postgres_replication_user_result
   no_log: true
   when: backend_postgres_manageable | bool
 
@@ -156,7 +161,26 @@
     role_attr_flags: LOGIN
     state: present
   become_user: postgres
+  register: backend_postgres_app_rehearsal_user_result
   no_log: true
+  when: backend_postgres_manageable | bool
+
+- name: Track whether PostgreSQL role-dependent tasks can run in this check
+  ansible.builtin.set_fact:
+    backend_postgres_database_manageable: >-
+      {{
+        (not ansible_check_mode)
+        or not (backend_postgres_app_user_result is changed)
+      }}
+    backend_postgres_privilege_roles_manageable: >-
+      {{
+        (not ansible_check_mode)
+        or not (
+          (backend_postgres_readonly_user_result is changed)
+          or (backend_postgres_validation_user_result is changed)
+          or (backend_postgres_app_rehearsal_user_result is changed)
+        )
+      }}
   when: backend_postgres_manageable | bool
 
 - name: Ensure failover database exists
@@ -166,6 +190,24 @@
     encoding: UTF8
     state: present
   become_user: postgres
+  register: backend_postgres_database_result
+  when:
+    - backend_postgres_manageable | bool
+    - backend_postgres_database_manageable | default(false) | bool
+
+- name: Track whether PostgreSQL database-dependent tasks can run in this check
+  ansible.builtin.set_fact:
+    backend_postgres_database_dependents_manageable: >-
+      {{
+        (backend_postgres_database_manageable | default(false) | bool)
+        and (
+          (not ansible_check_mode)
+          or (
+            backend_postgres_database_result is defined
+            and not (backend_postgres_database_result is changed)
+          )
+        )
+      }}
   when: backend_postgres_manageable | bool
 
 - name: Ensure required PostgreSQL extensions exist in the failover database
@@ -175,7 +217,9 @@
     state: present
   loop: "{{ backend_postgres_required_extensions }}"
   become_user: postgres
-  when: backend_postgres_manageable | bool
+  when:
+    - backend_postgres_manageable | bool
+    - backend_postgres_database_dependents_manageable | default(false) | bool
 
 - name: Allow read-only role to connect to the failover database
   community.postgresql.postgresql_privs:
@@ -185,7 +229,10 @@
     roles: "{{ backend_postgres_readonly_user }},{{ backend_postgres_validation_user }},{{ backend_postgres_app_rehearsal_user }}"
     state: present
   become_user: postgres
-  when: backend_postgres_manageable | bool
+  when:
+    - backend_postgres_manageable | bool
+    - backend_postgres_database_dependents_manageable | default(false) | bool
+    - backend_postgres_privilege_roles_manageable | default(false) | bool
 
 - name: Allow read-only role to use the public schema
   community.postgresql.postgresql_privs:
@@ -196,7 +243,10 @@
     roles: "{{ backend_postgres_readonly_user }},{{ backend_postgres_validation_user }},{{ backend_postgres_app_rehearsal_user }}"
     state: present
   become_user: postgres
-  when: backend_postgres_manageable | bool
+  when:
+    - backend_postgres_manageable | bool
+    - backend_postgres_database_dependents_manageable | default(false) | bool
+    - backend_postgres_privilege_roles_manageable | default(false) | bool
 
 - name: Preserve initial PostgreSQL readiness status
   ansible.builtin.copy:

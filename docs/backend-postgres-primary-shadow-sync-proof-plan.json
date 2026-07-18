@@ -1,0 +1,89 @@
+{
+  "plan_id": "backend-postgres-primary-shadow-sync-proof",
+  "version": 1,
+  "issue": 214,
+  "tracking_issue": 120,
+  "updated_at_utc": "2026-07-18",
+  "depends_on_issues": [
+    211,
+    212,
+    213,
+    215
+  ],
+  "source": {
+    "environment": "production",
+    "db_url_secret": "NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL"
+  },
+  "target": {
+    "database": "nutsnews_primary_shadow",
+    "database_variable": "NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE",
+    "network_path": "ssh_tunnel_to_loopback_postgresql",
+    "public_5432_allowed": false
+  },
+  "proof_workflows": [
+    {
+      "name": "replication_health",
+      "path": ".github/workflows/backend-postgres-replication-health.yml",
+      "mode": "environment_name=production mode=status",
+      "artifact": "backend-postgres-replication-health",
+      "required_evidence": [
+        "subscription_count",
+        "slot_count",
+        "max_lag_seconds",
+        "blockers",
+        "safe_metadata_only"
+      ]
+    },
+    {
+      "name": "object_parity",
+      "path": ".github/workflows/backend-postgres-parity-validation.yml",
+      "mode": "mode=validate-production-shadow",
+      "artifact": "backend-postgres-parity-validation",
+      "required_evidence": [
+        "required_object_count",
+        "failed_required_checks",
+        "safe_metadata_only"
+      ]
+    },
+    {
+      "name": "behavior_parity",
+      "path": ".github/workflows/backend-postgres-parity-validation.yml",
+      "mode": "mode=validate-production-shadow",
+      "artifact": "backend-postgres-behavior-parity-validation",
+      "required_evidence": [
+        "catalog_check_count",
+        "failed_required_checks",
+        "safe_metadata_only"
+      ]
+    }
+  ],
+  "artifact_policy": {
+    "safe_metadata_only": true,
+    "allowed_evidence": [
+      "workflow_run_url",
+      "artifact_id",
+      "row_counts",
+      "checksum_digests",
+      "catalog_hashes",
+      "lag_seconds",
+      "slot_status",
+      "subscription_status"
+    ],
+    "forbidden_evidence": [
+      "database_urls",
+      "passwords",
+      "tokens",
+      "wal_contents",
+      "database_dumps",
+      "row_data"
+    ]
+  },
+  "cutover_policy": {
+    "failed_proof_blocks_cutover": true,
+    "supabase_remains_writer_until_issue": 119,
+    "production_write_probe_allowed": false
+  },
+  "validation": {
+    "local_validator": "python3 scripts/validate_backend_postgres_primary_shadow_sync_proof_plan.py"
+  }
+}

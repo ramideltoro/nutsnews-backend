@@ -71,11 +71,32 @@ Versioned dashboard definitions currently managed by this repo:
 - `backend-transaction-slow-path`: slow request investigation for #140.
 - `backend-php-apm-throughput-latency`: request volume and latency analysis for #141.
 - `backend-external-dependencies`: outbound dependency diagnosis for #142.
+- `backend-php-fpm-runtime-pool-health`: PHP-FPM capacity and pool saturation for #144.
+- `backend-caddy-request-traffic`: Caddy request volume, status, latency, and bounded facets for #146.
+- `backend-host-infrastructure`: backend host CPU, memory, disk, network, and process health for #147.
+- `backend-systemd-service-health`: critical service state, restarts, and service logs for #149.
 
 Each dashboard keeps a 24 hour default query window and uses the
 `NutsNews Backend - ` naming prefix. Live dashboard URLs are printed by
 `scripts/provision_newrelic_dashboards.py` after New Relic credentials are
 available in the runtime environment.
+
+## Runtime And Host Data Sources
+
+The runtime and host dashboards expect low-cardinality New Relic data from:
+
+- PHP-FPM pool metrics under `php_fpm.*` or an equivalent custom metric source.
+- Caddy structured logs with parsed `http.statusCode`, `request.path`,
+  `request.method`, `request.durationMs`, and `userAgent.name` fields.
+- New Relic infrastructure samples for host, storage, network, and process
+  data.
+- Systemd service state metrics under `systemd.service.*` or equivalent
+  service-health events, plus service-scoped logs.
+
+This dashboard pack does not expose a public PHP-FPM status endpoint and does
+not change Caddy routing. If a PHP-FPM status endpoint is later approved, keep
+it local-only or otherwise access-controlled and update the dashboard queries to
+match the approved metric names.
 
 ## Validate Reporting
 

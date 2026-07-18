@@ -1,0 +1,121 @@
+{
+  "slug": "backend-host-infrastructure",
+  "issue": 147,
+  "dashboard": {
+    "name": "NutsNews Backend - Host - Infrastructure",
+    "description": "24 hour dashboard for backend host CPU, load, memory, swap, disk, network, and top process resource use. Managed from ramideltoro/nutsnews-backend.",
+    "permissions": "PUBLIC_READ_ONLY",
+    "pages": [
+      {
+        "name": "Host resources",
+        "description": "Server-level infrastructure signals for backend.nutsnews.com.",
+        "widgets": [
+          {
+            "title": "CPU and load",
+            "layout": {"column": 1, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT average(cpuPercent), average(loadAverageOneMinute), average(loadAverageFiveMinute) FROM SystemSample WHERE hostname = 'backend.nutsnews.com' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Memory and swap",
+            "layout": {"column": 5, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT average(memoryUsedPercent), average(swapUsedPercent) FROM SystemSample WHERE hostname = 'backend.nutsnews.com' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Disk used",
+            "layout": {"column": 9, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT average(diskUsedPercent) FROM StorageSample WHERE hostname = 'backend.nutsnews.com' FACET mountPoint TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Disk I/O",
+            "layout": {"column": 1, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT average(readBytesPerSecond), average(writeBytesPerSecond), average(ioUtilizationPercent) FROM StorageSample WHERE hostname = 'backend.nutsnews.com' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Network throughput",
+            "layout": {"column": 5, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT average(receiveBytesPerSecond), average(transmitBytesPerSecond) FROM NetworkSample WHERE hostname = 'backend.nutsnews.com' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Network errors",
+            "layout": {"column": 9, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT average(receiveErrorsPerSecond), average(transmitErrorsPerSecond) FROM NetworkSample WHERE hostname = 'backend.nutsnews.com' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Top CPU processes",
+            "layout": {"column": 1, "row": 7, "height": 3, "width": 6},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT average(cpuPercent), latest(commandName) FROM ProcessSample WHERE hostname = 'backend.nutsnews.com' FACET processDisplayName LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Top memory processes",
+            "layout": {"column": 7, "row": 7, "height": 3, "width": 6},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT average(memoryResidentSizeBytes), latest(commandName) FROM ProcessSample WHERE hostname = 'backend.nutsnews.com' FACET processDisplayName LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

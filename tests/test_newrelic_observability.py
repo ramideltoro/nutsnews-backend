@@ -62,6 +62,14 @@ class NewRelicObservabilityTests(unittest.TestCase):
         self.assertIn("logs", privacy["coverage"])
         self.assertIn("authorization", privacy["denylist"])
 
+    def test_dashboard_ux_covers_every_dashboard(self):
+        dashboards = {dashboard["slug"] for dashboard in provision_newrelic_dashboards.load_dashboard_files()}
+        ux = json.loads((ROOT / "docs" / "newrelic-dashboard-ux.json").read_text(encoding="utf-8"))
+        ux_slugs = {dashboard["slug"] for dashboard in ux["dashboards"]}
+        self.assertTrue(dashboards.issubset(ux_slugs))
+        variables = {variable["name"] for variable in ux["variables"]}
+        self.assertTrue({"environment", "host", "transaction", "status_code", "deployment_version"}.issubset(variables))
+
     def test_missing_new_relic_credentials_fail_closed(self):
         with mock.patch.dict("os.environ", {}, clear=True):
             with redirect_stdout(StringIO()):

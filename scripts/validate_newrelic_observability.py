@@ -20,6 +20,8 @@ LOG_POLICY = ROOT / "docs" / "newrelic-log-policy.json"
 SERVICE_LEVELS = ROOT / "docs" / "newrelic-service-levels.json"
 CACHE_QUEUE_DECISION = ROOT / "docs" / "newrelic-cache-queue-decision.json"
 PRIVACY_REVIEW = ROOT / "docs" / "newrelic-telemetry-privacy-review.json"
+DASHBOARD_UX = ROOT / "docs" / "newrelic-dashboard-ux.json"
+DEMO_RUNBOOK = ROOT / "runbooks" / "NEW_RELIC_OBSERVABILITY_DEMO.md"
 
 
 def main() -> int:
@@ -91,6 +93,20 @@ def main() -> int:
     for scope in ("logs", "apm_attributes", "custom_events", "synthetics"):
         if scope not in privacy.get("coverage", {}):
             errors.append(f"privacy review missing coverage: {scope}")
+    dashboard_ux = json.loads(DASHBOARD_UX.read_text(encoding="utf-8"))
+    dashboard_slugs = {dashboard.get("slug") for dashboard in load_dashboard_files()}
+    ux_slugs = {dashboard.get("slug") for dashboard in dashboard_ux.get("dashboards", [])}
+    missing_ux = sorted(dashboard_slugs - ux_slugs)
+    if missing_ux:
+        errors.append(f"dashboard UX map missing slugs: {missing_ux}")
+    variable_names = {variable.get("name") for variable in dashboard_ux.get("variables", [])}
+    for variable in ("environment", "host", "transaction", "status_code", "deployment_version"):
+        if variable not in variable_names:
+            errors.append(f"dashboard UX missing variable: {variable}")
+    demo = DEMO_RUNBOOK.read_text(encoding="utf-8")
+    for text in ("Latency Walkthrough", "Error Walkthrough", "Database Walkthrough", "Production Readiness Checklist", "Known Gaps"):
+        if text not in demo:
+            errors.append(f"demo runbook missing {text}")
     runbook = RUNBOOK.read_text(encoding="utf-8")
     for text in (
         "NEW_RELIC_LICENSE_KEY",
@@ -104,6 +120,8 @@ def main() -> int:
         "docs/newrelic-service-levels.json",
         "docs/newrelic-cache-queue-decision.json",
         "docs/newrelic-telemetry-privacy-review.json",
+        "docs/newrelic-dashboard-ux.json",
+        "runbooks/NEW_RELIC_OBSERVABILITY_DEMO.md",
     ):
         if text not in runbook:
             errors.append(f"runbook missing {text}")

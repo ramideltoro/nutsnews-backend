@@ -1,0 +1,47 @@
+{
+  "plan_id": "backend-postgres-primary-shadow-backup-restore-proof",
+  "version": 1,
+  "issue": 216,
+  "tracking_issue": 120,
+  "updated_at_utc": "2026-07-18",
+  "depends_on_issues": [
+    211,
+    212
+  ],
+  "source_database": "nutsnews_primary_shadow",
+  "isolated_restore_target": "nutsnews_primary_shadow_backup_restore_proof",
+  "workflow": {
+    "path": ".github/workflows/backend-postgres-backup-restore-proof.yml",
+    "mode": "run-proof",
+    "source_database_input": "primary-shadow",
+    "confirmation": "prove-backend-postgres-backup-restore",
+    "artifact": "backend-postgres-backup-restore-proof"
+  },
+  "artifact_policy": {
+    "safe_metadata_only": true,
+    "required_fields": [
+      "snapshot_id",
+      "restore_target",
+      "duration_seconds",
+      "validation_status",
+      "rpo_seconds",
+      "rto_seconds",
+      "operator"
+    ],
+    "forbidden_evidence": [
+      "database_urls",
+      "passwords",
+      "tokens",
+      "database_dumps",
+      "row_data"
+    ]
+  },
+  "cutover_policy": {
+    "failed_proof_blocks_cutover": true,
+    "supabase_remains_writer_until_issue": 119
+  },
+  "validation": {
+    "local_validator": "python3 scripts/validate_backend_postgres_primary_shadow_backup_restore_proof_plan.py",
+    "report_validator": "python3 scripts/validate_backend_postgres_backup_proof.py"
+  }
+}

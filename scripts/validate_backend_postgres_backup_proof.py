@@ -30,6 +30,7 @@ REQUIRED_FIELDS = {
     "production_cutover_blocker_cleared",
 }
 STATES = {"planned", "pass", "fail", "blocked"}
+RESTORE_SCOPES = {"backend_postgresql_rehearsal_database", "backend_postgresql_primary_shadow_database"}
 FORBIDDEN_MARKERS = ("postgres://", "postgresql://", "password=", "token=", "secret=", "service_role")
 
 
@@ -57,8 +58,8 @@ def main() -> int:
 
     if data.get("backup_source") != "backend_postgresql_restic_snapshot":
         errors.append("backup_source must prove the backup came from backend PostgreSQL restic coverage")
-    if data.get("restore_scope") != "backend_postgresql_rehearsal_database":
-        errors.append("restore_scope must target the isolated backend PostgreSQL rehearsal database")
+    if data.get("restore_scope") not in RESTORE_SCOPES:
+        errors.append("restore_scope must target an approved isolated backend PostgreSQL source database")
     if data.get("safe_metadata_only") is not True:
         errors.append("safe_metadata_only must be true")
     if data.get("manifest_version") != 1:

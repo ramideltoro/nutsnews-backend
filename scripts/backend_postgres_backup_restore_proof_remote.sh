@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-case "${REHEARSAL_DATABASE:-}" in
+source_database="${SOURCE_DATABASE:-${REHEARSAL_DATABASE:-}}"
+restore_scope="${RESTORE_SCOPE:-backend_postgresql_rehearsal_database}"
+
+case "$source_database" in
   ''|*[!A-Za-z0-9_]*|[0-9]*)
-    echo "Unsafe rehearsal database name." >&2
+    echo "Unsafe source database name." >&2
     exit 1
     ;;
 esac
@@ -20,6 +23,9 @@ github_run_id="${GITHUB_RUN_ID:?GITHUB_RUN_ID is required}"
 github_repository="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 manifest_version="${MANIFEST_VERSION:-unknown}"
 proof_status_path="/var/lib/nutsnews/postgres/backup-restore-proof.json"
+if [[ "$restore_scope" == "backend_postgresql_primary_shadow_database" ]]; then
+  proof_status_path="/var/lib/nutsnews/postgres/primary-shadow-backup-restore-proof.json"
+fi
 postgres_status_path="/var/lib/nutsnews/postgres/status.json"
 started_epoch="$(date -u +%s)"
 dump_path="$remote_dir/backend-postgres-source.dump"
@@ -28,7 +34,7 @@ validation_sql="$remote_dir/backend_postgres_restore_validation.sql"
 validation_log="$remote_dir/backup-restore-validation.log"
 restic_stdout="$remote_dir/restic-backup.jsonl"
 restic_stderr="$remote_dir/restic-backup.stderr"
-stdin_filename="backend-postgresql/logical/${REHEARSAL_DATABASE}-${github_run_id}.dump"
+stdin_filename="backend-postgresql/logical/${source_database}-${github_run_id}.dump"
 
 cleanup_remote_dir() {
   if [[ "${remote_dir:-}" != /tmp/nutsnews-postgres-backup-proof-* ]]; then
@@ -69,13 +75,13 @@ if [[ "${provider,,}" == "s3" && "$RESTIC_REPOSITORY" == http* ]]; then
   export RESTIC_REPOSITORY="s3:$RESTIC_REPOSITORY"
 fi
 
-sudo -n -u postgres pg_isready -q -d "$REHEARSAL_DATABASE"
+sudo -n -u postgres pg_isready -q -d "$source_database"
 sudo -n -u postgres pg_dump \
   --format=custom \
   --no-owner \
   --no-privileges \
   --file "$dump_path" \
-  "$REHEARSAL_DATABASE"
+  "$source_database"
 sudo -n chown root:root "$dump_path"
 sudo -n chmod 0600 "$dump_path"
 
@@ -165,6 +171,7 @@ workflow_url="https://github.com/${github_repository}/actions/runs/${github_run_
 
 SNAPSHOT_ID="$short_snapshot" \
 RESTORE_TARGET="$PROOF_DATABASE" \
+RESTORE_SCOPE="$restore_scope" \
 DURATION_SECONDS="$duration_seconds" \
 RPO_SECONDS="$rpo_seconds" \
 RTO_SECONDS="$rto_seconds" \
@@ -182,7 +189,7 @@ proof = {
     "snapshot_id": os.environ["SNAPSHOT_ID"],
     "backup_source": "backend_postgresql_restic_snapshot",
     "restore_target": os.environ["RESTORE_TARGET"],
-    "restore_scope": "backend_postgresql_rehearsal_database",
+    "restore_scope": os.environ["RESTORE_SCOPE"],
     "duration_seconds": int(os.environ["DURATION_SECONDS"]),
     "validation_status": "pass",
     "validation_report": os.environ["WORKFLOW_URL"],

@@ -33,7 +33,7 @@ planning inventory with live object counts before production cutover.
 | `public.article_ai_reviews` | table | app data | migrate | required | row count and checksum |
 | `public.ai_usage_runs` | table | ops data | migrate | required | row count and latest timestamp |
 | `public.feed_health` | table | ops data | migrate | required | row count and latest timestamp |
-| `public.feed_quality_scores` | table | worker data | migrate | required | row count and checksum |
+| `public.feed_quality_scores` | view | worker data | migrate | required | row count and checksum |
 | `public.quota_usage_events` | table | quota system | migrate | required | row count and checksum |
 | `public.runtime_feature_flags` | table | release operations | migrate | required | row count and key comparison |
 | `public.release_readiness` | table | release operations | migrate | required | row count and latest timestamp |

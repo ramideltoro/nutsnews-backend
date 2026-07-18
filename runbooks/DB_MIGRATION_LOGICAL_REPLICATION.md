@@ -90,6 +90,40 @@ When the parity manifest adds or removes required tables:
 3. Drop the Supabase publication only after no migration path depends on it.
 4. Remove or rotate migration-only replication credentials.
 
+## Monitoring And Alerts
+
+#217 monitoring uses the replication health workflow:
+
+```bash
+gh workflow run backend-postgres-replication-health.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f environment_name=production \
+  -f mode=status
+```
+
+The workflow publishes safe metadata to the backend PostgreSQL status file,
+ops dashboard status, and Prometheus textfile metrics. Required alert signals:
+
+- missing or inactive subscription;
+- replication lag above threshold;
+- missing or inactive source slot;
+- stale or failed primary-shadow backup/restore proof;
+- failed object or behavior parity.
+
+Broken-replication behavior is tested without live mutation:
+
+```bash
+gh workflow run backend-postgres-replication-health.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f environment_name=production \
+  -f mode=simulate-broken
+```
+
+The simulated run must fail closed and produce a safe metadata artifact with
+`simulated_broken_replication` blockers.
+
 ## Current Blockers
 
 - #211 protected provisioning evidence for `nutsnews_primary_shadow` is missing.

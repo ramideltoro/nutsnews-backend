@@ -133,6 +133,13 @@ grant `pg_read_all_stats` to the integration role. Dashboard widgets avoid raw
 SQL display and facet query diagnostics by query id, statement type, database,
 schema, wait category, or plan operation.
 
+During the database-primary migration, `docs/backend-postgres-primary-shadow-monitoring-plan.json`
+is the source of truth for `nutsnews_primary_shadow` replication monitoring.
+The required migration alerts cover missing/inactive subscriptions, replication
+lag, source slot state, backup/restore proof freshness, and parity failures.
+These signals are emitted as safe metadata by the backend PostgreSQL replication
+health and parity workflows before any cutover can proceed.
+
 ## Log Policy And Ingest Guardrails
 
 The structured logging policy lives in `docs/newrelic-log-policy.json`.

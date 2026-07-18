@@ -124,6 +124,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backend_postgres_primary_shadow_sync_proof_plan.py
 
+      - name: Validate PostgreSQL primary shadow monitoring plan
+        shell: bash
+        run: python3 scripts/validate_backend_postgres_primary_shadow_monitoring_plan.py
+
       - name: Validate Supabase backend PostgreSQL parity manifest
         shell: bash
         run: python3 scripts/validate_supabase_backend_postgres_parity.py

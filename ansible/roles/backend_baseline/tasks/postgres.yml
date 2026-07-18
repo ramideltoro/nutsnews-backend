@@ -136,7 +136,7 @@
   community.postgresql.postgresql_user:
     name: "{{ backend_postgres_validation_user }}"
     password: "{{ backend_postgres_validation_password }}"
-    role_attr_flags: LOGIN
+    role_attr_flags: LOGIN,BYPASSRLS
     state: present
   become_user: postgres
   register: backend_postgres_validation_user_result

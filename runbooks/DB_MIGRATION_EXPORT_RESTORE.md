@@ -39,6 +39,10 @@ and row data must never be uploaded or printed.
 The existing `backend-postgres-failover-drill.yml` remains the first protected
 restore path. Restore defaults to `nutsnews_restore_rehearsal`, recreates that
 database from scratch, and leaves any production-capable database untouched.
+Because each drill drops and recreates the rehearsal database, the restore
+runner reapplies grants for `nutsnews_readonly`,
+`nutsnews_migration_validation`, and `nutsnews_app_rehearsal` before downstream
+parity, smoke, and benchmark workflows connect with migration credentials.
 
 Restore evidence must include:
 

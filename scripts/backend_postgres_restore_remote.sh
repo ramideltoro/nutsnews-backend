@@ -104,6 +104,38 @@ sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$REHEARSAL_DATABASE" -f "$remote
 # shellcheck disable=SC2024
 sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$REHEARSAL_DATABASE" -f "$remote_dir/backend_postgres_restore_validation.sql" > "$remote_dir/validation.log" 2>&1
 
+sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$REHEARSAL_DATABASE" <<'SQL'
+DO $$
+DECLARE
+  read_role name;
+  write_role name;
+BEGIN
+  FOREACH read_role IN ARRAY ARRAY[
+    'nutsnews_readonly',
+    'nutsnews_migration_validation',
+    'nutsnews_app_rehearsal'
+  ]::name[] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = read_role) THEN
+      EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), read_role);
+      EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', read_role);
+      EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA public TO %I', read_role);
+      EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %I', read_role);
+      EXECUTE format('GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO %I', read_role);
+    END IF;
+  END LOOP;
+
+  FOREACH write_role IN ARRAY ARRAY[
+    'nutsnews_migration_validation',
+    'nutsnews_app_rehearsal'
+  ]::name[] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = write_role) THEN
+      EXECUTE format('GRANT INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %I', write_role);
+      EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %I', write_role);
+    END IF;
+  END LOOP;
+END $$;
+SQL
+
 row_counts=$(sudo -n -u postgres psql -At -d "$REHEARSAL_DATABASE" <<'SQL'
 select jsonb_object_agg(object_name, row_count)::text
 from (

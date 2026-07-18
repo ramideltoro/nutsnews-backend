@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "service": {
+    "canonical_name": "nutsnews-backend-production",
+    "display_name": "NutsNews Backend",
+    "environment": "production",
+    "owner": "nutsnews",
+    "team": "solo-ops"
+  },
+  "entities": [
+    {
+      "kind": "apm",
+      "name": "nutsnews-backend-production",
+      "required_tags": {
+        "service.name": "nutsnews-backend-production",
+        "environment": "production",
+        "owner": "nutsnews",
+        "team": "solo-ops"
+      }
+    },
+    {
+      "kind": "host",
+      "name": "backend.nutsnews.com",
+      "required_tags": {
+        "service.name": "nutsnews-backend-production",
+        "environment": "production",
+        "host.role": "backend",
+        "owner": "nutsnews"
+      }
+    },
+    {
+      "kind": "database",
+      "name": "backend-postgresql",
+      "required_tags": {
+        "service.name": "nutsnews-backend-production",
+        "environment": "production",
+        "database.system": "postgresql",
+        "owner": "nutsnews"
+      }
+    }
+  ],
+  "dashboard_naming": {
+    "prefix": "NutsNews Backend - ",
+    "format": "NutsNews Backend - <surface> - <purpose>",
+    "default_time_window": "SINCE 24 hours ago",
+    "permissions": "PUBLIC_READ_ONLY"
+  },
+  "standard_tags": {
+    "service.name": "nutsnews-backend-production",
+    "environment": "production",
+    "owner": "nutsnews",
+    "team": "solo-ops",
+    "repository": "ramideltoro/nutsnews-backend",
+    "host.name": "backend.nutsnews.com"
+  },
+  "workload_grouping": [
+    "PHP APM",
+    "backend host",
+    "Caddy reverse proxy",
+    "PHP-FPM runtime",
+    "PostgreSQL",
+    "logs",
+    "synthetics",
+    "deployments"
+  ]
+}

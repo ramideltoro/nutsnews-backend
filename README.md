@@ -75,6 +75,7 @@ Use [runbooks/SUPABASE_BACKEND_POSTGRES_PARITY.md](runbooks/SUPABASE_BACKEND_POS
 Use [runbooks/DB_MIGRATION_CHANGE_FREEZE.md](runbooks/DB_MIGRATION_CHANGE_FREEZE.md) before changing database schema during the primary migration window.
 Use [runbooks/DB_MIGRATION_ACCESS.md](runbooks/DB_MIGRATION_ACCESS.md) before running migration access, restore, validation, replication, or cutover workflows.
 Use [runbooks/DB_MIGRATION_LOGICAL_REPLICATION.md](runbooks/DB_MIGRATION_LOGICAL_REPLICATION.md) before configuring Supabase-to-backend PostgreSQL logical replication.
+Use [runbooks/SUPABASE_PLATFORM_PARITY.md](runbooks/SUPABASE_PLATFORM_PARITY.md) before changing Supabase Auth, Storage, Realtime, Edge Function, Data API, or API key cutover decisions.
 
 The current Ansible scaffold is intentionally narrow. It defines the host contract, runtime choice, validation commands, required secret boundaries, and rollback expectations that later issues will fill in through Ansible roles and protected workflows.
 
@@ -118,4 +119,5 @@ python3 scripts/check_supabase_migration_drift.py
 python3 scripts/backend_postgres_migration_access_preflight.py --offline
 python3 scripts/backend_postgres_parity_validate.py --offline
 python3 scripts/validate_backend_postgres_logical_replication_plan.py
+python3 scripts/validate_backend_postgres_backup_proof.py
 ```

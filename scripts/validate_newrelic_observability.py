@@ -16,6 +16,7 @@ except ModuleNotFoundError:  # pragma: no cover
 ROOT = Path(__file__).resolve().parents[1]
 TAXONOMY = ROOT / "docs" / "newrelic-observability-taxonomy.json"
 RUNBOOK = ROOT / "runbooks" / "NEW_RELIC_OBSERVABILITY.md"
+LOG_POLICY = ROOT / "docs" / "newrelic-log-policy.json"
 
 
 def main() -> int:
@@ -40,6 +41,30 @@ def main() -> int:
         validate_catalog(load_dashboard_files())
     except ValueError as exc:
         errors.append(str(exc))
+    log_policy = json.loads(LOG_POLICY.read_text(encoding="utf-8"))
+    required_fields = {field["name"] for field in log_policy.get("required_fields", [])}
+    for field in (
+        "timestamp",
+        "level",
+        "service.name",
+        "environment",
+        "request.id",
+        "trace.id",
+        "route",
+        "http.statusCode",
+        "duration.ms",
+        "deployment.version",
+        "exception.class",
+        "message.safe",
+    ):
+        if field not in required_fields:
+            errors.append(f"log policy missing required field: {field}")
+    if not log_policy.get("redaction_rules"):
+        errors.append("log policy must define redaction rules")
+    if not log_policy.get("drop_rules"):
+        errors.append("log policy must define drop rules")
+    if not log_policy.get("daily_ingest_estimate_mb"):
+        errors.append("log policy must define daily ingest estimate")
     runbook = RUNBOOK.read_text(encoding="utf-8")
     for text in (
         "NEW_RELIC_LICENSE_KEY",
@@ -49,6 +74,7 @@ def main() -> int:
         "NEW_RELIC_APP_NAME",
         "scripts/provision_newrelic_dashboards.py --check",
         "scripts/backend_newrelic_observability_check.py --offline",
+        "docs/newrelic-log-policy.json",
     ):
         if text not in runbook:
             errors.append(f"runbook missing {text}")

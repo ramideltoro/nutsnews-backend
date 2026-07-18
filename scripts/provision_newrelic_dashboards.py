@@ -21,6 +21,7 @@ ENDPOINTS = {
     "jp": "https://api.jp.newrelic.com/graphql",
 }
 FORBIDDEN_QUERY_TERMS = ("api_key", "license_key", "password", "secret", "token")
+ALLOWED_QUERY_WINDOWS = ("since 24 hours ago", "since this month")
 
 
 class ValidationError(ValueError):
@@ -80,8 +81,8 @@ def validate_dashboard_spec(spec: dict[str, Any]) -> list[str]:
             for term in FORBIDDEN_QUERY_TERMS:
                 if term in raw_text:
                     errors.append(f"{path}: widget {title or widget_index} contains forbidden term {term}")
-            if widget.get("visualization", {}).get("id") != "viz.markdown" and "since 24 hours ago" not in raw_text:
-                errors.append(f"{path}: widget {title or widget_index} must include SINCE 24 hours ago")
+            if widget.get("visualization", {}).get("id") != "viz.markdown" and not any(window in raw_text for window in ALLOWED_QUERY_WINDOWS):
+                errors.append(f"{path}: widget {title or widget_index} must include an approved SINCE window")
     return errors
 
 

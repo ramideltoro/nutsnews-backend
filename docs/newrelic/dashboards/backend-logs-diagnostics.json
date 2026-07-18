@@ -1,0 +1,116 @@
+{
+  "slug": "backend-logs-diagnostics",
+  "issue": 158,
+  "dashboard": {
+    "name": "NutsNews Backend - Logs - Diagnostics",
+    "description": "24 hour dashboard for structured backend log severity, exceptions, route/status breakdowns, deployment correlation, and trace/request context. Managed from ramideltoro/nutsnews-backend.",
+    "permissions": "PUBLIC_READ_ONLY",
+    "pages": [
+      {
+        "name": "Log diagnostics",
+        "description": "Incident-oriented views from parsed structured log fields.",
+        "widgets": [
+          {
+            "title": "Log volume by severity",
+            "layout": {"column": 1, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*) FROM Log WHERE service.name = 'nutsnews-backend-production' FACET level TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Warnings and errors",
+            "layout": {"column": 5, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*) FROM Log WHERE service.name = 'nutsnews-backend-production' AND level IN ('warning', 'error', 'critical') FACET level TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Logs by deployment",
+            "layout": {"column": 9, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*) FROM Log WHERE service.name = 'nutsnews-backend-production' FACET deployment.version, level LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Top exception classes",
+            "layout": {"column": 1, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*) FROM Log WHERE service.name = 'nutsnews-backend-production' AND exception.class IS NOT NULL FACET exception.class LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Logs by route and status",
+            "layout": {"column": 5, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*), average(duration.ms) FROM Log WHERE service.name = 'nutsnews-backend-production' FACET route, http.statusCode LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Logs by host and unit",
+            "layout": {"column": 9, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*) FROM Log WHERE service.name = 'nutsnews-backend-production' FACET host, unit, level LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Recent high severity logs",
+            "layout": {"column": 1, "row": 7, "height": 3, "width": 8},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(timestamp), latest(level), latest(request.id), latest(trace.id), latest(message.safe) FROM Log WHERE service.name = 'nutsnews-backend-production' AND level IN ('error', 'critical') FACET trace.id LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Log triage path",
+            "layout": {"column": 9, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.markdown"},
+            "rawConfiguration": {
+              "text": "Use severity trend, then route/status and deployment facets. Pivot to APM with request.id or trace.id when present."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

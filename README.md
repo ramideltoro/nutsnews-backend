@@ -74,6 +74,7 @@ Use [runbooks/POSTGRES_REPLACEMENT_PLAN.md](runbooks/POSTGRES_REPLACEMENT_PLAN.m
 Use [runbooks/SUPABASE_BACKEND_POSTGRES_PARITY.md](runbooks/SUPABASE_BACKEND_POSTGRES_PARITY.md) before changing the Supabase-to-backend PostgreSQL parity manifest.
 Use [runbooks/DB_MIGRATION_CHANGE_FREEZE.md](runbooks/DB_MIGRATION_CHANGE_FREEZE.md) before changing database schema during the primary migration window.
 Use [runbooks/DB_MIGRATION_ACCESS.md](runbooks/DB_MIGRATION_ACCESS.md) before running migration access, restore, validation, replication, or cutover workflows.
+Use [runbooks/DB_MIGRATION_LOGICAL_REPLICATION.md](runbooks/DB_MIGRATION_LOGICAL_REPLICATION.md) before configuring Supabase-to-backend PostgreSQL logical replication.
 Use [runbooks/DB_MIGRATION_SMOKE_TESTS.md](runbooks/DB_MIGRATION_SMOKE_TESTS.md) before running backend PostgreSQL query smoke tests.
 Use [runbooks/SUPABASE_PLATFORM_PARITY.md](runbooks/SUPABASE_PLATFORM_PARITY.md) before changing Supabase Auth, Storage, Realtime, Edge Function, Data API, or API key cutover decisions.
 
@@ -118,6 +119,7 @@ python3 scripts/validate_supabase_backend_postgres_parity.py
 python3 scripts/check_supabase_migration_drift.py
 python3 scripts/backend_postgres_migration_access_preflight.py --offline
 python3 scripts/backend_postgres_parity_validate.py --offline
+python3 scripts/validate_backend_postgres_logical_replication_plan.py
 python3 scripts/backend_postgres_smoke_tests.py --offline
 python3 scripts/validate_backend_postgres_backup_proof.py
 ```

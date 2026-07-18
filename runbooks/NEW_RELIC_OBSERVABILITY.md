@@ -79,6 +79,8 @@ Versioned dashboard definitions currently managed by this repo:
 - `backend-apm-postgresql-correlation`: APM/database latency correlation and datastore spans for #152.
 - `backend-postgresql-query-performance`: query monitoring, query IDs, execution time, reads, writes, and plan rows for #153.
 - `backend-postgresql-operations`: locks, blocking sessions, vacuum, table bloat, storage, and optional replication metrics for #154.
+- `backend-data-ingest-free-tier-usage`: account ingest usage, monthly run rate, noisy sources, and reduction actions for #157.
+- `backend-logs-diagnostics`: structured log severity, route, status, deployment, exception, and trace-context views for #158.
 
 Each dashboard keeps a 24 hour default query window and uses the
 `NutsNews Backend - ` naming prefix. Live dashboard URLs are printed by
@@ -121,6 +123,20 @@ the collected tables. For query-level metrics, enable `pg_stat_statements` and
 grant `pg_read_all_stats` to the integration role. Dashboard widgets avoid raw
 SQL display and facet query diagnostics by query id, statement type, database,
 schema, wait category, or plan operation.
+
+## Log Policy And Ingest Guardrails
+
+The structured logging policy lives in `docs/newrelic-log-policy.json`.
+It defines required parsed fields, redaction rules, retained categories,
+dropped categories, and expected daily log ingest volume for the free-tier
+budget. The logs diagnostics dashboard uses parsed fields such as
+`request.id`, `trace.id`, `route`, `http.statusCode`, `duration.ms`,
+`deployment.version`, `exception.class`, and `message.safe`.
+
+Live New Relic parsing, obfuscation, and drop-filter rules require New Relic
+account access and may depend on account features. Until those credentials are
+available, the repo policy and dashboard queries are the source of truth for the
+intended implementation.
 
 ## Validate Reporting
 
@@ -166,3 +182,11 @@ an optional NerdGraph account query when `NEW_RELIC_USER_KEY` and
   https://docs.newrelic.com/docs/apis/nerdgraph/get-started/introduction-new-relic-nerdgraph/
 - New Relic PostgreSQL integration:
   https://docs.newrelic.com/install/postgresql/
+- New Relic usage queries:
+  https://docs.newrelic.com/docs/accounts/accounts-billing/new-relic-one-pricing-billing/usage-queries-alerts/
+- New Relic log parsing:
+  https://docs.newrelic.com/docs/logs/ui-data/parsing/
+- New Relic drop filter rules:
+  https://docs.newrelic.com/docs/logs/ui-data/drop-data-drop-filter-rules/
+- New Relic log security and privacy:
+  https://docs.newrelic.com/docs/logs/get-started/new-relics-log-management-security-privacy/

@@ -1,0 +1,103 @@
+{
+  "slug": "backend-data-ingest-free-tier-usage",
+  "issue": 157,
+  "dashboard": {
+    "name": "NutsNews Backend - Usage - Data Ingest and Free Tier",
+    "description": "Monthly and 24 hour dashboard for New Relic ingest usage, projected run rate, noisy sources, and free-tier safety actions. Managed from ramideltoro/nutsnews-backend.",
+    "permissions": "PUBLIC_READ_ONLY",
+    "pages": [
+      {
+        "name": "Ingest usage",
+        "description": "Free-tier budget and noisy source triage.",
+        "widgets": [
+          {
+            "title": "Current month ingest by usage metric",
+            "layout": {"column": 1, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.bar"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(Gigabytes) FROM NrMTDConsumption FACET usageMetric LIMIT 20 SINCE this month"
+                }
+              ]
+            }
+          },
+          {
+            "title": "24 hour ingest by usage metric",
+            "layout": {"column": 5, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT sum(Gigabytes) FROM NrConsumption FACET usageMetric TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Projected monthly ingest at 24h run rate",
+            "layout": {"column": 9, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.billboard"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT rate(sum(Gigabytes), 1 day) * 31 FROM NrConsumption SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Free tier usage percent",
+            "layout": {"column": 1, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.billboard"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(Gigabytes) / 100 * 100 FROM NrMTDConsumption SINCE this month"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Noisy log sources",
+            "layout": {"column": 5, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT bytecountestimate() FROM Log WHERE service.name = 'nutsnews-backend-production' FACET unit, level LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Noisy telemetry groups",
+            "layout": {"column": 9, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT sum(Gigabytes) FROM NrConsumption FACET productLine, usageMetric LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Reduction actions",
+            "layout": {"column": 1, "row": 7, "height": 3, "width": 12},
+            "visualization": {"id": "viz.markdown"},
+            "rawConfiguration": {
+              "text": "If projected monthly ingest approaches 100 GB, first reduce debug success logs, successful health checks, oversized lines, and high-cardinality facets before reducing warning or error telemetry."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

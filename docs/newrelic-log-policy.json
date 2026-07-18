@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "issues": [155, 156],
+  "service": "nutsnews-backend-production",
+  "environment": "production",
+  "required_fields": [
+    {"name": "timestamp", "source": "all", "purpose": "event time"},
+    {"name": "level", "source": "all", "purpose": "severity filtering"},
+    {"name": "service.name", "source": "all", "purpose": "service scoping"},
+    {"name": "environment", "source": "all", "purpose": "environment scoping"},
+    {"name": "host", "source": "all", "purpose": "host filtering"},
+    {"name": "unit", "source": "journal", "purpose": "systemd service filtering"},
+    {"name": "request.id", "source": "application,caddy,php", "purpose": "request correlation"},
+    {"name": "trace.id", "source": "application,php", "purpose": "APM trace correlation"},
+    {"name": "route", "source": "application,php,caddy", "purpose": "bounded endpoint grouping"},
+    {"name": "http.statusCode", "source": "application,caddy", "purpose": "response status grouping"},
+    {"name": "duration.ms", "source": "application,caddy", "purpose": "request latency"},
+    {"name": "deployment.version", "source": "application,php", "purpose": "release correlation"},
+    {"name": "exception.class", "source": "application,php", "purpose": "exception grouping"},
+    {"name": "message.safe", "source": "all", "purpose": "sanitized operator summary"}
+  ],
+  "excluded_fields": [
+    "request.body",
+    "response.body",
+    "authorization",
+    "cookie",
+    "set-cookie",
+    "access_token",
+    "refresh_token",
+    "api_key",
+    "password",
+    "secret",
+    "email",
+    "raw_user_input",
+    "full_query_string"
+  ],
+  "parsing_rules": [
+    {
+      "name": "caddy_access_json",
+      "where": "unit = 'caddy'",
+      "fields": ["timestamp", "level", "request.id", "route", "http.statusCode", "duration.ms", "userAgent.name", "message.safe"]
+    },
+    {
+      "name": "php_fpm_json",
+      "where": "unit = 'php8.5-fpm'",
+      "fields": ["timestamp", "level", "service.name", "trace.id", "request.id", "route", "exception.class", "message.safe"]
+    },
+    {
+      "name": "application_json",
+      "where": "service.name = 'nutsnews-backend-production'",
+      "fields": ["timestamp", "level", "service.name", "environment", "trace.id", "request.id", "route", "http.statusCode", "duration.ms", "deployment.version", "exception.class", "message.safe"]
+    },
+    {
+      "name": "postgresql_journal",
+      "where": "unit = 'postgresql'",
+      "fields": ["timestamp", "level", "service.name", "host", "unit", "message.safe"]
+    }
+  ],
+  "redaction_rules": [
+    {"name": "drop_authorization_headers", "action": "redact", "pattern_class": "authorization_header"},
+    {"name": "drop_cookie_headers", "action": "redact", "pattern_class": "cookie_header"},
+    {"name": "drop_credential_like_pairs", "action": "redact", "pattern_class": "credential_key_value"},
+    {"name": "drop_query_strings", "action": "redact", "pattern_class": "url_query_string"},
+    {"name": "mask_email_addresses", "action": "redact", "pattern_class": "email_address"}
+  ],
+  "drop_rules": [
+    {"name": "private_key_markers", "action": "drop", "reason": "credential material"},
+    {"name": "oversized_lines", "action": "drop", "reason": "ingest protection"},
+    {"name": "debug_success_noise", "action": "drop_when_level_debug_and_status_lt_400", "reason": "low incident value"},
+    {"name": "health_success_sampling", "action": "drop_or_sample_successful_health_checks", "reason": "free-tier volume control"}
+  ],
+  "retained_categories": [
+    "warning_or_higher",
+    "http_4xx_and_5xx",
+    "php_exceptions",
+    "postgresql_errors",
+    "deployment_events",
+    "synthetic_failures",
+    "sampled_successful_requests"
+  ],
+  "daily_ingest_estimate_mb": {
+    "expected": 75,
+    "warning": 150,
+    "critical": 250,
+    "monthly_free_tier_reference_gb": 100,
+    "method": "dashboard uses NrConsumption and Log byte-count estimates; revise after seven production days"
+  }
+}

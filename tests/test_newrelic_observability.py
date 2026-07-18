@@ -39,6 +39,14 @@ class NewRelicObservabilityTests(unittest.TestCase):
         for forbidden in provision_newrelic_dashboards.FORBIDDEN_QUERY_TERMS:
             self.assertNotIn(forbidden, catalog_text)
 
+    def test_log_policy_documents_correlation_and_drop_rules(self):
+        policy = json.loads((ROOT / "docs" / "newrelic-log-policy.json").read_text(encoding="utf-8"))
+        fields = {field["name"] for field in policy["required_fields"]}
+        self.assertIn("request.id", fields)
+        self.assertIn("trace.id", fields)
+        self.assertTrue(policy["drop_rules"])
+        self.assertGreater(policy["daily_ingest_estimate_mb"]["expected"], 0)
+
     def test_missing_new_relic_credentials_fail_closed(self):
         with mock.patch.dict("os.environ", {}, clear=True):
             with redirect_stdout(StringIO()):

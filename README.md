@@ -77,6 +77,7 @@ Use [runbooks/DB_MIGRATION_ACCESS.md](runbooks/DB_MIGRATION_ACCESS.md) before ru
 Use [runbooks/DB_MIGRATION_LOGICAL_REPLICATION.md](runbooks/DB_MIGRATION_LOGICAL_REPLICATION.md) before configuring Supabase-to-backend PostgreSQL logical replication.
 Use [runbooks/DB_MIGRATION_REPLICATION_HEALTH.md](runbooks/DB_MIGRATION_REPLICATION_HEALTH.md) before checking or alerting on logical replication health.
 Use [runbooks/DB_MIGRATION_SMOKE_TESTS.md](runbooks/DB_MIGRATION_SMOKE_TESTS.md) before running backend PostgreSQL query smoke tests.
+Use [runbooks/DB_MIGRATION_API_COMPATIBILITY.md](runbooks/DB_MIGRATION_API_COMPATIBILITY.md) before changing app or worker database provider compatibility.
 Use [runbooks/DB_MIGRATION_BENCHMARK_TUNING.md](runbooks/DB_MIGRATION_BENCHMARK_TUNING.md) before benchmarking or tuning backend PostgreSQL for primary workload.
 Use [runbooks/SUPABASE_PLATFORM_PARITY.md](runbooks/SUPABASE_PLATFORM_PARITY.md) before changing Supabase Auth, Storage, Realtime, Edge Function, Data API, or API key cutover decisions.
 
@@ -121,6 +122,7 @@ python3 scripts/validate_supabase_backend_postgres_parity.py
 python3 scripts/check_supabase_migration_drift.py
 python3 scripts/backend_postgres_migration_access_preflight.py --offline
 python3 scripts/backend_postgres_parity_validate.py --offline
+python3 scripts/validate_backend_api_compatibility_contract.py
 python3 scripts/validate_backend_postgres_logical_replication_plan.py
 python3 scripts/backend_postgres_replication_health.py --offline
 python3 scripts/backend_postgres_smoke_tests.py --offline

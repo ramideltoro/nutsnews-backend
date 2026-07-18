@@ -58,6 +58,22 @@ chmod 0640 \
   "$remote_dir/public-data.sql" \
   "$remote_dir/backend_postgres_restore_validation.sql"
 
+if sudo -n -u postgres psql -v ON_ERROR_STOP=1 -At -d "$REHEARSAL_DATABASE" -c "select 1" >/dev/null 2>&1; then
+  while IFS= read -r subscription_name; do
+    [[ -n "$subscription_name" ]] || continue
+    sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$REHEARSAL_DATABASE" -v subscription="$subscription_name" <<'SQL'
+ALTER SUBSCRIPTION :"subscription" DISABLE;
+DROP SUBSCRIPTION :"subscription";
+SQL
+  done < <(
+    sudo -n -u postgres psql -v ON_ERROR_STOP=1 -At -d "$REHEARSAL_DATABASE" <<'SQL'
+select subname
+from pg_subscription
+where subname like 'nutsnews_backend_migration_%';
+SQL
+  )
+fi
+
 sudo -n -u postgres psql -v ON_ERROR_STOP=1 postgres <<SQL
 SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${REHEARSAL_DATABASE}';
 DROP DATABASE IF EXISTS "${REHEARSAL_DATABASE}";

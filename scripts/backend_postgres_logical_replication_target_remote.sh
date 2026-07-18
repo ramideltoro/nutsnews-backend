@@ -49,7 +49,6 @@ alter subscription $q_subscription disable;
 alter subscription $q_subscription connection :'source_conn';
 alter subscription $q_subscription set publication $q_publication with (refresh = false);
 alter subscription $q_subscription enable;
-alter subscription $q_subscription refresh publication with (copy_data = false);
 SQL
 else
   sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$target_database" \

@@ -1,0 +1,173 @@
+{
+  "version": 1,
+  "issues_covered": [143, 145, 150, 159, 160, 163, 165, 167, 168, 170, 172],
+  "service": "nutsnews-backend-production",
+  "environment": "production",
+  "live_status": "blocked until NEW_RELIC_USER_KEY, NEW_RELIC_ACCOUNT_ID, NEW_RELIC_REGION, NEW_RELIC_LICENSE_KEY, and NEW_RELIC_ENTITY_GUID are available in the protected runtime",
+  "key_transactions": [
+    {
+      "id": "health",
+      "route_group": "health",
+      "match": "WebTransaction/Action/GET /health",
+      "owner": "solo-ops",
+      "apdex_target_seconds": 0.25,
+      "dashboard_slug": "backend-executive-service-overview"
+    },
+    {
+      "id": "public_feed",
+      "route_group": "public_feed",
+      "match": "WebTransaction/Action/GET /api/feed",
+      "owner": "solo-ops",
+      "apdex_target_seconds": 0.5,
+      "dashboard_slug": "backend-transaction-slow-path"
+    },
+    {
+      "id": "article_read",
+      "route_group": "article",
+      "match": "WebTransaction/Action/GET /api/articles/*",
+      "owner": "solo-ops",
+      "apdex_target_seconds": 0.5,
+      "dashboard_slug": "backend-transaction-slow-path"
+    },
+    {
+      "id": "admin",
+      "route_group": "admin",
+      "match": "WebTransaction/Action/admin/*",
+      "owner": "solo-ops",
+      "apdex_target_seconds": 0.75,
+      "dashboard_slug": "backend-error-rate-exception-diagnostics"
+    }
+  ],
+  "custom_attributes": {
+    "allowlist": [
+      {"name": "environment", "cardinality": "low", "applies_to": ["Transaction", "TransactionError", "Span"]},
+      {"name": "service.name", "cardinality": "low", "applies_to": ["Transaction", "TransactionError", "Span"]},
+      {"name": "deployment.version", "cardinality": "bounded_by_release", "applies_to": ["Transaction", "TransactionError", "Span"]},
+      {"name": "route.group", "cardinality": "low", "applies_to": ["Transaction", "TransactionError", "Span"]},
+      {"name": "request.id", "cardinality": "per_request", "applies_to": ["TransactionError", "Span", "logs"]},
+      {"name": "workflow.name", "cardinality": "low", "applies_to": ["Metric", "custom_event"]},
+      {"name": "job.name", "cardinality": "low", "applies_to": ["Metric", "custom_event"]}
+    ],
+    "denylist": ["email", "authorization", "cookie", "password", "token", "raw_query", "request.body", "ip.address"]
+  },
+  "custom_metrics": [
+    {
+      "name": "Custom/NutsNews/feedRefresh/durationMs",
+      "unit": "milliseconds",
+      "attributes": ["workflow.name", "environment", "status"],
+      "expected_cardinality": "low",
+      "dashboard_slug": "backend-sli-slo"
+    },
+    {
+      "name": "Custom/NutsNews/feedRefresh/success",
+      "unit": "count",
+      "attributes": ["workflow.name", "environment"],
+      "expected_cardinality": "low",
+      "dashboard_slug": "backend-golden-metrics-apdex"
+    },
+    {
+      "name": "Custom/NutsNews/validation/failure",
+      "unit": "count",
+      "attributes": ["workflow.name", "route.group", "environment"],
+      "expected_cardinality": "low",
+      "dashboard_slug": "backend-error-rate-exception-diagnostics"
+    },
+    {
+      "name": "Custom/NutsNews/job/durationMs",
+      "unit": "milliseconds",
+      "attributes": ["job.name", "environment", "status"],
+      "expected_cardinality": "low",
+      "dashboard_slug": "backend-systemd-service-health"
+    }
+  ],
+  "background_jobs": {
+    "backend_owned": [
+      {"name": "nutsnews-backup", "unit": "nutsnews-backup.timer", "telemetry": ["duration", "success", "failure"], "dashboard_slug": "backend-systemd-service-health"},
+      {"name": "nutsnews-backup-verify", "unit": "nutsnews-backup-verify.timer", "telemetry": ["duration", "success", "failure"], "dashboard_slug": "backend-systemd-service-health"},
+      {"name": "nutsnews-restore-drill", "unit": "nutsnews-restore-drill.timer", "telemetry": ["duration", "success", "failure"], "dashboard_slug": "backend-systemd-service-health"},
+      {"name": "nutsnews-metrics-textfile", "unit": "nutsnews-metrics-textfile.timer", "telemetry": ["duration", "success", "failure"], "dashboard_slug": "backend-systemd-service-health"},
+      {"name": "nutsnews-ops-dashboard-collect", "unit": "nutsnews-ops-dashboard-collect.timer", "telemetry": ["duration", "success", "failure"], "dashboard_slug": "backend-systemd-service-health"}
+    ],
+    "external_owned": [
+      {
+        "name": "feed-worker",
+        "repository": "ramideltoro/nutsnews-worker",
+        "telemetry_contract": "Emit feed refresh duration, success, failure, freshness, and backlog with low-cardinality job.name and workflow.name attributes."
+      }
+    ]
+  },
+  "alert_policies": [
+    {
+      "name": "NutsNews Backend Service Risk",
+      "incident_preference": "PER_CONDITION",
+      "conditions": [
+        {"id": "high_error_rate", "severity": "critical", "nrql": "SELECT percentage(count(*), WHERE error IS true) FROM Transaction WHERE appName = 'nutsnews-backend-production'", "operator": "above", "threshold": 5, "window_minutes": 5, "runbook_url": "runbooks/NEW_RELIC_OBSERVABILITY.md", "dashboard_slug": "backend-error-rate-exception-diagnostics"},
+        {"id": "high_latency", "severity": "warning", "nrql": "SELECT percentile(duration, 95) FROM Transaction WHERE appName = 'nutsnews-backend-production'", "operator": "above", "threshold": 0.75, "window_minutes": 10, "runbook_url": "runbooks/NEW_RELIC_OBSERVABILITY.md", "dashboard_slug": "backend-transaction-slow-path"},
+        {"id": "low_throughput_anomaly", "severity": "warning", "nrql": "SELECT rate(count(*), 1 minute) FROM Transaction WHERE appName = 'nutsnews-backend-production'", "operator": "below", "threshold": 0.1, "window_minutes": 30, "runbook_url": "runbooks/NEW_RELIC_OBSERVABILITY.md", "dashboard_slug": "backend-anomaly-baseline"}
+      ]
+    },
+    {
+      "name": "NutsNews Backend Host And Data Risk",
+      "incident_preference": "PER_CONDITION",
+      "conditions": [
+        {"id": "host_cpu_pressure", "severity": "warning", "nrql": "SELECT average(cpuPercent) FROM SystemSample WHERE hostname = 'backend.nutsnews.com'", "operator": "above", "threshold": 85, "window_minutes": 15, "runbook_url": "runbooks/NEW_RELIC_OBSERVABILITY.md", "dashboard_slug": "backend-host-infrastructure"},
+        {"id": "host_disk_pressure", "severity": "critical", "nrql": "SELECT average(diskUsedPercent) FROM StorageSample WHERE hostname = 'backend.nutsnews.com'", "operator": "above", "threshold": 85, "window_minutes": 15, "runbook_url": "runbooks/NEW_RELIC_OBSERVABILITY.md", "dashboard_slug": "backend-host-infrastructure"},
+        {"id": "postgres_connection_pressure", "severity": "warning", "nrql": "SELECT average(db.connections.active) FROM PostgresqlDatabaseSample WHERE entityName = 'backend-postgresql'", "operator": "above", "threshold": 80, "window_minutes": 10, "runbook_url": "runbooks/DB_MIGRATION_REPLICATION_HEALTH.md", "dashboard_slug": "backend-postgresql-health"},
+        {"id": "postgres_deadlocks", "severity": "critical", "nrql": "SELECT sum(db.deadlocksPerSecond) FROM PostgresqlDatabaseSample WHERE entityName = 'backend-postgresql'", "operator": "above", "threshold": 0, "window_minutes": 5, "runbook_url": "runbooks/DB_MIGRATION_REPLICATION_HEALTH.md", "dashboard_slug": "backend-postgresql-operations"},
+        {"id": "log_error_spike", "severity": "warning", "nrql": "SELECT count(*) FROM Log WHERE service.name = 'nutsnews-backend-production' AND level IN ('error', 'critical')", "operator": "above", "threshold": 20, "window_minutes": 10, "runbook_url": "runbooks/NEW_RELIC_OBSERVABILITY.md", "dashboard_slug": "backend-logs-diagnostics"}
+      ]
+    }
+  ],
+  "notification_workflow": {
+    "name": "NutsNews Backend Alerts",
+    "destination_required": true,
+    "severity_names": ["critical", "warning"],
+    "routing_labels": {"service.name": "nutsnews-backend-production", "team": "solo-ops"},
+    "test_procedure": "Create a temporary low-threshold NRQL condition in the backend policy, confirm delivery, then delete the temporary condition.",
+    "runbook_url": "runbooks/NEW_RELIC_OBSERVABILITY.md"
+  },
+  "synthetics": {
+    "locations": ["AWS_US_EAST_1"],
+    "monitors": [
+      {
+        "id": "backend-health-ping",
+        "type": "ping",
+        "url": "https://backend.nutsnews.com/health",
+        "frequency_minutes": 15,
+        "assertions": ["status_code_2xx", "tls_valid", "response_time_under_2000_ms"],
+        "alert_condition": "synthetic_health_failure"
+      },
+      {
+        "id": "backend-health-scripted-api",
+        "type": "scripted_api",
+        "url": "https://backend.nutsnews.com/health",
+        "frequency_minutes": 30,
+        "script_checks": ["status_code_2xx", "json_parseable", "status_field_ok", "sensitive_value_absent"],
+        "expected_json_shape": {"status": "string"},
+        "alert_condition": "synthetic_behavior_failure"
+      }
+    ],
+    "free_tier_guardrail": "No monitor runs more often than every 15 minutes unless incident response temporarily overrides it."
+  },
+  "deployment_markers": {
+    "enabled_via_workflow": ".github/workflows/backend-newrelic-change-tracking.yml",
+    "script": "scripts/newrelic_change_tracking.py",
+    "required_fields": ["commit_sha", "branch", "release_name", "deploy_actor", "environment", "entity_guid"],
+    "fail_safe": true,
+    "dashboard_slug": "backend-release-health-regression"
+  },
+  "workload_grouping": {
+    "name": "NutsNews Backend Ecosystem",
+    "entity_kinds": ["apm", "host", "database", "synthetics", "logs", "deployment"],
+    "required_tags": ["service.name", "environment", "owner", "team", "repository"],
+    "service_map_expected_relationships": ["Caddy to PHP APM", "PHP APM to PostgreSQL", "synthetics to public backend endpoint"]
+  },
+  "errors_inbox": {
+    "expected_attributes": ["environment", "route.group", "deployment.version", "request.id"],
+    "triage_states": ["new", "acknowledged", "resolved", "muted_with_reason"],
+    "excluded_grouping_keys": ["request.id"],
+    "grouping_review": "Group by exception class and normalized route group; avoid request.id as a grouping key.",
+    "dashboard_slug": "backend-error-rate-exception-diagnostics",
+    "runbook_url": "runbooks/NEW_RELIC_OBSERVABILITY.md"
+  }
+}

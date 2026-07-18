@@ -186,6 +186,13 @@ The telemetry privacy review lives in
 custom events, query attributes, and synthetics with explicit allowlist and
 denylist fields.
 
+## Demo And Dashboard UX
+
+Use `runbooks/NEW_RELIC_OBSERVABILITY_DEMO.md` for the end-to-end demo,
+production readiness review, and free-tier safety checklist.
+Use `docs/newrelic-dashboard-ux.json` for the dashboard variable and drilldown
+map that keeps the dashboard catalog navigable.
+
 ## Validate Reporting
 
 Offline CI guard:

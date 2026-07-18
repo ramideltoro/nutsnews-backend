@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "issue": 176,
+  "variables": [
+    {"name": "environment", "default": "production", "applies_to": "all dashboards"},
+    {"name": "host", "default": "backend.nutsnews.com", "applies_to": "host, runtime, logs, PostgreSQL dashboards"},
+    {"name": "transaction", "default": "all", "applies_to": "APM, trace, error, latency dashboards"},
+    {"name": "status_code", "default": "all", "applies_to": "Caddy, logs, error dashboards"},
+    {"name": "deployment_version", "default": "latest", "applies_to": "release, logs, SLO dashboards"}
+  ],
+  "layout_standard": {
+    "default_window": "24 hours",
+    "grid_columns": 12,
+    "top_row": "headline health or top diagnostic signal",
+    "middle_rows": "faceted breakdowns and trend comparisons",
+    "last_row": "sample tables, drilldown guidance, or runbook context"
+  },
+  "dashboards": [
+    {"slug": "backend-executive-service-overview", "primary_question": "Is the backend healthy right now?", "drilldowns": ["backend-sli-slo", "backend-php-apm-throughput-latency", "backend-host-infrastructure", "backend-postgresql-health", "backend-logs-diagnostics"]},
+    {"slug": "backend-error-rate-exception-diagnostics", "primary_question": "What broke, where, and when?", "drilldowns": ["backend-trace-diagnostics", "backend-logs-diagnostics", "backend-release-health-regression"]},
+    {"slug": "backend-transaction-slow-path", "primary_question": "Which endpoints are slow and why?", "drilldowns": ["backend-apm-postgresql-correlation", "backend-external-dependencies", "backend-trace-diagnostics"]},
+    {"slug": "backend-php-apm-throughput-latency", "primary_question": "Did request volume or latency regress?", "drilldowns": ["backend-transaction-slow-path", "backend-golden-metrics-apdex", "backend-anomaly-baseline"]},
+    {"slug": "backend-external-dependencies", "primary_question": "Are outbound dependencies hurting reliability?", "drilldowns": ["backend-trace-diagnostics", "backend-release-health-regression"]},
+    {"slug": "backend-php-fpm-runtime-pool-health", "primary_question": "Is PHP-FPM saturated?", "drilldowns": ["backend-host-infrastructure", "backend-php-apm-throughput-latency"]},
+    {"slug": "backend-caddy-request-traffic", "primary_question": "Is the edge proxy forwarding traffic correctly?", "drilldowns": ["backend-logs-diagnostics", "backend-error-rate-exception-diagnostics"]},
+    {"slug": "backend-host-infrastructure", "primary_question": "Is the host resource constrained?", "drilldowns": ["backend-systemd-service-health", "backend-php-fpm-runtime-pool-health"]},
+    {"slug": "backend-systemd-service-health", "primary_question": "Are critical services active?", "drilldowns": ["backend-host-infrastructure", "backend-logs-diagnostics"]},
+    {"slug": "backend-postgresql-health", "primary_question": "Is PostgreSQL healthy at a glance?", "drilldowns": ["backend-postgresql-operations", "backend-postgresql-query-performance", "backend-apm-postgresql-correlation"]},
+    {"slug": "backend-apm-postgresql-correlation", "primary_question": "How much latency is database-related?", "drilldowns": ["backend-postgresql-query-performance", "backend-trace-diagnostics"]},
+    {"slug": "backend-postgresql-query-performance", "primary_question": "Which query IDs are expensive?", "drilldowns": ["backend-postgresql-operations", "backend-apm-postgresql-correlation"]},
+    {"slug": "backend-postgresql-operations", "primary_question": "Are locks, bloat, or capacity causing risk?", "drilldowns": ["backend-postgresql-health", "backend-postgresql-query-performance"]},
+    {"slug": "backend-data-ingest-free-tier-usage", "primary_question": "Will New Relic ingest stay within budget?", "drilldowns": ["backend-logs-diagnostics", "backend-anomaly-baseline"]},
+    {"slug": "backend-logs-diagnostics", "primary_question": "What are logs showing during an incident?", "drilldowns": ["backend-error-rate-exception-diagnostics", "backend-trace-diagnostics", "backend-release-health-regression"]},
+    {"slug": "backend-sli-slo", "primary_question": "Are reliability targets being met?", "drilldowns": ["backend-golden-metrics-apdex", "backend-release-health-regression"]},
+    {"slug": "backend-golden-metrics-apdex", "primary_question": "Are the golden metrics healthy?", "drilldowns": ["backend-php-apm-throughput-latency", "backend-host-infrastructure"]},
+    {"slug": "backend-anomaly-baseline", "primary_question": "Is behavior unusual compared with baseline?", "drilldowns": ["backend-php-apm-throughput-latency", "backend-logs-diagnostics", "backend-data-ingest-free-tier-usage"]},
+    {"slug": "backend-release-health-regression", "primary_question": "Is the latest release healthy?", "drilldowns": ["backend-error-rate-exception-diagnostics", "backend-logs-diagnostics", "backend-trace-diagnostics"]},
+    {"slug": "backend-trace-diagnostics", "primary_question": "Can traces explain the failing or slow request?", "drilldowns": ["backend-apm-postgresql-correlation", "backend-external-dependencies", "backend-logs-diagnostics"]}
+  ]
+}

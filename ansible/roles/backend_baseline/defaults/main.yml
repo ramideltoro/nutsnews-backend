@@ -194,3 +194,32 @@ backend_newrelic_logs_max_line_kb: 16
 backend_newrelic_logs_disabled_config_files:
   - discovered.yml
   - logging.yml
+backend_newrelic_metrics_enabled: false
+backend_newrelic_metric_config_dir: /etc/nutsnews-newrelic
+backend_newrelic_metric_env_path: "{{ backend_newrelic_metric_config_dir }}/metric-api.env"
+backend_newrelic_metric_jobs_path: "{{ backend_newrelic_metric_config_dir }}/background-jobs.json"
+backend_newrelic_metric_state_dir: /var/lib/nutsnews/newrelic
+backend_newrelic_metric_emitter_path: /usr/local/bin/nutsnews-newrelic-job-metrics
+backend_newrelic_metric_output_path: "{{ backend_newrelic_metric_state_dir }}/job-metrics-last.json"
+backend_newrelic_metric_calendar: "*:0/5:00"
+backend_newrelic_metric_region: us
+backend_newrelic_metric_license_key: ""
+backend_newrelic_metric_service_name: nutsnews-backend-production
+backend_newrelic_metric_environment_label: production
+backend_newrelic_metric_host: backend.nutsnews.com
+backend_newrelic_metric_jobs:
+  - name: nutsnews-backup
+    service_unit: nutsnews-backup.service
+    timer_unit: nutsnews-backup.timer
+  - name: nutsnews-backup-verify
+    service_unit: nutsnews-backup-verify.service
+    timer_unit: nutsnews-backup-verify.timer
+  - name: nutsnews-restore-drill
+    service_unit: nutsnews-restore-drill.service
+    timer_unit: nutsnews-restore-drill.timer
+  - name: nutsnews-metrics-textfile
+    service_unit: nutsnews-metrics-textfile.service
+    timer_unit: nutsnews-metrics-textfile.timer
+  - name: nutsnews-ops-dashboard-collect
+    service_unit: nutsnews-ops-dashboard-collect.service
+    timer_unit: nutsnews-ops-dashboard-collect.timer

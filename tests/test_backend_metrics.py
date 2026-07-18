@@ -15,11 +15,22 @@ METRICS_PATH = Path("ansible/roles/backend_baseline/files/nutsnews_metrics_textf
 GRAFANA_SPEC = Path("grafana/backend-metrics/dashboards.json")
 ALLOY_TEMPLATE = Path("ansible/roles/backend_baseline/templates/alloy-config.alloy.j2")
 METRICS_TASKS = Path("ansible/roles/backend_baseline/tasks/metrics.yml")
+NEW_RELIC_METRICS = Path("ansible/roles/backend_baseline/files/nutsnews_newrelic_job_metrics.py")
+NEW_RELIC_METRICS_TASKS = Path("ansible/roles/backend_baseline/tasks/newrelic_metrics.yml")
 PROTECTED_APPLY_WORKFLOW = Path(".github/workflows/protected-backend-ansible-apply.yml")
 
 
 def load_metrics_module():
     spec = importlib.util.spec_from_file_location("nutsnews_metrics_textfile", METRICS_PATH)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_newrelic_metrics_module():
+    spec = importlib.util.spec_from_file_location("nutsnews_newrelic_job_metrics", NEW_RELIC_METRICS)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -148,6 +159,52 @@ class BackendMetricsTests(unittest.TestCase):
         for name in ("GRAFANA_CLOUD_LOKI_URL", "GRAFANA_CLOUD_LOKI_USERNAME", "GRAFANA_CLOUD_LOKI_PASSWORD"):
             self.assertIn(name, workflow)
         self.assertIn('"backend_logs_enabled"] = True', workflow)
+
+    def test_new_relic_job_metrics_are_host_managed_and_secret_safe(self):
+        defaults = Path("ansible/roles/backend_baseline/defaults/main.yml").read_text(encoding="utf-8")
+        tasks = NEW_RELIC_METRICS_TASKS.read_text(encoding="utf-8")
+        workflow = PROTECTED_APPLY_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("nutsnews-newrelic-job-metrics.service", tasks)
+        self.assertIn("nutsnews-newrelic-job-metrics.timer", tasks)
+        self.assertIn("metric-api.env", defaults)
+        self.assertIn("no_log: true", tasks)
+        self.assertIn('"backend_newrelic_metrics_enabled"] = True', workflow)
+        self.assertIn('"backend_newrelic_metric_license_key"] = new_relic_license_key', workflow)
+
+    def test_new_relic_job_metric_payload_is_low_cardinality(self):
+        metrics = load_newrelic_metrics_module()
+        jobs = [{"name": "nutsnews-backup", "service_unit": "nutsnews-backup.service", "timer_unit": "nutsnews-backup.timer"}]
+        systemd_state = {
+            "LoadState": "loaded",
+            "ActiveState": "inactive",
+            "Result": "success",
+            "ExecMainStatus": "0",
+            "ExecMainStartTimestampMonotonic": "1000000",
+            "ExecMainExitTimestampMonotonic": "2500000",
+            "NRestarts": "0",
+        }
+        with (
+            mock.patch.object(metrics, "run_systemctl_show", return_value=systemd_state),
+            mock.patch.dict(
+                "os.environ",
+                {
+                    "NUTSNEWS_BACKEND_ENVIRONMENT": "production",
+                    "NEW_RELIC_SERVICE_NAME": "nutsnews-backend-production",
+                    "NUTSNEWS_BACKEND_HOST": "backend.nutsnews.com",
+                    "NEW_RELIC_LICENSE_KEY": "secret-not-in-payload",
+                },
+                clear=True,
+            ),
+        ):
+            payload = metrics.build_payload(jobs, now=123, now_monotonic_usec=3000000)
+        text = json.dumps(payload)
+        self.assertIn("Custom/NutsNews/job/durationMs", text)
+        self.assertIn('"job.name": "nutsnews-backup"', text)
+        self.assertIn('"systemd.unit": "nutsnews-backup.service"', text)
+        self.assertIn('"status": "success"', text)
+        self.assertIn('"value": 1500', text)
+        self.assertNotIn("secret-not-in-payload", text)
 
     def test_textfile_exporter_writes_backup_metrics_without_secret_content(self):
         metrics = load_metrics_module()

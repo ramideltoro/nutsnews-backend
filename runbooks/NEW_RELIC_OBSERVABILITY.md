@@ -103,6 +103,10 @@ The runtime and host dashboards expect low-cardinality New Relic data from:
   data.
 - Systemd service state metrics under `systemd.service.*` or equivalent
   service-health events, plus service-scoped logs.
+- `nutsnews-newrelic-job-metrics.service`, a repo-managed one-shot that reads
+  backend-owned systemd job status and posts Metric API gauges for
+  `Custom/NutsNews/job/durationMs`, `success`, `failure`, `active`, and
+  `restartCount`.
 
 This dashboard pack does not expose a public PHP-FPM status endpoint and does
 not change Caddy routing. If a PHP-FPM status endpoint is later approved, keep
@@ -205,10 +209,19 @@ map that keeps the dashboard catalog navigable.
 ## Live Configuration Contracts
 
 Use `docs/newrelic-live-configuration.json` for the remaining live New Relic
-configuration plan: key transactions, custom transaction attributes, custom
+configuration contract: key transactions, custom transaction attributes, custom
 metrics, background job telemetry, alert policies, notification workflow,
 synthetics, deployment markers, workload grouping, service map expectations,
 and Errors Inbox triage.
+
+Backend-owned scheduled job telemetry is installed by the protected backend
+Ansible apply when a New Relic ingest key exists. The root-only environment file
+is `/etc/nutsnews-newrelic/metric-api.env`, the inventory is
+`/etc/nutsnews-newrelic/background-jobs.json`, and the timer is
+`nutsnews-newrelic-job-metrics.timer`. The job inventory is intentionally small
+and uses only `job.name`, `workflow.name`, `systemd.unit`, `systemd.timer`,
+`environment`, and `status` attributes. App and feed-worker job instrumentation
+belongs in their owning repositories.
 
 Use `scripts/newrelic_change_tracking.py --check` to validate deployment marker
 inputs without credentials. The GitHub workflow in

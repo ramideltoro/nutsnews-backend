@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "issue": 169,
+  "decision": "no_cache_or_queue_dashboard_now",
+  "active_cache_or_queue_workloads": [],
+  "reviewed_sources": [
+    "docs/backend-redis-valkey-decision.json",
+    "runbooks/REDIS_VALKEY_DECISION.md",
+    "docs/backend-service-baseline.json",
+    "ansible/roles/backend_baseline/templates/alloy-config.alloy.j2"
+  ],
+  "findings": [
+    "Redis and Valkey are explicitly not installed for the backend host.",
+    "No backend-owned Memcached workload is present in the service baseline.",
+    "Queue-like worker tables exist for database migration validation, but worker execution is owned by ramideltoro/nutsnews-worker rather than this backend host.",
+    "GitHub Actions maintenance workflows are observable through workflow results and backend runbooks, not a backend queue runtime."
+  ],
+  "future_dashboard_gate": [
+    "Add a concrete cache or queue owner repo and workload.",
+    "Define low-cardinality metrics for hit rate, latency, errors, depth, processing time, and retry age.",
+    "Prove no public cache or queue listener is introduced.",
+    "Add dashboard definitions only after the workload exists."
+  ]
+}

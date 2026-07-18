@@ -85,6 +85,7 @@ Versioned dashboard definitions currently managed by this repo:
 - `backend-golden-metrics-apdex`: Apdex, throughput, latency, errors, saturation, and target rationale for #175.
 - `backend-anomaly-baseline`: current-versus-baseline throughput, latency, errors, and log-volume views for #173.
 - `backend-release-health-regression`: deploy markers, before/after health, new exceptions, logs, and rollback signals for #166.
+- `backend-trace-diagnostics`: trace count, slow traces, error traces, database spans, outbound spans, and log correlation for #148.
 
 Each dashboard keeps a 24 hour default query window and uses the
 `NutsNews Backend - ` naming prefix. Live dashboard URLs are printed by
@@ -168,6 +169,22 @@ Common triage flow:
 New Relic service-level, Apdex, anomaly-alert, and change-tracking mutations
 require New Relic account credentials and permissions. Until those are
 available, this repo stores the intended configuration and dashboard evidence.
+
+## Trace, Cache/Queue, And Privacy Reviews
+
+Trace diagnostics are versioned in `backend-trace-diagnostics`, and live
+verification now includes a PHP distributed tracing configuration check in
+`scripts/backend_newrelic_observability_check.py --enforce`. Real trace
+existence still requires New Relic account access and backend request traffic.
+
+The cache and queue decision lives in `docs/newrelic-cache-queue-decision.json`.
+No cache or queue dashboard is created while there is no backend-owned Redis,
+Valkey, Memcached, or durable queue workload.
+
+The telemetry privacy review lives in
+`docs/newrelic-telemetry-privacy-review.json`. It covers logs, APM attributes,
+custom events, query attributes, and synthetics with explicit allowlist and
+denylist fields.
 
 ## Validate Reporting
 

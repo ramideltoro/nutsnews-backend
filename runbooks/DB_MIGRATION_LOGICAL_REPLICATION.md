@@ -40,7 +40,10 @@ python3 scripts/validate_backend_postgres_logical_replication_plan.py
 
 ## Protected Setup
 
-Status-only source inspection:
+Status-only source inspection uses direct database URL secrets. Pooler
+connections are rejected before any setup mutation.
+
+Staging status-only source inspection:
 
 ```bash
 gh workflow run backend-postgres-logical-replication.yml \
@@ -62,8 +65,13 @@ gh workflow run backend-postgres-logical-replication.yml \
 ```
 
 Production setup uses the same workflow with `environment_name=production` and
-confirmation `setup-production-logical-replication`. Do not run production setup
-until staging replication setup and health have been proven and recorded.
+confirmation `setup-production-logical-replication`. Production setup is fixed
+to `nutsnews_primary_shadow`, uses
+`NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL`, creates a backend subscription
+with `copy_data=false`, and does not permit app or worker writes to the backend.
+
+Do not run production setup until #211 provisioning, #212 restore, and #215
+behavior parity have been proven and recorded.
 
 ## Refresh Procedure
 
@@ -84,8 +92,9 @@ When the parity manifest adds or removes required tables:
 
 ## Current Blockers
 
-- Local `NUTSNEWS_PRODUCTION_SUPABASE_DB_URL` points at the staging project ref and rejects authentication.
-- `NUTSNEWS_STAGING_SUPABASE_DB_URL` is not present in `production-backend`.
+- #211 protected provisioning evidence for `nutsnews_primary_shadow` is missing.
+- #212 protected production restore evidence is missing.
+- #215 production-shadow behavior parity evidence is missing.
 - Live setup requires `production-backend` protected environment approval.
 
 ## References Checked 2026-07-18

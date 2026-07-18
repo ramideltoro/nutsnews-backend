@@ -67,8 +67,8 @@ jobs:
         shell: bash
         env:
           ENVIRONMENT_NAME: ${{ inputs.environment_name }}
-          NUTSNEWS_STAGING_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_STAGING_SUPABASE_DB_URL }}
-          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
+          NUTSNEWS_STAGING_SUPABASE_DB_DIRECT_URL: ${{ secrets.NUTSNEWS_STAGING_SUPABASE_DB_DIRECT_URL }}
+          NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL }}
           NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
           NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
         run: |
@@ -81,8 +81,8 @@ jobs:
             fi
           done
           case "$ENVIRONMENT_NAME" in
-            staging) source_name=NUTSNEWS_STAGING_SUPABASE_DB_URL ;;
-            production) source_name=NUTSNEWS_PRODUCTION_SUPABASE_DB_URL ;;
+            staging) source_name=NUTSNEWS_STAGING_SUPABASE_DB_DIRECT_URL ;;
+            production) source_name=NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL ;;
           esac
           if [[ -z "${!source_name}" ]]; then
             echo "Missing required production-backend secret: $source_name" >&2
@@ -117,15 +117,15 @@ jobs:
         env:
           ENVIRONMENT_NAME: ${{ inputs.environment_name }}
           OPERATION: ${{ inputs.operation }}
-          NUTSNEWS_STAGING_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_STAGING_SUPABASE_DB_URL }}
-          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
+          NUTSNEWS_STAGING_SUPABASE_DB_DIRECT_URL: ${{ secrets.NUTSNEWS_STAGING_SUPABASE_DB_DIRECT_URL }}
+          NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL }}
           NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
           NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
         run: |
           set -euo pipefail
           case "$ENVIRONMENT_NAME" in
-            staging) source_url="$NUTSNEWS_STAGING_SUPABASE_DB_URL" ;;
-            production) source_url="$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL" ;;
+            staging) source_url="$NUTSNEWS_STAGING_SUPABASE_DB_DIRECT_URL" ;;
+            production) source_url="$NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL" ;;
           esac
           echo "::add-mask::$source_url"
           ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
@@ -171,11 +171,12 @@ jobs:
         shell: bash
         env:
           ENVIRONMENT_NAME: ${{ inputs.environment_name }}
-          NUTSNEWS_STAGING_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_STAGING_SUPABASE_DB_URL }}
-          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
+          NUTSNEWS_STAGING_SUPABASE_DB_DIRECT_URL: ${{ secrets.NUTSNEWS_STAGING_SUPABASE_DB_DIRECT_URL }}
+          NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL }}
           NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
           NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
           NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE || 'nutsnews_restore_rehearsal' }}
+          NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE || 'nutsnews_primary_shadow' }}
         run: |
           set -euo pipefail
           publication="$(python3 - <<'PY'
@@ -197,8 +198,18 @@ jobs:
           PY
           )"
           case "$ENVIRONMENT_NAME" in
-            staging) source_url="$NUTSNEWS_STAGING_SUPABASE_DB_URL" ;;
-            production) source_url="$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL" ;;
+            staging)
+              source_url="$NUTSNEWS_STAGING_SUPABASE_DB_DIRECT_URL"
+              target_database="$NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE"
+              ;;
+            production)
+              source_url="$NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL"
+              target_database="$NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE"
+              if [[ "$target_database" != "nutsnews_primary_shadow" ]]; then
+                echo "Production logical replication target is fixed to nutsnews_primary_shadow." >&2
+                exit 1
+              fi
+              ;;
           esac
           echo "::add-mask::$source_url"
           ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
@@ -223,7 +234,7 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
-            "sudo -n env REHEARSAL_DATABASE='$NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE' SOURCE_DB_URL='$source_url' PUBLICATION_NAME='$publication' SLOT_NAME='$slot' SUBSCRIPTION_NAME='$subscription' bash '$remote_dir/backend_postgres_logical_replication_target_remote.sh'" \
+            "sudo -n env TARGET_DATABASE='$target_database' SOURCE_DB_URL='$source_url' PUBLICATION_NAME='$publication' SLOT_NAME='$slot' SUBSCRIPTION_NAME='$subscription' bash '$remote_dir/backend_postgres_logical_replication_target_remote.sh'" \
             | tee "$RUNNER_TEMP/backend-postgres-logical-replication-target.json"
 
       - name: Summarize safe metadata

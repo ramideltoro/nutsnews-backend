@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-case "${REHEARSAL_DATABASE:-}" in
+target_database="${TARGET_DATABASE:-${REHEARSAL_DATABASE:-}}"
+
+case "$target_database" in
   ''|*[!A-Za-z0-9_]*|[0-9]*)
-    echo "Unsafe rehearsal database name." >&2
+    echo "Unsafe target database name." >&2
     exit 1
     ;;
 esac
@@ -26,22 +28,22 @@ q_publication="\"$PUBLICATION_NAME\""
 q_subscription="\"$SUBSCRIPTION_NAME\""
 started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-sudo -n -u postgres pg_isready -q -d "$REHEARSAL_DATABASE"
+sudo -n -u postgres pg_isready -q -d "$target_database"
 
-target_table_count="$(sudo -n -u postgres psql -At -d "$REHEARSAL_DATABASE" <<'SQL'
+target_table_count="$(sudo -n -u postgres psql -At -d "$target_database" <<'SQL'
 select count(*)::int
 from information_schema.tables
 where table_schema = 'public';
 SQL
 )"
 
-sub_exists="$(sudo -n -u postgres psql -At -d "$REHEARSAL_DATABASE" -v sub="$SUBSCRIPTION_NAME" <<'SQL'
+sub_exists="$(sudo -n -u postgres psql -At -d "$target_database" -v sub="$SUBSCRIPTION_NAME" <<'SQL'
 select exists(select 1 from pg_subscription where subname = :'sub');
 SQL
 )"
 
 if [[ "$sub_exists" == "t" ]]; then
-  sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$REHEARSAL_DATABASE" \
+  sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$target_database" \
     -v source_conn="$SOURCE_DB_URL" <<SQL
 alter subscription $q_subscription disable;
 alter subscription $q_subscription connection :'source_conn';
@@ -50,7 +52,7 @@ alter subscription $q_subscription enable;
 alter subscription $q_subscription refresh publication with (copy_data = false);
 SQL
 else
-  sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$REHEARSAL_DATABASE" \
+  sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$target_database" \
     -v source_conn="$SOURCE_DB_URL" \
     -v slot_name="$SLOT_NAME" <<SQL
 create subscription $q_subscription
@@ -65,14 +67,14 @@ with (
 SQL
 fi
 
-subscription_count="$(sudo -n -u postgres psql -At -d "$REHEARSAL_DATABASE" -v sub="$SUBSCRIPTION_NAME" <<'SQL'
+subscription_count="$(sudo -n -u postgres psql -At -d "$target_database" -v sub="$SUBSCRIPTION_NAME" <<'SQL'
 select count(*)::int
 from pg_subscription
 where subname = :'sub';
 SQL
 )"
 
-worker_present="$(sudo -n -u postgres psql -At -d "$REHEARSAL_DATABASE" -v sub="$SUBSCRIPTION_NAME" <<'SQL'
+worker_present="$(sudo -n -u postgres psql -At -d "$target_database" -v sub="$SUBSCRIPTION_NAME" <<'SQL'
 select exists(
   select 1
   from pg_stat_subscription
@@ -85,7 +87,7 @@ SQL
 completed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 STARTED_AT="$started_at" \
 COMPLETED_AT="$completed_at" \
-REHEARSAL_DATABASE="$REHEARSAL_DATABASE" \
+TARGET_DATABASE="$target_database" \
 SUBSCRIPTION_NAME="$SUBSCRIPTION_NAME" \
 PUBLICATION_NAME="$PUBLICATION_NAME" \
 SLOT_NAME="$SLOT_NAME" \
@@ -100,7 +102,8 @@ print(json.dumps({
     "status": "pass" if os.environ["SUBSCRIPTION_COUNT"] == "1" else "blocked",
     "started_at_utc": os.environ["STARTED_AT"],
     "completed_at_utc": os.environ["COMPLETED_AT"],
-    "rehearsal_database": os.environ["REHEARSAL_DATABASE"],
+    "target_database": os.environ["TARGET_DATABASE"],
+    "rehearsal_database": os.environ["TARGET_DATABASE"],
     "subscription": os.environ["SUBSCRIPTION_NAME"],
     "publication": os.environ["PUBLICATION_NAME"],
     "slot": os.environ["SLOT_NAME"],

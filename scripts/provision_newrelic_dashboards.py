@@ -42,6 +42,8 @@ def validate_dashboard_spec(spec: dict[str, Any]) -> list[str]:
     dashboard = spec.get("dashboard")
     if not spec.get("slug"):
         errors.append(f"{path}: missing slug")
+    if not isinstance(spec.get("issue"), int):
+        errors.append(f"{path}: issue must reference the owning GitHub issue number")
     if not isinstance(dashboard, dict):
         return errors + [f"{path}: missing dashboard object"]
     name = str(dashboard.get("name") or "")

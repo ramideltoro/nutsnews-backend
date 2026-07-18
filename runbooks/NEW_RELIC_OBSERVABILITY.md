@@ -62,6 +62,21 @@ The provisioner reads `docs/newrelic/dashboards/*.json`, searches for an
 existing dashboard by name, updates it when found, and creates it otherwise.
 Missing credentials fail closed before any network call.
 
+## Dashboard Catalog
+
+Versioned dashboard definitions currently managed by this repo:
+
+- `backend-executive-service-overview`: high-level health overview for #135.
+- `backend-error-rate-exception-diagnostics`: failure and exception triage for #138.
+- `backend-transaction-slow-path`: slow request investigation for #140.
+- `backend-php-apm-throughput-latency`: request volume and latency analysis for #141.
+- `backend-external-dependencies`: outbound dependency diagnosis for #142.
+
+Each dashboard keeps a 24 hour default query window and uses the
+`NutsNews Backend - ` naming prefix. Live dashboard URLs are printed by
+`scripts/provision_newrelic_dashboards.py` after New Relic credentials are
+available in the runtime environment.
+
 ## Validate Reporting
 
 Offline CI guard:

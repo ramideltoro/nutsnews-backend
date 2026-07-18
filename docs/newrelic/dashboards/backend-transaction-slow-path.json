@@ -1,0 +1,129 @@
+{
+  "slug": "backend-transaction-slow-path",
+  "issue": 140,
+  "dashboard": {
+    "name": "NutsNews Backend - APM - Transaction Slow Path",
+    "description": "24 hour dashboard for slow backend transactions, latency contributors, database span time, outbound span time, and repeated slow endpoints. Managed from ramideltoro/nutsnews-backend.",
+    "permissions": "PUBLIC_READ_ONLY",
+    "pages": [
+      {
+        "name": "Slow path triage",
+        "description": "Find the endpoints and spans most responsible for request latency.",
+        "widgets": [
+          {
+            "title": "p95 latency trend",
+            "layout": {"column": 1, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT percentile(duration, 95) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Max latency trend",
+            "layout": {"column": 5, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT max(duration) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Slow requests by endpoint",
+            "layout": {"column": 9, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT percentile(duration, 95), max(duration), count(*) FROM Transaction WHERE appName = 'nutsnews-backend-production' FACET name LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Application, database, and external time",
+            "layout": {"column": 1, "row": 4, "height": 3, "width": 6},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT average(duration), average(databaseDuration), average(externalDuration) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Latency mix by transaction",
+            "layout": {"column": 7, "row": 4, "height": 3, "width": 6},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT average(duration), average(databaseDuration), average(externalDuration) FROM Transaction WHERE appName = 'nutsnews-backend-production' FACET name LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Slow datastore spans",
+            "layout": {"column": 1, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT percentile(duration, 95), max(duration), count(*) FROM Span WHERE appName = 'nutsnews-backend-production' AND category = 'datastore' FACET name LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Slow external spans",
+            "layout": {"column": 5, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT percentile(duration, 95), max(duration), count(*) FROM Span WHERE appName = 'nutsnews-backend-production' AND category IN ('external', 'http') FACET name LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Repeated slow endpoints",
+            "layout": {"column": 9, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT filter(count(*), WHERE duration > 1), count(*) FROM Transaction WHERE appName = 'nutsnews-backend-production' FACET name LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Tuning path",
+            "layout": {"column": 1, "row": 10, "height": 3, "width": 12},
+            "visualization": {"id": "viz.markdown"},
+            "rawConfiguration": {
+              "text": "Use endpoint p95 first, then compare database and outbound span time. Prioritize repeated slow endpoints before one-off max-duration samples."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "slug": "backend-external-dependencies",
+  "issue": 142,
+  "dashboard": {
+    "name": "NutsNews Backend - APM - External Dependencies",
+    "description": "24 hour dashboard for outbound dependency count, latency, error rate, slow hosts, and transaction contribution. Managed from ramideltoro/nutsnews-backend.",
+    "permissions": "PUBLIC_READ_ONLY",
+    "pages": [
+      {
+        "name": "Outbound dependencies",
+        "description": "Outbound HTTP and third-party dependency behavior from backend APM spans.",
+        "widgets": [
+          {
+            "title": "External call volume",
+            "layout": {"column": 1, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*) FROM Span WHERE appName = 'nutsnews-backend-production' AND category IN ('external', 'http') TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "External latency",
+            "layout": {"column": 5, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT average(duration), percentile(duration, 95), max(duration) FROM Span WHERE appName = 'nutsnews-backend-production' AND category IN ('external', 'http') TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "External span errors",
+            "layout": {"column": 9, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*) FROM Span WHERE appName = 'nutsnews-backend-production' AND category IN ('external', 'http') AND error IS true TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Slowest dependency hosts",
+            "layout": {"column": 1, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT percentile(duration, 95), average(duration), count(*) FROM Span WHERE appName = 'nutsnews-backend-production' AND category IN ('external', 'http') FACET peer.hostname LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Dependency operations",
+            "layout": {"column": 5, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT percentile(duration, 95), count(*) FROM Span WHERE appName = 'nutsnews-backend-production' AND category IN ('external', 'http') FACET name LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "External time by transaction",
+            "layout": {"column": 9, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT average(externalDuration), average(duration), count(*) FROM Transaction WHERE appName = 'nutsnews-backend-production' FACET name LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "External contribution",
+            "layout": {"column": 1, "row": 7, "height": 3, "width": 8},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT average(externalDuration), average(duration) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Dependency triage",
+            "layout": {"column": 9, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.markdown"},
+            "rawConfiguration": {
+              "text": "Start with host-level p95, then inspect the transaction contribution panel. Keep facets bounded to host and operation names."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -57,13 +57,13 @@ jobs:
         shell: bash
         env:
           NUTSNEWS_STAGING_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_STAGING_SUPABASE_DB_URL }}
-          NUTSNEWS_BACKEND_POSTGRES_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_VALIDATION_PASSWORD }}
+          NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
           NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
           NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
           missing=0
-          for name in NUTSNEWS_STAGING_SUPABASE_DB_URL NUTSNEWS_BACKEND_POSTGRES_VALIDATION_PASSWORD NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
+          for name in NUTSNEWS_STAGING_SUPABASE_DB_URL NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
             if [[ -z "${!name}" ]]; then
               echo "Missing required production-backend secret: $name" >&2
               missing=1
@@ -103,7 +103,7 @@ jobs:
         shell: bash
         env:
           NUTSNEWS_STAGING_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_STAGING_SUPABASE_DB_URL }}
-          NUTSNEWS_BACKEND_POSTGRES_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_VALIDATION_PASSWORD }}
+          NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE || 'nutsnews_restore_rehearsal' }}
         run: |
           set -euo pipefail
@@ -115,7 +115,7 @@ jobs:
           from urllib.parse import quote
 
           user = quote("nutsnews_migration_validation", safe="")
-          password = quote(os.environ["NUTSNEWS_BACKEND_POSTGRES_VALIDATION_PASSWORD"], safe="")
+          password = quote(os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD"], safe="")
           database = quote(os.environ["NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE"], safe="")
           print(f"postgresql://{user}:{password}@127.0.0.1:15432/{database}")
           PY

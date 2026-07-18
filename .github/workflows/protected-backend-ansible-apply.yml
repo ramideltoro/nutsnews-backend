@@ -207,6 +207,8 @@ jobs:
           GRAFANA_CLOUD_LOKI_URL: ${{ secrets.GRAFANA_CLOUD_LOKI_URL }}
           GRAFANA_CLOUD_LOKI_USERNAME: ${{ secrets.GRAFANA_CLOUD_LOKI_USERNAME }}
           GRAFANA_CLOUD_LOKI_PASSWORD: ${{ secrets.GRAFANA_CLOUD_LOKI_PASSWORD }}
+          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+          NEW_RELIC_LICENCE_KEY: ${{ secrets.NEW_RELIC_LICENCE_KEY }}
           B2_ACCOUNT_ID: ${{ secrets.B2_ACCOUNT_ID }}
           B2_ACCOUNT_KEY: ${{ secrets.B2_ACCOUNT_KEY }}
           NUTSNEWS_BACKEND_ENVIRONMENT: ${{ vars.NUTSNEWS_BACKEND_ENVIRONMENT || 'production' }}
@@ -282,6 +284,10 @@ jobs:
           if all(logs_values.values()):
               extra_vars["backend_logs_enabled"] = True
               extra_vars.update(logs_values)
+
+          new_relic_license_key = os.environ.get("NEW_RELIC_LICENSE_KEY", "") or os.environ.get("NEW_RELIC_LICENCE_KEY", "")
+          if new_relic_license_key:
+              extra_vars["backend_newrelic_logs_enabled"] = True
 
           postgres_enabled = os.environ.get("NUTSNEWS_BACKEND_POSTGRES_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
           if postgres_enabled:

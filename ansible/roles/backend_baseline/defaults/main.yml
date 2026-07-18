@@ -188,3 +188,9 @@ backend_logs_file_targets:
   - service: backend
     unit: nutsnews-app
     path: /var/log/nutsnews/*.log
+backend_newrelic_logs_enabled: false
+backend_newrelic_logs_config_dir: /etc/newrelic-infra/logging.d
+backend_newrelic_logs_max_line_kb: 16
+backend_newrelic_logs_disabled_config_files:
+  - discovered.yml
+  - logging.yml

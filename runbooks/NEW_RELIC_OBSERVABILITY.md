@@ -143,6 +143,15 @@ account access and may depend on account features. Until those credentials are
 available, the repo policy and dashboard queries are the source of truth for the
 intended implementation.
 
+The protected backend Ansible apply also manages a host-side New Relic log
+forwarding allowlist when a New Relic ingest key exists in the protected
+environment. It removes guided-install `discovered.yml` and `logging.yml`
+sources, installs `/etc/newrelic-infra/logging.d/nutsnews-backend.yml`, avoids
+forwarding `newrelic-cli.log`, caps forwarded line size, and only forwards
+incident-useful Caddy, PostgreSQL, app, auth, fail2ban, and New Relic infra
+warning/error/status signals. This is the fallback control path while custom
+New Relic obfuscation and Pipeline Cloud rule mutations are RBAC-denied.
+
 ## Service Quality And Release Triage
 
 The service-level and golden-metric policy lives in

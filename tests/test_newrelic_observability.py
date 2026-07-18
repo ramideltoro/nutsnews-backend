@@ -32,6 +32,8 @@ class NewRelicObservabilityTests(unittest.TestCase):
     def test_dashboard_definitions_use_24h_queries_and_no_secret_terms(self):
         dashboards = provision_newrelic_dashboards.load_dashboard_files()
         provision_newrelic_dashboards.validate_catalog(dashboards)
+        self.assertGreaterEqual(len(dashboards), 5)
+        self.assertTrue(all(isinstance(dashboard.get("issue"), int) for dashboard in dashboards))
         catalog_text = json.dumps(dashboards).lower()
         self.assertIn("since 24 hours ago", catalog_text)
         for forbidden in provision_newrelic_dashboards.FORBIDDEN_QUERY_TERMS:

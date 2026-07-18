@@ -1,0 +1,129 @@
+{
+  "slug": "backend-php-apm-throughput-latency",
+  "issue": 141,
+  "dashboard": {
+    "name": "NutsNews Backend - APM - Throughput and Latency",
+    "description": "24 hour dashboard for PHP APM request volume, latency percentiles, Apdex, current-versus-previous behavior, and route-level latency. Managed from ramideltoro/nutsnews-backend.",
+    "permissions": "PUBLIC_READ_ONLY",
+    "pages": [
+      {
+        "name": "Throughput and latency",
+        "description": "Request volume and latency behavior for backend PHP transactions.",
+        "widgets": [
+          {
+            "title": "Requests per minute",
+            "layout": {"column": 1, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT rate(count(*), 1 minute) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Average latency",
+            "layout": {"column": 5, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT average(duration) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago COMPARE WITH 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "p50 p95 p99 latency",
+            "layout": {"column": 9, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT percentile(duration, 50, 95, 99) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Apdex target 0.5s",
+            "layout": {"column": 1, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.billboard"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT apdex(duration, t: 0.5) FROM Transaction WHERE appName = 'nutsnews-backend-production' SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Latency by transaction",
+            "layout": {"column": 5, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT average(duration), percentile(duration, 95), percentile(duration, 99), count(*) FROM Transaction WHERE appName = 'nutsnews-backend-production' FACET name LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Throughput by transaction",
+            "layout": {"column": 9, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT rate(count(*), 1 minute) FROM Transaction WHERE appName = 'nutsnews-backend-production' FACET name LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Latency distribution",
+            "layout": {"column": 1, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.bar"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT histogram(duration, width: 0.25, buckets: 20) FROM Transaction WHERE appName = 'nutsnews-backend-production' SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Error rate overlay",
+            "layout": {"column": 5, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT percentage(count(*), WHERE error IS true) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Operating target",
+            "layout": {"column": 9, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.markdown"},
+            "rawConfiguration": {
+              "text": "Initial Apdex target is 0.5 seconds for API responsiveness. Revisit after stable production baseline data is available."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

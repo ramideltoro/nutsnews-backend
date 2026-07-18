@@ -1,0 +1,116 @@
+{
+  "slug": "backend-error-rate-exception-diagnostics",
+  "issue": 138,
+  "dashboard": {
+    "name": "NutsNews Backend - APM - Errors and Exceptions",
+    "description": "24 hour dashboard for backend failure rate, exception classes, failing transactions, HTTP status errors, and recent trace context. Managed from ramideltoro/nutsnews-backend.",
+    "permissions": "PUBLIC_READ_ONLY",
+    "pages": [
+      {
+        "name": "Errors and exceptions",
+        "description": "Failure triage by rate, class, transaction, endpoint, and trace context.",
+        "widgets": [
+          {
+            "title": "Transaction error rate",
+            "layout": {"column": 1, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT percentage(count(*), WHERE error IS true) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Transaction error count",
+            "layout": {"column": 5, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*) FROM TransactionError WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "HTTP error status codes",
+            "layout": {"column": 9, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*) FROM Transaction WHERE appName = 'nutsnews-backend-production' AND httpResponseCode >= '400' FACET httpResponseCode TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Top exception classes",
+            "layout": {"column": 1, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*) FROM TransactionError WHERE appName = 'nutsnews-backend-production' FACET error.class LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Top failing transactions",
+            "layout": {"column": 5, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*) FROM TransactionError WHERE appName = 'nutsnews-backend-production' FACET transactionName LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Impacted endpoints",
+            "layout": {"column": 9, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*), percentage(count(*), WHERE error IS true) FROM Transaction WHERE appName = 'nutsnews-backend-production' FACET name LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Recent trace context",
+            "layout": {"column": 1, "row": 7, "height": 3, "width": 8},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(traceId), latest(transactionName), latest(error.class) FROM TransactionError WHERE appName = 'nutsnews-backend-production' FACET error.group.name LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Triage path",
+            "layout": {"column": 9, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.markdown"},
+            "rawConfiguration": {
+              "text": "Start with error rate, then narrow by transaction and exception class. Use trace context for request-level diagnosis. Keep direct user data out of displayed attributes."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

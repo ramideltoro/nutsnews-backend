@@ -104,7 +104,9 @@ class NewRelicObservabilityTests(unittest.TestCase):
         self.assertIn("backend_owned_status", config["background_jobs"])
         self.assertTrue(config["notification_workflow"]["destination_required"])
         self.assertTrue(config["deployment_markers"]["fail_safe"])
-        self.assertIn("scripted_api", {monitor["type"] for monitor in config["synthetics"]["monitors"]})
+        self.assertEqual(config["synthetics"]["acceptance_monitor_id"], "backend-health-ping")
+        self.assertIn("ping", {monitor["type"] for monitor in config["synthetics"]["monitors"]})
+        self.assertIn("scripted_api", {monitor["type"] for monitor in config["synthetics"]["planned_monitors"]})
 
     def test_systemd_dashboard_has_background_job_metric_panels(self):
         dashboard = json.loads((ROOT / "docs/newrelic/dashboards/backend-systemd-service-health.json").read_text(encoding="utf-8"))

@@ -47,6 +47,28 @@ class NewRelicObservabilityTests(unittest.TestCase):
         self.assertIn("trace.id", fields)
         self.assertTrue(policy["drop_rules"])
         self.assertGreater(policy["daily_ingest_estimate_mb"]["expected"], 0)
+        forwarding = policy["live_forwarding"]
+        self.assertIn("discovered.yml", forwarding["disabled_auto_configs"])
+        self.assertIn("logging.yml", forwarding["disabled_auto_configs"])
+        self.assertIn("newrelic-cli", forwarding["drop_strategy"])
+
+    def test_backend_role_manages_new_relic_log_forwarding_guardrails(self):
+        defaults = (ROOT / "ansible/roles/backend_baseline/defaults/main.yml").read_text(encoding="utf-8")
+        monitoring = (ROOT / "ansible/roles/backend_baseline/tasks/monitoring.yml").read_text(encoding="utf-8")
+        handlers = (ROOT / "ansible/roles/backend_baseline/handlers/main.yml").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/protected-backend-ansible-apply.yml").read_text(encoding="utf-8")
+
+        self.assertIn("backend_newrelic_logs_enabled: false", defaults)
+        self.assertIn("backend_newrelic_logs_disabled_config_files", defaults)
+        self.assertIn("Remove unmanaged New Relic auto log configs", monitoring)
+        self.assertIn("nutsnews-backend.yml", monitoring)
+        self.assertIn("max_line_kb: {{ backend_newrelic_logs_max_line_kb }}", monitoring)
+        self.assertIn("pattern:", monitoring)
+        self.assertIn("newrelic-infra", monitoring)
+        self.assertNotIn("newrelic-cli.log", monitoring)
+        self.assertIn("Restart newrelic-infra", handlers)
+        self.assertIn("NEW_RELIC_LICENSE_KEY", workflow)
+        self.assertIn('"backend_newrelic_logs_enabled"] = True', workflow)
 
     def test_service_levels_define_targets_and_apdex(self):
         service_levels = json.loads((ROOT / "docs" / "newrelic-service-levels.json").read_text(encoding="utf-8"))

@@ -71,6 +71,14 @@ def main() -> int:
         errors.append("log policy must define drop rules")
     if not log_policy.get("daily_ingest_estimate_mb"):
         errors.append("log policy must define daily ingest estimate")
+    forwarding = log_policy.get("live_forwarding", {})
+    if forwarding.get("config_path") != "/etc/newrelic-infra/logging.d/nutsnews-backend.yml":
+        errors.append("log policy must document the repo-managed New Relic log forwarding path")
+    disabled_configs = set(forwarding.get("disabled_auto_configs", []))
+    if not {"discovered.yml", "logging.yml"}.issubset(disabled_configs):
+        errors.append("log policy must disable New Relic guided-install auto log configs")
+    if "newrelic-cli" not in forwarding.get("drop_strategy", ""):
+        errors.append("log policy must avoid forwarding New Relic CLI logs")
     service_levels = json.loads(SERVICE_LEVELS.read_text(encoding="utf-8"))
     if service_levels.get("service") != "nutsnews-backend-production":
         errors.append("service levels must use nutsnews-backend-production")

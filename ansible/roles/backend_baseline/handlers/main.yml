@@ -33,6 +33,12 @@
     state: restarted
   when: not ansible_check_mode
 
+- name: Restart newrelic-infra
+  ansible.builtin.service:
+    name: newrelic-infra
+    state: restarted
+  when: not ansible_check_mode
+
 - name: Reload systemd
   ansible.builtin.systemd:
     daemon_reload: true

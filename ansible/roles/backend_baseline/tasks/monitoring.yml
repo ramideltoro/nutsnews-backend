@@ -61,6 +61,118 @@
           create 0640 root adm
       }
 
+- name: Ensure New Relic log forwarder directory exists
+  ansible.builtin.file:
+    path: "{{ backend_newrelic_logs_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: backend_newrelic_logs_enabled | bool
+
+- name: Remove unmanaged New Relic auto log configs
+  ansible.builtin.file:
+    path: "{{ backend_newrelic_logs_config_dir }}/{{ item }}"
+    state: absent
+  loop: "{{ backend_newrelic_logs_disabled_config_files }}"
+  when: backend_newrelic_logs_enabled | bool
+  notify: Restart newrelic-infra
+
+- name: Install curated New Relic backend log forwarding config
+  ansible.builtin.copy:
+    dest: "{{ backend_newrelic_logs_config_dir }}/nutsnews-backend.yml"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      # Keep this allowlisted and low-volume; do not forward New Relic CLI logs.
+      logs:
+        - name: nutsnews-caddy-access-errors
+          file: /var/log/caddy/access.log
+          max_line_kb: {{ backend_newrelic_logs_max_line_kb }}
+          pattern: '"status":(4|5)[0-9][0-9]|[[:space:]](4|5)[0-9][0-9][[:space:]]'
+          attributes:
+            service.name: nutsnews-backend-production
+            environment: {{ backend_metrics_environment_label }}
+            host.name: {{ backend_metrics_instance_label }}
+            repository: ramideltoro/nutsnews-backend
+            unit: caddy
+            logtype: caddy-access
+
+        - name: nutsnews-caddy-error
+          file: /var/log/caddy/error.log
+          max_line_kb: {{ backend_newrelic_logs_max_line_kb }}
+          attributes:
+            service.name: nutsnews-backend-production
+            environment: {{ backend_metrics_environment_label }}
+            host.name: {{ backend_metrics_instance_label }}
+            repository: ramideltoro/nutsnews-backend
+            unit: caddy
+            logtype: caddy-error
+
+        - name: nutsnews-postgresql-operational
+          file: /var/log/postgresql/postgresql*.log
+          max_line_kb: {{ backend_newrelic_logs_max_line_kb }}
+          pattern: '(ERROR|Error|error|FATAL|Fatal|fatal|PANIC|Panic|panic|WARNING|Warning|warning|deadlock|Deadlock|checkpoint|Checkpoint|autovacuum|Autovacuum|duration:)'
+          attributes:
+            service.name: nutsnews-backend-production
+            environment: {{ backend_metrics_environment_label }}
+            host.name: {{ backend_metrics_instance_label }}
+            repository: ramideltoro/nutsnews-backend
+            unit: postgresql
+            logtype: postgresql
+
+        - name: nutsnews-app-warn-error
+          file: /var/log/nutsnews/*.log
+          max_line_kb: {{ backend_newrelic_logs_max_line_kb }}
+          pattern: '(WARN|Warn|warn|WARNING|Warning|warning|ERROR|Error|error|CRITICAL|Critical|critical|FATAL|Fatal|fatal|Exception|exception|trace_id|request_id)'
+          attributes:
+            service.name: nutsnews-backend-production
+            environment: {{ backend_metrics_environment_label }}
+            host.name: {{ backend_metrics_instance_label }}
+            repository: ramideltoro/nutsnews-backend
+            unit: nutsnews-app
+            logtype: nutsnews-app
+
+        - name: nutsnews-auth-security
+          file: /var/log/auth.log
+          max_line_kb: {{ backend_newrelic_logs_max_line_kb }}
+          pattern: '(fail|failed|Failed|FAILED|denied|Denied|DENIED|invalid|Invalid|INVALID|refused|Refused|authentication failure|Authentication failure|sudo|session opened|session closed)'
+          attributes:
+            service.name: nutsnews-backend-production
+            environment: {{ backend_metrics_environment_label }}
+            host.name: {{ backend_metrics_instance_label }}
+            repository: ramideltoro/nutsnews-backend
+            unit: auth.log
+            logtype: linux_auth
+
+        - name: nutsnews-fail2ban-security
+          file: /var/log/fail2ban.log
+          max_line_kb: {{ backend_newrelic_logs_max_line_kb }}
+          pattern: '(Ban|ban|Unban|unban|Found|found|ERROR|Error|error|WARNING|Warning|warning)'
+          attributes:
+            service.name: nutsnews-backend-production
+            environment: {{ backend_metrics_environment_label }}
+            host.name: {{ backend_metrics_instance_label }}
+            repository: ramideltoro/nutsnews-backend
+            unit: fail2ban.log
+            logtype: fail2ban
+
+        - name: nutsnews-newrelic-infra-warn-error
+          file: /var/log/newrelic-infra/newrelic-infra.log
+          max_line_kb: {{ backend_newrelic_logs_max_line_kb }}
+          pattern: '(WARN|Warn|warn|WARNING|Warning|warning|ERROR|Error|error|FATAL|Fatal|fatal)'
+          attributes:
+            service.name: nutsnews-backend-production
+            environment: {{ backend_metrics_environment_label }}
+            host.name: {{ backend_metrics_instance_label }}
+            repository: ramideltoro/nutsnews-backend
+            unit: newrelic-infra
+            logtype: newrelic-infra
+  when: backend_newrelic_logs_enabled | bool
+  notify: Restart newrelic-infra
+
 - name: Enable sysstat collection
   ansible.builtin.lineinfile:
     path: /etc/default/sysstat

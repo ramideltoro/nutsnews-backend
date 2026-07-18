@@ -3,6 +3,26 @@
   "issues": [155, 156],
   "service": "nutsnews-backend-production",
   "environment": "production",
+  "live_forwarding": {
+    "configured_by": "ramideltoro/nutsnews-backend protected Ansible apply",
+    "config_path": "/etc/newrelic-infra/logging.d/nutsnews-backend.yml",
+    "disabled_auto_configs": ["discovered.yml", "logging.yml"],
+    "drop_strategy": "Pre-ingest allowlist plus source-specific severity/status patterns; do not forward newrelic-cli logs.",
+    "forwarded_sources": [
+      "Caddy access 4xx/5xx only",
+      "Caddy error log",
+      "PostgreSQL warning/error/operational signals",
+      "NutsNews app warning/error/correlation lines",
+      "auth.log security events",
+      "fail2ban security events",
+      "newrelic-infra warning/error lines"
+    ],
+    "new_relic_account_rules": {
+      "custom_obfuscation": "blocked_by_new_relic_rbac",
+      "pipeline_cloud_drop_rules": "blocked_by_new_relic_rbac",
+      "scripted_api_monitor": "blocked_by_subscription_limit"
+    }
+  },
   "required_fields": [
     {"name": "timestamp", "source": "all", "purpose": "event time"},
     {"name": "level", "source": "all", "purpose": "severity filtering"},

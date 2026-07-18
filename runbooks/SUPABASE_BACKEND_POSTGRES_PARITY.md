@@ -12,6 +12,8 @@ Validate the manifest locally:
 ```bash
 python3 scripts/validate_supabase_backend_postgres_parity.py
 python3 scripts/backend_postgres_parity_validate.py --offline
+python3 scripts/validate_supabase_backend_postgres_behavior_parity.py
+python3 scripts/backend_postgres_behavior_parity_validate.py --offline
 ```
 
 ## Operating Rules
@@ -42,6 +44,30 @@ Parity validation must emit a JSON report with:
 - pass/fail/warning/skipped-with-reason states;
 - row counts, checksums, sequence safety, and behavior-object hashes;
 - explicit cutover blocker status.
+
+Behavior parity validation uses `docs/supabase-backend-postgres-behavior-parity.json`
+and compares catalog-query SHA-256 digests rather than raw definitions. It covers:
+
+- schemas and extensions;
+- functions/routines, triggers, indexes, and constraints;
+- sequences;
+- RLS policies;
+- grants and default privileges;
+- Supabase compatibility roles;
+- Supabase migration history.
+
+Production behavior parity mode is fixed to production Supabase direct database
+connectivity and `nutsnews_primary_shadow`:
+
+```bash
+gh workflow run backend-postgres-parity-validation.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f mode=validate-production-shadow
+```
+
+Do not run the production-shadow mode until #211 provisioning and #212 restore
+evidence have passed.
 
 ## Cutover Gate
 

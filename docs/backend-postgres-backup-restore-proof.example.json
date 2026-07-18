@@ -1,0 +1,28 @@
+{
+  "status": "planned",
+  "snapshot_id": "example-snapshot-id",
+  "backup_source": "backend_postgresql_restic_snapshot",
+  "restore_target": "isolated-backend-postgres-restore-target",
+  "restore_scope": "backend_postgresql_rehearsal_database",
+  "duration_seconds": 0,
+  "validation_status": "planned",
+  "validation_report": "backend-postgres-parity-validation artifact",
+  "operator": "production-backend protected workflow",
+  "completed_at_utc": "1970-01-01T00:00:00Z",
+  "rpo_seconds": null,
+  "rto_seconds": null,
+  "backup_freshness_status": "planned",
+  "restore_health_status": "planned",
+  "status_artifacts": [
+    "/var/lib/nutsnews/backups/backup-status.json",
+    "/var/lib/nutsnews/backups/restore-drill-status.json",
+    "/var/lib/nutsnews/postgres/status.json"
+  ],
+  "manifest_version": 1,
+  "safe_metadata_only": true,
+  "production_cutover_blocker_cleared": false,
+  "notes": [
+    "Replace this example with workflow artifact evidence after a protected restore drill.",
+    "Do not include database URLs, passwords, dump paths, row data, tokens, or secret values."
+  ]
+}

@@ -1,0 +1,118 @@
+---
+- name: Validate New Relic Metric API settings
+  ansible.builtin.assert:
+    that:
+      - backend_newrelic_metric_license_key | length > 0
+      - backend_newrelic_metric_region in ['us', 'eu', 'jp']
+      - backend_newrelic_metric_jobs | length > 0
+    fail_msg: New Relic Metric API license key, supported region, and job inventory are required when backend_newrelic_metrics_enabled is true.
+  no_log: true
+
+- name: Ensure New Relic metric config directory exists
+  ansible.builtin.file:
+    path: "{{ backend_newrelic_metric_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Ensure New Relic metric state directory exists
+  ansible.builtin.file:
+    path: "{{ backend_newrelic_metric_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install New Relic background job metric emitter
+  ansible.builtin.copy:
+    src: nutsnews_newrelic_job_metrics.py
+    dest: "{{ backend_newrelic_metric_emitter_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install New Relic background job inventory
+  ansible.builtin.copy:
+    dest: "{{ backend_newrelic_metric_jobs_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: "{{ backend_newrelic_metric_jobs | to_nice_json }}\n"
+
+- name: Install New Relic Metric API environment
+  ansible.builtin.copy:
+    dest: "{{ backend_newrelic_metric_env_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      NEW_RELIC_LICENSE_KEY={{ backend_newrelic_metric_license_key | quote }}
+      NEW_RELIC_REGION={{ backend_newrelic_metric_region | quote }}
+      NEW_RELIC_SERVICE_NAME={{ backend_newrelic_metric_service_name | quote }}
+      NUTSNEWS_BACKEND_ENVIRONMENT={{ backend_newrelic_metric_environment_label | quote }}
+      NUTSNEWS_BACKEND_HOST={{ backend_newrelic_metric_host | quote }}
+  no_log: true
+
+- name: Install New Relic background job metric service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nutsnews-newrelic-job-metrics.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      [Unit]
+      Description=NutsNews backend New Relic background job metrics
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      Type=oneshot
+      EnvironmentFile={{ backend_newrelic_metric_env_path }}
+      ExecStart={{ backend_newrelic_metric_emitter_path }} --jobs-config {{ backend_newrelic_metric_jobs_path }} --output {{ backend_newrelic_metric_output_path }}
+  notify: Reload systemd
+
+- name: Install New Relic background job metric timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nutsnews-newrelic-job-metrics.timer
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      [Unit]
+      Description=Publish NutsNews backend New Relic background job metrics
+
+      [Timer]
+      OnCalendar={{ backend_newrelic_metric_calendar }}
+      Persistent=true
+      Unit=nutsnews-newrelic-job-metrics.service
+
+      [Install]
+      WantedBy=timers.target
+  notify: Reload systemd
+
+- name: Flush handlers before publishing New Relic job metrics
+  ansible.builtin.meta: flush_handlers
+
+- name: Publish New Relic background job metrics once
+  ansible.builtin.command: "{{ backend_newrelic_metric_emitter_path }} --jobs-config {{ backend_newrelic_metric_jobs_path }} --output {{ backend_newrelic_metric_output_path }}"
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Ensure New Relic background job metric timer is enabled and started
+  ansible.builtin.systemd:
+    name: nutsnews-newrelic-job-metrics.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: not ansible_check_mode
+
+- name: Report New Relic background job metric summary
+  ansible.builtin.debug:
+    msg:
+      enabled: "{{ backend_newrelic_metrics_enabled }}"
+      region: "{{ backend_newrelic_metric_region }}"
+      jobs: "{{ backend_newrelic_metric_jobs | length }}"
+      output_path: "{{ backend_newrelic_metric_output_path }}"

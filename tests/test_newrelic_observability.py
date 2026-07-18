@@ -97,10 +97,21 @@ class NewRelicObservabilityTests(unittest.TestCase):
         config = json.loads((ROOT / "docs" / "newrelic-live-configuration.json").read_text(encoding="utf-8"))
         self.assertTrue({143, 145, 150, 159, 160, 163, 165, 167, 168, 170, 172}.issubset(config["issues_covered"]))
         self.assertGreaterEqual(len(config["key_transactions"]), 4)
-        self.assertGreaterEqual(len(config["custom_metrics"]), 4)
+        self.assertGreaterEqual(len(config["custom_metrics"]), 6)
+        metric_names = {metric["name"] for metric in config["custom_metrics"]}
+        self.assertIn("Custom/NutsNews/job/success", metric_names)
+        self.assertIn("Custom/NutsNews/job/failure", metric_names)
+        self.assertIn("backend_owned_status", config["background_jobs"])
         self.assertTrue(config["notification_workflow"]["destination_required"])
         self.assertTrue(config["deployment_markers"]["fail_safe"])
         self.assertIn("scripted_api", {monitor["type"] for monitor in config["synthetics"]["monitors"]})
+
+    def test_systemd_dashboard_has_background_job_metric_panels(self):
+        dashboard = json.loads((ROOT / "docs/newrelic/dashboards/backend-systemd-service-health.json").read_text(encoding="utf-8"))
+        text = json.dumps(dashboard)
+        self.assertIn("Custom/NutsNews/job/durationMs", text)
+        self.assertIn("Custom/NutsNews/job/success", text)
+        self.assertIn("Custom/NutsNews/job/failure", text)
 
     def test_change_tracking_check_mode_is_credential_free(self):
         with mock.patch.dict("os.environ", {"GITHUB_SHA": "abc123", "GITHUB_REF_NAME": "main"}, clear=True):

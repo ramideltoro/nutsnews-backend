@@ -3,7 +3,7 @@
   "issues_covered": [143, 145, 150, 159, 160, 163, 165, 167, 168, 170, 172],
   "service": "nutsnews-backend-production",
   "environment": "production",
-  "live_status": "blocked until NEW_RELIC_USER_KEY, NEW_RELIC_ACCOUNT_ID, NEW_RELIC_REGION, NEW_RELIC_LICENSE_KEY, and NEW_RELIC_ENTITY_GUID are available in the protected runtime",
+  "live_status": "backend-owned background job Metric API emission is repo-managed when NEW_RELIC_LICENSE_KEY is available; account-level NerdGraph mutations still require NEW_RELIC_USER_KEY, NEW_RELIC_ACCOUNT_ID, NEW_RELIC_REGION, and NEW_RELIC_ENTITY_GUID",
   "key_transactions": [
     {
       "id": "health",
@@ -78,9 +78,24 @@
       "attributes": ["job.name", "environment", "status"],
       "expected_cardinality": "low",
       "dashboard_slug": "backend-systemd-service-health"
+    },
+    {
+      "name": "Custom/NutsNews/job/success",
+      "unit": "gauge",
+      "attributes": ["job.name", "environment", "status"],
+      "expected_cardinality": "low",
+      "dashboard_slug": "backend-systemd-service-health"
+    },
+    {
+      "name": "Custom/NutsNews/job/failure",
+      "unit": "gauge",
+      "attributes": ["job.name", "environment", "status"],
+      "expected_cardinality": "low",
+      "dashboard_slug": "backend-systemd-service-health"
     }
   ],
   "background_jobs": {
+    "backend_owned_status": "Protected backend Ansible installs nutsnews-newrelic-job-metrics.service and .timer. The service reads systemd state for the backend-owned timers and posts low-cardinality Metric API gauges for duration, success, failure, active state, and restart count.",
     "backend_owned": [
       {"name": "nutsnews-backup", "unit": "nutsnews-backup.timer", "telemetry": ["duration", "success", "failure"], "dashboard_slug": "backend-systemd-service-health"},
       {"name": "nutsnews-backup-verify", "unit": "nutsnews-backup-verify.timer", "telemetry": ["duration", "success", "failure"], "dashboard_slug": "backend-systemd-service-health"},

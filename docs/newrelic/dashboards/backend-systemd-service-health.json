@@ -89,8 +89,47 @@
             }
           },
           {
-            "title": "Runbook links",
+            "title": "Background Job Duration",
             "layout": {"column": 1, "row": 7, "height": 3, "width": 12},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(Custom/NutsNews/job/durationMs) FROM Metric WHERE service.name = 'nutsnews-backend-production' FACET job.name TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Background Job Result",
+            "layout": {"column": 1, "row": 10, "height": 3, "width": 6},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(Custom/NutsNews/job/success), latest(Custom/NutsNews/job/failure), latest(status) FROM Metric WHERE service.name = 'nutsnews-backend-production' FACET job.name LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Background Job Active State",
+            "layout": {"column": 7, "row": 10, "height": 3, "width": 6},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(Custom/NutsNews/job/active), latest(Custom/NutsNews/job/restartCount) FROM Metric WHERE service.name = 'nutsnews-backend-production' FACET job.name LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Runbook links",
+            "layout": {"column": 1, "row": 13, "height": 3, "width": 12},
             "visualization": {"id": "viz.markdown"},
             "rawConfiguration": {
               "text": "Use PROTECTED_BACKEND_APPLY.md for repo-managed service changes, BACKEND_HEALTH_REPORT.md for read-only status, and NEW_RELIC_OBSERVABILITY.md for New Relic verification."

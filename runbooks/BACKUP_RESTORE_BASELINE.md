@@ -15,10 +15,17 @@ The service-aware matrix is:
 docs/backend-backup-service-matrix.json
 ```
 
+Backend PostgreSQL restore proof metadata example:
+
+```text
+docs/backend-postgres-backup-restore-proof.example.json
+```
+
 Validate it with:
 
 ```bash
 python3 scripts/validate_backup_service_matrix.py
+python3 scripts/validate_backend_postgres_backup_proof.py
 ```
 
 ## Policy
@@ -38,7 +45,7 @@ Provider snapshots are supplemental only. They are useful for fast whole-server 
 | Ops dashboard snapshots | Generated on host | Back up `status.json` for incident evidence; collectors can regenerate |
 | Backup status metadata | Backup runner | Back up `/var/lib/nutsnews/backups` status JSON |
 | Application uploads or local files | Future backend issue | Must use off-server backups before production use |
-| PostgreSQL data | Backend issue #13 | Host state is covered by service-aware restic paths; database readiness is proven by the protected staging Supabase restore drill before production use |
+| PostgreSQL data | Backend issues #13 and #113 | Host state is covered by encrypted off-server restic paths; database readiness for primary use requires a backend-produced backup restore proof artifact, not only a Supabase dump restore |
 | Logs | Host log retention plus future off-server policy | Back up `/var/log/nutsnews` only; avoid unbounded raw logs |
 
 ## Off-Server Target
@@ -91,6 +98,18 @@ Minimum restore test:
 No production database cutover, upload store, or other stateful production
 service should depend on this backend host until this gate is satisfied with the
 relevant production-like data.
+
+For backend PostgreSQL primary promotion, #113 remains blocked until the proof
+artifact validates with:
+
+```bash
+python3 scripts/validate_backend_postgres_backup_proof.py path/to/live-proof.json
+```
+
+The live proof must identify the backend PostgreSQL restic snapshot id, isolated
+restore target, measured RPO/RTO, parity validation status, backup freshness
+status, restore health status, and status artifact paths. It must not include
+connection strings, passwords, row data, dump paths, or tokens.
 
 ## GitOps Components
 

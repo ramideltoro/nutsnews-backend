@@ -154,6 +154,11 @@
       "owner": "worker_runtime",
       "schema": "public",
       "validation": {
+        "live_replication_tolerance": {
+          "enabled": true,
+          "method": "source_count_watermark",
+          "reason": "Production writes can add worker run rows while async logical replication is being checked; target must reach the source count observed at validator start."
+        },
         "method": "row_count_latest_timestamp",
         "query": "select count(*)::bigint from public.worker_runs",
         "sensitivity": "aggregate_only"
@@ -182,6 +187,11 @@
       "owner": "backend_operations",
       "schema": "public",
       "validation": {
+        "live_replication_tolerance": {
+          "enabled": true,
+          "method": "source_count_watermark",
+          "reason": "Production writes can add AI usage run rows while async logical replication is being checked; target must reach the source count observed at validator start."
+        },
         "method": "row_count_latest_timestamp",
         "query": "select count(*)::bigint from public.ai_usage_runs",
         "sensitivity": "aggregate_only"
@@ -374,6 +384,7 @@
     },
     "row_counts": {
       "emit": "counts only",
+      "live_replication_watermark": "For explicitly configured append-style live tables, production-shadow validation records the source count at validator start and passes only after the target reaches that aggregate watermark without exceeding the current source count.",
       "required_for_object_types": [
         "table",
         "materialized_view",

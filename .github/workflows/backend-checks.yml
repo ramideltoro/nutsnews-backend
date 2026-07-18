@@ -68,6 +68,18 @@ jobs:
         shell: bash
         run: python3 scripts/provision_grafana_metrics.py --check
 
+      - name: Validate New Relic observability definitions
+        shell: bash
+        run: python3 scripts/validate_newrelic_observability.py
+
+      - name: Validate New Relic dashboard provisioning check mode
+        shell: bash
+        run: python3 scripts/provision_newrelic_dashboards.py --check
+
+      - name: Validate New Relic observability offline mode
+        shell: bash
+        run: python3 scripts/backend_newrelic_observability_check.py --offline
+
       - name: Validate abuse protection decision
         shell: bash
         run: python3 scripts/validate_abuse_protection_decision.py

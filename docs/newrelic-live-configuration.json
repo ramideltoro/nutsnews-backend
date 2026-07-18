@@ -143,6 +143,8 @@
   },
   "synthetics": {
     "locations": ["AWS_US_EAST_1"],
+    "acceptance_monitor_id": "backend-health-ping",
+    "account_limit_note": "New Relic returned PAYMENT_REQUIRED for scripted API monitor creation; live acceptance uses the existing simple ping monitor until scripted synthetics capacity is available.",
     "monitors": [
       {
         "id": "backend-health-ping",
@@ -151,10 +153,13 @@
         "frequency_minutes": 15,
         "assertions": ["status_code_2xx", "tls_valid", "response_time_under_2000_ms"],
         "alert_condition": "synthetic_health_failure"
-      },
+      }
+    ],
+    "planned_monitors": [
       {
         "id": "backend-health-scripted-api",
         "type": "scripted_api",
+        "status": "blocked_by_subscription_limit",
         "url": "https://backend.nutsnews.com/health",
         "frequency_minutes": 30,
         "script_checks": ["status_code_2xx", "json_parseable", "status_field_ok", "sensitive_value_absent"],

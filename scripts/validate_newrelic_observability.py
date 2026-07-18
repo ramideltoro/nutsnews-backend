@@ -158,9 +158,16 @@ def main() -> int:
         errors.append("notification workflow must require a destination and test procedure")
     synthetics = live_config.get("synthetics", {})
     monitor_types = {monitor.get("type") for monitor in synthetics.get("monitors", [])}
-    if not {"ping", "scripted_api"}.issubset(monitor_types):
-        errors.append("synthetics must include ping and scripted_api monitors")
-    for monitor in synthetics.get("monitors", []):
+    if "ping" not in monitor_types:
+        errors.append("synthetics must include a live ping monitor")
+    acceptance_monitor_id = synthetics.get("acceptance_monitor_id")
+    live_monitor_ids = {monitor.get("id") for monitor in synthetics.get("monitors", [])}
+    if acceptance_monitor_id not in live_monitor_ids:
+        errors.append("synthetics acceptance monitor must reference a live monitor")
+    planned_types = {monitor.get("type") for monitor in synthetics.get("planned_monitors", [])}
+    if "scripted_api" not in planned_types:
+        errors.append("synthetics must document the planned scripted_api monitor")
+    for monitor in [*synthetics.get("monitors", []), *synthetics.get("planned_monitors", [])]:
         if monitor.get("frequency_minutes", 0) < 15:
             errors.append(f"synthetic monitor {monitor.get('id')} violates free-tier cadence")
         if "secret" in json.dumps(monitor).lower():

@@ -27,6 +27,14 @@ The workflow runs unauthenticated `GET` checks only:
 The checks do not authenticate, submit forms, mutate production, or exercise
 admin flows.
 
+## New Relic Acceptance
+
+Issue #172 is accepted against the existing New Relic simple synthetic monitor
+`NutsNews Backend Health Ping` while scripted API synthetics are unavailable on
+the current New Relic account. New Relic returned `PAYMENT_REQUIRED` for the
+scripted API monitor, so the scripted behavior check remains documented as a
+future upgrade in `docs/newrelic-live-configuration.json`.
+
 ## Reporting And Alerts
 
 Each run uploads `backend-synthetic-report.json`, writes a GitHub step summary,

@@ -64,6 +64,13 @@ class AnsibleCheckModeGuardTests(unittest.TestCase):
         self.assertIn("not (backend_postgres_package_result is changed)", postgres)
         self.assertIn("backend_db_dashboard_manageable", postgres)
         self.assertIn("when: backend_postgres_manageable | bool", postgres)
+        self.assertIn("register: backend_postgres_validation_user_result", postgres)
+        self.assertIn("register: backend_postgres_app_rehearsal_user_result", postgres)
+        self.assertIn("backend_postgres_database_manageable", postgres)
+        self.assertIn("backend_postgres_database_dependents_manageable", postgres)
+        self.assertIn("backend_postgres_privilege_roles_manageable", postgres)
+        self.assertIn("(backend_postgres_validation_user_result is changed)", postgres)
+        self.assertIn("backend_postgres_privilege_roles_manageable | default(false) | bool", postgres)
 
 
 if __name__ == "__main__":

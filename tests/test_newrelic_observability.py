@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 from scripts import backend_newrelic_observability_check
+from scripts import newrelic_change_tracking
 from scripts import provision_newrelic_dashboards
 from scripts import validate_newrelic_observability
 
@@ -70,6 +71,24 @@ class NewRelicObservabilityTests(unittest.TestCase):
         variables = {variable["name"] for variable in ux["variables"]}
         self.assertTrue({"environment", "host", "transaction", "status_code", "deployment_version"}.issubset(variables))
 
+    def test_live_configuration_covers_remaining_repo_contracts(self):
+        config = json.loads((ROOT / "docs" / "newrelic-live-configuration.json").read_text(encoding="utf-8"))
+        self.assertTrue({143, 145, 150, 159, 160, 163, 165, 167, 168, 170, 172}.issubset(config["issues_covered"]))
+        self.assertGreaterEqual(len(config["key_transactions"]), 4)
+        self.assertGreaterEqual(len(config["custom_metrics"]), 4)
+        self.assertTrue(config["notification_workflow"]["destination_required"])
+        self.assertTrue(config["deployment_markers"]["fail_safe"])
+        self.assertIn("scripted_api", {monitor["type"] for monitor in config["synthetics"]["monitors"]})
+
+    def test_change_tracking_check_mode_is_credential_free(self):
+        with mock.patch.dict("os.environ", {"GITHUB_SHA": "abc123", "GITHUB_REF_NAME": "main"}, clear=True):
+            with redirect_stdout(StringIO()) as stdout:
+                exit_code = newrelic_change_tracking.main_args(["--check"])
+        self.assertEqual(exit_code, 0)
+        report = json.loads(stdout.getvalue())
+        self.assertEqual(report["status"], "pass")
+        self.assertTrue(report["safe_metadata_only"])
+
     def test_missing_new_relic_credentials_fail_closed(self):
         with mock.patch.dict("os.environ", {}, clear=True):
             with redirect_stdout(StringIO()):
@@ -111,6 +130,13 @@ class NewRelicObservabilityTests(unittest.TestCase):
     def test_redaction_masks_secret_like_environment_values(self):
         with mock.patch.dict("os.environ", {"NEW_RELIC_LICENSE_KEY": "1234567890abcdef"}, clear=True):
             self.assertNotIn("1234567890abcdef", backend_newrelic_observability_check.redact("key=1234567890abcdef"))
+
+    def test_change_tracking_skips_without_credentials_when_requested(self):
+        with mock.patch.dict("os.environ", {}, clear=True):
+            with redirect_stdout(StringIO()) as stdout:
+                exit_code = newrelic_change_tracking.main_args(["--skip-without-credentials"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("skipped_with_reason", stdout.getvalue())
 
 
 if __name__ == "__main__":

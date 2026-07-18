@@ -80,6 +80,10 @@ jobs:
         shell: bash
         run: python3 scripts/backend_newrelic_observability_check.py --offline
 
+      - name: Validate New Relic change tracking check mode
+        shell: bash
+        run: python3 scripts/newrelic_change_tracking.py --check
+
       - name: Validate abuse protection decision
         shell: bash
         run: python3 scripts/validate_abuse_protection_decision.py

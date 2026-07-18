@@ -22,6 +22,7 @@ CACHE_QUEUE_DECISION = ROOT / "docs" / "newrelic-cache-queue-decision.json"
 PRIVACY_REVIEW = ROOT / "docs" / "newrelic-telemetry-privacy-review.json"
 DASHBOARD_UX = ROOT / "docs" / "newrelic-dashboard-ux.json"
 DEMO_RUNBOOK = ROOT / "runbooks" / "NEW_RELIC_OBSERVABILITY_DEMO.md"
+LIVE_CONFIG = ROOT / "docs" / "newrelic-live-configuration.json"
 
 
 def main() -> int:
@@ -107,6 +108,66 @@ def main() -> int:
     for text in ("Latency Walkthrough", "Error Walkthrough", "Database Walkthrough", "Production Readiness Checklist", "Known Gaps"):
         if text not in demo:
             errors.append(f"demo runbook missing {text}")
+    live_config = json.loads(LIVE_CONFIG.read_text(encoding="utf-8"))
+    required_issues = {143, 145, 150, 159, 160, 163, 165, 167, 168, 170, 172}
+    if not required_issues.issubset(set(live_config.get("issues_covered", []))):
+        errors.append("live New Relic config missing issue coverage")
+    dashboard_slugs = {dashboard.get("slug") for dashboard in load_dashboard_files()}
+    for transaction in live_config.get("key_transactions", []):
+        if not transaction.get("route_group") or not transaction.get("owner"):
+            errors.append(f"key transaction {transaction.get('id')} missing route group or owner")
+        if transaction.get("dashboard_slug") not in dashboard_slugs:
+            errors.append(f"key transaction {transaction.get('id')} references unknown dashboard")
+    attributes = live_config.get("custom_attributes", {})
+    allowed_attributes = {item.get("name") for item in attributes.get("allowlist", [])}
+    for attribute in ("environment", "route.group", "request.id", "deployment.version"):
+        if attribute not in allowed_attributes:
+            errors.append(f"custom attributes missing allowlist field: {attribute}")
+    for denied in ("email", "authorization", "token", "request.body"):
+        if denied not in attributes.get("denylist", []):
+            errors.append(f"custom attributes missing denylist field: {denied}")
+    for metric in live_config.get("custom_metrics", []):
+        if not metric.get("name", "").startswith("Custom/NutsNews/"):
+            errors.append(f"custom metric {metric.get('name')} must use Custom/NutsNews prefix")
+        if metric.get("expected_cardinality") != "low":
+            errors.append(f"custom metric {metric.get('name')} must stay low-cardinality")
+    jobs = live_config.get("background_jobs", {})
+    if len(jobs.get("backend_owned", [])) < 3:
+        errors.append("background job inventory must include backend-owned timers")
+    if not jobs.get("external_owned"):
+        errors.append("background job inventory must document external worker ownership")
+    conditions = [condition for policy in live_config.get("alert_policies", []) for condition in policy.get("conditions", [])]
+    if len(conditions) < 8:
+        errors.append("alert config must define service, host, database, and log conditions")
+    for condition in conditions:
+        for field in ("severity", "nrql", "threshold", "window_minutes", "runbook_url", "dashboard_slug"):
+            if field not in condition:
+                errors.append(f"alert condition {condition.get('id')} missing {field}")
+        if condition.get("dashboard_slug") not in dashboard_slugs:
+            errors.append(f"alert condition {condition.get('id')} references unknown dashboard")
+    workflow = live_config.get("notification_workflow", {})
+    if workflow.get("destination_required") is not True or not workflow.get("test_procedure"):
+        errors.append("notification workflow must require a destination and test procedure")
+    synthetics = live_config.get("synthetics", {})
+    monitor_types = {monitor.get("type") for monitor in synthetics.get("monitors", [])}
+    if not {"ping", "scripted_api"}.issubset(monitor_types):
+        errors.append("synthetics must include ping and scripted_api monitors")
+    for monitor in synthetics.get("monitors", []):
+        if monitor.get("frequency_minutes", 0) < 15:
+            errors.append(f"synthetic monitor {monitor.get('id')} violates free-tier cadence")
+        if "secret" in json.dumps(monitor).lower():
+            errors.append(f"synthetic monitor {monitor.get('id')} must not reference secrets")
+    markers = live_config.get("deployment_markers", {})
+    if markers.get("fail_safe") is not True or "commit_sha" not in markers.get("required_fields", []):
+        errors.append("deployment markers must fail safe and include commit_sha")
+    workload = live_config.get("workload_grouping", {})
+    if not {"apm", "host", "database", "synthetics"}.issubset(set(workload.get("entity_kinds", []))):
+        errors.append("workload grouping must include apm, host, database, and synthetics")
+    errors_inbox = live_config.get("errors_inbox", {})
+    if "request.id" not in errors_inbox.get("excluded_grouping_keys", []):
+        errors.append("errors inbox grouping must avoid request.id")
+    if len(errors_inbox.get("triage_states", [])) < 3:
+        errors.append("errors inbox must define triage states")
     runbook = RUNBOOK.read_text(encoding="utf-8")
     for text in (
         "NEW_RELIC_LICENSE_KEY",
@@ -122,6 +183,8 @@ def main() -> int:
         "docs/newrelic-telemetry-privacy-review.json",
         "docs/newrelic-dashboard-ux.json",
         "runbooks/NEW_RELIC_OBSERVABILITY_DEMO.md",
+        "docs/newrelic-live-configuration.json",
+        "scripts/newrelic_change_tracking.py --check",
     ):
         if text not in runbook:
             errors.append(f"runbook missing {text}")

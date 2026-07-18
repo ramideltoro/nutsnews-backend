@@ -193,6 +193,26 @@ production readiness review, and free-tier safety checklist.
 Use `docs/newrelic-dashboard-ux.json` for the dashboard variable and drilldown
 map that keeps the dashboard catalog navigable.
 
+## Live Configuration Contracts
+
+Use `docs/newrelic-live-configuration.json` for the remaining live New Relic
+configuration plan: key transactions, custom transaction attributes, custom
+metrics, background job telemetry, alert policies, notification workflow,
+synthetics, deployment markers, workload grouping, service map expectations,
+and Errors Inbox triage.
+
+Use `scripts/newrelic_change_tracking.py --check` to validate deployment marker
+inputs without credentials. The GitHub workflow in
+`.github/workflows/backend-newrelic-change-tracking.yml` records a New Relic
+change marker on `main` pushes when `NEW_RELIC_USER_KEY` and
+`NEW_RELIC_ENTITY_GUID` are present, and skips safely while those inputs are
+missing.
+
+Live New Relic alert policy creation, synthetics provisioning, notification
+delivery tests, workload grouping, Errors Inbox verification, key transaction
+creation, custom telemetry emission, and deployment marker verification still
+require account credentials, entity access, and backend runtime traffic.
+
 ## Validate Reporting
 
 Offline CI guard:
@@ -249,5 +269,21 @@ an optional NerdGraph account query when `NEW_RELIC_USER_KEY` and
   https://docs.newrelic.com/docs/service-level-management/create-slm/
 - New Relic change tracking:
   https://docs.newrelic.com/docs/change-tracking/overview/
+- New Relic change tracking with NerdGraph:
+  https://docs.newrelic.com/docs/change-tracking/config/nerdgraph/
+- New Relic change tracking with GitHub Actions:
+  https://docs.newrelic.com/docs/change-tracking/config/github-actions/
 - New Relic anomaly alerting:
   https://docs.newrelic.com/docs/alerts/create-alert/set-thresholds/anomaly-detection/
+- New Relic alert policies with NerdGraph:
+  https://docs.newrelic.com/docs/apis/nerdgraph/examples/nerdgraph-api-alerts-policies/
+- New Relic NRQL alert conditions with NerdGraph:
+  https://docs.newrelic.com/docs/apis/nerdgraph/examples/nerdgraph-api-nrql-condition-alerts/
+- New Relic alert destinations with NerdGraph:
+  https://docs.newrelic.com/docs/apis/nerdgraph/examples/nerdgraph-api-notifications-destinations/
+- New Relic alert workflows with NerdGraph:
+  https://docs.newrelic.com/docs/apis/nerdgraph/examples/nerdgraph-api-workflows/
+- New Relic synthetic monitors with NerdGraph:
+  https://docs.newrelic.com/docs/apis/nerdgraph/examples/synthetics-api/overview/
+- New Relic scripted API monitors:
+  https://docs.newrelic.com/docs/apis/nerdgraph/examples/synthetics-api/scripted-api-monitor/

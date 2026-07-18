@@ -1,0 +1,100 @@
+{
+  "contract_id": "backend-database-provider-switch",
+  "issue": 117,
+  "status": "backend_switch_contract_committed",
+  "depends_on": [
+    "docs/backend-api-compatibility-contract.json"
+  ],
+  "safe_default": "supabase_primary",
+  "production_primary_confirmation": "enable-backend-postgres-primary",
+  "modes": [
+    {
+      "mode": "supabase_primary",
+      "writer": "supabase",
+      "backend_reads": "disabled",
+      "serves_production_responses": true,
+      "safe_default": true,
+      "rollback_target": null
+    },
+    {
+      "mode": "backend_postgres_shadow",
+      "writer": "supabase",
+      "backend_reads": "comparison_only",
+      "serves_production_responses": false,
+      "safe_default": false,
+      "rollback_target": "supabase_primary"
+    },
+    {
+      "mode": "backend_postgres_primary",
+      "writer": "backend_postgres",
+      "backend_reads": "serving",
+      "serves_production_responses": true,
+      "safe_default": false,
+      "requires_protected_cutover": true,
+      "requires_confirmation": "enable-backend-postgres-primary",
+      "rollback_target": "supabase_primary_within_rollback_window"
+    }
+  ],
+  "environment_variables": [
+    {
+      "name": "NUTSNEWS_DATABASE_PROVIDER_MODE",
+      "scope": "app_and_worker",
+      "safe_default": "supabase_primary",
+      "production_primary_allowed_by_default": false
+    },
+    {
+      "name": "NUTSNEWS_BACKEND_API_URL",
+      "scope": "app_and_worker",
+      "required_modes": [
+        "backend_postgres_shadow",
+        "backend_postgres_primary"
+      ]
+    },
+    {
+      "name": "NUTSNEWS_BACKEND_API_TOKEN",
+      "scope": "server_and_worker_only",
+      "required_modes": [
+        "backend_postgres_shadow",
+        "backend_postgres_primary"
+      ],
+      "secret_scope": "protected_environment"
+    }
+  ],
+  "secret_replacements": [
+    {
+      "old": "SUPABASE_SERVICE_ROLE_KEY",
+      "new": "NUTSNEWS_BACKEND_API_TOKEN",
+      "mode": "backend_postgres_primary",
+      "rule": "service-role style Supabase writes are forbidden after primary cutover"
+    }
+  ],
+  "deployment_order": [
+    "backend contract and smoke tests",
+    "app backend_postgres_shadow support",
+    "worker backend_postgres_shadow support",
+    "staging rehearsal with rollback",
+    "protected production cutover workflow",
+    "observation window",
+    "post-cutover Supabase credential retirement"
+  ],
+  "rollback": {
+    "target_mode": "supabase_primary",
+    "allowed_until": "rollback_window_only_before_backend_only_writes_exceed_verified_sync_point",
+    "requires": [
+      "writer pause evidence",
+      "last successful Supabase sync point",
+      "smoke tests against Supabase primary",
+      "no concurrent writes to both databases"
+    ],
+    "forward_recovery_boundary": "After backend PostgreSQL has accepted authoritative writes beyond a verified Supabase sync point, rollback becomes forward recovery unless a reviewed sync-back procedure exists."
+  },
+  "companion_issues": [
+    "https://github.com/ramideltoro/nutsnews/issues/255",
+    "https://github.com/ramideltoro/nutsnews-worker/issues/27"
+  ],
+  "validation": {
+    "local_validator": "python3 scripts/validate_backend_database_provider_switch.py",
+    "dry_run_workflow": ".github/workflows/backend-database-provider-switch-dry-run.yml",
+    "live_status": "blocked until app and worker provider modes are implemented"
+  }
+}

@@ -27,6 +27,7 @@ DATE_UDTS = {"date"}
 BOOL_UDTS = {"bool"}
 UUID_UDTS = {"uuid"}
 JSON_UDTS = {"json", "jsonb"}
+PROBE_TOKEN_PREFIX = "codex_db_migration_probe_"
 
 
 def utc_now() -> str:
@@ -47,6 +48,16 @@ def literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def safe_psql_error(stderr: str) -> str:
+    for raw_line in stderr.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("ERROR:"):
+            continue
+        line = line.replace(PROBE_TOKEN_PREFIX, "probe_")
+        return line[:240]
+    return "query_failed"
+
+
 def run_psql(db_url: str, sql: str, timeout: int = 30) -> tuple[str | None, str | None]:
     try:
         proc = subprocess.run(
@@ -61,8 +72,8 @@ def run_psql(db_url: str, sql: str, timeout: int = 30) -> tuple[str | None, str 
         return None, "psql_not_installed"
     except subprocess.TimeoutExpired:
         return None, "query_timeout"
-    except subprocess.CalledProcessError:
-        return None, "query_failed"
+    except subprocess.CalledProcessError as exc:
+        return None, safe_psql_error(exc.stderr or "")
     return proc.stdout.strip(), None
 
 
@@ -110,7 +121,7 @@ def value_sql(column: dict[str, Any], token: str, phase: str) -> str:
     udt = str(column.get("udt_name", ""))
     suffix = "updated" if phase == "updated" else "initial"
     if udt in TEXT_UDTS:
-        return literal(f"codex_db_migration_probe_{token}_{suffix}")
+        return literal(f"{PROBE_TOKEN_PREFIX}{token}_{suffix}")
     if udt in UUID_UDTS:
         return literal(str(uuid.uuid5(uuid.NAMESPACE_URL, f"{token}:{column['name']}:{phase}"))) + "::uuid"
     if udt in BOOL_UDTS:
@@ -159,6 +170,13 @@ def mutable_column(columns: list[dict[str, Any]], primary_key: list[dict[str, An
     return preferred[0] if preferred else None
 
 
+def column_summary(column: dict[str, Any]) -> dict[str, str]:
+    return {
+        "name": str(column.get("name", "")),
+        "udt_name": str(column.get("udt_name", "")),
+    }
+
+
 def where_from_pk(primary_key: list[dict[str, Any]], pk_values: dict[str, str]) -> str:
     return " and ".join(f"{qident(column['name'])}::text = {literal(str(pk_values[column['name']]))}" for column in primary_key)
 
@@ -180,7 +198,7 @@ def attempt_candidate(source_url: str, target_url: str, schema: str, table: str,
     table_name = f"{schema}.{table}"
     columns, error = column_metadata(source_url, schema, table)
     if error:
-        return {"table": table_name, "status": "blocked", "blockers": ["source_metadata_query_failed"]}
+        return {"table": table_name, "status": "blocked", "blockers": ["source_metadata_query_failed"], "error": error}
     if not columns:
         return {"table": table_name, "status": "blocked", "blockers": ["candidate_table_missing"]}
 
@@ -196,6 +214,12 @@ def attempt_candidate(source_url: str, target_url: str, schema: str, table: str,
     update_column = mutable_column(columns, primary_key)
     if not update_column:
         return {"table": table_name, "status": "blocked", "blockers": ["candidate_mutable_column_missing"]}
+
+    schema_summary = {
+        "primary_key_columns": [column_summary(column) for column in primary_key],
+        "required_columns": [column_summary(column) for column in required],
+        "update_column": column_summary(update_column),
+    }
 
     token = uuid.uuid4().hex
     insert_columns: list[dict[str, Any]] = []
@@ -215,7 +239,13 @@ returning jsonb_build_object(
 """
     raw, error = run_psql(source_url, insert_sql)
     if error:
-        return {"table": table_name, "status": "blocked", "blockers": ["candidate_probe_insert_failed"]}
+        return {
+            "table": table_name,
+            "status": "blocked",
+            "blockers": ["candidate_probe_insert_failed"],
+            "error": error,
+            "schema": schema_summary,
+        }
 
     pk_values = json.loads(raw or "{}").get("pk", {})
     where_sql = where_from_pk(primary_key, pk_values)
@@ -240,6 +270,7 @@ returning jsonb_build_object(
                 "status": "fail",
                 "blockers": blockers,
                 "timings": timings,
+                "schema": schema_summary,
                 "insert_propagated": False,
                 "update_propagated": False,
                 "delete_propagated": False,
@@ -259,6 +290,7 @@ returning {qident(update_column['name'])}::text
                 "status": "fail",
                 "blockers": blockers,
                 "timings": timings,
+                "schema": schema_summary,
                 "insert_propagated": True,
                 "update_propagated": False,
                 "delete_propagated": False,
@@ -280,6 +312,7 @@ returning {qident(update_column['name'])}::text
                 "status": "fail",
                 "blockers": blockers,
                 "timings": timings,
+                "schema": schema_summary,
                 "insert_propagated": True,
                 "update_propagated": False,
                 "delete_propagated": False,
@@ -293,6 +326,7 @@ returning {qident(update_column['name'])}::text
                 "status": "fail",
                 "blockers": blockers,
                 "timings": timings,
+                "schema": schema_summary,
                 "insert_propagated": True,
                 "update_propagated": True,
                 "delete_propagated": False,
@@ -314,6 +348,7 @@ returning {qident(update_column['name'])}::text
                 "status": "fail",
                 "blockers": blockers,
                 "timings": timings,
+                "schema": schema_summary,
                 "insert_propagated": True,
                 "update_propagated": True,
                 "delete_propagated": False,
@@ -324,6 +359,7 @@ returning {qident(update_column['name'])}::text
             "status": "pass",
             "blockers": [],
             "timings": timings,
+            "schema": schema_summary,
             "insert_propagated": True,
             "update_propagated": True,
             "delete_propagated": True,
@@ -357,7 +393,7 @@ def main() -> int:
         status = "blocked"
         for schema, table in CANDIDATES:
             attempt = attempt_candidate(source_url, target_url, schema, table, args.poll_timeout_seconds)
-            candidate_attempts.append({k: attempt[k] for k in ("table", "status", "blockers") if k in attempt})
+            candidate_attempts.append({k: attempt[k] for k in ("table", "status", "blockers", "error", "schema") if k in attempt})
             if attempt["status"] == "blocked":
                 continue
             result = attempt
@@ -390,6 +426,7 @@ def main() -> int:
                 "delete_propagated": result.get("delete_propagated", False),
                 "timings": result.get("timings", {}),
                 "max_step_seconds": result.get("max_step_seconds", max(result.get("timings", {}).values(), default=0)),
+                "schema": result.get("schema", {}),
             }
         )
 

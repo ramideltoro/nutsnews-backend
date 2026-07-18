@@ -97,27 +97,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes postgresql-client
 
-      - name: Configure source publication and slot
-        shell: bash
-        env:
-          ENVIRONMENT_NAME: ${{ inputs.environment_name }}
-          OPERATION: ${{ inputs.operation }}
-          NUTSNEWS_STAGING_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_STAGING_SUPABASE_DB_URL }}
-          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
-        run: |
-          set -euo pipefail
-          case "$ENVIRONMENT_NAME" in
-            staging) source_url="$NUTSNEWS_STAGING_SUPABASE_DB_URL" ;;
-            production) source_url="$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL" ;;
-          esac
-          echo "::add-mask::$source_url"
-          NUTSNEWS_SOURCE_DB_URL="$source_url" \
-            python3 scripts/backend_postgres_logical_replication_source.py \
-              --operation "$OPERATION" \
-              --environment-name "$ENVIRONMENT_NAME" \
-              --output "$RUNNER_TEMP/backend-postgres-logical-replication-source.json" \
-              --enforce
-
       - name: Prepare SSH material
         shell: bash
         env:
@@ -132,6 +111,60 @@ jobs:
           chmod 0600 "$HOME/.ssh/known_hosts"
           ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
           ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Configure source publication and slot
+        shell: bash
+        env:
+          ENVIRONMENT_NAME: ${{ inputs.environment_name }}
+          OPERATION: ${{ inputs.operation }}
+          NUTSNEWS_STAGING_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_STAGING_SUPABASE_DB_URL }}
+          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          case "$ENVIRONMENT_NAME" in
+            staging) source_url="$NUTSNEWS_STAGING_SUPABASE_DB_URL" ;;
+            production) source_url="$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL" ;;
+          esac
+          echo "::add-mask::$source_url"
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          remote_dir="/tmp/nutsnews-postgres-logical-replication-source-${GITHUB_RUN_ID}"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "install -m 0700 -d '$remote_dir/scripts' '$remote_dir/docs'"
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            scripts/backend_postgres_logical_replication_source.py \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/scripts/"
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            docs/backend-postgres-logical-replication-plan.json \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/docs/"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "cd '$remote_dir' && NUTSNEWS_SOURCE_DB_URL='$source_url' python3 scripts/backend_postgres_logical_replication_source.py --operation '$OPERATION' --environment-name '$ENVIRONMENT_NAME' --output '$remote_dir/backend-postgres-logical-replication-source.json' --enforce"
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/backend-postgres-logical-replication-source.json" \
+            "$RUNNER_TEMP/backend-postgres-logical-replication-source.json"
 
       - name: Configure backend subscription
         if: inputs.operation == 'setup'

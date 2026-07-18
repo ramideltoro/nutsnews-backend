@@ -132,6 +132,11 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("refresh materialized view public.public_feed_snapshot", validation)
         self.assertIn("ALTER SUBSCRIPTION :\"subscription\" SET (slot_name = NONE);", primary_script)
         self.assertIn("DROP SUBSCRIPTION IF EXISTS :\"subscription\";", primary_script)
+        replication_target = (ROOT / "scripts/backend_postgres_logical_replication_target_remote.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"$sub_exists" == "true"', replication_target)
+        self.assertIn('os.environ["WORKER_PRESENT"] in {"1", "t", "true"}', replication_target)
 
     def test_plan_forbids_multi_writer_and_production_cutover(self):
         plan = json.loads(PLAN.read_text(encoding="utf-8"))

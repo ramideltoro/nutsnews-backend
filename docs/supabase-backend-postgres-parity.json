@@ -1,48 +1,102 @@
 {
-  "version": 1,
-  "manifest_id": "supabase-backend-postgres-parity",
-  "updated_at_utc": "2026-07-18",
-  "tracking_issue": 120,
-  "source_inventory": "docs/supabase-backend-postgres-inventory.md",
-  "runbook": "runbooks/SUPABASE_BACKEND_POSTGRES_PARITY.md",
-  "change_freeze_runbook": "runbooks/DB_MIGRATION_CHANGE_FREEZE.md",
   "access_runbook": "runbooks/DB_MIGRATION_ACCESS.md",
-  "owners": {
-    "backend_operations": "ramideltoro/nutsnews-backend",
-    "app_api": "ramideltoro/nutsnews",
-    "worker_runtime": "ramideltoro/nutsnews-worker",
-    "release_operations": "ramideltoro",
-    "platform": "ramideltoro"
-  },
-  "source_projects": {
-    "production": {
-      "project_ref_secret": "NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF",
-      "db_url_secret": "NUTSNEWS_PRODUCTION_SUPABASE_DB_URL",
-      "api_url_secret": "NUTSNEWS_PRODUCTION_SUPABASE_URL",
-      "access_token_secret": "SUPABASE_ACCESS_TOKEN",
-      "direct_connectivity_gate": "issues/102-and-121"
+  "change_freeze_runbook": "runbooks/DB_MIGRATION_CHANGE_FREEZE.md",
+  "excluded_objects": [
+    {
+      "classification": "keep_on_supabase_temporarily",
+      "cutover_risk": "medium; app auth assumptions must be verified in #106/#111 before production cutover",
+      "id": "schema.auth",
+      "name": "auth",
+      "object_type": "schema",
+      "owner": "app_api",
+      "reason": "Current backend inventory says admin authentication is handled by NextAuth Google/JWT; bare PostgreSQL restore only needs an auth.users shim when public foreign keys require it."
     },
-    "staging": {
-      "project_ref_variable": "NUTSNEWS_STAGING_SUPABASE_PROJECT_REF",
-      "default_project_ref": "zjatvzhppkvqcgqitevu",
-      "access_token_secret": "SUPABASE_ACCESS_TOKEN"
+    {
+      "classification": "keep_on_supabase_temporarily",
+      "cutover_risk": "high if app object storage usage exists; #106 must decide byte migration or removal",
+      "id": "schema.storage",
+      "name": "storage",
+      "object_type": "schema",
+      "owner": "app_api",
+      "reason": "Supabase backups cover storage metadata, not restored object bytes; no repo-owned storage client dependency is confirmed."
     },
-    "backend_target": {
-      "host_variable": "NUTSNEWS_BACKEND_HOST",
-      "default_host": "65.75.201.18",
-      "network_path": "ssh_tunnel_to_loopback_postgresql",
-      "public_5432_allowed": false
+    {
+      "classification": "exclude_with_reason",
+      "cutover_risk": "medium until #106 verifies app/runtime usage",
+      "id": "schema.realtime",
+      "name": "realtime",
+      "object_type": "schema",
+      "owner": "app_api",
+      "reason": "No Supabase Realtime client dependency is identified in this backend repo; logical replication is tracked separately."
+    },
+    {
+      "classification": "exclude_with_reason",
+      "cutover_risk": "medium until #106 verifies Supabase project and app usage",
+      "id": "platform.edge-functions",
+      "name": "edge_functions",
+      "object_type": "platform_feature",
+      "owner": "app_api",
+      "reason": "No Edge Function dependency is identified in this backend repo."
+    },
+    {
+      "classification": "replace",
+      "cutover_risk": "critical; #111 blocks production cutover",
+      "id": "platform.postgrest-data-api",
+      "name": "postgrest_data_api",
+      "object_type": "platform_feature",
+      "owner": "app_api",
+      "reason": "Bare PostgreSQL is not compatible with supabase-js/PostgREST clients."
     }
+  ],
+  "manifest_change_policy": {
+    "enforced_by": "runbooks/DB_MIGRATION_CHANGE_FREEZE.md",
+    "owner": "release_operations",
+    "required_when_schema_changes": true
   },
+  "manifest_id": "supabase-backend-postgres-parity",
+  "owners": {
+    "app_api": "ramideltoro/nutsnews",
+    "backend_operations": "ramideltoro/nutsnews-backend",
+    "platform": "ramideltoro",
+    "release_operations": "ramideltoro",
+    "worker_runtime": "ramideltoro/nutsnews-worker"
+  },
+  "references": [
+    "https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore",
+    "https://supabase.com/docs/guides/database/postgres/setup-replication-external",
+    "https://supabase.com/docs/guides/database/replication",
+    "https://supabase.com/docs/guides/platform/backups"
+  ],
+  "references_checked_utc": "2026-07-18",
+  "required_behavior": [
+    {
+      "description": "Roles, grants, default privileges, RLS policies, functions, triggers, indexes, constraints, publications, and extension versions must match this manifest or be waived before cutover.",
+      "id": "roles-grants-rls",
+      "owner": "backend_operations",
+      "validation_method": "catalog_diff_safe_metadata"
+    },
+    {
+      "description": "Supabase migration history and repository migration files must match before dump, restore, replication, staging rehearsal, or production cutover continues.",
+      "id": "migration-history",
+      "owner": "release_operations",
+      "validation_method": "scripts/check_supabase_migration_drift.py --enforce"
+    },
+    {
+      "description": "Supabase remains the only production writer until #119 is explicitly approved and executed. No phase may permit concurrent writes to Supabase and backend PostgreSQL.",
+      "id": "single-writer",
+      "owner": "backend_operations",
+      "validation_method": "cutover_checklist_gate"
+    }
+  ],
   "required_objects": [
     {
-      "id": "schema.public",
-      "object_type": "schema",
-      "schema": "public",
-      "name": "public",
-      "owner": "backend_operations",
       "classification": "migrate",
+      "id": "schema.public",
       "migration_status": "required",
+      "name": "public",
+      "object_type": "schema",
+      "owner": "backend_operations",
+      "schema": "public",
       "validation": {
         "method": "catalog_presence",
         "query": "select 1 from information_schema.schemata where schema_name = 'public'",
@@ -50,13 +104,13 @@
       }
     },
     {
-      "id": "table.public.articles",
-      "object_type": "table",
-      "schema": "public",
-      "name": "articles",
-      "owner": "app_api",
       "classification": "migrate",
+      "id": "table.public.articles",
       "migration_status": "required",
+      "name": "articles",
+      "object_type": "table",
+      "owner": "app_api",
+      "schema": "public",
       "validation": {
         "method": "row_count_checksum_sequence",
         "query": "select count(*)::bigint from public.articles",
@@ -64,13 +118,13 @@
       }
     },
     {
-      "id": "table.public.article_summaries",
-      "object_type": "table",
-      "schema": "public",
-      "name": "article_summaries",
-      "owner": "app_api",
       "classification": "migrate",
+      "id": "table.public.article_summaries",
       "migration_status": "required",
+      "name": "article_summaries",
+      "object_type": "table",
+      "owner": "app_api",
+      "schema": "public",
       "validation": {
         "method": "row_count_checksum",
         "query": "select count(*)::bigint from public.article_summaries",
@@ -78,13 +132,13 @@
       }
     },
     {
-      "id": "table.public.rss_feeds",
-      "object_type": "table",
-      "schema": "public",
-      "name": "rss_feeds",
-      "owner": "worker_runtime",
       "classification": "migrate",
+      "id": "table.public.rss_feeds",
       "migration_status": "required",
+      "name": "rss_feeds",
+      "object_type": "table",
+      "owner": "worker_runtime",
+      "schema": "public",
       "validation": {
         "method": "row_count_checksum_sequence",
         "query": "select count(*)::bigint from public.rss_feeds",
@@ -92,13 +146,13 @@
       }
     },
     {
-      "id": "table.public.worker_runs",
-      "object_type": "table",
-      "schema": "public",
-      "name": "worker_runs",
-      "owner": "worker_runtime",
       "classification": "migrate",
+      "id": "table.public.worker_runs",
       "migration_status": "required",
+      "name": "worker_runs",
+      "object_type": "table",
+      "owner": "worker_runtime",
+      "schema": "public",
       "validation": {
         "method": "row_count_latest_timestamp",
         "query": "select count(*)::bigint from public.worker_runs",
@@ -106,13 +160,13 @@
       }
     },
     {
-      "id": "table.public.article_ai_reviews",
-      "object_type": "table",
-      "schema": "public",
-      "name": "article_ai_reviews",
-      "owner": "app_api",
       "classification": "migrate",
+      "id": "table.public.article_ai_reviews",
       "migration_status": "required",
+      "name": "article_ai_reviews",
+      "object_type": "table",
+      "owner": "app_api",
+      "schema": "public",
       "validation": {
         "method": "row_count_checksum",
         "query": "select count(*)::bigint from public.article_ai_reviews",
@@ -120,13 +174,13 @@
       }
     },
     {
-      "id": "table.public.ai_usage_runs",
-      "object_type": "table",
-      "schema": "public",
-      "name": "ai_usage_runs",
-      "owner": "backend_operations",
       "classification": "migrate",
+      "id": "table.public.ai_usage_runs",
       "migration_status": "required",
+      "name": "ai_usage_runs",
+      "object_type": "table",
+      "owner": "backend_operations",
+      "schema": "public",
       "validation": {
         "method": "row_count_latest_timestamp",
         "query": "select count(*)::bigint from public.ai_usage_runs",
@@ -134,13 +188,13 @@
       }
     },
     {
-      "id": "table.public.feed_health",
-      "object_type": "table",
-      "schema": "public",
-      "name": "feed_health",
-      "owner": "worker_runtime",
       "classification": "migrate",
+      "id": "table.public.feed_health",
       "migration_status": "required",
+      "name": "feed_health",
+      "object_type": "table",
+      "owner": "worker_runtime",
+      "schema": "public",
       "validation": {
         "method": "row_count_latest_timestamp",
         "query": "select count(*)::bigint from public.feed_health",
@@ -148,13 +202,14 @@
       }
     },
     {
-      "id": "table.public.feed_quality_scores",
-      "object_type": "table",
-      "schema": "public",
-      "name": "feed_quality_scores",
-      "owner": "worker_runtime",
       "classification": "migrate",
+      "id": "view.public.feed_quality_scores",
       "migration_status": "required",
+      "name": "feed_quality_scores",
+      "notes": "Confirmed as a view in staging and production; logical replication publications include base tables only.",
+      "object_type": "view",
+      "owner": "worker_runtime",
+      "schema": "public",
       "validation": {
         "method": "row_count_checksum",
         "query": "select count(*)::bigint from public.feed_quality_scores",
@@ -162,13 +217,13 @@
       }
     },
     {
-      "id": "table.public.quota_usage_events",
-      "object_type": "table",
-      "schema": "public",
-      "name": "quota_usage_events",
-      "owner": "app_api",
       "classification": "migrate",
+      "id": "table.public.quota_usage_events",
       "migration_status": "required",
+      "name": "quota_usage_events",
+      "object_type": "table",
+      "owner": "app_api",
+      "schema": "public",
       "validation": {
         "method": "row_count_checksum",
         "query": "select count(*)::bigint from public.quota_usage_events",
@@ -176,13 +231,13 @@
       }
     },
     {
-      "id": "table.public.runtime_feature_flags",
-      "object_type": "table",
-      "schema": "public",
-      "name": "runtime_feature_flags",
-      "owner": "release_operations",
       "classification": "migrate",
+      "id": "table.public.runtime_feature_flags",
       "migration_status": "required",
+      "name": "runtime_feature_flags",
+      "object_type": "table",
+      "owner": "release_operations",
+      "schema": "public",
       "validation": {
         "method": "row_count_key_comparison",
         "query": "select count(*)::bigint from public.runtime_feature_flags",
@@ -190,13 +245,13 @@
       }
     },
     {
-      "id": "table.public.release_readiness",
-      "object_type": "table",
-      "schema": "public",
-      "name": "release_readiness",
-      "owner": "release_operations",
       "classification": "migrate",
+      "id": "table.public.release_readiness",
       "migration_status": "required",
+      "name": "release_readiness",
+      "object_type": "table",
+      "owner": "release_operations",
+      "schema": "public",
       "validation": {
         "method": "row_count_latest_timestamp",
         "query": "select count(*)::bigint from public.release_readiness",
@@ -204,13 +259,13 @@
       }
     },
     {
-      "id": "table.public.migration_schema_contract",
-      "object_type": "table",
-      "schema": "public",
-      "name": "migration_schema_contract",
-      "owner": "release_operations",
       "classification": "migrate",
+      "id": "table.public.migration_schema_contract",
       "migration_status": "required",
+      "name": "migration_schema_contract",
+      "object_type": "table",
+      "owner": "release_operations",
+      "schema": "public",
       "validation": {
         "method": "migration_head_comparison",
         "query": "select count(*)::bigint from public.migration_schema_contract",
@@ -218,13 +273,13 @@
       }
     },
     {
-      "id": "materialized_view.public.public_feed_snapshot",
-      "object_type": "materialized_view",
-      "schema": "public",
-      "name": "public_feed_snapshot",
-      "owner": "app_api",
       "classification": "migrate",
+      "id": "materialized_view.public.public_feed_snapshot",
       "migration_status": "required",
+      "name": "public_feed_snapshot",
+      "object_type": "materialized_view",
+      "owner": "app_api",
+      "schema": "public",
       "validation": {
         "method": "refresh_and_row_count",
         "query": "select count(*)::bigint from public.public_feed_snapshot",
@@ -232,13 +287,13 @@
       }
     },
     {
-      "id": "view.public.best_feeds",
-      "object_type": "view",
-      "schema": "public",
-      "name": "best_feeds",
-      "owner": "app_api",
       "classification": "migrate",
+      "id": "view.public.best_feeds",
       "migration_status": "required",
+      "name": "best_feeds",
+      "object_type": "view",
+      "owner": "app_api",
+      "schema": "public",
       "validation": {
         "method": "query_smoke_count",
         "query": "select count(*)::bigint from public.best_feeds",
@@ -246,13 +301,13 @@
       }
     },
     {
-      "id": "view.public.bad_feeds",
-      "object_type": "view",
-      "schema": "public",
-      "name": "bad_feeds",
-      "owner": "app_api",
       "classification": "migrate",
+      "id": "view.public.bad_feeds",
       "migration_status": "required",
+      "name": "bad_feeds",
+      "object_type": "view",
+      "owner": "app_api",
+      "schema": "public",
       "validation": {
         "method": "query_smoke_count",
         "query": "select count(*)::bigint from public.bad_feeds",
@@ -260,13 +315,13 @@
       }
     },
     {
-      "id": "routine.public.search_articles",
-      "object_type": "routine",
-      "schema": "public",
-      "name": "search_articles",
-      "owner": "app_api",
       "classification": "migrate",
+      "id": "routine.public.search_articles",
       "migration_status": "required",
+      "name": "search_articles",
+      "object_type": "routine",
+      "owner": "app_api",
+      "schema": "public",
       "validation": {
         "method": "critical_query_smoke",
         "query": "select count(*)::bigint from information_schema.routines where routine_schema = 'public' and routine_name = 'search_articles'",
@@ -274,13 +329,13 @@
       }
     },
     {
-      "id": "extension.pg_trgm",
-      "object_type": "extension",
-      "schema": "public",
-      "name": "pg_trgm",
-      "owner": "backend_operations",
       "classification": "migrate",
+      "id": "extension.pg_trgm",
       "migration_status": "required",
+      "name": "pg_trgm",
+      "object_type": "extension",
+      "owner": "backend_operations",
+      "schema": "public",
       "validation": {
         "method": "extension_version",
         "query": "select extversion from pg_extension where extname = 'pg_trgm'",
@@ -288,142 +343,88 @@
       }
     }
   ],
-  "required_behavior": [
-    {
-      "id": "roles-grants-rls",
-      "owner": "backend_operations",
-      "description": "Roles, grants, default privileges, RLS policies, functions, triggers, indexes, constraints, publications, and extension versions must match this manifest or be waived before cutover.",
-      "validation_method": "catalog_diff_safe_metadata"
+  "runbook": "runbooks/SUPABASE_BACKEND_POSTGRES_PARITY.md",
+  "source_inventory": "docs/supabase-backend-postgres-inventory.md",
+  "source_projects": {
+    "backend_target": {
+      "default_host": "65.75.201.18",
+      "host_variable": "NUTSNEWS_BACKEND_HOST",
+      "network_path": "ssh_tunnel_to_loopback_postgresql",
+      "public_5432_allowed": false
     },
-    {
-      "id": "migration-history",
-      "owner": "release_operations",
-      "description": "Supabase migration history and repository migration files must match before dump, restore, replication, staging rehearsal, or production cutover continues.",
-      "validation_method": "scripts/check_supabase_migration_drift.py --enforce"
+    "production": {
+      "access_token_secret": "SUPABASE_ACCESS_TOKEN",
+      "api_url_secret": "NUTSNEWS_PRODUCTION_SUPABASE_URL",
+      "db_url_secret": "NUTSNEWS_PRODUCTION_SUPABASE_DB_URL",
+      "direct_connectivity_gate": "issues/102-and-121",
+      "project_ref_secret": "NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF"
     },
-    {
-      "id": "single-writer",
-      "owner": "backend_operations",
-      "description": "Supabase remains the only production writer until #119 is explicitly approved and executed. No phase may permit concurrent writes to Supabase and backend PostgreSQL.",
-      "validation_method": "cutover_checklist_gate"
+    "staging": {
+      "access_token_secret": "SUPABASE_ACCESS_TOKEN",
+      "default_project_ref": "zjatvzhppkvqcgqitevu",
+      "project_ref_variable": "NUTSNEWS_STAGING_SUPABASE_PROJECT_REF"
     }
-  ],
-  "excluded_objects": [
-    {
-      "id": "schema.auth",
-      "object_type": "schema",
-      "name": "auth",
-      "classification": "keep_on_supabase_temporarily",
-      "owner": "app_api",
-      "reason": "Current backend inventory says admin authentication is handled by NextAuth Google/JWT; bare PostgreSQL restore only needs an auth.users shim when public foreign keys require it.",
-      "cutover_risk": "medium; app auth assumptions must be verified in #106/#111 before production cutover"
-    },
-    {
-      "id": "schema.storage",
-      "object_type": "schema",
-      "name": "storage",
-      "classification": "keep_on_supabase_temporarily",
-      "owner": "app_api",
-      "reason": "Supabase backups cover storage metadata, not restored object bytes; no repo-owned storage client dependency is confirmed.",
-      "cutover_risk": "high if app object storage usage exists; #106 must decide byte migration or removal"
-    },
-    {
-      "id": "schema.realtime",
-      "object_type": "schema",
-      "name": "realtime",
-      "classification": "exclude_with_reason",
-      "owner": "app_api",
-      "reason": "No Supabase Realtime client dependency is identified in this backend repo; logical replication is tracked separately.",
-      "cutover_risk": "medium until #106 verifies app/runtime usage"
-    },
-    {
-      "id": "platform.edge-functions",
-      "object_type": "platform_feature",
-      "name": "edge_functions",
-      "classification": "exclude_with_reason",
-      "owner": "app_api",
-      "reason": "No Edge Function dependency is identified in this backend repo.",
-      "cutover_risk": "medium until #106 verifies Supabase project and app usage"
-    },
-    {
-      "id": "platform.postgrest-data-api",
-      "object_type": "platform_feature",
-      "name": "postgrest_data_api",
-      "classification": "replace",
-      "owner": "app_api",
-      "reason": "Bare PostgreSQL is not compatible with supabase-js/PostgREST clients.",
-      "cutover_risk": "critical; #111 blocks production cutover"
-    }
-  ],
+  },
+  "tracking_issue": 120,
+  "updated_at_utc": "2026-07-18",
   "validation_strategy": {
+    "checksums": {
+      "emit": "hash digests only; no row data",
+      "required_for_high_value_tables": true
+    },
     "row_counts": {
+      "emit": "counts only",
       "required_for_object_types": [
         "table",
         "materialized_view",
         "view"
-      ],
-      "emit": "counts only"
-    },
-    "checksums": {
-      "required_for_high_value_tables": true,
-      "emit": "hash digests only; no row data"
-    },
-    "sequences": {
-      "required": true,
-      "emit": "sequence name, last_value, max_referenced_id, pass/fail"
+      ]
     },
     "schema_behavior": {
-      "required": true,
-      "emit": "object names, definitions hashes, grants, RLS policy names, extension versions"
+      "emit": "object names, definitions hashes, grants, RLS policy names, extension versions",
+      "required": true
+    },
+    "sequences": {
+      "emit": "sequence name, last_value, max_referenced_id, pass/fail",
+      "required": true
     }
   },
+  "version": 1,
   "workflow_contract": {
+    "cutover": {
+      "issue": 119,
+      "requires_explicit_approval": true,
+      "supabase_remains_writer_until_approved": true
+    },
     "dump": {
       "issue": 103,
+      "must_exclude": [
+        "secret values",
+        "database dumps in git",
+        "row-level data in logs"
+      ],
       "must_include": [
         "roles",
         "schema",
         "data",
         "supabase_migrations when available",
         "safe metadata manifest"
-      ],
-      "must_exclude": [
-        "secret values",
-        "database dumps in git",
-        "row-level data in logs"
       ]
     },
     "restore": {
-      "issue": 104,
       "default_target": "nutsnews_restore_rehearsal",
+      "issue": 104,
       "production_target_allowed_by_default": false
     },
     "validation": {
+      "failed_required_check_blocks_cutover": true,
       "issue": 107,
       "report_states": [
         "pass",
         "fail",
         "skipped_with_reason",
         "warning"
-      ],
-      "failed_required_check_blocks_cutover": true
-    },
-    "cutover": {
-      "issue": 119,
-      "requires_explicit_approval": true,
-      "supabase_remains_writer_until_approved": true
+      ]
     }
-  },
-  "manifest_change_policy": {
-    "required_when_schema_changes": true,
-    "owner": "release_operations",
-    "enforced_by": "runbooks/DB_MIGRATION_CHANGE_FREEZE.md"
-  },
-  "references_checked_utc": "2026-07-18",
-  "references": [
-    "https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore",
-    "https://supabase.com/docs/guides/database/postgres/setup-replication-external",
-    "https://supabase.com/docs/guides/database/replication",
-    "https://supabase.com/docs/guides/platform/backups"
-  ]
+  }
 }

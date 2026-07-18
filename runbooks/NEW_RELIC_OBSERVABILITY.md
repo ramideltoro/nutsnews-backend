@@ -81,6 +81,10 @@ Versioned dashboard definitions currently managed by this repo:
 - `backend-postgresql-operations`: locks, blocking sessions, vacuum, table bloat, storage, and optional replication metrics for #154.
 - `backend-data-ingest-free-tier-usage`: account ingest usage, monthly run rate, noisy sources, and reduction actions for #157.
 - `backend-logs-diagnostics`: structured log severity, route, status, deployment, exception, and trace-context views for #158.
+- `backend-sli-slo`: availability, latency, error-free, freshness, burn, and SLO history for #161.
+- `backend-golden-metrics-apdex`: Apdex, throughput, latency, errors, saturation, and target rationale for #175.
+- `backend-anomaly-baseline`: current-versus-baseline throughput, latency, errors, and log-volume views for #173.
+- `backend-release-health-regression`: deploy markers, before/after health, new exceptions, logs, and rollback signals for #166.
 
 Each dashboard keeps a 24 hour default query window and uses the
 `NutsNews Backend - ` naming prefix. Live dashboard URLs are printed by
@@ -138,6 +142,33 @@ account access and may depend on account features. Until those credentials are
 available, the repo policy and dashboard queries are the source of truth for the
 intended implementation.
 
+## Service Quality And Release Triage
+
+The service-level and golden-metric policy lives in
+`docs/newrelic-service-levels.json`. Initial production targets:
+
+- Availability SLO: 99.5 percent successful backend requests over 30 days.
+- Latency SLO: 95 percent of valid requests at or below 750 ms over 30 days.
+- Error-free SLO: 99.5 percent non-error requests over 30 days.
+- Freshness SLO: 99 percent of feed refresh samples at or below 15 minutes over
+  30 days.
+- Apdex target: 0.5 seconds for the backend API.
+
+Common triage flow:
+
+1. Start in `backend-executive-service-overview` for broad health.
+2. Use `backend-sli-slo` for reliability target status and burn.
+3. Use `backend-golden-metrics-apdex` for service quality and golden metrics.
+4. Use `backend-release-health-regression` after deploys or suspected changes.
+5. Use `backend-anomaly-baseline` when behavior is unusual but static
+   thresholds have not fired.
+6. Drill into APM, PostgreSQL, logs, host, Caddy, or PHP-FPM dashboards based on
+   the first degraded signal.
+
+New Relic service-level, Apdex, anomaly-alert, and change-tracking mutations
+require New Relic account credentials and permissions. Until those are
+available, this repo stores the intended configuration and dashboard evidence.
+
 ## Validate Reporting
 
 Offline CI guard:
@@ -190,3 +221,9 @@ an optional NerdGraph account query when `NEW_RELIC_USER_KEY` and
   https://docs.newrelic.com/docs/logs/ui-data/drop-data-drop-filter-rules/
 - New Relic log security and privacy:
   https://docs.newrelic.com/docs/logs/get-started/new-relics-log-management-security-privacy/
+- New Relic service levels:
+  https://docs.newrelic.com/docs/service-level-management/create-slm/
+- New Relic change tracking:
+  https://docs.newrelic.com/docs/change-tracking/overview/
+- New Relic anomaly alerting:
+  https://docs.newrelic.com/docs/alerts/create-alert/set-thresholds/anomaly-detection/

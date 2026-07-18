@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TAXONOMY = ROOT / "docs" / "newrelic-observability-taxonomy.json"
 RUNBOOK = ROOT / "runbooks" / "NEW_RELIC_OBSERVABILITY.md"
 LOG_POLICY = ROOT / "docs" / "newrelic-log-policy.json"
+SERVICE_LEVELS = ROOT / "docs" / "newrelic-service-levels.json"
 
 
 def main() -> int:
@@ -65,6 +66,18 @@ def main() -> int:
         errors.append("log policy must define drop rules")
     if not log_policy.get("daily_ingest_estimate_mb"):
         errors.append("log policy must define daily ingest estimate")
+    service_levels = json.loads(SERVICE_LEVELS.read_text(encoding="utf-8"))
+    if service_levels.get("service") != "nutsnews-backend-production":
+        errors.append("service levels must use nutsnews-backend-production")
+    if service_levels.get("apdex", {}).get("target_seconds") != 0.5:
+        errors.append("service levels must define 0.5 second Apdex target")
+    sli_ids = {sli.get("id") for sli in service_levels.get("service_levels", [])}
+    for sli_id in ("availability", "latency", "error_free", "freshness"):
+        if sli_id not in sli_ids:
+            errors.append(f"service levels missing SLI: {sli_id}")
+    for sli in service_levels.get("service_levels", []):
+        if not sli.get("target") or not sli.get("nrql"):
+            errors.append(f"service level {sli.get('id')} missing target or NRQL")
     runbook = RUNBOOK.read_text(encoding="utf-8")
     for text in (
         "NEW_RELIC_LICENSE_KEY",
@@ -75,6 +88,7 @@ def main() -> int:
         "scripts/provision_newrelic_dashboards.py --check",
         "scripts/backend_newrelic_observability_check.py --offline",
         "docs/newrelic-log-policy.json",
+        "docs/newrelic-service-levels.json",
     ):
         if text not in runbook:
             errors.append(f"runbook missing {text}")

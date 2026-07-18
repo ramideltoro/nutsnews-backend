@@ -47,6 +47,13 @@ class NewRelicObservabilityTests(unittest.TestCase):
         self.assertTrue(policy["drop_rules"])
         self.assertGreater(policy["daily_ingest_estimate_mb"]["expected"], 0)
 
+    def test_service_levels_define_targets_and_apdex(self):
+        service_levels = json.loads((ROOT / "docs" / "newrelic-service-levels.json").read_text(encoding="utf-8"))
+        sli_ids = {sli["id"] for sli in service_levels["service_levels"]}
+        self.assertTrue({"availability", "latency", "error_free", "freshness"}.issubset(sli_ids))
+        self.assertEqual(service_levels["apdex"]["target_seconds"], 0.5)
+        self.assertTrue(all(sli["target"] for sli in service_levels["service_levels"]))
+
     def test_missing_new_relic_credentials_fail_closed(self):
         with mock.patch.dict("os.environ", {}, clear=True):
             with redirect_stdout(StringIO()):

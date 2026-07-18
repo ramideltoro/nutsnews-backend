@@ -1,0 +1,59 @@
+{
+  "slug": "backend-anomaly-baseline",
+  "issue": 173,
+  "dashboard": {
+    "name": "NutsNews Backend - Reliability - Anomaly and Baseline",
+    "description": "24 hour dashboard comparing current throughput, latency, error rate, and log volume against recent baselines. Managed from ramideltoro/nutsnews-backend.",
+    "permissions": "PUBLIC_READ_ONLY",
+    "pages": [
+      {
+        "name": "Baseline comparison",
+        "description": "Current behavior against recent baselines before static thresholds fire.",
+        "widgets": [
+          {
+            "title": "Throughput versus last week",
+            "layout": {"column": 1, "row": 1, "height": 3, "width": 6},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT rate(count(*), 1 minute) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago COMPARE WITH 1 week ago"}]}
+          },
+          {
+            "title": "Latency versus last week",
+            "layout": {"column": 7, "row": 1, "height": 3, "width": 6},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT percentile(duration, 95), percentile(duration, 99) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago COMPARE WITH 1 week ago"}]}
+          },
+          {
+            "title": "Error rate versus last week",
+            "layout": {"column": 1, "row": 4, "height": 3, "width": 6},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT percentage(count(*), WHERE error IS true) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago COMPARE WITH 1 week ago"}]}
+          },
+          {
+            "title": "Log volume versus last week",
+            "layout": {"column": 7, "row": 4, "height": 3, "width": 6},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT count(*) FROM Log WHERE service.name = 'nutsnews-backend-production' FACET level TIMESERIES SINCE 24 hours ago COMPARE WITH 1 week ago"}]}
+          },
+          {
+            "title": "Unusual transactions",
+            "layout": {"column": 1, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT percentile(duration, 95), count(*), percentage(count(*), WHERE error IS true) FROM Transaction WHERE appName = 'nutsnews-backend-production' FACET name LIMIT 10 SINCE 24 hours ago COMPARE WITH 1 week ago"}]}
+          },
+          {
+            "title": "Noisy log groups",
+            "layout": {"column": 5, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT count(*) FROM Log WHERE service.name = 'nutsnews-backend-production' FACET unit, level LIMIT 10 SINCE 24 hours ago COMPARE WITH 1 week ago"}]}
+          },
+          {
+            "title": "Static versus anomaly alerts",
+            "layout": {"column": 9, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.markdown"},
+            "rawConfiguration": {"text": "Use static thresholds for hard risk limits. Use anomaly conditions only after enough baseline data exists and noise is reviewed."}
+          }
+        ]
+      }
+    ]
+  }
+}

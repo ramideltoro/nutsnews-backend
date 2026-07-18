@@ -1,0 +1,71 @@
+{
+  "slug": "backend-sli-slo",
+  "issue": 161,
+  "dashboard": {
+    "name": "NutsNews Backend - Reliability - SLI and SLO",
+    "description": "24 hour dashboard for backend availability, latency, error-free requests, freshness, burn signals, and SLO target review. Managed from ramideltoro/nutsnews-backend.",
+    "permissions": "PUBLIC_READ_ONLY",
+    "pages": [
+      {
+        "name": "SLI and SLO",
+        "description": "Backend service-level indicators and initial production targets.",
+        "widgets": [
+          {
+            "title": "Availability SLI target 99.5",
+            "layout": {"column": 1, "row": 1, "height": 3, "width": 3},
+            "visualization": {"id": "viz.billboard"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT percentage(count(*), WHERE error IS false) FROM Transaction WHERE appName = 'nutsnews-backend-production' SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Latency SLI target 95 at 750ms",
+            "layout": {"column": 4, "row": 1, "height": 3, "width": 3},
+            "visualization": {"id": "viz.billboard"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT percentage(count(*), WHERE duration <= 0.75) FROM Transaction WHERE appName = 'nutsnews-backend-production' SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Error-free SLI target 99.5",
+            "layout": {"column": 7, "row": 1, "height": 3, "width": 3},
+            "visualization": {"id": "viz.billboard"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT percentage(count(*), WHERE error IS false) FROM Transaction WHERE appName = 'nutsnews-backend-production' SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Freshness SLI target 99",
+            "layout": {"column": 10, "row": 1, "height": 3, "width": 3},
+            "visualization": {"id": "viz.billboard"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT percentage(count(*), WHERE workflow.feedRefresh.ageSeconds <= 900) FROM Metric WHERE service.name = 'nutsnews-backend-production' SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Availability and error-free trend",
+            "layout": {"column": 1, "row": 4, "height": 3, "width": 6},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT percentage(count(*), WHERE error IS false), percentage(count(*), WHERE error IS true) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Latency good-event trend",
+            "layout": {"column": 7, "row": 4, "height": 3, "width": 6},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT percentage(count(*), WHERE duration <= 0.75), percentile(duration, 95) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Freshness age",
+            "layout": {"column": 1, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT latest(workflow.feedRefresh.ageSeconds), percentile(workflow.feedRefresh.ageSeconds, 95) FROM Metric WHERE service.name = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "Burn approximation",
+            "layout": {"column": 5, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {"nrqlQueries": [{"accountIds": ["{{ACCOUNT_ID}}"], "query": "SELECT 100 - percentage(count(*), WHERE error IS false) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"}]}
+          },
+          {
+            "title": "SLO definitions",
+            "layout": {"column": 9, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.markdown"},
+            "rawConfiguration": {"text": "Definitions and targets live in docs/newrelic-service-levels.json. Review after seven stable production days."}
+          }
+        ]
+      }
+    ]
+  }
+}

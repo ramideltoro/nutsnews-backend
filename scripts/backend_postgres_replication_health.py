@@ -31,8 +31,8 @@ select coalesce(jsonb_agg(jsonb_build_object(
   'active', active,
   'restart_lsn_present', restart_lsn is not null,
   'confirmed_flush_lsn_present', confirmed_flush_lsn is not null,
-  'wal_status', wal_status,
-  'safe_wal_size_present', safe_wal_size is not null
+  'wal_status', null,
+  'safe_wal_size_present', false
 ) order by slot_name), '[]'::jsonb)::text
 from pg_replication_slots
 where slot_name like 'nutsnews_backend_migration_%'

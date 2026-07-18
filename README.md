@@ -130,6 +130,7 @@ python3 scripts/validate_backend_database_provider_switch.py
 python3 scripts/validate_backend_db_rollback_guardrails.py
 python3 scripts/validate_backend_production_cutover_plan.py
 python3 scripts/validate_backend_postgres_logical_replication_plan.py
+python3 scripts/backend_postgres_logical_replication_source.py --operation status
 python3 scripts/backend_postgres_replication_health.py --offline
 python3 scripts/backend_postgres_smoke_tests.py --offline
 python3 scripts/backend_postgres_benchmark_tuning.py --offline

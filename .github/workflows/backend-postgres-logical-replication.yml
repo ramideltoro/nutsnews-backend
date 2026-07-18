@@ -1,0 +1,218 @@
+name: Backend PostgreSQL Logical Replication
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment_name:
+        description: Source database environment to configure.
+        required: true
+        default: staging
+        type: choice
+        options:
+          - staging
+          - production
+      operation:
+        description: Inspect or configure source publication/slot and backend subscription.
+        required: true
+        default: status
+        type: choice
+        options:
+          - status
+          - setup
+      confirmation:
+        description: For setup, type setup-staging-logical-replication or setup-production-logical-replication.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-postgres-logical-replication-${{ inputs.environment_name }}
+  cancel-in-progress: false
+
+jobs:
+  replication:
+    name: Logical replication setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          ENVIRONMENT_NAME: ${{ inputs.environment_name }}
+          OPERATION: ${{ inputs.operation }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          case "$ENVIRONMENT_NAME" in staging|production) ;; *) exit 1 ;; esac
+          case "$OPERATION" in status|setup) ;; *) exit 1 ;; esac
+          if [[ "$OPERATION" == "setup" ]]; then
+            expected="setup-${ENVIRONMENT_NAME}-logical-replication"
+            if [[ "$CONFIRMATION" != "$expected" ]]; then
+              echo "setup requires confirmation to be exactly $expected." >&2
+              exit 1
+            fi
+          fi
+
+      - name: Validate required protected material
+        shell: bash
+        env:
+          ENVIRONMENT_NAME: ${{ inputs.environment_name }}
+          NUTSNEWS_STAGING_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_STAGING_SUPABASE_DB_URL }}
+          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing required production-backend secret: $name" >&2
+              missing=1
+            fi
+          done
+          case "$ENVIRONMENT_NAME" in
+            staging) source_name=NUTSNEWS_STAGING_SUPABASE_DB_URL ;;
+            production) source_name=NUTSNEWS_PRODUCTION_SUPABASE_DB_URL ;;
+          esac
+          if [[ -z "${!source_name}" ]]; then
+            echo "Missing required production-backend secret: $source_name" >&2
+            missing=1
+          fi
+          exit "$missing"
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Configure source publication and slot
+        shell: bash
+        env:
+          ENVIRONMENT_NAME: ${{ inputs.environment_name }}
+          OPERATION: ${{ inputs.operation }}
+          NUTSNEWS_STAGING_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_STAGING_SUPABASE_DB_URL }}
+          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          case "$ENVIRONMENT_NAME" in
+            staging) source_url="$NUTSNEWS_STAGING_SUPABASE_DB_URL" ;;
+            production) source_url="$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL" ;;
+          esac
+          echo "::add-mask::$source_url"
+          NUTSNEWS_SOURCE_DB_URL="$source_url" \
+            python3 scripts/backend_postgres_logical_replication_source.py \
+              --operation "$OPERATION" \
+              --environment-name "$ENVIRONMENT_NAME" \
+              --output "$RUNNER_TEMP/backend-postgres-logical-replication-source.json" \
+              --enforce
+
+      - name: Prepare SSH material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Configure backend subscription
+        if: inputs.operation == 'setup'
+        shell: bash
+        env:
+          ENVIRONMENT_NAME: ${{ inputs.environment_name }}
+          NUTSNEWS_STAGING_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_STAGING_SUPABASE_DB_URL }}
+          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE || 'nutsnews_restore_rehearsal' }}
+        run: |
+          set -euo pipefail
+          publication="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          print(json.loads(Path("docs/backend-postgres-logical-replication-plan.json").read_text())["replication_names"]["publication"])
+          PY
+          )"
+          slot="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          print(json.loads(Path("docs/backend-postgres-logical-replication-plan.json").read_text())["replication_names"]["slot"])
+          PY
+          )"
+          subscription="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          print(json.loads(Path("docs/backend-postgres-logical-replication-plan.json").read_text())["replication_names"]["subscription"])
+          PY
+          )"
+          case "$ENVIRONMENT_NAME" in
+            staging) source_url="$NUTSNEWS_STAGING_SUPABASE_DB_URL" ;;
+            production) source_url="$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL" ;;
+          esac
+          echo "::add-mask::$source_url"
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          remote_dir="/tmp/nutsnews-postgres-logical-replication-${GITHUB_RUN_ID}"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "install -m 0700 -d '$remote_dir'"
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            scripts/backend_postgres_logical_replication_target_remote.sh \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "sudo -n env REHEARSAL_DATABASE='$NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE' SOURCE_DB_URL='$source_url' PUBLICATION_NAME='$publication' SLOT_NAME='$slot' SUBSCRIPTION_NAME='$subscription' bash '$remote_dir/backend_postgres_logical_replication_target_remote.sh'" \
+            | tee "$RUNNER_TEMP/backend-postgres-logical-replication-target.json"
+
+      - name: Summarize safe metadata
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Backend PostgreSQL logical replication"
+            echo
+            echo "- Environment: \`${{ inputs.environment_name }}\`"
+            echo "- Operation: \`${{ inputs.operation }}\`"
+            echo "- Artifacts contain safe metadata only."
+            echo "- Database URLs, passwords, tokens, row data, and WAL contents are not printed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload replication setup reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-postgres-logical-replication
+          path: |
+            ${{ runner.temp }}/backend-postgres-logical-replication-source.json
+            ${{ runner.temp }}/backend-postgres-logical-replication-target.json
+          if-no-files-found: ignore

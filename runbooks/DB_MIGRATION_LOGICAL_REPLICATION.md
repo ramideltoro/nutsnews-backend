@@ -38,6 +38,33 @@ python3 scripts/validate_backend_postgres_logical_replication_plan.py
 | Slot | `nutsnews_backend_migration_slot` |
 | Subscription | `nutsnews_backend_migration_sub` |
 
+## Protected Setup
+
+Status-only source inspection:
+
+```bash
+gh workflow run backend-postgres-logical-replication.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f environment_name=staging \
+  -f operation=status
+```
+
+Staging setup:
+
+```bash
+gh workflow run backend-postgres-logical-replication.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f environment_name=staging \
+  -f operation=setup \
+  -f confirmation=setup-staging-logical-replication
+```
+
+Production setup uses the same workflow with `environment_name=production` and
+confirmation `setup-production-logical-replication`. Do not run production setup
+until staging replication setup and health have been proven and recorded.
+
 ## Refresh Procedure
 
 When the parity manifest adds or removes required tables:

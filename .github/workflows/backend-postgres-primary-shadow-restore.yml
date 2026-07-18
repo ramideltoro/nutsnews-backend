@@ -1,0 +1,250 @@
+name: Backend PostgreSQL Primary Shadow Restore
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Inspect restore metadata or restore production Supabase into the backend primary shadow database.
+        required: true
+        default: status
+        type: choice
+        options:
+          - status
+          - restore-production
+      confirm_restore:
+        description: For restore-production only, type restore-production-to-primary-shadow.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-postgres-primary-shadow-restore
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    name: Primary shadow restore
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRM_RESTORE: ${{ inputs.confirm_restore }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            status|restore-production) ;;
+            *) echo "Unsupported mode: $MODE" >&2; exit 1 ;;
+          esac
+          if [[ "$MODE" == "restore-production" && "$CONFIRM_RESTORE" != "restore-production-to-primary-shadow" ]]; then
+            echo "restore-production requires confirm_restore to be exactly restore-production-to-primary-shadow." >&2
+            exit 1
+          fi
+
+      - name: Validate required protected material
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing required production-backend secret: $name" >&2
+              missing=1
+            fi
+          done
+          if [[ "$MODE" == "restore-production" ]]; then
+            for name in SUPABASE_ACCESS_TOKEN NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF; do
+              if [[ -z "${!name}" ]]; then
+                echo "Missing required production-backend secret: $name" >&2
+                missing=1
+              fi
+            done
+            if [[ -n "$NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF" && ! "$NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF" =~ ^[a-z0-9]{20}$ ]]; then
+              echo "NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF must be a 20-character Supabase project ref." >&2
+              missing=1
+            fi
+          fi
+          exit "$missing"
+
+      - name: Prepare SSH material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F "${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}" -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Inspect current primary shadow restore metadata
+        if: inputs.mode == 'status'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            'set -euo pipefail
+             if sudo -n test -r /var/lib/nutsnews/postgres/primary-shadow-restore.json; then
+               sudo -n cat /var/lib/nutsnews/postgres/primary-shadow-restore.json
+             else
+               printf "%s\n" "{\"status\":\"not_configured\",\"safe_metadata_only\":true}"
+             fi' | tee "$RUNNER_TEMP/backend-postgres-primary-shadow-restore.json"
+
+      - name: Stop before mutation for status mode
+        if: inputs.mode == 'status'
+        shell: bash
+        run: exit 0
+
+      - name: Install restore tooling
+        if: inputs.mode == 'restore-production'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+          npm install --global supabase@2.105.0
+
+      - name: Dump production Supabase public schema, data, and migration history
+        if: inputs.mode == 'restore-production'
+        shell: bash
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          workdir="$RUNNER_TEMP/supabase-primary-shadow-restore"
+          mkdir -p "$workdir/supabase"
+          printf 'project_id = "nutsnews-backend-primary-shadow-restore"\n' > "$workdir/supabase/config.toml"
+          supabase link --project-ref "$NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF" --workdir "$workdir"
+          supabase db dump --linked --schema public --file "$RUNNER_TEMP/public-schema.sql" --workdir "$workdir"
+          supabase db dump --linked --schema public --data-only --use-copy --file "$RUNNER_TEMP/public-data.sql" --workdir "$workdir"
+          supabase db dump --linked --schema supabase_migrations --file "$RUNNER_TEMP/history-schema.sql" --workdir "$workdir"
+          supabase db dump --linked --schema supabase_migrations --data-only --use-copy --file "$RUNNER_TEMP/history-data.sql" --workdir "$workdir"
+
+      - name: Restore production dump into backend primary shadow database
+        if: inputs.mode == 'restore-production'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE || 'nutsnews_primary_shadow' }}
+        run: |
+          set -euo pipefail
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          target_database="$NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE"
+          if [[ "$target_database" != "nutsnews_primary_shadow" ]]; then
+            echo "This workflow is only approved for nutsnews_primary_shadow." >&2
+            exit 1
+          fi
+
+          remote_dir="/tmp/nutsnews-postgres-primary-shadow-restore-${GITHUB_RUN_ID}"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "install -m 0700 -d '$remote_dir'"
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$RUNNER_TEMP/public-schema.sql" \
+            "$RUNNER_TEMP/public-data.sql" \
+            "$RUNNER_TEMP/history-schema.sql" \
+            "$RUNNER_TEMP/history-data.sql" \
+            "scripts/backend_postgres_restore_validation.sql" \
+            "scripts/backend_postgres_primary_shadow_restore_remote.sh" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/"
+
+          public_schema_sha256="$(sha256sum "$RUNNER_TEMP/public-schema.sql" | awk '{print $1}')"
+          public_data_sha256="$(sha256sum "$RUNNER_TEMP/public-data.sql" | awk '{print $1}')"
+          history_schema_sha256="$(sha256sum "$RUNNER_TEMP/history-schema.sql" | awk '{print $1}')"
+          history_data_sha256="$(sha256sum "$RUNNER_TEMP/history-data.sql" | awk '{print $1}')"
+          snapshot_id="logical-${GITHUB_RUN_ID}-${public_schema_sha256:0:12}-${public_data_sha256:0:12}"
+          manifest_version="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          print(json.loads(Path("docs/supabase-backend-postgres-parity.json").read_text()).get("version", "unknown"))
+          PY
+          )"
+
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "sudo -n env TARGET_DATABASE='$target_database' REMOTE_DIR='$remote_dir' SOURCE_LABEL='production_supabase' GITHUB_RUN_ID='$GITHUB_RUN_ID' GITHUB_REPOSITORY='$GITHUB_REPOSITORY' MANIFEST_VERSION='$manifest_version' SNAPSHOT_ID='$snapshot_id' PUBLIC_SCHEMA_DUMP_SHA256='$public_schema_sha256' PUBLIC_DATA_DUMP_SHA256='$public_data_sha256' HISTORY_SCHEMA_DUMP_SHA256='$history_schema_sha256' HISTORY_DATA_DUMP_SHA256='$history_data_sha256' bash '$remote_dir/backend_postgres_primary_shadow_restore_remote.sh'"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "sudo -n cat /var/lib/nutsnews/postgres/primary-shadow-restore.json" \
+            | tee "$RUNNER_TEMP/backend-postgres-primary-shadow-restore.json"
+
+      - name: Validate restore status artifact shape
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -s "$RUNNER_TEMP/backend-postgres-primary-shadow-restore.json" ]]; then
+            python3 scripts/validate_backend_postgres_primary_shadow_restore_report.py "$RUNNER_TEMP/backend-postgres-primary-shadow-restore.json"
+          fi
+
+      - name: Summarize safe metadata
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Backend PostgreSQL primary shadow restore"
+            echo
+            echo "- Mode: \`${{ inputs.mode }}\`"
+            echo "- Target: \`nutsnews_primary_shadow\`"
+            echo "- Report artifact contains safe metadata only."
+            echo "- Database URLs, passwords, tokens, dumps, and row data are not printed."
+            echo "- Supabase remains the production writer; this workflow does not cut over app or worker writes."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload restore report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-postgres-primary-shadow-restore
+          path: ${{ runner.temp }}/backend-postgres-primary-shadow-restore.json
+          if-no-files-found: ignore

@@ -1,0 +1,95 @@
+{
+  "plan_id": "backend-postgres-primary-shadow-restore",
+  "version": 1,
+  "issue": 212,
+  "tracking_issue": 120,
+  "updated_at_utc": "2026-07-18",
+  "depends_on_issues": [
+    210,
+    211
+  ],
+  "source": {
+    "environment": "production",
+    "system": "Supabase Postgres",
+    "dump_method": "supabase_cli_logical_dump",
+    "access_token_secret": "SUPABASE_ACCESS_TOKEN",
+    "project_ref_secret": "NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF",
+    "dump_scopes": [
+      "public_schema",
+      "public_data",
+      "supabase_migrations_schema",
+      "supabase_migrations_data"
+    ],
+    "production_writer_after_restore": "production_supabase"
+  },
+  "target": {
+    "database": "nutsnews_primary_shadow",
+    "host": "backend",
+    "network_path": "ssh_tunnel_to_loopback_postgresql",
+    "public_5432_allowed": false,
+    "must_be_distinct_from": [
+      "nutsnews_restore_rehearsal",
+      "nutsnews_backup_restore_proof"
+    ]
+  },
+  "workflow": {
+    "path": ".github/workflows/backend-postgres-primary-shadow-restore.yml",
+    "environment": "production-backend",
+    "restore_mode": "restore-production",
+    "status_mode": "status",
+    "confirmation": "restore-production-to-primary-shadow",
+    "remote_script": "scripts/backend_postgres_primary_shadow_restore_remote.sh",
+    "status_artifact": "backend-postgres-primary-shadow-restore"
+  },
+  "preconditions": {
+    "requires_issue_211_live_provisioning": true,
+    "requires_primary_shadow_owner": "nutsnews_migration_restore",
+    "requires_shadow_database": "nutsnews_primary_shadow",
+    "requires_loopback_only_postgresql": true,
+    "requires_protected_approval": true
+  },
+  "artifact_policy": {
+    "safe_metadata_only": true,
+    "required_fields": [
+      "snapshot_id",
+      "target_database",
+      "duration_seconds",
+      "validation_status",
+      "rpo_seconds",
+      "rto_seconds",
+      "operator",
+      "workflow_url"
+    ],
+    "allowed_evidence": [
+      "logical_snapshot_id",
+      "sha256_digests",
+      "workflow_run_url",
+      "duration_seconds",
+      "row_count_keys",
+      "rpo_seconds",
+      "rto_seconds",
+      "operator"
+    ],
+    "forbidden_evidence": [
+      "database_urls",
+      "passwords",
+      "tokens",
+      "database_dumps",
+      "row_data"
+    ]
+  },
+  "validation": {
+    "plan_validator": "python3 scripts/validate_backend_postgres_primary_shadow_restore_plan.py",
+    "report_validator": "python3 scripts/validate_backend_postgres_primary_shadow_restore_report.py",
+    "restore_validation_sql": "scripts/backend_postgres_restore_validation.sql",
+    "example_report": "docs/backend-postgres-primary-shadow-restore.example.json"
+  },
+  "external_references": [
+    "https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore"
+  ],
+  "cutover_policy": {
+    "production_cutover_allowed": false,
+    "supabase_remains_writer_until_issue": 119,
+    "app_worker_writes_to_backend_allowed": false
+  }
+}

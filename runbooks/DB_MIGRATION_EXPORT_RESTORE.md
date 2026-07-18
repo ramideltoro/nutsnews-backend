@@ -53,8 +53,40 @@ Restore evidence must include:
 - aggregate row counts;
 - validation status.
 
-Production restore is not enabled by this runbook. It requires a later approved
-cutover runbook and protected workflow inputs.
+Production restore to the future-primary shadow database is enabled only by the
+protected `backend-postgres-primary-shadow-restore.yml` workflow. It restores
+production Supabase public schema/data and Supabase migration history into
+`nutsnews_primary_shadow`; it does not cut over app or worker writes.
+
+Run status mode:
+
+```bash
+gh workflow run backend-postgres-primary-shadow-restore.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f mode=status
+```
+
+Run the protected restore only after #211 live provisioning evidence passes:
+
+```bash
+gh workflow run backend-postgres-primary-shadow-restore.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f mode=restore-production \
+  -f confirm_restore=restore-production-to-primary-shadow
+```
+
+The workflow is fixed to `nutsnews_primary_shadow` and refuses the rehearsal and
+backup-proof databases. Restore evidence must include:
+
+- logical snapshot id;
+- target database;
+- public and migration-history dump checksums;
+- restore duration;
+- validation status;
+- RPO/RTO seconds;
+- protected workflow operator and workflow URL.
 
 ## Cleanup
 

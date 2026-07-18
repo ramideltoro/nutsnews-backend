@@ -1,0 +1,103 @@
+{
+  "slug": "backend-apm-postgresql-correlation",
+  "issue": 152,
+  "dashboard": {
+    "name": "NutsNews Backend - PostgreSQL - APM Correlation",
+    "description": "24 hour dashboard that compares backend transaction latency with PostgreSQL spans, database time, wait events, and trace context. Managed from ramideltoro/nutsnews-backend.",
+    "permissions": "PUBLIC_READ_ONLY",
+    "pages": [
+      {
+        "name": "APM and database correlation",
+        "description": "Move from slow backend transactions to PostgreSQL contribution and trace evidence.",
+        "widgets": [
+          {
+            "title": "Transaction and database time",
+            "layout": {"column": 1, "row": 1, "height": 3, "width": 6},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT average(duration), average(databaseDuration), percentile(duration, 95) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "PostgreSQL span latency",
+            "layout": {"column": 7, "row": 1, "height": 3, "width": 6},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT average(duration), percentile(duration, 95), max(duration) FROM Span WHERE appName = 'nutsnews-backend-production' AND db.system = 'postgresql' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Database time by transaction",
+            "layout": {"column": 1, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT average(databaseDuration), average(duration), count(*) FROM Transaction WHERE appName = 'nutsnews-backend-production' FACET name LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Database operations by span",
+            "layout": {"column": 5, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT percentile(duration, 95), count(*) FROM Span WHERE appName = 'nutsnews-backend-production' AND db.system = 'postgresql' FACET db.operation, db.collection LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Wait event contribution",
+            "layout": {"column": 9, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT sum(total_wait_time_ms), count(*) FROM PostgresWaitEvents WHERE hostname = 'backend.nutsnews.com' FACET wait_category, wait_event_name LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Trace IDs with slow database spans",
+            "layout": {"column": 1, "row": 7, "height": 3, "width": 8},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(traceId), percentile(duration, 95), count(*) FROM Span WHERE appName = 'nutsnews-backend-production' AND db.system = 'postgresql' FACET name LIMIT 20 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Trace workflow",
+            "layout": {"column": 9, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.markdown"},
+            "rawConfiguration": {
+              "text": "Start with transaction/database time, open a slow transaction trace, then compare PostgreSQL spans and wait-event categories for the same period."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,270 @@
+{
+  "topology_id": "backend-postgres-future-primary-topology",
+  "version": 1,
+  "issue": 210,
+  "tracking_issue": 120,
+  "updated_at_utc": "2026-07-18",
+  "scope": {
+    "goal": "keep an exact backend PostgreSQL shadow target ready to become the future primary database",
+    "in_scope": [
+      "backend PostgreSQL database topology",
+      "production Supabase to backend PostgreSQL one-way synchronization",
+      "safe metadata-only evidence for restore, replication, parity, backup, and monitoring gates"
+    ],
+    "out_of_scope": [
+      "apps/worker changes before production cutover",
+      "active-active database topology",
+      "bidirectional replication",
+      "public PostgreSQL listener",
+      "manual production cutover outside the protected workflow boundary"
+    ]
+  },
+  "source": {
+    "environment": "production",
+    "system": "Supabase Postgres",
+    "authoritative_writer": "production_supabase",
+    "direct_connection_secret": "NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL",
+    "pooler_connection_allowed_for_logical_replication": false,
+    "project_ref_secret": "NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF",
+    "access_token_secret": "SUPABASE_ACCESS_TOKEN"
+  },
+  "target_database": {
+    "host": "backend",
+    "host_variable": "NUTSNEWS_BACKEND_HOST",
+    "name": "nutsnews_primary_shadow",
+    "purpose": "future_primary_shadow",
+    "initial_state": "restored_from_production_snapshot_then_kept_current_by_one_way_logical_replication",
+    "must_be_distinct_from": [
+      "nutsnews_restore_rehearsal",
+      "nutsnews_backup_restore_proof"
+    ],
+    "default_owner_role": "nutsnews_migration_restore",
+    "validation_role": "nutsnews_migration_validation",
+    "readonly_role": "nutsnews_readonly",
+    "future_application_role": "nutsnews_app"
+  },
+  "network": {
+    "backend_postgres_access": "loopback_only",
+    "network_path": "ssh_tunnel_to_loopback_postgresql",
+    "public_5432_allowed": false,
+    "admin_surfaces": "ssh_tunnel_only",
+    "production_mutation_boundary": "production-backend"
+  },
+  "write_policy": {
+    "single_writer": "production_supabase",
+    "supabase_remains_writer_until_issue": 119,
+    "backend_app_worker_writes_allowed_before_cutover": false,
+    "active_active_allowed": false,
+    "bidirectional_replication_allowed": false,
+    "writer_pause_required_for_cutover": true,
+    "production_cutover_requires_protected_workflow": "production-backend"
+  },
+  "replication": {
+    "direction": "production_supabase_to_backend_postgres",
+    "mode": "one_way_logical_replication",
+    "publication_manifest": "docs/backend-postgres-logical-replication-plan.json",
+    "subscription_copy_data_after_snapshot_restore": false,
+    "active_active_allowed": false,
+    "bidirectional_allowed": false,
+    "required_before_cutover": true,
+    "health_gate_issue": 214
+  },
+  "role_contract": {
+    "database_roles": [
+      {
+        "id": "postgres",
+        "purpose": "protected workflow bootstrap and database administration",
+        "runtime_application_role": false,
+        "secret_names": [
+          "NUTSNEWS_BACKEND_POSTGRES_ADMIN_PASSWORD"
+        ]
+      },
+      {
+        "id": "nutsnews_migration_restore",
+        "purpose": "own restored schema objects and perform protected restore operations",
+        "runtime_application_role": false,
+        "secret_names": [
+          "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_RESTORE_PASSWORD"
+        ]
+      },
+      {
+        "id": "nutsnews_migration_validation",
+        "purpose": "run metadata, aggregate parity, smoke, and behavior validation",
+        "runtime_application_role": false,
+        "secret_names": [
+          "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD"
+        ]
+      },
+      {
+        "id": "nutsnews_readonly",
+        "purpose": "read-only operator inspection through protected access paths",
+        "runtime_application_role": false,
+        "secret_names": [
+          "NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD"
+        ]
+      },
+      {
+        "id": "nutsnews_app",
+        "purpose": "future application database role after cutover approval",
+        "runtime_application_role": true,
+        "writes_allowed_before_cutover": false,
+        "secret_names": [
+          "NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD"
+        ]
+      },
+      {
+        "id": "anon",
+        "purpose": "Supabase-compatible role name for restored grants and RLS policy behavior",
+        "runtime_application_role": false,
+        "secret_names": []
+      },
+      {
+        "id": "authenticated",
+        "purpose": "Supabase-compatible role name for restored grants and RLS policy behavior",
+        "runtime_application_role": false,
+        "secret_names": []
+      },
+      {
+        "id": "service_role",
+        "purpose": "Supabase-compatible role name for restored grants and RLS policy behavior only; no key material is stored here",
+        "runtime_application_role": false,
+        "secret_names": []
+      }
+    ],
+    "default_privilege_owner": "nutsnews_migration_restore",
+    "compatibility_roles_required": [
+      "anon",
+      "authenticated",
+      "service_role"
+    ]
+  },
+  "workflow_gates": [
+    {
+      "issue": 211,
+      "name": "provision_backend_primary_shadow",
+      "required_evidence": [
+        "database_exists",
+        "roles_exist",
+        "grants_match_contract",
+        "loopback_only_access_confirmed"
+      ],
+      "mutation_boundary": "production-backend"
+    },
+    {
+      "issue": 212,
+      "name": "restore_production_snapshot_to_shadow",
+      "required_evidence": [
+        "snapshot_id",
+        "target_database",
+        "restore_duration_seconds",
+        "validation_result",
+        "rpo_seconds",
+        "rto_seconds",
+        "operator"
+      ],
+      "mutation_boundary": "production-backend"
+    },
+    {
+      "issue": 215,
+      "name": "validate_supabase_behavior_parity",
+      "required_evidence": [
+        "catalog_diff_status",
+        "extension_versions",
+        "grants_rls_policy_hashes",
+        "sequence_status",
+        "migration_history_status"
+      ],
+      "mutation_boundary": "read_only_or_shadow_only"
+    },
+    {
+      "issue": 213,
+      "name": "configure_production_logical_replication",
+      "required_evidence": [
+        "publication_name",
+        "slot_name",
+        "subscription_name",
+        "copy_data_false",
+        "source_direct_connection_confirmed",
+        "target_database"
+      ],
+      "mutation_boundary": "production-backend"
+    },
+    {
+      "issue": 214,
+      "name": "prove_shadow_sync_and_parity",
+      "required_evidence": [
+        "replication_status",
+        "lag_bytes_or_lsn_delta",
+        "safe_row_count_checksums",
+        "watermark_lsn",
+        "validation_artifact"
+      ],
+      "mutation_boundary": "read_only_or_shadow_only"
+    },
+    {
+      "issue": 216,
+      "name": "prove_shadow_backup_restore",
+      "required_evidence": [
+        "backup_id",
+        "isolated_restore_target",
+        "restore_duration_seconds",
+        "validation_result",
+        "rpo_seconds",
+        "rto_seconds"
+      ],
+      "mutation_boundary": "production-backend"
+    },
+    {
+      "issue": 217,
+      "name": "monitor_shadow_and_replication",
+      "required_evidence": [
+        "dashboard_status_ingested",
+        "alert_rules_active",
+        "broken_replication_simulation_result",
+        "backup_freshness_metric",
+        "runbook_updated"
+      ],
+      "mutation_boundary": "production-backend"
+    }
+  ],
+  "artifact_policy": {
+    "safe_metadata_only": true,
+    "allowed_evidence": [
+      "workflow_run_url",
+      "commit_sha",
+      "pull_request",
+      "artifact_id",
+      "snapshot_id",
+      "backup_id",
+      "database_name",
+      "duration_seconds",
+      "rpo_seconds",
+      "rto_seconds",
+      "row_counts",
+      "checksum_digests",
+      "definition_hashes",
+      "lag_bytes",
+      "watermark_lsn",
+      "operator"
+    ],
+    "forbidden_evidence": [
+      "connection_strings",
+      "database_urls",
+      "secret_values",
+      "passwords",
+      "service_role_keys",
+      "database_dumps",
+      "row_data"
+    ]
+  },
+  "cutover_and_retirement_gates": {
+    "cutover_issue": 119,
+    "post_cutover_issue": 114,
+    "cutover_allowed_before_all_shadow_gates_pass": false,
+    "post_cutover_retirement_allowed_before_cutover_complete": false
+  },
+  "validation": {
+    "local_validator": "python3 scripts/validate_backend_postgres_future_primary_topology.py",
+    "ci_workflow": ".github/workflows/backend-checks.yml"
+  }
+}

@@ -42,7 +42,7 @@ select exists(select 1 from pg_subscription where subname = :'sub');
 SQL
 )"
 
-if [[ "$sub_exists" == "t" ]]; then
+if [[ "$sub_exists" == "t" || "$sub_exists" == "true" || "$sub_exists" == "1" ]]; then
   sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$target_database" \
     -v source_conn="$SOURCE_DB_URL" <<SQL
 alter subscription $q_subscription disable;
@@ -109,7 +109,7 @@ print(json.dumps({
     "slot": os.environ["SLOT_NAME"],
     "target_public_table_count": int(os.environ["TARGET_TABLE_COUNT"] or "0"),
     "subscription_count": int(os.environ["SUBSCRIPTION_COUNT"] or "0"),
-    "subscription_worker_present": os.environ["WORKER_PRESENT"] == "t",
+    "subscription_worker_present": os.environ["WORKER_PRESENT"] in {"1", "t", "true"},
     "copy_data": False,
     "create_slot": False,
     "safe_metadata_only": True,

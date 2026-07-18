@@ -69,6 +69,25 @@ gh workflow run backend-postgres-parity-validation.yml \
 Do not run the production-shadow mode until #211 provisioning and #212 restore
 evidence have passed.
 
+Production sync proof for #214 requires both workflows:
+
+```bash
+gh workflow run backend-postgres-replication-health.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f environment_name=production \
+  -f mode=status
+
+gh workflow run backend-postgres-parity-validation.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f mode=validate-production-shadow
+```
+
+The replication health artifact proves subscription/slot/lag state. The parity
+validation artifacts prove required object parity and database behavior parity.
+Production write probes are not allowed for #214.
+
 ## Cutover Gate
 
 Cutover remains blocked unless:

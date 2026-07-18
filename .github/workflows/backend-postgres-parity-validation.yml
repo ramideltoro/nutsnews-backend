@@ -230,6 +230,7 @@ jobs:
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            scripts/backend_postgres_parity_validate.py \
             scripts/backend_postgres_behavior_parity_validate.py \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/scripts/"
           scp -i "$HOME/.ssh/nutsnews_backend" \
@@ -237,6 +238,7 @@ jobs:
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            docs/supabase-backend-postgres-parity.json \
             docs/supabase-backend-postgres-behavior-parity.json \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/docs/"
           set +e
@@ -246,9 +248,24 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "cd '$remote_dir' && NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL='$NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL' NUTSNEWS_BACKEND_TARGET_DB_URL='$target_url' python3 scripts/backend_postgres_parity_validate.py --manifest docs/supabase-backend-postgres-parity.json --source-db-url-env NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL --target-db-url-env NUTSNEWS_BACKEND_TARGET_DB_URL --enforce --output '$remote_dir/backend-postgres-parity-validation.json'"
+          parity_rc="$?"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
             "cd '$remote_dir' && NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL='$NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL' NUTSNEWS_BACKEND_TARGET_DB_URL='$target_url' python3 scripts/backend_postgres_behavior_parity_validate.py --manifest docs/supabase-backend-postgres-behavior-parity.json --source-db-url-env NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL --target-db-url-env NUTSNEWS_BACKEND_TARGET_DB_URL --source-label production_supabase --target-label nutsnews_primary_shadow --enforce --output '$remote_dir/backend-postgres-behavior-parity-validation.json'"
-          rc="$?"
+          behavior_rc="$?"
           set -e
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/backend-postgres-parity-validation.json" \
+            "$RUNNER_TEMP/backend-postgres-parity-validation.json" || true
           scp -i "$HOME/.ssh/nutsnews_backend" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
@@ -256,6 +273,12 @@ jobs:
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/backend-postgres-behavior-parity-validation.json" \
             "$RUNNER_TEMP/backend-postgres-behavior-parity-validation.json" || true
+          rc=0
+          if [[ "$parity_rc" != "0" ]]; then
+            rc="$parity_rc"
+          elif [[ "$behavior_rc" != "0" ]]; then
+            rc="$behavior_rc"
+          fi
           exit "$rc"
 
       - name: Summarize safe metadata

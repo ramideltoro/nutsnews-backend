@@ -1,0 +1,85 @@
+{
+  "plan_id": "backend-postgres-primary-shadow-monitoring",
+  "version": 1,
+  "issue": 217,
+  "tracking_issue": 120,
+  "updated_at_utc": "2026-07-18",
+  "depends_on_issues": [
+    213,
+    214,
+    216
+  ],
+  "target": {
+    "database": "nutsnews_primary_shadow",
+    "network_path": "ssh_tunnel_to_loopback_postgresql",
+    "public_5432_allowed": false
+  },
+  "status_ingestion": {
+    "replication_health_workflow": ".github/workflows/backend-postgres-replication-health.yml",
+    "replication_health_mode": "environment_name=production mode=status",
+    "dashboard_status_file": "/var/lib/nutsnews/postgres/replication-health.json",
+    "textfile_metric": "/var/lib/nutsnews/metrics/backend-postgres-replication-health.prom",
+    "ops_dashboard_refresh": "/var/www/nutsnews-ops-dashboard/status.json"
+  },
+  "metrics": [
+    "nutsnews_backend_postgres_replication_subscription_count",
+    "nutsnews_backend_postgres_replication_blocker_count",
+    "nutsnews_backend_postgres_replication_max_lag_seconds"
+  ],
+  "alert_conditions": [
+    {
+      "id": "subscription_missing_or_inactive",
+      "severity": "critical",
+      "signal": "replication subscription count is zero or subscription worker is inactive"
+    },
+    {
+      "id": "replication_lag_exceeds_threshold",
+      "severity": "critical",
+      "signal": "max logical replication lag is above the configured threshold"
+    },
+    {
+      "id": "source_slot_missing_or_inactive",
+      "severity": "critical",
+      "signal": "source replication slot is missing or inactive while subscription exists"
+    },
+    {
+      "id": "backup_restore_proof_stale_or_failed",
+      "severity": "warning",
+      "signal": "primary shadow backup/restore proof is missing, stale, or failed"
+    },
+    {
+      "id": "shadow_parity_failed",
+      "severity": "critical",
+      "signal": "object parity or behavior parity proof failed"
+    }
+  ],
+  "failure_simulation": {
+    "workflow": ".github/workflows/backend-postgres-replication-health.yml",
+    "mode": "mode=simulate-broken",
+    "expected_result": "workflow fails closed after producing safe metadata with simulated_broken_replication blockers"
+  },
+  "runbooks": [
+    "runbooks/DB_MIGRATION_LOGICAL_REPLICATION.md",
+    "runbooks/SUPABASE_BACKEND_POSTGRES_PARITY.md",
+    "runbooks/DB_MIGRATION_EXPORT_RESTORE.md",
+    "runbooks/NEW_RELIC_OBSERVABILITY.md"
+  ],
+  "artifact_policy": {
+    "safe_metadata_only": true,
+    "forbidden_evidence": [
+      "database_urls",
+      "passwords",
+      "tokens",
+      "wal_contents",
+      "database_dumps",
+      "row_data"
+    ]
+  },
+  "cutover_policy": {
+    "failed_monitoring_blocks_cutover": true,
+    "supabase_remains_writer_until_issue": 119
+  },
+  "validation": {
+    "local_validator": "python3 scripts/validate_backend_postgres_primary_shadow_monitoring_plan.py"
+  }
+}

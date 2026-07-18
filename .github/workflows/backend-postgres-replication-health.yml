@@ -91,8 +91,7 @@ jobs:
           for name in \
             NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD \
             NUTSNEWS_BACKEND_SSH_PRIVATE_KEY \
-            NUTSNEWS_BACKEND_KNOWN_HOSTS \
-            NUTSNEWS_PRODUCTION_SUPABASE_DB_URL
+            NUTSNEWS_BACKEND_KNOWN_HOSTS
           do
             if [[ -z "${!name}" ]]; then
               echo "Missing required production-backend secret: $name" >&2
@@ -174,6 +173,7 @@ jobs:
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             scripts/backend_postgres_replication_health.py \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST:$REMOTE_REPLICATION_HEALTH_DIR/"
+          set +e
           ssh -i "$HOME/.ssh/nutsnews_backend" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
@@ -186,20 +186,23 @@ jobs:
               --output '$REMOTE_REPLICATION_HEALTH_DIR/backend-postgres-replication-health.json' \
               --textfile-output '$REMOTE_REPLICATION_HEALTH_DIR/backend-postgres-replication-health.prom' \
               --enforce"
+          rc="$?"
+          set -e
           scp -i "$HOME/.ssh/nutsnews_backend" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST:$REMOTE_REPLICATION_HEALTH_DIR/backend-postgres-replication-health.json" \
-            "$RUNNER_TEMP/backend-postgres-replication-health.json"
+            "$RUNNER_TEMP/backend-postgres-replication-health.json" || true
           scp -i "$HOME/.ssh/nutsnews_backend" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST:$REMOTE_REPLICATION_HEALTH_DIR/backend-postgres-replication-health.prom" \
-            "$RUNNER_TEMP/backend-postgres-replication-health.prom"
+            "$RUNNER_TEMP/backend-postgres-replication-health.prom" || true
+          exit "$rc"
 
       - name: Publish replication health status for dashboard
         if: always() && inputs.mode == 'status'

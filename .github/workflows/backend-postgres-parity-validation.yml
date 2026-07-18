@@ -71,7 +71,7 @@ jobs:
           done
           exit "$missing"
 
-      - name: Prepare SSH tunnel
+      - name: Prepare SSH material
         if: inputs.mode == 'validate-staging'
         shell: bash
         env:
@@ -90,13 +90,13 @@ jobs:
           ssh-keygen -F "$NUTSNEWS_BACKEND_HOST" -f "$HOME/.ssh/known_hosts" > /dev/null
 
           ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
-          ssh -fN -L 15432:127.0.0.1:5432 \
+          ssh \
             -i "$HOME/.ssh/nutsnews_backend" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            "$ssh_user@$NUTSNEWS_BACKEND_HOST"
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" true
 
       - name: Run protected staging parity validation
         if: inputs.mode == 'validate-staging'
@@ -105,10 +105,10 @@ jobs:
           NUTSNEWS_STAGING_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_STAGING_SUPABASE_DB_URL }}
           NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE || 'nutsnews_restore_rehearsal' }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --yes postgresql-client
 
           target_url="$(python3 - <<'PY'
           import os
@@ -117,17 +117,52 @@ jobs:
           user = quote("nutsnews_migration_validation", safe="")
           password = quote(os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD"], safe="")
           database = quote(os.environ["NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE"], safe="")
-          print(f"postgresql://{user}:{password}@127.0.0.1:15432/{database}")
+          print(f"postgresql://{user}:{password}@127.0.0.1:5432/{database}")
           PY
           )"
           echo "::add-mask::$NUTSNEWS_STAGING_SUPABASE_DB_URL"
           echo "::add-mask::$target_url"
-          NUTSNEWS_BACKEND_TARGET_DB_URL="$target_url" \
-            python3 scripts/backend_postgres_parity_validate.py \
-              --source-db-url-env NUTSNEWS_STAGING_SUPABASE_DB_URL \
-              --target-db-url-env NUTSNEWS_BACKEND_TARGET_DB_URL \
-              --enforce \
-              --output "$RUNNER_TEMP/backend-postgres-parity-validation.json"
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          remote_dir="/tmp/nutsnews-postgres-parity-validation-${GITHUB_RUN_ID}"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "install -m 0700 -d '$remote_dir/scripts' '$remote_dir/docs'"
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            scripts/backend_postgres_parity_validate.py \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/scripts/"
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            docs/supabase-backend-postgres-parity.json \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/docs/"
+          set +e
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "cd '$remote_dir' && NUTSNEWS_STAGING_SUPABASE_DB_URL='$NUTSNEWS_STAGING_SUPABASE_DB_URL' NUTSNEWS_BACKEND_TARGET_DB_URL='$target_url' python3 scripts/backend_postgres_parity_validate.py --source-db-url-env NUTSNEWS_STAGING_SUPABASE_DB_URL --target-db-url-env NUTSNEWS_BACKEND_TARGET_DB_URL --enforce --output '$remote_dir/backend-postgres-parity-validation.json'"
+          rc="$?"
+          set -e
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/backend-postgres-parity-validation.json" \
+            "$RUNNER_TEMP/backend-postgres-parity-validation.json" || true
+          exit "$rc"
 
       - name: Summarize safe metadata
         if: always()

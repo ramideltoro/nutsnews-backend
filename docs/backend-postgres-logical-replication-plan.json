@@ -12,9 +12,11 @@
     "https://www.postgresql.org/docs/current/sql-altersubscription.html"
   ],
   "issue": 109,
+  "extends_for_issue": 213,
   "live_blockers": [
-    "production-backend protected environment approval is required for live setup",
-    "staging setup must pass with direct Supabase DB URLs before production setup"
+    "#211 protected provisioning must prove nutsnews_primary_shadow before production subscription setup",
+    "#212 protected restore must prove the production snapshot in nutsnews_primary_shadow before subscription setup",
+    "production-backend protected environment approval is required for live setup"
   ],
   "plan_id": "backend-postgres-logical-replication",
   "publication_tables": [
@@ -61,7 +63,7 @@
   ],
   "source": {
     "connection_pooler_allowed": false,
-    "db_url_secret": "NUTSNEWS_PRODUCTION_SUPABASE_DB_URL",
+    "db_url_secret": "NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL",
     "direct_connection_required": true,
     "ipv4_or_ipv6_requirement_must_be_recorded": true,
     "project_ref_secret": "NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF"
@@ -75,11 +77,30 @@
     ],
     "production_writes_allowed": false,
     "required_before_production": true,
-    "required_status": "streaming_or_equivalent_healthy"
+    "required_status": "streaming_or_equivalent_healthy",
+    "source_db_url_secret": "NUTSNEWS_STAGING_SUPABASE_DB_DIRECT_URL",
+    "target_database_variable": "NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE"
   },
-  "status": "planned_blocked_on_live_credentials_and_approval",
+  "production_shadow": {
+    "issue": 213,
+    "required_after_issues": [
+      211,
+      212,
+      215
+    ],
+    "source_db_url_secret": "NUTSNEWS_PRODUCTION_SUPABASE_DB_DIRECT_URL",
+    "target_database": "nutsnews_primary_shadow",
+    "target_database_variable": "NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE",
+    "subscription_copy_data_after_restore": false,
+    "workflow_mode": "environment_name=production operation=setup",
+    "confirmation": "setup-production-logical-replication",
+    "safe_metadata_artifact": "backend-postgres-logical-replication",
+    "production_writes_allowed": false
+  },
+  "status": "planned_blocked_on_211_212_215_and_protected_approval",
   "target": {
-    "database_variable": "NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE",
+    "database_variable": "NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE",
+    "database": "nutsnews_primary_shadow",
     "host_variable": "NUTSNEWS_BACKEND_HOST",
     "network_path": "ssh_tunnel_to_loopback_postgresql",
     "public_5432_allowed": false

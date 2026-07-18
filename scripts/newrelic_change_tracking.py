@@ -41,13 +41,12 @@ def build_deployment_payload() -> tuple[dict[str, Any], list[str]]:
     changelog = os.environ.get("NEW_RELIC_DEPLOY_CHANGELOG", "")
     commit = os.environ.get("GITHUB_SHA", "")
     payload = {
-        "categoryAndTypeData": {
-            "kind": {"category": "deployment", "type": "basic"},
-            "categoryFields": {"deployment": {"version": version, "changelog": changelog, "commit": commit}},
-        },
-        "entitySearch": {"query": f"id = '{os.environ.get('NEW_RELIC_ENTITY_GUID', '').strip()}'"},
-        "shortDescription": f"nutsnews-backend {version[:12]}",
+        "entityGuid": os.environ.get("NEW_RELIC_ENTITY_GUID", "").strip(),
+        "version": version,
         "description": os.environ.get("NEW_RELIC_DEPLOY_DESCRIPTION") or branch,
+        "deploymentType": "BASIC",
+        "changelog": changelog,
+        "commit": commit,
         "user": os.environ.get("NEW_RELIC_DEPLOY_USER") or os.environ.get("GITHUB_ACTOR", ""),
         "groupId": f"nutsnews-backend-{environment}",
         "customAttributes": {
@@ -93,29 +92,20 @@ def graphql(endpoint: str, user_key: str, query: str, variables: dict[str, Any])
 
 def create_deployment(endpoint: str, user_key: str, deployment: dict[str, Any]) -> dict[str, Any]:
     mutation = """
-    mutation($event: ChangeTrackingEventInput!) {
-      changeTrackingCreateEvent(changeTrackingEvent: $event) {
-        changeTrackingEvent {
-          changeTrackingId
-          category
-          categoryAndType
-          description
-          entity {
-            guid
-            name
-          }
-          groupId
-          shortDescription
-          type
-        }
-        messages
+    mutation($deployment: ChangeTrackingDeploymentInput!) {
+      changeTrackingCreateDeployment(deployment: $deployment) {
+        deploymentId
+        entityGuid
+        version
+        commit
+        deploymentType
+        groupId
       }
     }
     """
-    data = graphql(endpoint, user_key, mutation, {"event": deployment})
-    result = data.get("changeTrackingCreateEvent", {})
-    if result.get("messages"):
-        raise RuntimeError("changeTrackingCreateEvent returned messages")
+    result = graphql(endpoint, user_key, mutation, {"deployment": deployment}).get("changeTrackingCreateDeployment", {})
+    if not result.get("deploymentId"):
+        raise RuntimeError("changeTrackingCreateDeployment did not return a deploymentId")
     return result
 
 

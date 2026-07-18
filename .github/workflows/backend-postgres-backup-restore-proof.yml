@@ -146,7 +146,14 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
-            "sudo -n env REHEARSAL_DATABASE='$NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE' PROOF_DATABASE='$proof_database' REMOTE_DIR='$remote_dir' GITHUB_RUN_ID='$GITHUB_RUN_ID' GITHUB_REPOSITORY='$GITHUB_REPOSITORY' MANIFEST_VERSION='$manifest_version' bash '$remote_dir/backend_postgres_backup_restore_proof_remote.sh'" \
+            "sudo -n env REHEARSAL_DATABASE='$NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE' PROOF_DATABASE='$proof_database' REMOTE_DIR='$remote_dir' GITHUB_RUN_ID='$GITHUB_RUN_ID' GITHUB_REPOSITORY='$GITHUB_REPOSITORY' MANIFEST_VERSION='$manifest_version' bash '$remote_dir/backend_postgres_backup_restore_proof_remote.sh'"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "sudo -n cat /var/lib/nutsnews/postgres/backup-restore-proof.json" \
             | tee "$RUNNER_TEMP/backend-postgres-backup-restore-proof.json"
 
       - name: Validate proof artifact shape

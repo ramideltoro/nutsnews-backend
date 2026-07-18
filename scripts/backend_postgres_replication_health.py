@@ -120,6 +120,7 @@ def main_args(argv: list[str] | None = None) -> int:
     blockers: list[str] = []
     subscriptions: list[dict] = []
     slots: list[dict] = []
+    active_subscriptions: list[dict] = []
 
     if args.simulate_broken:
         status = "fail"
@@ -171,12 +172,12 @@ def main_args(argv: list[str] | None = None) -> int:
             blockers.append(error)
         else:
             subscriptions = json.loads(raw or "[]")
-            active = [item for item in subscriptions if item.get("pid_present")]
+            active_subscriptions = [item for item in subscriptions if item.get("pid_present")]
             max_lag = max((int(item["lag_seconds"]) for item in subscriptions if item.get("lag_seconds") is not None), default=None)
             if not subscriptions:
                 status = "not_configured"
                 lag_status = "not_configured"
-            elif not active:
+            elif not active_subscriptions:
                 status = "fail"
                 lag_status = "inactive"
                 blockers.append("subscription_inactive")
@@ -196,10 +197,20 @@ def main_args(argv: list[str] | None = None) -> int:
             else:
                 slots = json.loads(raw_slots or "[]")
                 inactive = [item for item in slots if not item.get("active")]
-                slot_status = "healthy" if slots and not inactive else "not_configured" if not slots else "inactive"
+                slots_with_lsn = [
+                    item
+                    for item in slots
+                    if item.get("restart_lsn_present") and item.get("confirmed_flush_lsn_present")
+                ]
+                if not slots:
+                    slot_status = "not_configured"
+                elif active_subscriptions and slots_with_lsn:
+                    slot_status = "healthy" if not inactive else "healthy_idle"
+                else:
+                    slot_status = "inactive" if inactive else "healthy"
                 if subscriptions and not slots:
                     blockers.append("source_replication_slot_missing")
-                if inactive:
+                if inactive and not active_subscriptions:
                     blockers.append("source_replication_slot_inactive")
         else:
             slot_status = "skipped_missing_source_db_url"

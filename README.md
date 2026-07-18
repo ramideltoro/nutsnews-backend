@@ -74,11 +74,15 @@ Use [runbooks/POSTGRES_REPLACEMENT_PLAN.md](runbooks/POSTGRES_REPLACEMENT_PLAN.m
 Use [runbooks/SUPABASE_BACKEND_POSTGRES_PARITY.md](runbooks/SUPABASE_BACKEND_POSTGRES_PARITY.md) before changing the Supabase-to-backend PostgreSQL parity manifest.
 Use [runbooks/DB_MIGRATION_CHANGE_FREEZE.md](runbooks/DB_MIGRATION_CHANGE_FREEZE.md) before changing database schema during the primary migration window.
 Use [runbooks/DB_MIGRATION_ACCESS.md](runbooks/DB_MIGRATION_ACCESS.md) before running migration access, restore, validation, replication, or cutover workflows.
+Use [runbooks/DB_MIGRATION_LOGICAL_REPLICATION.md](runbooks/DB_MIGRATION_LOGICAL_REPLICATION.md) before configuring Supabase-to-backend PostgreSQL logical replication.
+Use [runbooks/DB_MIGRATION_REPLICATION_HEALTH.md](runbooks/DB_MIGRATION_REPLICATION_HEALTH.md) before checking or alerting on logical replication health.
 Use [runbooks/DB_MIGRATION_SMOKE_TESTS.md](runbooks/DB_MIGRATION_SMOKE_TESTS.md) before running backend PostgreSQL query smoke tests.
 Use [runbooks/DB_MIGRATION_API_COMPATIBILITY.md](runbooks/DB_MIGRATION_API_COMPATIBILITY.md) before changing app or worker database provider compatibility.
 Use [runbooks/DB_MIGRATION_PROVIDER_SWITCH.md](runbooks/DB_MIGRATION_PROVIDER_SWITCH.md) before changing provider switch modes or rollback behavior.
 Use [runbooks/DB_MIGRATION_ROLLBACK_FAILBACK.md](runbooks/DB_MIGRATION_ROLLBACK_FAILBACK.md) before changing rollback, failback, or single-writer guardrails.
 Use [runbooks/DB_MIGRATION_PRODUCTION_CUTOVER.md](runbooks/DB_MIGRATION_PRODUCTION_CUTOVER.md) before running production cutover planning or protected cutover workflows.
+Use [runbooks/DB_MIGRATION_BENCHMARK_TUNING.md](runbooks/DB_MIGRATION_BENCHMARK_TUNING.md) before benchmarking or tuning backend PostgreSQL for primary workload.
+Use [runbooks/SUPABASE_PLATFORM_PARITY.md](runbooks/SUPABASE_PLATFORM_PARITY.md) before changing Supabase Auth, Storage, Realtime, Edge Function, Data API, or API key cutover decisions.
 
 The current Ansible scaffold is intentionally narrow. It defines the host contract, runtime choice, validation commands, required secret boundaries, and rollback expectations that later issues will fill in through Ansible roles and protected workflows.
 
@@ -125,5 +129,9 @@ python3 scripts/validate_backend_api_compatibility_contract.py
 python3 scripts/validate_backend_database_provider_switch.py
 python3 scripts/validate_backend_db_rollback_guardrails.py
 python3 scripts/validate_backend_production_cutover_plan.py
+python3 scripts/validate_backend_postgres_logical_replication_plan.py
+python3 scripts/backend_postgres_replication_health.py --offline
 python3 scripts/backend_postgres_smoke_tests.py --offline
+python3 scripts/backend_postgres_benchmark_tuning.py --offline
+python3 scripts/validate_backend_postgres_backup_proof.py
 ```

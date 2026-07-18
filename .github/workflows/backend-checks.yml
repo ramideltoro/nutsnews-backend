@@ -60,6 +60,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backup_service_matrix.py
 
+      - name: Validate PostgreSQL backup restore proof example
+        shell: bash
+        run: python3 scripts/validate_backend_postgres_backup_proof.py
+
       - name: Validate Grafana metrics dashboards
         shell: bash
         run: python3 scripts/provision_grafana_metrics.py --check
@@ -87,6 +91,10 @@ jobs:
       - name: Validate Supabase backend PostgreSQL parity manifest
         shell: bash
         run: python3 scripts/validate_supabase_backend_postgres_parity.py
+
+      - name: Validate Supabase platform parity decision
+        shell: bash
+        run: python3 scripts/validate_supabase_platform_parity_decision.py
 
       - name: Report migration drift gate status
         shell: bash
@@ -116,9 +124,21 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backend_production_cutover_plan.py
 
+      - name: Validate PostgreSQL logical replication plan
+        shell: bash
+        run: python3 scripts/validate_backend_postgres_logical_replication_plan.py
+
+      - name: Validate PostgreSQL replication health offline mode
+        shell: bash
+        run: python3 scripts/backend_postgres_replication_health.py --offline
+
       - name: Validate PostgreSQL smoke tests offline mode
         shell: bash
         run: python3 scripts/backend_postgres_smoke_tests.py --offline
+
+      - name: Validate PostgreSQL benchmark offline mode
+        shell: bash
+        run: python3 scripts/backend_postgres_benchmark_tuning.py --offline
 
       - name: Run backend drift check tests
         shell: bash

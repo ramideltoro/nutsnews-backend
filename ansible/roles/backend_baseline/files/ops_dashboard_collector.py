@@ -28,6 +28,7 @@ EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 
 SERVICES = ("ssh", "ufw", "fail2ban", "caddy", "docker", "postgresql", "alloy", "nutsnews-backup.timer")
 POSTGRES_STATE_DIR = Path("/var/lib/nutsnews/postgres")
+POSTGRES_REPLICATION_HEALTH_PATH = POSTGRES_STATE_DIR / "replication-health.json"
 
 
 def utc_now() -> str:
@@ -249,6 +250,21 @@ def collect() -> dict[str, Any]:
         "restore_drill": read_json(backup_dir / "last-restore-verification.json"),
     }
     postgres = read_json(POSTGRES_STATE_DIR / "status.json")
+    replication_health = read_json(POSTGRES_REPLICATION_HEALTH_PATH)
+    if isinstance(replication_health.get("replication"), dict):
+        postgres["replication"] = replication_health["replication"]
+    replication = postgres.get("replication", {}) if isinstance(postgres, dict) else {}
+    if isinstance(replication, dict):
+        blockers = replication.get("blockers", [])
+        if blockers or replication.get("status") in {"fail", "critical"} or replication.get("lag_status") in {"lagging", "inactive"}:
+            replication["dashboard_status"] = "critical"
+        elif replication.get("status") == "healthy" or replication.get("lag_status") == "healthy":
+            replication["dashboard_status"] = "healthy"
+        elif replication.get("status") in {"blocked", "warning"} or replication.get("lag_status") == "unknown":
+            replication["dashboard_status"] = "warning"
+        else:
+            replication["dashboard_status"] = "not_configured"
+        postgres["replication"] = replication
 
     return {
         "schema_version": 1,

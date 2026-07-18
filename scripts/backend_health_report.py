@@ -94,6 +94,11 @@ REMOTE_COMMANDS: dict[str, str] = {
         "cat /var/lib/nutsnews/postgres/status.json; "
         "else echo not_configured; fi"
     ),
+    "postgres_replication_health": (
+        "if test -r /var/lib/nutsnews/postgres/replication-health.json; then "
+        "cat /var/lib/nutsnews/postgres/replication-health.json; "
+        "else echo not_configured; fi"
+    ),
     "recent_errors": "journalctl -p err..alert -n 25 --no-pager 2>/dev/null || true",
     "sudo_nopasswd": "sudo -n true >/dev/null 2>&1 && echo yes || echo no",
 }
@@ -218,6 +223,29 @@ def status_from_backup_section(section: dict[str, Any]) -> str:
     if status in {"healthy", "warning", "critical", "not_configured", "unknown"}:
         return status
     return "unknown"
+
+
+def status_from_replication(replication: dict[str, Any]) -> str:
+    if not replication:
+        return "not_configured"
+    explicit = str(replication.get("status") or "").strip()
+    if explicit == "healthy":
+        return "healthy"
+    if explicit in {"fail", "critical"}:
+        return "critical"
+    if explicit in {"blocked", "warning"}:
+        return "warning"
+    lag_status = str(replication.get("lag_status") or "not_configured")
+    slot_status = str(replication.get("slot_status") or "not_configured")
+    validation_status = str(replication.get("validation_status") or "not_configured")
+    blockers = replication.get("blockers", [])
+    if blockers or lag_status in {"lagging", "inactive"} or slot_status == "inactive":
+        return "critical"
+    if lag_status in {"unknown"} or slot_status == "unknown" or validation_status == "stale":
+        return "warning"
+    if lag_status in {"healthy"}:
+        return "healthy"
+    return "not_configured"
 
 
 def run_ssh_command(host: str, user: str, key: str, known_hosts: str, command: str, timeout: int) -> dict[str, Any]:
@@ -455,6 +483,8 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
         )
 
     postgres_status_raw = command_stdout(report, "postgres_status").strip()
+    replication_health = parse_json_object(command_stdout(report, "postgres_replication_health"))
+    replication_from_health = replication_health.get("replication", {}) if isinstance(replication_health.get("replication"), dict) else {}
     if postgres_status_raw == "not_configured" or not postgres_status_raw:
         checks.append(
             {
@@ -463,14 +493,16 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
                 "summary": "postgres_restore_readiness=not_configured",
             }
         )
+        replication_for_check = replication_from_health
     else:
         postgres_status = parse_json_object(postgres_status_raw)
         last_restore = postgres_status.get("last_restore_drill", {})
         restore_status = str(last_restore.get("status") or "unknown") if isinstance(last_restore, dict) else "unknown"
         if restore_status not in {"healthy", "warning", "critical", "unknown", "not_configured"}:
             restore_status = "unknown"
-        replication = postgres_status.get("replication", {})
+        replication = replication_from_health or postgres_status.get("replication", {})
         lag_status = str(replication.get("lag_status") or "not_configured") if isinstance(replication, dict) else "not_configured"
+        replication_for_check = replication if isinstance(replication, dict) else {}
         checks.append(
             {
                 "name": "postgres_restore_readiness",
@@ -482,6 +514,18 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
                 ),
             }
         )
+    checks.append(
+        {
+            "name": "postgres_replication_health",
+            "status": status_from_replication(replication_for_check),
+            "summary": (
+                f"mode={replication_for_check.get('mode', 'not_configured')} "
+                f"lag={replication_for_check.get('lag_status', 'not_configured')} "
+                f"max_lag_seconds={replication_for_check.get('max_lag_seconds', 'unknown')} "
+                f"slot={replication_for_check.get('slot_status', 'not_configured')}"
+            ),
+        }
+    )
 
     sudo_state = command_stdout(report, "sudo_nopasswd").strip()
     checks.append(
@@ -661,6 +705,8 @@ def failure_class_for_check(check: dict[str, Any]) -> str:
         return "missing_data"
     if name.startswith("backup_"):
         return name
+    if name == "postgres_replication_health":
+        return "replication_health"
     if "disk" in name or "inode" in name:
         return "disk_pressure"
     if name.startswith("service_"):

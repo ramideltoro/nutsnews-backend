@@ -101,10 +101,16 @@ function renderPostgres(postgres) {
   const target = document.getElementById("postgres");
   target.replaceChildren();
   const restoreStatus = postgres?.last_restore_drill?.status || postgres?.status || "not_configured";
+  const replication = postgres?.replication || {};
+  const replicationDetail = [
+    replication.mode || "not_configured",
+    replication.max_lag_seconds !== undefined && replication.max_lag_seconds !== null ? `${replication.max_lag_seconds}s lag` : null,
+    replication.slot_status ? `slot ${replication.slot_status}` : null,
+  ].filter(Boolean).join(" | ");
   const rows = [
     ["Target", postgres?.database || "not_configured", postgres?.status || "not_configured"],
     ["Restore Drill", postgres?.last_restore_drill?.completed_at_utc || "not run", restoreStatus],
-    ["Replication", postgres?.replication?.mode || "not_configured", postgres?.replication?.lag_status || "not_configured"],
+    ["Replication", replicationDetail || "not_configured", replication.dashboard_status || replication.lag_status || "not_configured"],
     ["Dashboard", postgres?.dashboard?.access_boundary || "not_configured", postgres?.dashboard ? "healthy" : "not_configured"],
   ];
   for (const [labelText, detailText, status] of rows) {
@@ -129,6 +135,7 @@ function overallStatus(data) {
     backupStatus(data.backup?.verification),
     backupStatus(data.backup?.restore_drill),
     data.postgres?.last_restore_drill?.status || data.postgres?.status,
+    data.postgres?.replication?.dashboard_status || data.postgres?.replication?.lag_status,
     ...(data.services || []).map((service) => service.status),
   ];
   return statuses.sort((a, b) => (statusRank[b] ?? 2) - (statusRank[a] ?? 2))[0] || "unknown";

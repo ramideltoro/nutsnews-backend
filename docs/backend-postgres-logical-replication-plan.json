@@ -1,0 +1,83 @@
+{
+  "issue": 109,
+  "plan_id": "backend-postgres-logical-replication",
+  "updated_at_utc": "2026-07-18",
+  "status": "planned_blocked_on_live_credentials_and_approval",
+  "source": {
+    "project_ref_secret": "NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF",
+    "db_url_secret": "NUTSNEWS_PRODUCTION_SUPABASE_DB_URL",
+    "direct_connection_required": true,
+    "connection_pooler_allowed": false,
+    "ipv4_or_ipv6_requirement_must_be_recorded": true
+  },
+  "target": {
+    "host_variable": "NUTSNEWS_BACKEND_HOST",
+    "database_variable": "NUTSNEWS_BACKEND_POSTGRES_REHEARSAL_DATABASE",
+    "network_path": "ssh_tunnel_to_loopback_postgresql",
+    "public_5432_allowed": false
+  },
+  "replication_names": {
+    "publication": "nutsnews_backend_migration_pub",
+    "slot": "nutsnews_backend_migration_slot",
+    "subscription": "nutsnews_backend_migration_sub"
+  },
+  "publication_tables": [
+    "public.ai_usage_runs",
+    "public.article_ai_reviews",
+    "public.article_summaries",
+    "public.articles",
+    "public.feed_health",
+    "public.feed_quality_scores",
+    "public.migration_schema_contract",
+    "public.quota_usage_events",
+    "public.release_readiness",
+    "public.rss_feeds",
+    "public.runtime_feature_flags",
+    "public.worker_runs"
+  ],
+  "replica_identity": {
+    "default": "required_primary_key_or_unique_identity",
+    "tables_without_identity": [],
+    "validation_required": true,
+    "validation_query": "select n.nspname || '.' || c.relname as table_name from pg_class c join pg_namespace n on n.oid = c.relnamespace where c.relkind = 'r' and n.nspname = 'public' and not exists (select 1 from pg_index i where i.indrelid = c.oid and (i.indisprimary or i.indisreplident))"
+  },
+  "staging_rehearsal": {
+    "required_before_production": true,
+    "required_status": "streaming_or_equivalent_healthy",
+    "change_tests": [
+      "insert",
+      "update",
+      "delete",
+      "truncate"
+    ],
+    "production_writes_allowed": false
+  },
+  "slot_risk_checks": [
+    "pg_replication_slots.active",
+    "pg_replication_slots.restart_lsn",
+    "retained_wal_bytes_or_lsn_lag",
+    "target_subscription_status",
+    "backend_disk_free_bytes"
+  ],
+  "refresh_policy": {
+    "when_publication_tables_change": "run ALTER SUBSCRIPTION refresh publication on the backend target after protected approval",
+    "manifest_change_required": true
+  },
+  "rollback": [
+    "disable or drop backend subscription",
+    "drop Supabase replication slot after confirming no subscriber needs it",
+    "drop Supabase publication only after production cutover path no longer depends on it",
+    "remove migration-only replication credentials after rehearsal or retirement"
+  ],
+  "live_blockers": [
+    "local NUTSNEWS_PRODUCTION_SUPABASE_DB_URL points at the staging project ref and rejects authentication",
+    "NUTSNEWS_STAGING_SUPABASE_DB_URL is not present in production-backend",
+    "production-backend protected environment approval is required for live setup"
+  ],
+  "external_references": [
+    "https://supabase.com/docs/guides/database/postgres/setup-replication-external",
+    "https://supabase.com/docs/guides/database/replication",
+    "https://www.postgresql.org/docs/current/sql-altersubscription.html"
+  ],
+  "safe_metadata_only": true
+}

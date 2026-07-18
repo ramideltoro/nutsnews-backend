@@ -81,6 +81,55 @@ class BackendPostgresReplicationHealthTests(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         self.assertIn("source_slot_check_skipped_missing_source_db_url", report["blockers"])
 
+    def test_idle_source_slot_with_current_subscription_is_healthy(self):
+        subscription_payload = json.dumps(
+            [
+                {
+                    "subscription": "nutsnews_backend_migration_sub",
+                    "pid_present": True,
+                    "received_lsn_present": True,
+                    "latest_end_lsn_present": True,
+                    "lag_seconds": 14,
+                }
+            ]
+        )
+        slot_payload = json.dumps(
+            [
+                {
+                    "slot_name": "nutsnews_backend_migration_slot",
+                    "active": False,
+                    "restart_lsn_present": True,
+                    "confirmed_flush_lsn_present": True,
+                }
+            ]
+        )
+
+        def fake_run_psql(_db_url, query):
+            if "pg_stat_subscription" in query:
+                return subscription_payload, None
+            return slot_payload, None
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = Path(tmpdir) / "health.json"
+            with mock.patch.dict(
+                "os.environ",
+                {
+                    "NUTSNEWS_BACKEND_TARGET_DB_URL": "postgresql://target-redacted",
+                    "NUTSNEWS_SOURCE_DB_URL": "postgresql://source-redacted",
+                },
+                clear=True,
+            ):
+                with mock.patch.object(backend_postgres_replication_health, "run_psql", side_effect=fake_run_psql):
+                    with redirect_stdout(StringIO()):
+                        exit_code = backend_postgres_replication_health.main_args(
+                            ["--output", str(output), "--enforce"]
+                        )
+            report = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(report["status"], "healthy")
+        self.assertEqual(report["replication"]["slot_status"], "healthy_idle")
+        self.assertEqual(report["blockers"], [])
+
     def test_simulated_broken_mode_fails_with_clear_blocker(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             output = Path(tmpdir) / "health.json"

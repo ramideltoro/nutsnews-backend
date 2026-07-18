@@ -121,7 +121,18 @@ def value_sql(column: dict[str, Any], token: str, phase: str) -> str:
     udt = str(column.get("udt_name", ""))
     suffix = "updated" if phase == "updated" else "initial"
     if udt in TEXT_UDTS:
-        return literal(f"{PROBE_TOKEN_PREFIX}{token}_{suffix}")
+        name = str(column.get("name", ""))
+        short = token[:12]
+        short_suffix = "u" if phase == "updated" else "i"
+        if name == "key":
+            return literal(f"codex_probe_{short}_{short_suffix}")
+        if name == "migration_head":
+            return literal(f"20260718170000_codex_probe_{short_suffix}")
+        if name == "schema_fingerprint":
+            return literal(f"sha256:{token}")
+        if name == "schema_version":
+            return literal(f"0.0.0-codex-probe.{short_suffix}")
+        return literal(f"{PROBE_TOKEN_PREFIX}{short}_{short_suffix}")
     if udt in UUID_UDTS:
         return literal(str(uuid.uuid5(uuid.NAMESPACE_URL, f"{token}:{column['name']}:{phase}"))) + "::uuid"
     if udt in BOOL_UDTS:

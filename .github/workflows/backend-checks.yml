@@ -88,6 +88,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_supabase_backend_postgres_parity.py
 
+      - name: Validate Supabase platform parity decision
+        shell: bash
+        run: python3 scripts/validate_supabase_platform_parity_decision.py
+
       - name: Report migration drift gate status
         shell: bash
         run: python3 scripts/check_supabase_migration_drift.py

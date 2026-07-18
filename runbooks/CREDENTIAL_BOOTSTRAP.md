@@ -113,6 +113,20 @@ Supabase:
 
 Use a Supabase personal access token for CLI and Management API automation. Keep the service role key and database URL only in protected secrets.
 
+Backend PostgreSQL migration roles:
+
+- `NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD`
+- `NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD`
+- `NUTSNEWS_BACKEND_POSTGRES_MIGRATION_RESTORE_PASSWORD`
+- `NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD`
+- `NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD`
+- `NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD`
+
+These passwords are runtime-scoped or migration-only. Rotate or revoke restore,
+validation, replication, and app rehearsal credentials after staging rehearsal,
+production cutover, or rollback according to
+[DB_MIGRATION_ACCESS.md](DB_MIGRATION_ACCESS.md).
+
 Restic backups:
 
 - `RESTIC_REPOSITORY`

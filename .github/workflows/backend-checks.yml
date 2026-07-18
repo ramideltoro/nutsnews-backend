@@ -84,6 +84,18 @@ jobs:
         shell: bash
         run: python3 scripts/validate_postgres_replacement_plan.py
 
+      - name: Validate Supabase backend PostgreSQL parity manifest
+        shell: bash
+        run: python3 scripts/validate_supabase_backend_postgres_parity.py
+
+      - name: Report migration drift gate status
+        shell: bash
+        run: python3 scripts/check_supabase_migration_drift.py
+
+      - name: Validate migration access preflight offline mode
+        shell: bash
+        run: python3 scripts/backend_postgres_migration_access_preflight.py --offline
+
       - name: Run backend drift check tests
         shell: bash
         run: python3 -m unittest discover -s tests

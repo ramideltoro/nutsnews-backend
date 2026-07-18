@@ -112,6 +112,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backend_db_rollback_guardrails.py
 
+      - name: Validate backend production cutover plan
+        shell: bash
+        run: python3 scripts/validate_backend_production_cutover_plan.py
+
       - name: Validate PostgreSQL smoke tests offline mode
         shell: bash
         run: python3 scripts/backend_postgres_smoke_tests.py --offline

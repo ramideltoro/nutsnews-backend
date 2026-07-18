@@ -1,0 +1,68 @@
+{
+  "plan_id": "backend-production-cutover-plan",
+  "issue": 116,
+  "status": "runbook_and_dry_run_committed",
+  "depends_on": [
+    115,
+    118
+  ],
+  "production_environment": "production-backend",
+  "mutation_confirmation": "execute-production-db-cutover",
+  "dry_run_confirmation": "plan-production-cutover-only",
+  "operations": [
+    "dry-run",
+    "preflight-only",
+    "final-replication-catchup",
+    "final-dump-restore",
+    "switch-provider",
+    "rollback"
+  ],
+  "preflight_gates": [
+    "backup freshness and restore proof",
+    "replication health or approved final dump path",
+    "parity validation",
+    "query smoke tests",
+    "API compatibility contract",
+    "provider switch contract",
+    "rollback guardrails",
+    "ops dashboard health",
+    "disk capacity",
+    "staging rehearsal evidence"
+  ],
+  "production_sequence": [
+    "announce maintenance window",
+    "run preflight-only",
+    "pause app and worker writers",
+    "verify writer pause",
+    "run final-replication-catchup or final-dump-restore",
+    "run parity validation and smoke tests",
+    "switch provider mode to backend_postgres_primary",
+    "monitor through rollback window",
+    "record go/no-go and evidence"
+  ],
+  "abort_criteria": [
+    "missing staging rehearsal evidence",
+    "backup or restore proof stale",
+    "replication lag or slot health critical",
+    "parity validation failure",
+    "smoke test failure",
+    "writer pause cannot be proven",
+    "dashboard or health report critical",
+    "rollback boundary unclear"
+  ],
+  "rollback_decision_points": [
+    "before backend_postgres_primary accepts writes, return to supabase_primary",
+    "after backend-only authoritative writes, use forward recovery unless reviewed sync-back evidence exists"
+  ],
+  "workflow": {
+    "path": ".github/workflows/backend-production-cutover.yml",
+    "protected_environment": "production-backend",
+    "default_operation": "dry-run",
+    "mutates_production_by_default": false
+  },
+  "validation": {
+    "local_validator": "python3 scripts/validate_backend_production_cutover_plan.py",
+    "plan_renderer": "python3 scripts/backend_production_cutover_plan.py --operation dry-run",
+    "live_status": "blocked until staging rehearsal evidence from #115 exists"
+  }
+}

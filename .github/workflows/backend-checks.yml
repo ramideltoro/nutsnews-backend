@@ -112,6 +112,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backend_api_compatibility_contract.py
 
+      - name: Validate backend database provider switch
+        shell: bash
+        run: python3 scripts/validate_backend_database_provider_switch.py
+
       - name: Validate PostgreSQL logical replication plan
         shell: bash
         run: python3 scripts/validate_backend_postgres_logical_replication_plan.py

@@ -1,0 +1,67 @@
+name: Backend Database Provider Switch Dry Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Provider mode to validate without mutation.
+        required: true
+        default: supabase_primary
+        type: choice
+        options:
+          - supabase_primary
+          - backend_postgres_shadow
+          - backend_postgres_primary
+      environment:
+        description: Target environment label for the dry run.
+        required: true
+        default: non-production
+        type: choice
+        options:
+          - non-production
+          - production
+      confirmation:
+        description: Required only to model backend_postgres_primary.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-database-provider-switch-dry-run-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dry-run:
+    name: Provider switch dry run
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate provider switch contract
+        shell: bash
+        run: python3 scripts/validate_backend_database_provider_switch.py
+
+      - name: Render non-mutating switch plan
+        shell: bash
+        run: |
+          python3 scripts/backend_database_provider_switch_plan.py \
+            --mode "${{ inputs.mode }}" \
+            --environment "${{ inputs.environment }}" \
+            --confirmation "${{ inputs.confirmation }}" \
+            --output "$RUNNER_TEMP/backend-database-provider-switch-plan.json"
+
+      - name: Upload provider switch plan
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-database-provider-switch-plan
+          path: ${{ runner.temp }}/backend-database-provider-switch-plan.json
+          if-no-files-found: ignore

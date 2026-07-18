@@ -1,0 +1,116 @@
+{
+  "slug": "backend-caddy-request-traffic",
+  "issue": 146,
+  "dashboard": {
+    "name": "NutsNews Backend - Edge - Caddy Request Traffic",
+    "description": "24 hour dashboard for Caddy request volume, status mix, redirects, errors, latency, safe paths, and bounded user-agent facets. Managed from ramideltoro/nutsnews-backend.",
+    "permissions": "PUBLIC_READ_ONLY",
+    "pages": [
+      {
+        "name": "Caddy traffic",
+        "description": "Request traffic and forwarding health from parsed Caddy logs.",
+        "widgets": [
+          {
+            "title": "Requests by status",
+            "layout": {"column": 1, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*) FROM Log WHERE service.name = 'nutsnews-backend-production' AND unit = 'caddy' FACET http.statusCode TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Redirect volume",
+            "layout": {"column": 5, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*) FROM Log WHERE service.name = 'nutsnews-backend-production' AND unit = 'caddy' AND http.statusCode >= 300 AND http.statusCode < 400 FACET http.statusCode TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "4xx and 5xx trend",
+            "layout": {"column": 9, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*) FROM Log WHERE service.name = 'nutsnews-backend-production' AND unit = 'caddy' AND http.statusCode >= 400 FACET http.statusCode TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Request latency",
+            "layout": {"column": 1, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT average(request.durationMs), percentile(request.durationMs, 95) FROM Log WHERE service.name = 'nutsnews-backend-production' AND unit = 'caddy' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Top safe paths",
+            "layout": {"column": 5, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*), average(request.durationMs) FROM Log WHERE service.name = 'nutsnews-backend-production' AND unit = 'caddy' FACET request.path LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Top user agents",
+            "layout": {"column": 9, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*) FROM Log WHERE service.name = 'nutsnews-backend-production' AND unit = 'caddy' FACET userAgent.name LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Upstream failures",
+            "layout": {"column": 1, "row": 7, "height": 3, "width": 8},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT count(*), latest(http.statusCode), latest(request.method) FROM Log WHERE service.name = 'nutsnews-backend-production' AND unit = 'caddy' AND http.statusCode >= 500 FACET request.path LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Edge triage",
+            "layout": {"column": 9, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.markdown"},
+            "rawConfiguration": {
+              "text": "Use status trends first, then check redirects, upstream failures, and bounded parsed path facets. Avoid raw query-string analysis."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

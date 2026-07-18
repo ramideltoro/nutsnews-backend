@@ -1,0 +1,116 @@
+{
+  "slug": "backend-php-fpm-runtime-pool-health",
+  "issue": 144,
+  "dashboard": {
+    "name": "NutsNews Backend - Runtime - PHP-FPM Pool Health",
+    "description": "24 hour dashboard for PHP-FPM worker capacity, listen queue pressure, max children, slow requests, process churn, and APM latency correlation. Managed from ramideltoro/nutsnews-backend.",
+    "permissions": "PUBLIC_READ_ONLY",
+    "pages": [
+      {
+        "name": "PHP-FPM pool health",
+        "description": "Runtime capacity and saturation signals for PHP-FPM.",
+        "widgets": [
+          {
+            "title": "Worker capacity",
+            "layout": {"column": 1, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(php_fpm.pool.activeProcesses), latest(php_fpm.pool.idleProcesses), latest(php_fpm.pool.totalProcesses) FROM Metric WHERE service.name = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Listen queue pressure",
+            "layout": {"column": 5, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(php_fpm.pool.listenQueue), latest(php_fpm.pool.maxListenQueue), latest(php_fpm.pool.listenQueueLength) FROM Metric WHERE service.name = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Max children reached",
+            "layout": {"column": 9, "row": 1, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(php_fpm.pool.maxChildrenReached) FROM Metric WHERE service.name = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Slow requests",
+            "layout": {"column": 1, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(php_fpm.pool.slowRequests) FROM Metric WHERE service.name = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Process churn",
+            "layout": {"column": 5, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(php_fpm.pool.startSince), latest(php_fpm.pool.acceptedConnections) FROM Metric WHERE service.name = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "APM latency correlation",
+            "layout": {"column": 9, "row": 4, "height": 3, "width": 4},
+            "visualization": {"id": "viz.line"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT percentile(duration, 95), average(duration) FROM Transaction WHERE appName = 'nutsnews-backend-production' TIMESERIES SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Pool summary",
+            "layout": {"column": 1, "row": 7, "height": 3, "width": 8},
+            "visualization": {"id": "viz.table"},
+            "rawConfiguration": {
+              "nrqlQueries": [
+                {
+                  "accountIds": ["{{ACCOUNT_ID}}"],
+                  "query": "SELECT latest(php_fpm.pool.activeProcesses), latest(php_fpm.pool.idleProcesses), latest(php_fpm.pool.listenQueue), latest(php_fpm.pool.maxChildrenReached) FROM Metric WHERE service.name = 'nutsnews-backend-production' FACET pool.name LIMIT 10 SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Setup note",
+            "layout": {"column": 9, "row": 7, "height": 3, "width": 4},
+            "visualization": {"id": "viz.markdown"},
+            "rawConfiguration": {
+              "text": "Dashboard queries expect PHP-FPM pool metrics from a local or integration source. Keep any status endpoint private or local-only."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

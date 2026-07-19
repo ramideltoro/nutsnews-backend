@@ -93,6 +93,6 @@
   "validation": {
     "local_validator": "python3 scripts/validate_backend_db_rollback_guardrails.py",
     "dry_run_workflow": ".github/workflows/backend-db-rollback-guardrails-dry-run.yml",
-    "live_status": "blocked until staging rehearsal proves rollback without losing test data"
+    "live_status": "staging rehearsal complete and app/worker pause guards deployed; final catch-up, backend primary, and rollback-window phases remain blocked until live writer pause, Supabase no-new-write watermark evidence, and rollback owner coverage are recorded"
   }
 }

@@ -69,8 +69,23 @@ evidence are available. After backend PostgreSQL accepts authoritative writes
 beyond a verified Supabase sync point, rollback becomes forward recovery unless
 a reviewed sync-back procedure exists.
 
-## Current Blockers
+## Current Status
 
-- App provider modes: https://github.com/ramideltoro/nutsnews/issues/255
-- Worker provider modes: https://github.com/ramideltoro/nutsnews-worker/issues/27
-- Staging rehearsal must prove shadow mode, primary mode, and rollback.
+App and worker provider modes are implemented:
+
+- App provider tracker: https://github.com/ramideltoro/nutsnews/issues/255
+- Worker provider tracker: https://github.com/ramideltoro/nutsnews-worker/issues/27
+- Backend provider-shadow dry-run:
+  https://github.com/ramideltoro/nutsnews-backend/actions/runs/29705168086
+
+Remaining production blockers:
+
+- app and worker provider-switch owner approval;
+- final go/no-go owner approval;
+- protected production cutover workflow approval;
+- verified writer-pause and Supabase no-new-write watermark evidence;
+- rollback owner coverage through the rollback window.
+
+Do not run production `backend_postgres_primary` through the standalone
+provider-switch dry-run workflow. It must continue to fail closed outside the
+protected production cutover path.

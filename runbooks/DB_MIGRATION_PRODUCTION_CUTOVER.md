@@ -65,17 +65,42 @@ Abort if staging rehearsal evidence is missing, writer pause cannot be proven,
 backup/replication/parity/smoke checks fail, dashboard health is critical, or
 the rollback boundary is unclear.
 
-## Current Blocker
+## Current Status
 
-The backend database gates are complete, but mutating cutover operations remain
-blocked in the current workflow scaffold until coordinated production cutover
-ownership exists outside this backend DB-only path:
+The backend database gates are complete, and the app/worker writer-pause
+controls have now been deployed in production without changing the database
+provider:
+
+- app readiness reports `productionWritesPaused=true` and
+  `databaseProviderMode=supabase_primary`;
+- the Vercel production release run
+  `https://github.com/ramideltoro/nutsnews/actions/runs/29704129436` promoted
+  commit `936062eee2ed097817a81f881920faa9808c2fac` with
+  `PRODUCTION_WRITES_PAUSED=true`;
+- the worker pipeline run
+  `https://github.com/ramideltoro/nutsnews-worker/actions/runs/29703213882`
+  deployed all 25 worker shards with
+  `NUTSNEWS_PRODUCTION_WRITES_PAUSED=true`;
+- backend provider-shadow dry-run
+  `https://github.com/ramideltoro/nutsnews-backend/actions/runs/29705168086`
+  remains non-mutating and ready;
+- production `backend_postgres_primary` still fails closed outside the
+  protected cutover workflow with
+  `production_switch_requires_protected_cutover_workflow`;
+- final catch-up/rollback-window guardrails still fail closed until live
+  writer-pause and Supabase no-new-write watermark evidence is attached.
+
+Mutating cutover operations remain blocked until coordinated production
+cutover ownership exists:
 
 - maintenance window approval;
-- app, worker, scheduler, and admin writer pause evidence;
+- verified app, worker, scheduler, and admin writer-pause evidence, including
+  Supabase no-new-write watermarks after the pause;
 - app and worker provider switch owner approval;
 - final go/no-go owner approval;
 - rollback owner coverage through the rollback window.
+- `production-backend` approval for refreshed DB gate workflows and the
+  eventual protected cutover run.
 
 Supabase remains the production writer until the protected cutover is explicitly
 approved and executed.

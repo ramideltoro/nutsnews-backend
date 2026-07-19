@@ -48,7 +48,17 @@ accepted authoritative writes beyond the verified Supabase sync point. After
 that boundary, failback requires a reviewed sync-back procedure; otherwise the
 recovery path is forward recovery on backend PostgreSQL.
 
-## Current Blocker
+## Current Status
 
-Staging rehearsal must prove rollback without losing test data before
-production cutover can proceed.
+Staging rehearsal has completed, and app/worker pause guards are deployed. The
+remaining rollback blockers are live-cutover specific:
+
+- live writer-pause evidence across app, worker, scheduler, and admin paths;
+- Supabase no-new-write watermark evidence after the pause timestamp;
+- rollback owner coverage through the full rollback window;
+- provider-switch owner approval and final go/no-go.
+
+Final catch-up, backend-primary, and rollback-window guardrail plans must keep
+failing closed until that live evidence is attached. If backend PostgreSQL
+accepts authoritative writes beyond the verified Supabase sync point, rollback
+becomes forward recovery unless a reviewed sync-back procedure exists.

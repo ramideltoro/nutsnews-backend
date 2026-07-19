@@ -80,8 +80,10 @@ def main() -> int:
         errors.append("local_validator must name this validator")
     if validation.get("dry_run_workflow") != ".github/workflows/backend-db-rollback-guardrails-dry-run.yml":
         errors.append("dry_run_workflow must name the workflow")
-    if "blocked until staging rehearsal" not in validation.get("live_status", ""):
-        errors.append("live_status must record staging rehearsal blocker")
+    live_status = validation.get("live_status", "")
+    for required in ("staging rehearsal complete", "live writer pause", "rollback owner"):
+        if required not in live_status:
+            errors.append(f"live_status must record rollback status: {required}")
 
     if errors:
         for error in errors:

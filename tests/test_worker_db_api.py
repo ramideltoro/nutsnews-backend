@@ -99,6 +99,120 @@ class WorkerDbApiTests(unittest.TestCase):
         self.assertNotIn("malicious", query)
         self.assertEqual(len(params), len(worker_db_api.WRITE_TABLE_COLUMNS["worker_runs"]))
 
+    def test_app_smoke_does_not_touch_database(self) -> None:
+        store = FakeStore()
+
+        result = worker_db_api.handle_app_operation(
+            "app-provider-smoke",
+            {"providerMode": "backend_postgres_shadow"},
+            store,
+        )
+
+        self.assertEqual({"ok": True, "provider": "backend_postgres", "writesEnabled": False}, result)
+        self.assertEqual([], store.fetches)
+        self.assertEqual([], store.executes)
+
+    def test_app_public_feed_read_is_bounded_and_allowlisted(self) -> None:
+        store = FakeStore()
+
+        worker_db_api.handle_app_operation(
+            "load-public-feed-snapshot",
+            {
+                "providerMode": "backend_postgres_shadow",
+                "category": "science",
+                "limit": 2,
+                "offset": 3,
+            },
+            store,
+        )
+
+        query, params = store.fetches[0]
+        self.assertIn("from public.public_feed_snapshot", query)
+        self.assertIn("category ilike %s", query)
+        self.assertIn("order by snapshot_rank asc", query)
+        self.assertEqual(("%science%", 2, 3), params)
+
+    def test_app_shadow_write_is_rejected_before_database_call(self) -> None:
+        store = FakeStore()
+
+        with self.assertRaises(worker_db_api.ApiError) as error:
+            worker_db_api.handle_app_operation(
+                "record-quota-usage-event",
+                {
+                    "providerMode": "backend_postgres_shadow",
+                    "eventType": "email_send",
+                    "eventSource": "contact",
+                },
+                store,
+            )
+
+        self.assertEqual(409, error.exception.status)
+        self.assertEqual([], store.executes)
+
+    def test_app_primary_write_requires_deployment_guardrail(self) -> None:
+        store = FakeStore()
+
+        with self.assertRaises(worker_db_api.ApiError) as error:
+            worker_db_api.handle_app_operation(
+                "record-quota-usage-event",
+                {
+                    "providerMode": "backend_postgres_primary",
+                    "eventType": "email_send",
+                    "eventSource": "contact",
+                },
+                store,
+            )
+
+        self.assertEqual(403, error.exception.status)
+        self.assertEqual([], store.executes)
+
+    def test_app_quota_write_uses_allowlisted_insert(self) -> None:
+        store = FakeStore()
+        store.writes_enabled = True
+
+        result = worker_db_api.handle_app_operation(
+            "record-quota-usage-event",
+            {
+                "providerMode": "backend_postgres_primary",
+                "eventType": "email_send",
+                "eventSource": "contact",
+                "provider": "resend",
+                "quantity": 2,
+                "metadata": {"ok": True, "unexpected_column": "blocked"},
+            },
+            store,
+        )
+
+        query, params = store.executes[0]
+        self.assertEqual({"ok": True}, result)
+        self.assertIn("insert into public.quota_usage_events", query)
+        self.assertNotIn("unexpected_column", query)
+        self.assertEqual(("email_send", "contact", "resend", 2, '{"ok":true,"unexpected_column":"blocked"}'), params)
+
+    def test_app_engagement_write_uses_database_function(self) -> None:
+        store = FakeStore()
+        store.writes_enabled = True
+
+        worker_db_api.handle_app_operation(
+            "record-article-engagement-event",
+            {
+                "providerMode": "backend_postgres_primary",
+                "eventType": "outbound_click",
+                "articleId": "00000000-0000-0000-0000-000000000001",
+                "source": "Example",
+                "category": "Science",
+                "quantity": 1,
+            },
+            store,
+        )
+
+        query, params = store.fetches[0]
+        self.assertIn("public.record_article_engagement_event", query)
+        self.assertEqual(
+            ("outbound_click", "00000000-0000-0000-0000-000000000001", "Example", "Science", 1),
+            params,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

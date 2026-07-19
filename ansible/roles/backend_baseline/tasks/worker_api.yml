@@ -144,4 +144,5 @@
       db_user: "{{ backend_worker_api_db_user }}"
       writes_enabled: "{{ backend_worker_api_writes_enabled }}"
       public_route: "https://{{ backend_domain }}/api/worker/db/*"
+      app_route: "https://{{ backend_domain }}/api/app/db/*"
       health: "{{ backend_worker_api_health.stdout_lines | default([]) }}"

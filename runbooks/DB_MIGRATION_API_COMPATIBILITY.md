@@ -20,6 +20,12 @@ Validator:
 python3 scripts/validate_backend_api_compatibility_contract.py
 ```
 
+Offline app API smoke:
+
+```bash
+python3 scripts/backend_app_db_api_smoke.py --offline
+```
+
 ## Provider Modes
 
 | Mode | Writer | Production responses | Notes |
@@ -33,31 +39,40 @@ python3 scripts/validate_backend_api_compatibility_contract.py
 - App: https://github.com/ramideltoro/nutsnews/issues/255
 - Worker: https://github.com/ramideltoro/nutsnews-worker/issues/27
 - Worker API endpoint/token provisioning: https://github.com/ramideltoro/nutsnews-backend/issues/242
+- App API endpoint/token provisioning: https://github.com/ramideltoro/nutsnews-backend/issues/247
 
 Backend cutover remains blocked until those repos can run the smoke-test
 capabilities against backend PostgreSQL in non-production.
 
-## Worker Database API
+## App And Worker Database API
 
-The backend Worker database compatibility API is disabled by default and, when
-enabled, is bound on loopback behind Caddy at:
+The backend database compatibility API is disabled by default and, when enabled,
+is bound on loopback behind Caddy at:
 
 ```text
+https://backend.nutsnews.com/api/app/db/*
 https://backend.nutsnews.com/api/worker/db/*
 ```
 
 Protected apply inputs:
 
 - `NUTSNEWS_BACKEND_WORKER_API_ENABLED=true` enables the loopback service and
-  Caddy route.
+  Caddy routes.
 - `NUTSNEWS_BACKEND_API_TOKEN` is the bearer token accepted by the backend API
-  and sent by the Worker runtime.
+  and sent by the app server runtime and Worker runtime.
 - `NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED=false` keeps writes fail-closed
   for shadow parity.
 
 The initial shadow configuration uses the backend PostgreSQL read-only role
 against `nutsnews_primary_shadow`. Backend writes remain disabled until the
 production cutover issue explicitly approves `backend_postgres_primary`.
+
+App operations are allow-listed separately from worker operations. Current app
+coverage includes public feed/article/search/sitemap reads, runtime feature
+flags, readiness schema-contract reads, bounded admin dashboard read snapshots,
+quota usage writes, article engagement writes, and runtime feature flag writes.
+Write operations must return `409` in `backend_postgres_shadow` and `403` when
+`backend_postgres_primary` is selected but deployment writes are still disabled.
 
 ## Authorization Rules
 

@@ -63,10 +63,13 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("{{ backend_postgres_worker_api_user }}", enforce_grant)
         self.assertIn("not ansible_check_mode", enforce_grant)
         self.assertIn("Ensure Worker API read role exists", tasks)
-        self.assertIn("Allow Worker API role to read future-primary shadow worker objects", tasks)
+        self.assertIn("Allow database API role to read future-primary shadow app and worker objects", tasks)
         self.assertIn("GRANT SELECT ON TABLE %s TO %I", tasks)
         self.assertIn("public.rss_feeds", tasks)
         self.assertIn("public.runtime_feature_flags", tasks)
+        self.assertIn("public.quota_usage_events", tasks)
+        self.assertIn("public.article_engagement_source_category_summary", tasks)
+        self.assertIn("GRANT EXECUTE ON FUNCTION public.record_article_engagement_event", tasks)
         self.assertNotIn("GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO %I', '{{ backend_postgres_worker_api_user }}'", tasks)
 
     def test_caddy_exposes_adminer_only_on_loopback(self):
@@ -76,6 +79,7 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("php_fastcgi {{ backend_db_dashboard_php_fpm_listen }}", caddy)
         self.assertNotIn("{{ backend_domain }}/adminer", caddy)
         self.assertIn("handle /api/worker/db/*", caddy)
+        self.assertIn("handle /api/app/db/*", caddy)
         self.assertIn("reverse_proxy http://{{ backend_worker_api_bind }}:{{ backend_worker_api_port }}", caddy)
 
     def test_firewall_does_not_open_database_or_dashboard_ports(self):

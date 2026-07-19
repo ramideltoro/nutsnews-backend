@@ -1,0 +1,93 @@
+name: Backend Sync App Backend API Token
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type sync-app-production-backend-api-token to copy the backend API token into the app Production environment.
+        required: true
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-sync-app-backend-api-token
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync app Production backend API token
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate protected material
+        shell: bash
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          NUTSNEWS_BACKEND_API_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_API_TOKEN }}
+          NUTSNEWS_MAINTENANCE_GITHUB_TOKEN: ${{ secrets.NUTSNEWS_MAINTENANCE_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ "$CONFIRMATION" != "sync-app-production-backend-api-token" ]]; then
+            echo "Invalid confirmation for backend API token sync." >&2
+            exit 1
+          fi
+          for name in NUTSNEWS_BACKEND_API_TOKEN NUTSNEWS_MAINTENANCE_GITHUB_TOKEN; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing required production-backend secret: $name" >&2
+              exit 1
+            fi
+          done
+
+      - name: Sync app Production environment secret
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.NUTSNEWS_MAINTENANCE_GITHUB_TOKEN }}
+          NUTSNEWS_BACKEND_API_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh auth status --hostname github.com
+          printf '%s' "$NUTSNEWS_BACKEND_API_TOKEN" \
+            | gh secret set NUTSNEWS_BACKEND_API_TOKEN \
+                --repo ramideltoro/nutsnews \
+                --env Production
+          cat > "$RUNNER_TEMP/backend-sync-app-backend-api-token.json" <<'JSON'
+          {
+            "status": "synced",
+            "target_repository": "ramideltoro/nutsnews",
+            "target_environment": "Production",
+            "secret_name": "NUTSNEWS_BACKEND_API_TOKEN",
+            "safe_metadata_only": true,
+            "secret_value_printed": false
+          }
+          JSON
+
+      - name: Summarize safe metadata
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Backend API token sync"
+            echo
+            echo "- Target repository: \`ramideltoro/nutsnews\`"
+            echo "- Target environment: \`Production\`"
+            echo "- Secret name: \`NUTSNEWS_BACKEND_API_TOKEN\`"
+            echo "- Secret value printed: \`false\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sync report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-sync-app-backend-api-token
+          path: ${{ runner.temp }}/backend-sync-app-backend-api-token.json
+          if-no-files-found: ignore

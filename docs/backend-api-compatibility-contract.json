@@ -2,7 +2,7 @@
   "contract_id": "backend-api-compatibility-contract",
   "issue": 111,
   "decision": "app_owned_backend_api",
-  "status": "backend_contract_committed",
+  "status": "app_and_worker_backend_routes_committed",
   "production_cutover_blocker": true,
   "chosen_pattern": {
     "summary": "Replace Supabase Data API assumptions with app-owned backend APIs and worker data APIs backed by backend PostgreSQL.",
@@ -83,6 +83,20 @@
       "validated_by": "backend_postgres_smoke_tests worker"
     }
   ],
+  "http_routes": [
+    {
+      "scope": "app",
+      "route": "https://backend.nutsnews.com/api/app/db/*",
+      "auth": "server-only bearer token",
+      "writes_guarded_by": "NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED"
+    },
+    {
+      "scope": "worker",
+      "route": "https://backend.nutsnews.com/api/worker/db/*",
+      "auth": "worker bearer token",
+      "writes_guarded_by": "NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED"
+    }
+  ],
   "authorization_replacement": {
     "browser": "No database credential or service-role style token is exposed to browser code.",
     "server_admin": "Admin routes keep existing app auth/session checks before using backend database credentials.",
@@ -119,7 +133,8 @@
   ],
   "companion_issues": [
     "https://github.com/ramideltoro/nutsnews/issues/255",
-    "https://github.com/ramideltoro/nutsnews-worker/issues/27"
+    "https://github.com/ramideltoro/nutsnews-worker/issues/27",
+    "https://github.com/ramideltoro/nutsnews-backend/issues/247"
   ],
   "cutover_blockers": [
     "All required capabilities pass against backend PostgreSQL in non-production.",
@@ -131,6 +146,7 @@
   "validation": {
     "local_validator": "python3 scripts/validate_backend_api_compatibility_contract.py",
     "smoke_test": "python3 scripts/backend_postgres_smoke_tests.py --offline",
-    "live_status": "blocked until app and worker companion issues are implemented"
+    "app_api_smoke_test": "python3 scripts/backend_app_db_api_smoke.py --offline",
+    "live_status": "backend app and worker routes are committed; production cutover remains blocked until protected apply, app shadow parity evidence, writer pause, rollback coverage, and final approval pass"
   }
 }

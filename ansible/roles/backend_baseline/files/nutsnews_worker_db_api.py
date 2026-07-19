@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Loopback-only NutsNews Worker database compatibility API."""
+"""Loopback-only NutsNews database compatibility API."""
 
 from __future__ import annotations
 
@@ -35,6 +35,35 @@ WRITE_OPERATIONS = {
     "save-worker-run",
 }
 
+APP_READ_OPERATIONS = {
+    "app-provider-smoke",
+    "get-runtime-feature-flag",
+    "load-readiness-schema-contract",
+    "load-public-feed-snapshot",
+    "load-home-feed-snapshot",
+    "load-published-articles",
+    "load-published-categories",
+    "load-article-detail",
+    "load-recent-article-sitemap-items",
+    "load-published-article-sitemap-count",
+    "load-article-sitemap-items-page",
+    "search-published-articles",
+    "load-admin-quota-usage-events",
+    "load-admin-article-engagement-source-category-summary",
+    "load-admin-article-engagement-article-summary",
+    "load-admin-feed-health-snapshots",
+    "load-admin-feed-quality-rows",
+    "load-admin-worker-runs",
+    "load-admin-ai-usage-runs",
+    "load-admin-article-review-rows",
+}
+
+APP_WRITE_OPERATIONS = {
+    "record-quota-usage-event",
+    "record-article-engagement-event",
+    "set-runtime-feature-flag",
+}
+
 ALLOWED_PROVIDER_MODES = {"backend_postgres_shadow", "backend_postgres_primary"}
 
 RUNTIME_FEATURE_FLAG_DEFAULTS = {
@@ -54,6 +83,68 @@ PUBLIC_FEED_EDGE_SNAPSHOT_COLUMNS = (
     "category",
     "positivity_score",
 )
+
+ARTICLE_COLUMNS = (
+    "id",
+    "source",
+    "title",
+    "original_url",
+    "image_url",
+    "published_at",
+    "published_on_site_at",
+    "ai_summary",
+    "category",
+    "positivity_score",
+)
+
+SITEMAP_ARTICLE_COLUMNS = (
+    "id",
+    "published_on_site_at",
+    "published_at",
+)
+
+ADMIN_TABLE_READS = {
+    "load-admin-quota-usage-events": (
+        "public.quota_usage_events",
+        "id, created_at, event_type, event_source, provider, quantity, metadata",
+        "created_at desc",
+    ),
+    "load-admin-article-engagement-source-category-summary": (
+        "public.article_engagement_source_category_summary",
+        "source, category, outbound_click_count, category_interest_count, total_engagement_count, first_event_date, latest_event_date, last_updated_at",
+        "total_engagement_count desc, latest_event_date desc nulls last",
+    ),
+    "load-admin-article-engagement-article-summary": (
+        "public.article_engagement_article_summary",
+        "article_id, title, original_url, source, category, outbound_click_count, first_event_date, latest_event_date, last_updated_at",
+        "outbound_click_count desc, latest_event_date desc nulls last",
+    ),
+    "load-admin-feed-health-snapshots": (
+        "public.feed_health",
+        "source, feed_url, last_checked_at, last_success_at, last_failure_at, last_status, last_error_message, consecutive_failure_count, total_fetch_count, total_success_count, total_failure_count, total_article_count, total_image_count, total_accepted_count, total_rejected_count, updated_at",
+        "consecutive_failure_count desc, last_checked_at desc nulls last",
+    ),
+    "load-admin-feed-quality-rows": (
+        "public.feed_quality_scores",
+        "source, feed_url, quality_score, success_rate, thumbnail_rate, accepted_rate, failure_rate, duplicate_rate, total_fetch_count, total_success_count, total_failure_count, total_article_count, total_image_count, total_accepted_count, total_rejected_count, last_success_at, last_failure_at",
+        "quality_score asc, total_accepted_count desc",
+    ),
+    "load-admin-worker-runs": (
+        "public.worker_runs",
+        "id, run_started_at, run_completed_at, run_source, request_id, shard_index, success, error_name, error_message, feed_count, fetched_count, candidate_count, ai_reviewed_count, accepted_count, rejected_count, duration_ms",
+        "run_started_at desc",
+    ),
+    "load-admin-ai-usage-runs": (
+        "public.ai_usage_runs",
+        "id, run_started_at, run_completed_at, run_source, request_id, shard_index, ai_provider, local_ai_total_tokens, openai_total_tokens, estimated_openai_cost_usd, estimated_local_ai_savings_usd, duration_ms",
+        "run_started_at desc",
+    ),
+    "load-admin-article-review-rows": (
+        "public.article_ai_reviews",
+        "id, original_url, source, title, decision, category, positivity_score, reason, ai_provider, ai_model, review_duration_ms, reviewed_at",
+        "reviewed_at desc nulls last",
+    ),
+}
 
 WRITE_TABLE_COLUMNS = {
     "article_summaries": (
@@ -250,6 +341,32 @@ def string_list(body: dict[str, Any], key: str, *, maximum: int = 1000) -> list[
     return strings
 
 
+def optional_string(body: dict[str, Any], key: str, *, maximum: int = 500) -> str | None:
+    value = body.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ApiError(400, f"{key} must be a string")
+    value = value.strip()
+    if not value:
+        return None
+    return value[:maximum]
+
+
+def required_string(body: dict[str, Any], key: str, *, maximum: int = 500) -> str:
+    value = optional_string(body, key, maximum=maximum)
+    if value is None:
+        raise ApiError(400, f"{key} must be a non-empty string")
+    return value
+
+
+def optional_bool(body: dict[str, Any], key: str, *, default: bool = False) -> bool:
+    value = body.get(key, default)
+    if not isinstance(value, bool):
+        raise ApiError(400, f"{key} must be a boolean")
+    return value
+
+
 def bool_from_env(name: str, default: bool = False) -> bool:
     value = os.environ.get(name, "")
     if not value:
@@ -304,9 +421,15 @@ def assert_provider_mode(body: dict[str, Any]) -> str:
     return str(mode)
 
 
-def assert_write_allowed(operation: str, body: dict[str, Any], store: PostgresStore) -> None:
+def assert_write_allowed(
+    operation: str,
+    body: dict[str, Any],
+    store: PostgresStore,
+    *,
+    write_operations: set[str] = WRITE_OPERATIONS,
+) -> None:
     provider_mode = assert_provider_mode(body)
-    if operation not in WRITE_OPERATIONS:
+    if operation not in write_operations:
         return
     if provider_mode != "backend_postgres_primary":
         raise ApiError(409, "write operations are disabled outside backend_postgres_primary")
@@ -517,8 +640,237 @@ def handle_operation(operation: str, body: dict[str, Any], store: PostgresStore)
     raise ApiError(404, f"unknown worker database operation: {operation}")
 
 
+def app_article_columns() -> str:
+    return ", ".join(ARTICLE_COLUMNS)
+
+
+def sitemap_article_columns() -> str:
+    return ", ".join(SITEMAP_ARTICLE_COLUMNS)
+
+
+def category_clause(body: dict[str, Any], params: list[Any]) -> str:
+    category = optional_string(body, "category", maximum=96)
+    if category is None or category.lower() == "all":
+        return ""
+    params.append(f"%{category}%")
+    return " and category ilike %s"
+
+
+def published_article_filters(body: dict[str, Any], params: list[Any]) -> str:
+    clause = " where status = 'published' and image_url is not null and image_url <> ''"
+    clause += category_clause(body, params)
+    cursor_published_on_site_at = optional_string(body, "cursorPublishedOnSiteAt", maximum=64)
+    cursor_id = optional_string(body, "cursorId", maximum=128)
+    if cursor_published_on_site_at and cursor_id:
+        clause += " and (published_on_site_at < %s or (published_on_site_at = %s and id < %s))"
+        params.extend((cursor_published_on_site_at, cursor_published_on_site_at, cursor_id))
+    return clause
+
+
+def load_app_admin_rows(operation: str, body: dict[str, Any], store: PostgresStore) -> list[dict[str, Any]]:
+    table, columns, order_by = ADMIN_TABLE_READS[operation]
+    limit = bounded_int(body, "limit", default=100, minimum=1, maximum=store.max_limit)
+    offset = bounded_int(body, "offset", default=0, minimum=0, maximum=1_000_000)
+    return store.fetch_all(
+        f"select {columns} from {table} order by {order_by} limit %s offset %s",
+        (limit, offset),
+    )
+
+
+def handle_app_operation(operation: str, body: dict[str, Any], store: PostgresStore) -> Any:
+    if operation not in APP_READ_OPERATIONS and operation not in APP_WRITE_OPERATIONS:
+        raise ApiError(404, f"unknown app database operation: {operation}")
+
+    assert_write_allowed(operation, body, store, write_operations=APP_WRITE_OPERATIONS)
+
+    if operation == "app-provider-smoke":
+        return {
+            "ok": True,
+            "provider": "backend_postgres",
+            "writesEnabled": store.writes_enabled,
+        }
+
+    if operation == "load-readiness-schema-contract":
+        return store.fetch_all(
+            """
+            select legacy_schema_version, migration_head, expected_schema_fingerprint, actual_schema_fingerprint
+            from public.nutsnews_migration_schema_contract()
+            """
+        )
+
+    if operation == "get-runtime-feature-flag":
+        key = body.get("key")
+        if not isinstance(key, str):
+            raise ApiError(400, "key must be a string")
+        default = RUNTIME_FEATURE_FLAG_DEFAULTS.get(key, False)
+        row = store.fetch_one("select enabled from public.runtime_feature_flags where key = %s limit 1", (key,))
+        return {"key": key, "enabled": bool(row["enabled"]) if row and isinstance(row.get("enabled"), bool) else default}
+
+    if operation in {"load-public-feed-snapshot", "load-home-feed-snapshot"}:
+        default_limit = 250 if operation == "load-home-feed-snapshot" else 6
+        max_limit = min(store.max_limit, 250)
+        limit = bounded_int(body, "limit", default=default_limit, minimum=1, maximum=max_limit)
+        offset = bounded_int(body, "offset", default=0, minimum=0, maximum=1_000_000)
+        params: list[Any] = []
+        where = " where true" + category_clause(body, params)
+        params.extend((limit, offset))
+        return store.fetch_all(
+            f"""
+            select {app_article_columns()}
+            from public.public_feed_snapshot
+            {where}
+            order by snapshot_rank asc
+            limit %s offset %s
+            """,
+            tuple(params),
+        )
+
+    if operation == "load-published-articles":
+        limit = bounded_int(body, "limit", default=6, minimum=1, maximum=min(store.max_limit, 100))
+        offset = bounded_int(body, "offset", default=0, minimum=0, maximum=1_000_000)
+        params = []
+        where = published_article_filters(body, params)
+        params.extend((limit, offset))
+        return store.fetch_all(
+            f"""
+            select {app_article_columns()}
+            from public.articles
+            {where}
+            order by published_on_site_at desc nulls last, id desc
+            limit %s offset %s
+            """,
+            tuple(params),
+        )
+
+    if operation == "load-published-categories":
+        limit = bounded_int(body, "limit", default=1000, minimum=1, maximum=store.max_limit)
+        return store.fetch_all(
+            """
+            select category
+            from public.public_feed_snapshot
+            where category is not null
+            limit %s
+            """,
+            (limit,),
+        )
+
+    if operation == "load-article-detail":
+        article_id = required_string(body, "id", maximum=128)
+        return store.fetch_one(
+            f"""
+            select {app_article_columns()}
+            from public.articles
+            where status = 'published'
+              and id = %s
+              and image_url is not null
+              and image_url <> ''
+            limit 1
+            """,
+            (article_id,),
+        )
+
+    if operation == "load-recent-article-sitemap-items":
+        limit = bounded_int(body, "limit", default=100, minimum=1, maximum=50000)
+        return store.fetch_all(
+            f"""
+            select {sitemap_article_columns()}
+            from public.articles
+            where status = 'published'
+              and image_url is not null
+              and image_url <> ''
+            order by published_on_site_at desc nulls last, id desc
+            limit %s
+            """,
+            (limit,),
+        )
+
+    if operation == "load-published-article-sitemap-count":
+        row = store.fetch_one(
+            """
+            select count(*)::bigint as article_count
+            from public.articles
+            where status = 'published'
+              and image_url is not null
+              and image_url <> ''
+            """
+        )
+        return {"articleCount": int(row["article_count"]) if row else 0}
+
+    if operation == "load-article-sitemap-items-page":
+        offset = bounded_int(body, "offset", default=0, minimum=0, maximum=5_000_000)
+        limit = bounded_int(body, "limit", default=5000, minimum=1, maximum=50000)
+        return store.fetch_all(
+            f"""
+            select {sitemap_article_columns()}
+            from public.articles
+            where status = 'published'
+              and image_url is not null
+              and image_url <> ''
+            order by published_on_site_at desc nulls last, id desc
+            limit %s offset %s
+            """,
+            (limit, offset),
+        )
+
+    if operation == "search-published-articles":
+        query = required_string(body, "query", maximum=80)
+        page_size = bounded_int(body, "pageSize", default=20, minimum=1, maximum=50)
+        page_offset = bounded_int(body, "pageOffset", default=0, minimum=0, maximum=1_000_000)
+        return store.fetch_all(
+            f"select {app_article_columns()} from public.search_articles(%s, %s, %s)",
+            (query, page_size, page_offset),
+        )
+
+    if operation in ADMIN_TABLE_READS:
+        return load_app_admin_rows(operation, body, store)
+
+    if operation == "record-quota-usage-event":
+        event_type = required_string(body, "eventType", maximum=120)
+        event_source = optional_string(body, "eventSource", maximum=160) or "unknown"
+        provider = optional_string(body, "provider", maximum=120)
+        quantity = bounded_int(body, "quantity", default=1, minimum=1, maximum=1000000)
+        metadata = body.get("metadata", {})
+        if not isinstance(metadata, dict):
+            raise ApiError(400, "metadata must be an object")
+        store.execute(
+            """
+            insert into public.quota_usage_events (event_type, event_source, provider, quantity, metadata)
+            values (%s, %s, %s, %s, %s::jsonb)
+            """,
+            (event_type, event_source, provider, quantity, json.dumps(metadata, separators=(",", ":"))),
+        )
+        return {"ok": True}
+
+    if operation == "record-article-engagement-event":
+        event_type = required_string(body, "eventType", maximum=64)
+        article_id = optional_string(body, "articleId", maximum=128)
+        source = optional_string(body, "source", maximum=160)
+        category = optional_string(body, "category", maximum=96)
+        quantity = bounded_int(body, "quantity", default=1, minimum=1, maximum=10)
+        row = store.fetch_one(
+            "select * from public.record_article_engagement_event(%s, %s, %s, %s, %s)",
+            (event_type, article_id, source, category, quantity),
+        )
+        return {"ok": True, "row": row}
+
+    if operation == "set-runtime-feature-flag":
+        key = required_string(body, "key", maximum=120)
+        enabled = optional_bool(body, "enabled")
+        store.execute(
+            """
+            insert into public.runtime_feature_flags (key, enabled)
+            values (%s, %s)
+            on conflict (key) do update set enabled = excluded.enabled
+            """,
+            (key, enabled),
+        )
+        return {"ok": True}
+
+    raise ApiError(404, f"unknown app database operation: {operation}")
+
+
 class WorkerDbApiHandler(BaseHTTPRequestHandler):
-    server_version = "NutsNewsWorkerDbApi/1.0"
+    server_version = "NutsNewsDbCompatApi/1.0"
 
     def do_GET(self) -> None:
         if self.path == "/healthz":
@@ -532,18 +884,23 @@ class WorkerDbApiHandler(BaseHTTPRequestHandler):
         except ApiError as error:
             self.write_json(error.status, {"error": error.message})
         except Exception:
-            self.write_json(500, {"error": "internal worker database API error"})
+            self.write_json(500, {"error": "internal database compatibility API error"})
 
     def handle_post(self) -> None:
-        if not self.path.startswith("/api/worker/db/"):
+        route = None
+        if self.path.startswith("/api/worker/db/"):
+            route = "worker"
+        elif self.path.startswith("/api/app/db/"):
+            route = "app"
+        else:
             raise ApiError(404, "not found")
         operation = self.path.rsplit("/", 1)[-1]
         expected_token = os.environ.get("NUTSNEWS_BACKEND_API_TOKEN", "")
         if not expected_token:
-            raise ApiError(503, "worker database API token is not configured")
+            raise ApiError(503, "database compatibility API token is not configured")
         authorization = self.headers.get("authorization", "")
         if not authorization.startswith("Bearer ") or not hmac.compare_digest(authorization.removeprefix("Bearer "), expected_token):
-            raise ApiError(401, "invalid worker database API token")
+            raise ApiError(401, "invalid database compatibility API token")
         content_length = int(self.headers.get("content-length", "0") or "0")
         if content_length > 2_000_000:
             raise ApiError(413, "request body too large")
@@ -553,7 +910,10 @@ class WorkerDbApiHandler(BaseHTTPRequestHandler):
             raise ApiError(400, "request body must be JSON") from exc
         if not isinstance(body, dict):
             raise ApiError(400, "request body must be a JSON object")
-        result = handle_operation(operation, body, self.server.store)  # type: ignore[attr-defined]
+        if route == "worker":
+            result = handle_operation(operation, body, self.server.store)  # type: ignore[attr-defined]
+        else:
+            result = handle_app_operation(operation, body, self.server.store)  # type: ignore[attr-defined]
         self.write_json(200, result)
 
     def write_json(self, status: int, payload: Any) -> None:

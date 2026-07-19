@@ -30,6 +30,10 @@
           handle /api/worker/db/* {
               reverse_proxy http://{{ backend_worker_api_bind }}:{{ backend_worker_api_port }}
           }
+
+          handle /api/app/db/* {
+              reverse_proxy http://{{ backend_worker_api_bind }}:{{ backend_worker_api_port }}
+          }
           {% endif %}
 
           handle {

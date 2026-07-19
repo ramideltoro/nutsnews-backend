@@ -88,10 +88,24 @@ def main() -> int:
     if "NUTSNEWS_BACKEND_API_TOKEN" not in env:
         errors.append("missing NUTSNEWS_BACKEND_API_TOKEN environment contract")
 
+    routes = {item.get("scope"): item for item in contract.get("http_routes", [])}
+    app_route = routes.get("app", {})
+    worker_route = routes.get("worker", {})
+    if app_route.get("route") != "https://backend.nutsnews.com/api/app/db/*":
+        errors.append("app compatibility route must be documented")
+    if worker_route.get("route") != "https://backend.nutsnews.com/api/worker/db/*":
+        errors.append("worker compatibility route must be documented")
+    for scope, item in routes.items():
+        if "bearer token" not in item.get("auth", ""):
+            errors.append(f"{scope} route must require bearer-token auth")
+        if item.get("writes_guarded_by") != "NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED":
+            errors.append(f"{scope} route must document the write deployment guardrail")
+
     companion_issues = set(contract.get("companion_issues", []))
     for url in (
         "https://github.com/ramideltoro/nutsnews/issues/255",
         "https://github.com/ramideltoro/nutsnews-worker/issues/27",
+        "https://github.com/ramideltoro/nutsnews-backend/issues/247",
     ):
         if url not in companion_issues:
             errors.append(f"missing companion issue: {url}")
@@ -104,8 +118,12 @@ def main() -> int:
     validation = contract.get("validation", {})
     if validation.get("local_validator") != "python3 scripts/validate_backend_api_compatibility_contract.py":
         errors.append("local_validator must name this validator")
-    if "blocked until app and worker companion issues are implemented" not in validation.get("live_status", ""):
-        errors.append("live_status must record app/worker blocker")
+    if validation.get("app_api_smoke_test") != "python3 scripts/backend_app_db_api_smoke.py --offline":
+        errors.append("app_api_smoke_test must name the app DB API smoke command")
+    live_status = validation.get("live_status", "")
+    for required in ("protected apply", "app shadow parity", "writer pause", "rollback", "final approval"):
+        if required not in live_status:
+            errors.append(f"live_status must record cutover blocker: {required}")
 
     if errors:
         for error in errors:

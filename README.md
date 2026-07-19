@@ -133,6 +133,7 @@ python3 scripts/validate_backend_postgres_logical_replication_plan.py
 python3 scripts/backend_postgres_logical_replication_source.py --operation status
 python3 scripts/backend_postgres_replication_health.py --offline
 python3 scripts/backend_postgres_smoke_tests.py --offline
+python3 scripts/backend_app_db_api_smoke.py --offline
 python3 scripts/backend_postgres_benchmark_tuning.py --offline
 python3 scripts/validate_backend_postgres_backup_proof.py
 ```

@@ -363,32 +363,81 @@
     - backend_postgres_database_dependents_manageable | default(false) | bool
     - backend_postgres_privilege_roles_manageable | default(false) | bool
 
-- name: Allow Worker API role to read future-primary shadow worker objects
+- name: Allow database API role to read future-primary shadow app and worker objects
   community.postgresql.postgresql_query:
     db: "{{ backend_postgres_primary_shadow_database }}"
     query: |
       DO $$
       DECLARE
-        worker_object text;
+        api_object text;
       BEGIN
         EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', '{{ backend_postgres_worker_api_user }}');
-        FOREACH worker_object IN ARRAY ARRAY[
+        FOREACH api_object IN ARRAY ARRAY[
           'public.articles',
           'public.article_ai_reviews',
           'public.article_summaries',
+          'public.ai_usage_runs',
+          'public.article_engagement_article_summary',
+          'public.article_engagement_daily',
+          'public.article_engagement_source_category_summary',
           'public.feed_health',
+          'public.feed_quality_scores',
           'public.public_feed_snapshot',
+          'public.quota_usage_events',
           'public.rss_feeds',
+          'public.worker_runs',
           'public.runtime_feature_flags'
         ]::text[] LOOP
-          IF to_regclass(worker_object) IS NOT NULL THEN
+          IF to_regclass(api_object) IS NOT NULL THEN
             EXECUTE format(
               'GRANT SELECT ON TABLE %s TO %I',
-              to_regclass(worker_object),
+              to_regclass(api_object),
               '{{ backend_postgres_worker_api_user }}'
             );
           END IF;
         END LOOP;
+
+        IF to_regclass('public.quota_usage_events') IS NOT NULL THEN
+          EXECUTE format(
+            'GRANT INSERT ON TABLE public.quota_usage_events TO %I',
+            '{{ backend_postgres_worker_api_user }}'
+          );
+        END IF;
+
+        IF to_regclass('public.quota_usage_events_id_seq') IS NOT NULL THEN
+          EXECUTE format(
+            'GRANT USAGE ON SEQUENCE public.quota_usage_events_id_seq TO %I',
+            '{{ backend_postgres_worker_api_user }}'
+          );
+        END IF;
+
+        IF to_regclass('public.runtime_feature_flags') IS NOT NULL THEN
+          EXECUTE format(
+            'GRANT INSERT, UPDATE ON TABLE public.runtime_feature_flags TO %I',
+            '{{ backend_postgres_worker_api_user }}'
+          );
+        END IF;
+
+        IF to_regprocedure('public.record_article_engagement_event(text,uuid,text,text,integer)') IS NOT NULL THEN
+          EXECUTE format(
+            'GRANT EXECUTE ON FUNCTION public.record_article_engagement_event(text,uuid,text,text,integer) TO %I',
+            '{{ backend_postgres_worker_api_user }}'
+          );
+        END IF;
+
+        IF to_regprocedure('public.search_articles(text,integer,integer)') IS NOT NULL THEN
+          EXECUTE format(
+            'GRANT EXECUTE ON FUNCTION public.search_articles(text,integer,integer) TO %I',
+            '{{ backend_postgres_worker_api_user }}'
+          );
+        END IF;
+
+        IF to_regprocedure('public.nutsnews_migration_schema_contract()') IS NOT NULL THEN
+          EXECUTE format(
+            'GRANT EXECUTE ON FUNCTION public.nutsnews_migration_schema_contract() TO %I',
+            '{{ backend_postgres_worker_api_user }}'
+          );
+        END IF;
       END $$;
   become_user: postgres
   when:

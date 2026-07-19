@@ -78,12 +78,14 @@ backend_postgres_restore_user: nutsnews_migration_restore
 backend_postgres_validation_user: nutsnews_migration_validation
 backend_postgres_replication_user: nutsnews_migration_replication
 backend_postgres_app_rehearsal_user: nutsnews_app_rehearsal
+backend_postgres_worker_api_user: nutsnews_worker_api
 backend_postgres_app_password: ""
 backend_postgres_readonly_password: ""
 backend_postgres_restore_password: ""
 backend_postgres_validation_password: ""
 backend_postgres_replication_password: ""
 backend_postgres_app_rehearsal_password: ""
+backend_postgres_worker_api_password: ""
 backend_postgres_listen_addresses: localhost
 backend_postgres_log_min_duration_statement: "500"
 backend_postgres_log_autovacuum_min_duration: "10s"
@@ -103,8 +105,8 @@ backend_worker_api_token: ""
 backend_worker_api_db_host: 127.0.0.1
 backend_worker_api_db_port: "5432"
 backend_worker_api_db_name: "{{ backend_postgres_primary_shadow_database }}"
-backend_worker_api_db_user: "{{ backend_postgres_readonly_user }}"
-backend_worker_api_db_password: "{{ backend_postgres_readonly_password }}"
+backend_worker_api_db_user: "{{ backend_postgres_worker_api_user }}"
+backend_worker_api_db_password: "{{ backend_postgres_worker_api_password }}"
 backend_worker_api_writes_enabled: false
 backend_worker_api_max_limit: 10000
 backend_db_dashboard_enabled: false

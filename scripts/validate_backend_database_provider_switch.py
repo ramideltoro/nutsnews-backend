@@ -94,8 +94,10 @@ def main() -> int:
         errors.append("local_validator must name this validator")
     if validation.get("dry_run_workflow") != ".github/workflows/backend-database-provider-switch-dry-run.yml":
         errors.append("dry_run_workflow must name the workflow")
-    if "blocked until app and worker provider modes are implemented" not in validation.get("live_status", ""):
-        errors.append("live_status must record app/worker blocker")
+    live_status = validation.get("live_status", "")
+    for required in ("app and worker provider modes implemented", "protected cutover", "owner approval"):
+        if required not in live_status:
+            errors.append(f"live_status must record provider switch status: {required}")
 
     if errors:
         for error in errors:

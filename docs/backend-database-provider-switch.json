@@ -1,7 +1,7 @@
 {
   "contract_id": "backend-database-provider-switch",
   "issue": 117,
-  "status": "backend_switch_contract_committed",
+  "status": "app_worker_switch_contract_ready_production_primary_protected",
   "depends_on": [
     "docs/backend-api-compatibility-contract.json"
   ],
@@ -95,6 +95,6 @@
   "validation": {
     "local_validator": "python3 scripts/validate_backend_database_provider_switch.py",
     "dry_run_workflow": ".github/workflows/backend-database-provider-switch-dry-run.yml",
-    "live_status": "blocked until app and worker provider modes are implemented"
+    "live_status": "app and worker provider modes implemented; production backend_postgres_primary remains blocked outside protected cutover until provider switch owner approval and final go/no-go are recorded"
   }
 }

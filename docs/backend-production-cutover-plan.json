@@ -1,7 +1,7 @@
 {
   "plan_id": "backend-production-cutover-plan",
   "issue": 119,
-  "status": "db_ready_cutover_blocked_on_writer_ownership",
+  "status": "db_ready_writer_pause_active_cutover_blocked_on_approval",
   "depends_on": [
     211,
     212,
@@ -100,12 +100,40 @@
       "workflow_url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29660962794"
     }
   ],
+  "latest_safe_evidence": [
+    {
+      "summary": "app production writer pause deployed and live readiness reports productionWritesPaused=true while databaseProviderMode remains supabase_primary",
+      "workflow_url": "https://github.com/ramideltoro/nutsnews/actions/runs/29704129436",
+      "issue_comment_url": "https://github.com/ramideltoro/nutsnews-backend/issues/119#issuecomment-5017520442"
+    },
+    {
+      "summary": "worker production writer pause deployed to all 25 worker shards with NUTSNEWS_PRODUCTION_WRITES_PAUSED=true",
+      "workflow_url": "https://github.com/ramideltoro/nutsnews-worker/actions/runs/29703213882",
+      "issue_comment_url": "https://github.com/ramideltoro/nutsnews-backend/issues/119#issuecomment-5017520442"
+    },
+    {
+      "summary": "backend provider-shadow dry-run remains non-mutating and ready",
+      "workflow_url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29705168086",
+      "issue_comment_url": "https://github.com/ramideltoro/nutsnews-backend/issues/119#issuecomment-5017520442"
+    },
+    {
+      "summary": "production backend_postgres_primary provider dry-run still fails closed outside the protected cutover workflow",
+      "workflow_url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29705127819",
+      "issue_comment_url": "https://github.com/ramideltoro/nutsnews-backend/issues/119#issuecomment-5017520442"
+    },
+    {
+      "summary": "final catch-up rollback guardrail still fails closed until live writer-pause and Supabase no-new-write watermark evidence is attached",
+      "workflow_url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29705128499",
+      "issue_comment_url": "https://github.com/ramideltoro/nutsnews-backend/issues/119#issuecomment-5017520442"
+    }
+  ],
   "remaining_external_cutover_blockers": [
     "coordinated maintenance window approval",
-    "app worker scheduler and admin writer pause evidence",
+    "verified app worker scheduler and admin writer pause evidence, including Supabase no-new-write watermarks after pause",
     "app and worker provider switch owner approval",
     "final go/no-go owner approval",
-    "rollback owner coverage through the rollback window"
+    "rollback owner coverage through the rollback window",
+    "production-backend approval for refreshed DB gate workflows and cutover dry-run"
   ],
   "workflow": {
     "path": ".github/workflows/backend-production-cutover.yml",
@@ -116,6 +144,6 @@
   "validation": {
     "local_validator": "python3 scripts/validate_backend_production_cutover_plan.py",
     "plan_renderer": "python3 scripts/backend_production_cutover_plan.py --operation dry-run",
-    "live_status": "blocked until coordinated app worker scheduler admin writer pause, provider switch owner approval, final go/no-go, and rollback owner coverage exist"
+    "live_status": "app and worker pause are deployed and active, but cutover remains blocked until coordinated maintenance window approval, verified writer pause with Supabase no-new-write watermarks, provider switch owner approval, final go/no-go, rollback owner coverage, and production-backend approval for refreshed DB gate workflows exist"
   }
 }

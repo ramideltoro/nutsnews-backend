@@ -2,7 +2,7 @@
   "contract_id": "backend-api-compatibility-contract",
   "issue": 111,
   "decision": "app_owned_backend_api",
-  "status": "app_and_worker_backend_routes_committed",
+  "status": "app_and_worker_backend_routes_provisioned_shadow_smoke_passed",
   "production_cutover_blocker": true,
   "chosen_pattern": {
     "summary": "Replace Supabase Data API assumptions with app-owned backend APIs and worker data APIs backed by backend PostgreSQL.",
@@ -143,10 +143,37 @@
     "Smoke tests and parity validation pass after writer pause.",
     "Rollback to supabase_primary is documented and tested before production cutover."
   ],
+  "live_evidence": {
+    "backend_app_route_pr": "https://github.com/ramideltoro/nutsnews-backend/pull/248",
+    "backend_app_route_merge_commit": "7cdbdd79815009a3e1cfee6ab75820c78df1e902",
+    "protected_backend_check_run": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29693574619",
+    "protected_backend_apply_run": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29693776534",
+    "backend_app_api_smoke": {
+      "command": "python3 scripts/backend_app_db_api_smoke.py",
+      "route": "https://backend.nutsnews.com/api/app/db",
+      "status": "pass",
+      "checks": [
+        "app-provider-smoke 200",
+        "load-public-feed-snapshot rows 5",
+        "backend_postgres_shadow write rejected 409",
+        "backend_postgres_primary guarded write rejected 403"
+      ],
+      "supabase_required": false
+    },
+    "app_helper_shadow_smoke": {
+      "owner_repo": "ramideltoro/nutsnews",
+      "status": "pass",
+      "provider": "backend_postgres",
+      "writes_enabled": false,
+      "snapshot_rows": 3,
+      "supabase_writes": false
+    },
+    "docs_commit": "ramideltoro/nutsnews-docs@5dd057b"
+  },
   "validation": {
     "local_validator": "python3 scripts/validate_backend_api_compatibility_contract.py",
     "smoke_test": "python3 scripts/backend_postgres_smoke_tests.py --offline",
     "app_api_smoke_test": "python3 scripts/backend_app_db_api_smoke.py --offline",
-    "live_status": "backend app and worker routes are committed; production cutover remains blocked until protected apply, app shadow parity evidence, writer pause, rollback coverage, and final approval pass"
+    "live_status": "backend app and worker routes are provisioned; protected apply and app shadow parity smoke passed; production cutover remains blocked until writer pause evidence, rollback coverage, and final approval pass"
   }
 }

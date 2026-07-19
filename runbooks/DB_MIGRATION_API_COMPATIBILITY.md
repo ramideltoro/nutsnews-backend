@@ -26,6 +26,13 @@ Offline app API smoke:
 python3 scripts/backend_app_db_api_smoke.py --offline
 ```
 
+Live app API smoke after protected apply:
+
+```bash
+NUTSNEWS_BACKEND_API_URL=https://backend.nutsnews.com/api/app/db \
+  python3 scripts/backend_app_db_api_smoke.py
+```
+
 ## Provider Modes
 
 | Mode | Writer | Production responses | Notes |
@@ -43,6 +50,23 @@ python3 scripts/backend_app_db_api_smoke.py --offline
 
 Backend cutover remains blocked until those repos can run the smoke-test
 capabilities against backend PostgreSQL in non-production.
+
+Current evidence:
+
+- App provider guardrails are merged in
+  `ramideltoro/nutsnews#260`.
+- Worker provider guardrails are merged for
+  `ramideltoro/nutsnews-worker#27`.
+- Backend app route provisioning is merged in
+  `ramideltoro/nutsnews-backend#248`.
+- Protected backend check run `29693574619` passed.
+- Protected backend apply run `29693776534` passed.
+- Live app API smoke passed against
+  `https://backend.nutsnews.com/api/app/db`: provider smoke returned 200,
+  public snapshot read returned rows, shadow writes returned 409, and
+  backend-primary writes returned 403 while writes are disabled.
+- The app helper shadow smoke passed against the same route without Supabase
+  writes.
 
 ## App And Worker Database API
 

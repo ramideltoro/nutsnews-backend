@@ -31,6 +31,8 @@ def main() -> int:
         errors.append("issue must be 111")
     if contract.get("decision") != "app_owned_backend_api":
         errors.append("decision must be app_owned_backend_api")
+    if contract.get("status") != "app_and_worker_backend_routes_provisioned_shadow_smoke_passed":
+        errors.append("status must record provisioned app/worker routes and passed shadow smoke")
     if contract.get("production_cutover_blocker") is not True:
         errors.append("production_cutover_blocker must be true")
 
@@ -114,6 +116,33 @@ def main() -> int:
     for required in ("non-production", "backend_postgres_shadow", "Smoke tests", "Rollback"):
         if required not in blockers:
             errors.append(f"missing cutover blocker wording: {required}")
+
+    evidence = contract.get("live_evidence", {})
+    for required in (
+        "backend_app_route_pr",
+        "backend_app_route_merge_commit",
+        "protected_backend_check_run",
+        "protected_backend_apply_run",
+        "backend_app_api_smoke",
+        "app_helper_shadow_smoke",
+        "docs_commit",
+    ):
+        if required not in evidence:
+            errors.append(f"missing live evidence: {required}")
+    if evidence.get("backend_app_route_merge_commit") != "7cdbdd79815009a3e1cfee6ab75820c78df1e902":
+        errors.append("backend app-route merge commit evidence is stale")
+    backend_smoke = evidence.get("backend_app_api_smoke", {})
+    if backend_smoke.get("status") != "pass":
+        errors.append("backend app API smoke evidence must pass")
+    if backend_smoke.get("supabase_required") is not False:
+        errors.append("backend app API smoke must not require Supabase")
+    app_smoke = evidence.get("app_helper_shadow_smoke", {})
+    if app_smoke.get("status") != "pass":
+        errors.append("app helper shadow smoke evidence must pass")
+    if app_smoke.get("writes_enabled") is not False:
+        errors.append("app helper shadow smoke must prove backend writes are disabled")
+    if app_smoke.get("supabase_writes") is not False:
+        errors.append("app helper shadow smoke must not write to Supabase")
 
     validation = contract.get("validation", {})
     if validation.get("local_validator") != "python3 scripts/validate_backend_api_compatibility_contract.py":

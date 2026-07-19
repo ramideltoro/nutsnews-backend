@@ -121,7 +121,9 @@
     name: nutsnews-worker-db-api
     enabled: true
     state: started
-  when: backend_worker_api_manageable | bool
+  when:
+    - backend_worker_api_manageable | bool
+    - not ansible_check_mode
 
 - name: Capture Worker database API loopback health
   ansible.builtin.command: "curl -fsS http://{{ backend_worker_api_bind }}:{{ backend_worker_api_port }}/healthz"

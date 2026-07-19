@@ -78,6 +78,11 @@ class AnsibleCheckModeGuardTests(unittest.TestCase):
         self.assertIn("backend_worker_api_manageable", worker_api)
         self.assertIn("not (backend_worker_api_packages is changed)", worker_api)
         self.assertIn("when: backend_worker_api_manageable | bool", worker_api)
+        service_start_block = worker_api.split("- name: Ensure Worker database API service is enabled and started", 1)[1].split(
+            "- name: Capture Worker database API loopback health",
+            1,
+        )[0]
+        self.assertIn("not ansible_check_mode", service_start_block)
         self.assertIn("no_log: true", worker_api)
 
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -91,8 +92,30 @@ from watermarks;
 """
 
 
+URL_RE = re.compile(r"postgres(?:ql)?://\S+", re.IGNORECASE)
+PASSWORD_RE = re.compile(r"(password=)[^\s]+", re.IGNORECASE)
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def sanitized_psql_error(stderr: str) -> str:
+    text = PASSWORD_RE.sub(r"\1***", URL_RE.sub("postgresql://***", stderr.strip()))
+    lower = text.lower()
+    if "password authentication failed" in lower or "authentication failed" in lower:
+        category = "psql_auth_failed"
+    elif "permission denied" in lower:
+        category = "psql_permission_failed"
+    elif "does not exist" in lower or "syntax error" in lower:
+        category = "psql_sql_shape_failed"
+    elif "could not translate host" in lower or "could not connect" in lower or "connection to server" in lower:
+        category = "psql_connection_failed"
+    else:
+        category = "psql_query_failed"
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    detail = " | ".join(lines[-3:])[:500] if lines else "no_stderr"
+    return f"{category}: {detail}"
 
 
 def run_psql_json(db_url: str) -> dict[str, object]:
@@ -105,7 +128,7 @@ def run_psql_json(db_url: str) -> dict[str, object]:
         check=False,
     )
     if proc.returncode != 0:
-        raise RuntimeError("psql query failed; stderr suppressed to avoid leaking connection details")
+        raise RuntimeError(sanitized_psql_error(proc.stderr))
     return json.loads(proc.stdout.strip())
 
 

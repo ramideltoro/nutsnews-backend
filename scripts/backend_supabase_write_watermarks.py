@@ -119,14 +119,19 @@ def sanitized_psql_error(stderr: str) -> str:
 
 
 def run_psql_json(db_url: str) -> dict[str, object]:
-    proc = subprocess.run(
-        ["psql", "--no-psqlrc", "-X", "-v", "ON_ERROR_STOP=1", "-At", db_url, "-c", WATERMARK_SQL],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        timeout=60,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            ["psql", "--no-psqlrc", "-X", "-v", "ON_ERROR_STOP=1", "-At", db_url, "-c", WATERMARK_SQL],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("psql_not_found: install PostgreSQL client on the execution host") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("psql_timeout: query exceeded 60 seconds") from exc
     if proc.returncode != 0:
         raise RuntimeError(sanitized_psql_error(proc.stderr))
     return json.loads(proc.stdout.strip())
@@ -147,6 +152,13 @@ def changed_tables(first: dict[str, object], second: dict[str, object]) -> dict[
     return changed
 
 
+def emit_report(report: dict[str, object], output: str) -> None:
+    text = json.dumps(report, indent=2, sort_keys=True)
+    if output:
+        Path(output).write_text(text + "\n", encoding="utf-8")
+    print(text)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db-url-env", default="NUTSNEWS_PRODUCTION_SUPABASE_DB_URL")
@@ -160,27 +172,36 @@ def main() -> int:
     if not db_url:
         raise SystemExit(f"missing required DB URL env: {args.db_url_env}")
 
-    first = run_psql_json(db_url)
-    time.sleep(args.observe_seconds)
-    second = run_psql_json(db_url)
-    changed = changed_tables(first, second)
-    report = {
-        "status": "pass" if not changed else "fail",
-        "checked_at_utc": utc_now(),
-        "db_url_env": args.db_url_env,
-        "observe_seconds": args.observe_seconds,
-        "first_checked_at_utc": first.get("checked_at_utc"),
-        "second_checked_at_utc": second.get("checked_at_utc"),
-        "table_count": second.get("table_count"),
-        "no_watermark_changes": not changed,
-        "changed_tables": changed,
-        "safe_metadata_only": True,
-    }
-    text = json.dumps(report, indent=2, sort_keys=True)
-    if args.output:
-        Path(args.output).write_text(text + "\n", encoding="utf-8")
-    print(text)
-    return 0 if not changed else 1
+    try:
+        first = run_psql_json(db_url)
+        time.sleep(args.observe_seconds)
+        second = run_psql_json(db_url)
+        changed = changed_tables(first, second)
+        report = {
+            "status": "pass" if not changed else "fail",
+            "checked_at_utc": utc_now(),
+            "db_url_env": args.db_url_env,
+            "observe_seconds": args.observe_seconds,
+            "first_checked_at_utc": first.get("checked_at_utc"),
+            "second_checked_at_utc": second.get("checked_at_utc"),
+            "table_count": second.get("table_count"),
+            "no_watermark_changes": not changed,
+            "changed_tables": changed,
+            "safe_metadata_only": True,
+        }
+        emit_report(report, args.output)
+        return 0 if not changed else 1
+    except Exception as exc:
+        report = {
+            "status": "error",
+            "checked_at_utc": utc_now(),
+            "db_url_env": args.db_url_env,
+            "observe_seconds": args.observe_seconds,
+            "error": str(exc),
+            "safe_metadata_only": True,
+        }
+        emit_report(report, args.output)
+        return 1
 
 
 if __name__ == "__main__":

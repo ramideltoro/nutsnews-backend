@@ -1,0 +1,95 @@
+name: Backend Supabase Write Watermarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      observe_seconds:
+        description: Seconds between aggregate-only Supabase watermark snapshots.
+        required: true
+        default: "120"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-supabase-write-watermarks
+  cancel-in-progress: false
+
+jobs:
+  watermarks:
+    name: Supabase no-new-write watermarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate input
+        shell: bash
+        env:
+          OBSERVE_SECONDS: ${{ inputs.observe_seconds }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$OBSERVE_SECONDS" =~ ^[0-9]+$ ]]; then
+            echo "observe_seconds must be an integer." >&2
+            exit 1
+          fi
+          if (( OBSERVE_SECONDS < 30 || OBSERVE_SECONDS > 600 )); then
+            echo "observe_seconds must be between 30 and 600." >&2
+            exit 1
+          fi
+
+      - name: Validate protected material
+        shell: bash
+        env:
+          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL" ]]; then
+            echo "Missing required production-backend secret: NUTSNEWS_PRODUCTION_SUPABASE_DB_URL" >&2
+            exit 1
+          fi
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Compare Supabase write watermarks
+        shell: bash
+        env:
+          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
+          OBSERVE_SECONDS: ${{ inputs.observe_seconds }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL"
+          python3 scripts/backend_supabase_write_watermarks.py \
+            --observe-seconds "$OBSERVE_SECONDS" \
+            --output "$RUNNER_TEMP/backend-supabase-write-watermarks.json"
+
+      - name: Summarize safe metadata
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Supabase write watermarks"
+            echo
+            echo "- Observation seconds: \`${{ inputs.observe_seconds }}\`"
+            echo "- Report contains aggregate watermarks only."
+            echo "- Database URLs, passwords, tokens, and row data are not printed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload watermark report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-supabase-write-watermarks
+          path: ${{ runner.temp }}/backend-supabase-write-watermarks.json
+          if-no-files-found: ignore

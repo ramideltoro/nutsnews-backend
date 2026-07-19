@@ -50,6 +50,17 @@ gh workflow run backend-database-provider-switch-dry-run.yml \
 The backend API token is server/worker-only and must live in protected
 environment secrets. Browser code must never receive it.
 
+For worker shadow parity, backend issue #242 provides the backend-side route:
+
+```text
+POST https://backend.nutsnews.com/api/worker/db/<operation>
+Authorization: Bearer ${NUTSNEWS_BACKEND_API_TOKEN}
+```
+
+Keep `NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED=false` while workers run
+`backend_postgres_shadow`; this makes backend writes fail closed even if a
+write operation is accidentally called.
+
 ## Rollback
 
 Rollback returns app and worker configuration to `supabase_primary` only inside

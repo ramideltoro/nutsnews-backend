@@ -67,3 +67,9 @@
     name: "{{ backend_db_dashboard_php_fpm_service }}"
     state: restarted
   when: not ansible_check_mode
+
+- name: Restart worker database API
+  ansible.builtin.service:
+    name: nutsnews-worker-db-api
+    state: restarted
+  when: not ansible_check_mode

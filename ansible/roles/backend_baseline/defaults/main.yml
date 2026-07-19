@@ -91,6 +91,22 @@ backend_postgres_track_io_timing: "on"
 backend_postgres_autovacuum: "on"
 backend_postgres_required_extensions:
   - pg_trgm
+backend_worker_api_enabled: false
+backend_worker_api_user: nutsnews-worker-api
+backend_worker_api_group: nutsnews-worker-api
+backend_worker_api_root: /opt/nutsnews-worker-db-api
+backend_worker_api_script_path: "{{ backend_worker_api_root }}/nutsnews_worker_db_api.py"
+backend_worker_api_env_path: /etc/nutsnews-worker-db-api.env
+backend_worker_api_bind: 127.0.0.1
+backend_worker_api_port: "8093"
+backend_worker_api_token: ""
+backend_worker_api_db_host: 127.0.0.1
+backend_worker_api_db_port: "5432"
+backend_worker_api_db_name: "{{ backend_postgres_primary_shadow_database }}"
+backend_worker_api_db_user: "{{ backend_postgres_readonly_user }}"
+backend_worker_api_db_password: "{{ backend_postgres_readonly_password }}"
+backend_worker_api_writes_enabled: false
+backend_worker_api_max_limit: 10000
 backend_db_dashboard_enabled: false
 backend_db_dashboard_bind: 127.0.0.1
 backend_db_dashboard_port: "8082"
@@ -189,6 +205,9 @@ backend_logs_file_targets:
   - service: backend
     unit: nutsnews-app
     path: /var/log/nutsnews/*.log
+  - service: backend
+    unit: nutsnews-worker-db-api
+    path: /var/log/nutsnews/worker-db-api.log
 backend_newrelic_logs_enabled: false
 backend_newrelic_logs_config_dir: /etc/newrelic-infra/logging.d
 backend_newrelic_logs_max_line_kb: 16

@@ -32,9 +32,32 @@ python3 scripts/validate_backend_api_compatibility_contract.py
 
 - App: https://github.com/ramideltoro/nutsnews/issues/255
 - Worker: https://github.com/ramideltoro/nutsnews-worker/issues/27
+- Worker API endpoint/token provisioning: https://github.com/ramideltoro/nutsnews-backend/issues/242
 
 Backend cutover remains blocked until those repos can run the smoke-test
 capabilities against backend PostgreSQL in non-production.
+
+## Worker Database API
+
+The backend Worker database compatibility API is disabled by default and, when
+enabled, is bound on loopback behind Caddy at:
+
+```text
+https://backend.nutsnews.com/api/worker/db/*
+```
+
+Protected apply inputs:
+
+- `NUTSNEWS_BACKEND_WORKER_API_ENABLED=true` enables the loopback service and
+  Caddy route.
+- `NUTSNEWS_BACKEND_API_TOKEN` is the bearer token accepted by the backend API
+  and sent by the Worker runtime.
+- `NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED=false` keeps writes fail-closed
+  for shadow parity.
+
+The initial shadow configuration uses the backend PostgreSQL read-only role
+against `nutsnews_primary_shadow`. Backend writes remain disabled until the
+production cutover issue explicitly approves `backend_postgres_primary`.
 
 ## Authorization Rules
 

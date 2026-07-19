@@ -25,6 +25,13 @@ class CaddyConfigTests(unittest.TestCase):
         self.assertIn("root * {{ backend_ops_dashboard_public_dir }}", task)
         self.assertNotIn("ops-dashboard", task)
 
+    def test_worker_database_api_is_the_only_backend_app_route(self):
+        task = TASK_FILE.read_text(encoding="utf-8")
+
+        self.assertIn("handle /api/worker/db/*", task)
+        self.assertIn("reverse_proxy http://{{ backend_worker_api_bind }}:{{ backend_worker_api_port }}", task)
+        self.assertIn('respond "backend application not deployed\\n" 404', task)
+
 
 if __name__ == "__main__":
     unittest.main()

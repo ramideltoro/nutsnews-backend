@@ -72,6 +72,14 @@ class AnsibleCheckModeGuardTests(unittest.TestCase):
         self.assertIn("(backend_postgres_validation_user_result is changed)", postgres)
         self.assertIn("backend_postgres_privilege_roles_manageable | default(false) | bool", postgres)
 
+    def test_worker_api_skips_service_management_when_check_mode_package_is_pending(self):
+        worker_api = read_role_file("ansible/roles/backend_baseline/tasks/worker_api.yml")
+        self.assertIn("register: backend_worker_api_packages", worker_api)
+        self.assertIn("backend_worker_api_manageable", worker_api)
+        self.assertIn("not (backend_worker_api_packages is changed)", worker_api)
+        self.assertIn("when: backend_worker_api_manageable | bool", worker_api)
+        self.assertIn("no_log: true", worker_api)
+
 
 if __name__ == "__main__":
     unittest.main()

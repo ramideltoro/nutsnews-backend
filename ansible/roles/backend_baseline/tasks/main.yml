@@ -21,6 +21,10 @@
   ansible.builtin.import_tasks: postgres.yml
   when: backend_postgres_enabled | bool
 
+- name: Configure Worker database compatibility API
+  ansible.builtin.import_tasks: worker_api.yml
+  when: backend_worker_api_enabled | bool
+
 - name: Configure service-aware backup baseline
   ansible.builtin.import_tasks: backup.yml
   when: backend_backup_enabled | bool

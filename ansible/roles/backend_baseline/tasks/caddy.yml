@@ -21,11 +21,20 @@
       {{ backend_domain }} {
           encode zstd gzip
 
-          @health path {{ backend_monitoring_health_path }}
-          header @health Content-Type text/plain
-          respond @health "{{ backend_caddy_health_response }}" 200
+          handle {{ backend_monitoring_health_path }} {
+              header Content-Type text/plain
+              respond "{{ backend_caddy_health_response }}" 200
+          }
+          {% if backend_worker_api_enabled | bool %}
 
-          respond "backend application not deployed\n" 404
+          handle /api/worker/db/* {
+              reverse_proxy http://{{ backend_worker_api_bind }}:{{ backend_worker_api_port }}
+          }
+          {% endif %}
+
+          handle {
+              respond "backend application not deployed\n" 404
+          }
       }
       {% if backend_ops_dashboard_enabled | bool %}
 

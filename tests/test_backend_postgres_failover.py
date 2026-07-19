@@ -80,6 +80,7 @@ class BackendPostgresFailoverTests(unittest.TestCase):
             "- name: Run backend Ansible baseline",
             1,
         )[0]
+        build_step_env = build_step.split("run: |", 1)[0]
         self.assertIn("NUTSNEWS_BACKEND_POSTGRES_ENABLED", workflow)
         self.assertIn("NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD", workflow)
         self.assertIn("NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD", workflow)
@@ -96,6 +97,12 @@ class BackendPostgresFailoverTests(unittest.TestCase):
             "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD",
         ):
             self.assertIn(secret_name, build_step)
+        self.assertIn("NUTSNEWS_BACKEND_WORKER_API_ENABLED", build_step_env)
+        self.assertIn("NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED", build_step_env)
+        self.assertIn("NUTSNEWS_BACKEND_API_TOKEN", build_step_env)
+        self.assertIn("${{ vars.NUTSNEWS_BACKEND_WORKER_API_ENABLED || 'false' }}", build_step_env)
+        self.assertIn("${{ vars.NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED || 'false' }}", build_step_env)
+        self.assertIn("${{ secrets.NUTSNEWS_BACKEND_API_TOKEN }}", build_step_env)
         self.assertIn('os.environ.get("NUTSNEWS_BACKEND_POSTGRES_ENABLED", "true")', build_step)
         self.assertIn('"backend_postgres_enabled"] = True', workflow)
         self.assertIn('"backend_postgres_restore_password"]', build_step)

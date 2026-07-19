@@ -164,6 +164,7 @@ sudo -n -u postgres psql -v ON_ERROR_STOP=1 -d "$TARGET_DATABASE" <<'SQL'
 DO $$
 DECLARE
   read_role name;
+  worker_object text;
 BEGIN
   FOREACH read_role IN ARRAY ARRAY[
     'nutsnews_readonly',
@@ -177,6 +178,21 @@ BEGIN
     IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'supabase_migrations') THEN
       EXECUTE format('GRANT USAGE ON SCHEMA supabase_migrations TO %I', read_role);
       EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA supabase_migrations TO %I', read_role);
+    END IF;
+  END LOOP;
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO nutsnews_worker_api', current_database());
+  EXECUTE 'GRANT USAGE ON SCHEMA public TO nutsnews_worker_api';
+  FOREACH worker_object IN ARRAY ARRAY[
+    'public.articles',
+    'public.article_ai_reviews',
+    'public.article_summaries',
+    'public.feed_health',
+    'public.public_feed_snapshot',
+    'public.rss_feeds',
+    'public.runtime_feature_flags'
+  ]::text[] LOOP
+    IF to_regclass(worker_object) IS NOT NULL THEN
+      EXECUTE format('GRANT SELECT ON TABLE %s TO nutsnews_worker_api', to_regclass(worker_object));
     END IF;
   END LOOP;
   EXECUTE format('GRANT CONNECT ON DATABASE %I TO nutsnews_migration_replication', current_database());

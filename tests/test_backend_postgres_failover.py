@@ -26,6 +26,8 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("backend_worker_api_enabled: false", defaults)
         self.assertIn("backend_worker_api_bind: 127.0.0.1", defaults)
         self.assertIn("backend_worker_api_writes_enabled: false", defaults)
+        self.assertIn("backend_postgres_worker_api_user: nutsnews_worker_api", defaults)
+        self.assertIn('backend_worker_api_db_user: "{{ backend_postgres_worker_api_user }}"', defaults)
         self.assertIn("  - acl", defaults)
 
     def test_postgres_tasks_keep_database_and_dashboard_loopback_only(self):
@@ -50,6 +52,7 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn('objs: "{{ backend_postgres_primary_shadow_database }}"', shadow_grant)
         self.assertIn("{{ backend_postgres_app_user }}", shadow_grant)
         self.assertIn("{{ backend_postgres_replication_user }}", shadow_grant)
+        self.assertIn("{{ backend_postgres_worker_api_user }}", shadow_grant)
         enforce_grant = tasks.split("- name: Enforce future-primary shadow database CONNECT grants", 1)[1].split(
             "- name: Allow read-only role to use the public schema",
             1,
@@ -57,7 +60,14 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("community.postgresql.postgresql_query", enforce_grant)
         self.assertIn("GRANT CONNECT ON DATABASE %I TO %I", enforce_grant)
         self.assertIn("{{ backend_postgres_primary_shadow_database }}", enforce_grant)
+        self.assertIn("{{ backend_postgres_worker_api_user }}", enforce_grant)
         self.assertIn("not ansible_check_mode", enforce_grant)
+        self.assertIn("Ensure Worker API read role exists", tasks)
+        self.assertIn("Allow Worker API role to read future-primary shadow worker objects", tasks)
+        self.assertIn("GRANT SELECT ON TABLE %s TO %I", tasks)
+        self.assertIn("public.rss_feeds", tasks)
+        self.assertIn("public.runtime_feature_flags", tasks)
+        self.assertNotIn("GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO %I', '{{ backend_postgres_worker_api_user }}'", tasks)
 
     def test_caddy_exposes_adminer_only_on_loopback(self):
         caddy = CADDY_TASKS.read_text(encoding="utf-8")
@@ -95,23 +105,28 @@ class BackendPostgresFailoverTests(unittest.TestCase):
             "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD",
             "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD",
             "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD",
+            "NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD",
         ):
             self.assertIn(secret_name, build_step)
         self.assertIn("NUTSNEWS_BACKEND_WORKER_API_ENABLED", build_step_env)
         self.assertIn("NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED", build_step_env)
         self.assertIn("NUTSNEWS_BACKEND_API_TOKEN", build_step_env)
+        self.assertIn("NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD", build_step_env)
         self.assertIn("${{ vars.NUTSNEWS_BACKEND_WORKER_API_ENABLED || 'false' }}", build_step_env)
         self.assertIn("${{ vars.NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED || 'false' }}", build_step_env)
         self.assertIn("${{ secrets.NUTSNEWS_BACKEND_API_TOKEN }}", build_step_env)
+        self.assertIn("${{ secrets.NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD }}", build_step_env)
         self.assertIn('os.environ.get("NUTSNEWS_BACKEND_POSTGRES_ENABLED", "true")', build_step)
         self.assertIn('"backend_postgres_enabled"] = True', workflow)
         self.assertIn('"backend_postgres_restore_password"]', build_step)
         self.assertIn('"backend_postgres_validation_password"]', build_step)
         self.assertIn('"backend_postgres_replication_password"]', build_step)
         self.assertIn('"backend_postgres_app_rehearsal_password"]', build_step)
+        self.assertIn('"backend_postgres_worker_api_password"]', build_step)
         self.assertIn('"backend_worker_api_enabled"] = True', build_step)
         self.assertIn('"backend_worker_api_token"] = token', build_step)
         self.assertIn('"backend_worker_api_writes_enabled"] = writes_enabled', build_step)
+        self.assertIn('"backend_worker_api_db_user"] = "nutsnews_worker_api"', build_step)
         self.assertNotIn("postgres://", workflow)
 
     def test_restore_drill_has_fixed_modes_and_staging_source(self):

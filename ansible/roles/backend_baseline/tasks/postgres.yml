@@ -165,6 +165,17 @@
   no_log: true
   when: backend_postgres_manageable | bool
 
+- name: Ensure Worker API read role exists
+  community.postgresql.postgresql_user:
+    name: "{{ backend_postgres_worker_api_user }}"
+    password: "{{ backend_postgres_worker_api_password }}"
+    role_attr_flags: LOGIN,BYPASSRLS
+    state: present
+  become_user: postgres
+  register: backend_postgres_worker_api_user_result
+  no_log: true
+  when: backend_postgres_manageable | bool
+
 - name: Ensure Supabase compatibility roles exist
   community.postgresql.postgresql_user:
     name: "{{ item.name }}"
@@ -199,6 +210,7 @@
           or (backend_postgres_validation_user_result is changed)
           or (backend_postgres_replication_user_result is changed)
           or (backend_postgres_app_rehearsal_user_result is changed)
+          or (backend_postgres_worker_api_user_result is changed)
         )
       }}
   when: backend_postgres_manageable | bool
@@ -286,7 +298,7 @@
     type: database
     objs: "{{ backend_postgres_primary_shadow_database }}"
     privs: CONNECT
-    roles: "{{ backend_postgres_readonly_user }},{{ backend_postgres_validation_user }},{{ backend_postgres_replication_user }},{{ backend_postgres_app_user }}"
+    roles: "{{ backend_postgres_readonly_user }},{{ backend_postgres_validation_user }},{{ backend_postgres_replication_user }},{{ backend_postgres_app_user }},{{ backend_postgres_worker_api_user }}"
     state: present
   become_user: postgres
   when:
@@ -306,7 +318,8 @@
           '{{ backend_postgres_readonly_user }}',
           '{{ backend_postgres_validation_user }}',
           '{{ backend_postgres_replication_user }}',
-          '{{ backend_postgres_app_user }}'
+          '{{ backend_postgres_app_user }}',
+          '{{ backend_postgres_worker_api_user }}'
         ]::name[] LOOP
           EXECUTE format(
             'GRANT CONNECT ON DATABASE %I TO %I',
@@ -342,13 +355,47 @@
     type: schema
     objs: public
     privs: USAGE
-    roles: "{{ backend_postgres_readonly_user }},{{ backend_postgres_validation_user }}"
+    roles: "{{ backend_postgres_readonly_user }},{{ backend_postgres_validation_user }},{{ backend_postgres_worker_api_user }}"
     state: present
   become_user: postgres
   when:
     - backend_postgres_manageable | bool
     - backend_postgres_database_dependents_manageable | default(false) | bool
     - backend_postgres_privilege_roles_manageable | default(false) | bool
+
+- name: Allow Worker API role to read future-primary shadow worker objects
+  community.postgresql.postgresql_query:
+    db: "{{ backend_postgres_primary_shadow_database }}"
+    query: |
+      DO $$
+      DECLARE
+        worker_object text;
+      BEGIN
+        EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', '{{ backend_postgres_worker_api_user }}');
+        FOREACH worker_object IN ARRAY ARRAY[
+          'public.articles',
+          'public.article_ai_reviews',
+          'public.article_summaries',
+          'public.feed_health',
+          'public.public_feed_snapshot',
+          'public.rss_feeds',
+          'public.runtime_feature_flags'
+        ]::text[] LOOP
+          IF to_regclass(worker_object) IS NOT NULL THEN
+            EXECUTE format(
+              'GRANT SELECT ON TABLE %s TO %I',
+              to_regclass(worker_object),
+              '{{ backend_postgres_worker_api_user }}'
+            );
+          END IF;
+        END LOOP;
+      END $$;
+  become_user: postgres
+  when:
+    - backend_postgres_manageable | bool
+    - backend_postgres_database_dependents_manageable | default(false) | bool
+    - backend_postgres_privilege_roles_manageable | default(false) | bool
+    - not ansible_check_mode
 
 - name: Preserve initial PostgreSQL readiness status
   ansible.builtin.copy:

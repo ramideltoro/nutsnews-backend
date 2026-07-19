@@ -157,6 +157,9 @@ jobs:
           NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD }}
+          NUTSNEWS_BACKEND_WORKER_API_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_ENABLED || 'false' }}
+          NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED || 'false' }}
+          NUTSNEWS_BACKEND_API_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_API_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -330,6 +333,30 @@ jobs:
               extra_vars["backend_postgres_validation_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD"]
               extra_vars["backend_postgres_replication_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD"]
               extra_vars["backend_postgres_app_rehearsal_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD"]
+
+          worker_api_enabled = os.environ.get("NUTSNEWS_BACKEND_WORKER_API_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+          if worker_api_enabled:
+              token = os.environ.get("NUTSNEWS_BACKEND_API_TOKEN", "")
+              if not token:
+                  raise SystemExit("Missing required Worker database API secret: NUTSNEWS_BACKEND_API_TOKEN")
+              writes_enabled = os.environ.get("NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+              extra_vars["backend_worker_api_enabled"] = True
+              extra_vars["backend_worker_api_token"] = token
+              extra_vars["backend_worker_api_db_name"] = extra_vars.get(
+                  "backend_postgres_primary_shadow_database",
+                  os.environ.get("NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE", "nutsnews_primary_shadow").strip() or "nutsnews_primary_shadow",
+              )
+              extra_vars["backend_worker_api_writes_enabled"] = writes_enabled
+              if writes_enabled:
+                  if not os.environ.get("NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD", ""):
+                      raise SystemExit("Worker database API writes require NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD")
+                  extra_vars["backend_worker_api_db_user"] = "nutsnews_app"
+                  extra_vars["backend_worker_api_db_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD"]
+              else:
+                  if not os.environ.get("NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD", ""):
+                      raise SystemExit("Worker database API shadow reads require NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD")
+                  extra_vars["backend_worker_api_db_user"] = "nutsnews_readonly"
+                  extra_vars["backend_worker_api_db_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD"]
 
           path = Path(os.environ["RUNNER_TEMP"]) / "backend-extra-vars.json"
           path.write_text(json.dumps(extra_vars), encoding="utf-8")

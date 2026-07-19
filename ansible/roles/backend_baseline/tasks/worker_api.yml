@@ -1,0 +1,145 @@
+---
+- name: Require PostgreSQL when Worker database API is enabled
+  ansible.builtin.assert:
+    that:
+      - backend_postgres_enabled | bool
+      - backend_worker_api_token | length > 0
+      - backend_worker_api_db_password | length > 0
+    fail_msg: "Worker database API requires PostgreSQL plus backend_worker_api_token and backend_worker_api_db_password."
+
+- name: Install Worker database API runtime packages
+  ansible.builtin.apt:
+    name:
+      - python3-psycopg2
+    state: present
+    update_cache: true
+  register: backend_worker_api_packages
+
+- name: Track whether Worker database API can be managed in this run
+  ansible.builtin.set_fact:
+    backend_worker_api_manageable: "{{ (not ansible_check_mode) or not (backend_worker_api_packages is changed) }}"
+
+- name: Ensure Worker database API group exists
+  ansible.builtin.group:
+    name: "{{ backend_worker_api_group }}"
+    system: true
+    state: present
+  when: backend_worker_api_manageable | bool
+
+- name: Ensure Worker database API user exists
+  ansible.builtin.user:
+    name: "{{ backend_worker_api_user }}"
+    group: "{{ backend_worker_api_group }}"
+    system: true
+    create_home: false
+    home: "{{ backend_worker_api_root }}"
+    shell: /usr/sbin/nologin
+    state: present
+  when: backend_worker_api_manageable | bool
+
+- name: Ensure Worker database API root exists
+  ansible.builtin.file:
+    path: "{{ backend_worker_api_root }}"
+    state: directory
+    owner: root
+    group: "{{ backend_worker_api_group }}"
+    mode: "0750"
+  when: backend_worker_api_manageable | bool
+
+- name: Install Worker database API service script
+  ansible.builtin.copy:
+    src: nutsnews_worker_db_api.py
+    dest: "{{ backend_worker_api_script_path }}"
+    owner: root
+    group: "{{ backend_worker_api_group }}"
+    mode: "0750"
+  notify: Restart worker database API
+  when: backend_worker_api_manageable | bool
+
+- name: Install Worker database API environment
+  ansible.builtin.copy:
+    dest: "{{ backend_worker_api_env_path }}"
+    owner: root
+    group: "{{ backend_worker_api_group }}"
+    mode: "0640"
+    content: |
+      NUTSNEWS_WORKER_DB_API_BIND={{ backend_worker_api_bind }}
+      NUTSNEWS_WORKER_DB_API_PORT={{ backend_worker_api_port }}
+      NUTSNEWS_BACKEND_API_TOKEN={{ backend_worker_api_token }}
+      NUTSNEWS_WORKER_DB_API_DB_HOST={{ backend_worker_api_db_host }}
+      NUTSNEWS_WORKER_DB_API_DB_PORT={{ backend_worker_api_db_port }}
+      NUTSNEWS_WORKER_DB_API_DB_NAME={{ backend_worker_api_db_name }}
+      NUTSNEWS_WORKER_DB_API_DB_USER={{ backend_worker_api_db_user }}
+      NUTSNEWS_WORKER_DB_API_DB_PASSWORD={{ backend_worker_api_db_password }}
+      NUTSNEWS_WORKER_DB_API_WRITES_ENABLED={{ backend_worker_api_writes_enabled | bool | lower }}
+      NUTSNEWS_WORKER_DB_API_MAX_LIMIT={{ backend_worker_api_max_limit }}
+  no_log: true
+  notify: Restart worker database API
+  when: backend_worker_api_manageable | bool
+
+- name: Install Worker database API systemd unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nutsnews-worker-db-api.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=NutsNews Worker database compatibility API
+      After=network.target {{ backend_postgres_service_name }}.service
+      Requires={{ backend_postgres_service_name }}.service
+
+      [Service]
+      Type=simple
+      User={{ backend_worker_api_user }}
+      Group={{ backend_worker_api_group }}
+      EnvironmentFile={{ backend_worker_api_env_path }}
+      ExecStart=/usr/bin/python3 {{ backend_worker_api_script_path }}
+      Restart=on-failure
+      RestartSec=5s
+      NoNewPrivileges=true
+      PrivateTmp=true
+      ProtectHome=true
+      ProtectSystem=strict
+      ReadWritePaths=/tmp
+
+      [Install]
+      WantedBy=multi-user.target
+  notify:
+    - Reload systemd
+    - Restart worker database API
+  when: backend_worker_api_manageable | bool
+
+- name: Flush Worker database API handlers before health probe
+  ansible.builtin.meta: flush_handlers
+  when:
+    - backend_worker_api_manageable | bool
+    - not ansible_check_mode
+
+- name: Ensure Worker database API service is enabled and started
+  ansible.builtin.service:
+    name: nutsnews-worker-db-api
+    enabled: true
+    state: started
+  when: backend_worker_api_manageable | bool
+
+- name: Capture Worker database API loopback health
+  ansible.builtin.command: "curl -fsS http://{{ backend_worker_api_bind }}:{{ backend_worker_api_port }}/healthz"
+  register: backend_worker_api_health
+  changed_when: false
+  failed_when: false
+  when:
+    - backend_worker_api_manageable | bool
+    - not ansible_check_mode
+
+- name: Report Worker database API summary
+  ansible.builtin.debug:
+    msg:
+      enabled: "{{ backend_worker_api_enabled }}"
+      bind: "{{ backend_worker_api_bind }}"
+      port: "{{ backend_worker_api_port }}"
+      database: "{{ backend_worker_api_db_name }}"
+      db_user: "{{ backend_worker_api_db_user }}"
+      writes_enabled: "{{ backend_worker_api_writes_enabled }}"
+      public_route: "https://{{ backend_domain }}/api/worker/db/*"
+      health: "{{ backend_worker_api_health.stdout_lines | default([]) }}"

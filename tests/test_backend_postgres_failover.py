@@ -23,6 +23,9 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("backend_postgres_listen_addresses: localhost", defaults)
         self.assertIn("backend_db_dashboard_bind: 127.0.0.1", defaults)
         self.assertIn('backend_db_dashboard_port: "8082"', defaults)
+        self.assertIn("backend_worker_api_enabled: false", defaults)
+        self.assertIn("backend_worker_api_bind: 127.0.0.1", defaults)
+        self.assertIn("backend_worker_api_writes_enabled: false", defaults)
         self.assertIn("  - acl", defaults)
 
     def test_postgres_tasks_keep_database_and_dashboard_loopback_only(self):
@@ -62,6 +65,8 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("bind {{ backend_db_dashboard_bind }}", caddy)
         self.assertIn("php_fastcgi {{ backend_db_dashboard_php_fpm_listen }}", caddy)
         self.assertNotIn("{{ backend_domain }}/adminer", caddy)
+        self.assertIn("handle /api/worker/db/*", caddy)
+        self.assertIn("reverse_proxy http://{{ backend_worker_api_bind }}:{{ backend_worker_api_port }}", caddy)
 
     def test_firewall_does_not_open_database_or_dashboard_ports(self):
         firewall = FIREWALL_TASKS.read_text(encoding="utf-8")
@@ -78,6 +83,8 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("NUTSNEWS_BACKEND_POSTGRES_ENABLED", workflow)
         self.assertIn("NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD", workflow)
         self.assertIn("NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD", workflow)
+        self.assertIn("NUTSNEWS_BACKEND_WORKER_API_ENABLED", workflow)
+        self.assertIn("NUTSNEWS_BACKEND_API_TOKEN", workflow)
         self.assertIn("NUTSNEWS_BACKEND_POSTGRES_ENABLED", build_step)
         self.assertIn("NUTSNEWS_BACKEND_DB_DASHBOARD_ENABLED", build_step)
         self.assertIn("NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD", build_step)
@@ -95,6 +102,9 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn('"backend_postgres_validation_password"]', build_step)
         self.assertIn('"backend_postgres_replication_password"]', build_step)
         self.assertIn('"backend_postgres_app_rehearsal_password"]', build_step)
+        self.assertIn('"backend_worker_api_enabled"] = True', build_step)
+        self.assertIn('"backend_worker_api_token"] = token', build_step)
+        self.assertIn('"backend_worker_api_writes_enabled"] = writes_enabled', build_step)
         self.assertNotIn("postgres://", workflow)
 
     def test_restore_drill_has_fixed_modes_and_staging_source(self):

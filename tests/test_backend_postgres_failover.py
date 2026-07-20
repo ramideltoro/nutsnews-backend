@@ -40,6 +40,12 @@ class BackendPostgresFailoverTests(unittest.TestCase):
 
     def test_database_connect_grants_target_database_objects_explicitly(self):
         tasks = POSTGRES_TASKS.read_text(encoding="utf-8")
+        app_role = tasks.split("- name: Ensure failover application role exists", 1)[1].split(
+            "- name: Ensure failover read-only role exists",
+            1,
+        )[0]
+        self.assertIn("{{ backend_postgres_app_user }}", app_role)
+        self.assertIn("role_attr_flags: LOGIN,BYPASSRLS", app_role)
         failover_grant = tasks.split("- name: Allow read-only role to connect to the failover database", 1)[1].split(
             "- name: Allow migration roles to connect to the future-primary shadow database",
             1,

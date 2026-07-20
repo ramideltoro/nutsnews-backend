@@ -103,7 +103,7 @@
   community.postgresql.postgresql_user:
     name: "{{ backend_postgres_app_user }}"
     password: "{{ backend_postgres_app_password }}"
-    role_attr_flags: LOGIN
+    role_attr_flags: LOGIN,BYPASSRLS
     state: present
   become_user: postgres
   register: backend_postgres_app_user_result

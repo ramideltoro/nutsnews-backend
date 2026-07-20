@@ -94,6 +94,15 @@ jobs:
           set -euo pipefail
 
           ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh_base=(
+            ssh
+            -i "$HOME/.ssh/nutsnews_backend"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+          )
+          diagnostics_file="$RUNNER_TEMP/backend-backup-maintenance-diagnostics.txt"
           unit=""
           case "$ACTION" in
             backup) unit="nutsnews-backup.service" ;;
@@ -101,29 +110,50 @@ jobs:
             restore-drill) unit="nutsnews-restore-drill.service" ;;
           esac
 
+          action_rc=0
           if [[ -n "$unit" ]]; then
-            ssh -i "$HOME/.ssh/nutsnews_backend" \
-              -o BatchMode=yes \
-              -o IdentitiesOnly=yes \
-              -o StrictHostKeyChecking=yes \
-              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-              "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            set +e
+            "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
               "sudo -n systemctl start '$unit'"
+            action_rc="$?"
+            set -e
+            if [[ "$action_rc" -ne 0 ]]; then
+              {
+                echo "unit=$unit"
+                echo "systemctl_start_exit=$action_rc"
+                echo
+                echo "[systemctl-show]"
+                "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+                  "sudo -n systemctl show '$unit' --property=ActiveState,SubState,Result,ExecMainCode,ExecMainStatus,NRestarts --no-pager 2>&1 || true"
+                echo
+                echo "[journal-tail-redacted]"
+                "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+                  "sudo -n journalctl -u '$unit' -n 80 --no-pager --output=short-iso 2>&1 \
+                    | sed -E 's#(postgres(ql)?://)[^[:space:]]+#\1[REDACTED]#g; s#(s3:https?://)[^[:space:]]+#\1[REDACTED]#g; s#([A-Za-z_]*(PASSWORD|TOKEN|SECRET|KEY)[A-Za-z_]*=)[^[:space:]]+#\1[REDACTED]#g' \
+                    || true"
+              } | tee "$diagnostics_file"
+            fi
           fi
 
-          ssh -i "$HOME/.ssh/nutsnews_backend" \
-            -o BatchMode=yes \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+          status_rc=0
+          set +e
+          "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
             "sudo -n /usr/local/sbin/nutsnews-backup status" \
             | tee "$RUNNER_TEMP/backend-backup-maintenance-report.json"
+          status_rc="${PIPESTATUS[0]}"
+          set -e
+
+          if [[ "$action_rc" -ne 0 ]]; then
+            exit "$action_rc"
+          fi
+          exit "$status_rc"
 
       - name: Upload backup maintenance report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: backend-backup-maintenance-report
-          path: ${{ runner.temp }}/backend-backup-maintenance-report.json
+          path: |
+            ${{ runner.temp }}/backend-backup-maintenance-report.json
+            ${{ runner.temp }}/backend-backup-maintenance-diagnostics.txt
           if-no-files-found: ignore

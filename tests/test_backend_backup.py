@@ -110,6 +110,52 @@ class BackendBackupTests(unittest.TestCase):
         self.assertEqual(updated["latest_snapshot_verified_at_utc"], "2026-07-17T00:08:40Z")
         self.assertEqual(updated["alerts"], [{"kind": "storage_quota_warning", "status": "not_configured"}])
 
+    def test_verify_falls_back_to_last_healthy_backup_snapshot_from_state(self):
+        runner = load_runner()
+        full_id = "2fb6c729787cf16c8d2d02662e5e6723a9be6a66d000cb4b1c7596d140f53e2e"
+        completed = type("Completed", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir)
+            backup_path = state_dir / runner.STATUS_FILES["backup"]
+            backup_path.write_text(
+                json.dumps(
+                    {
+                        "status": "healthy",
+                        "freshness_status": "healthy",
+                        "snapshot_id": full_id,
+                        "alerts": [{"kind": "unverified_latest_snapshot", "status": "warning"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = type("Args", (), {"state_dir": state_dir, "read_data_subset": "1%"})()
+            with mock.patch.object(runner, "latest_snapshot_id", return_value=None), mock.patch.object(
+                runner, "run_restic", return_value=completed
+            ) as run_restic:
+                status = runner.action_verify(args)
+            updated = json.loads(backup_path.read_text(encoding="utf-8"))
+
+        run_restic.assert_called_once_with(["check", "--read-data-subset", "1%"], timeout=7200)
+        self.assertEqual(status["status"], "healthy")
+        self.assertEqual(status["snapshot_id"], full_id)
+        self.assertEqual(status["snapshot_source"], "backup_status")
+        self.assertEqual(updated["alerts"], [])
+        self.assertIn("latest_snapshot_verified_at_utc", updated)
+
+    def test_verify_reports_unavailable_snapshot_when_restic_and_state_have_no_snapshot(self):
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = type("Args", (), {"state_dir": Path(tmpdir), "read_data_subset": "1%"})()
+            with mock.patch.object(runner, "latest_snapshot_id", return_value=None), mock.patch.object(
+                runner, "run_restic"
+            ) as run_restic:
+                status = runner.action_verify(args)
+
+        run_restic.assert_not_called()
+        self.assertEqual(status["status"], "critical")
+        self.assertIsNone(status["snapshot_id"])
+        self.assertEqual(status["snapshot_source"], "unavailable")
+
     def test_backup_workflow_has_only_fixed_actions(self):
         workflow = Path(".github/workflows/backend-backup-maintenance.yml").read_text(encoding="utf-8")
         self.assertIn("- status", workflow)

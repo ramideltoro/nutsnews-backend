@@ -221,6 +221,20 @@ def latest_backup_is_verified(state_dir: Path, snapshot_id: str | None) -> bool:
     return data.get("status") == "healthy" and snapshot_ids_match(str(data.get("snapshot_id") or ""), snapshot_id)
 
 
+def latest_backup_snapshot_id_from_state(state_dir: Path) -> str | None:
+    path = state_dir / STATUS_FILES["backup"]
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    if data.get("status") != "healthy" or data.get("freshness_status") != "healthy":
+        return None
+    snapshot_id = str(data.get("snapshot_id") or "").strip()
+    return snapshot_id or None
+
+
 def mark_backup_verified(state_dir: Path, snapshot_id: str | None, verified_at: str) -> None:
     if not snapshot_id:
         return
@@ -317,6 +331,10 @@ def action_verify(args: argparse.Namespace) -> dict[str, Any]:
     ensure_state_dir(args.state_dir)
     started_at = utc_now()
     snapshot_id = latest_snapshot_id()
+    snapshot_source = "restic_latest"
+    if not snapshot_id:
+        snapshot_id = latest_backup_snapshot_id_from_state(args.state_dir)
+        snapshot_source = "backup_status" if snapshot_id else "unavailable"
     if not snapshot_id:
         status = {
             "schema_version": 1,
@@ -325,6 +343,7 @@ def action_verify(args: argparse.Namespace) -> dict[str, Any]:
             "started_at_utc": started_at,
             "finished_at_utc": utc_now(),
             "snapshot_id": None,
+            "snapshot_source": snapshot_source,
             "alerts": [{"kind": "unverified_latest_snapshot", "status": "critical"}],
         }
         write_json(args.state_dir / STATUS_FILES["verification"], status)
@@ -342,6 +361,7 @@ def action_verify(args: argparse.Namespace) -> dict[str, Any]:
         "started_at_utc": started_at,
         "finished_at_utc": finished_at,
         "snapshot_id": snapshot_id,
+        "snapshot_source": snapshot_source,
         "read_data_subset": args.read_data_subset,
         "alerts": [] if healthy else [{"kind": "unverified_latest_snapshot", "status": "critical"}],
         "repository_normalization": repository_normalization_metadata(),

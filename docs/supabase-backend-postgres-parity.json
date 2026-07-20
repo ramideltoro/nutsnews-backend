@@ -61,6 +61,15 @@
     "release_operations": "ramideltoro",
     "worker_runtime": "ramideltoro/nutsnews-worker"
   },
+  "post_cutover_status": {
+    "recorded_at_utc": "2026-07-20T05:31:00Z",
+    "cutover_issue": 119,
+    "retirement_issue": 114,
+    "production_primary": "backend_postgres_primary",
+    "supabase_role": "rollback_window_and_retirement_source_until_issue_114_approval",
+    "latest_no_new_supabase_write_evidence": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29719176421",
+    "latest_parity_evidence": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29719283886"
+  },
   "references": [
     "https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore",
     "https://supabase.com/docs/guides/database/postgres/setup-replication-external",
@@ -82,7 +91,7 @@
       "validation_method": "scripts/check_supabase_migration_drift.py --enforce"
     },
     {
-      "description": "Supabase remains the only production writer until #119 is explicitly approved and executed. No phase may permit concurrent writes to Supabase and backend PostgreSQL.",
+      "description": "Before #119, Supabase remained the only production writer until explicit protected cutover approval. After #119, backend PostgreSQL is the production primary; no phase may permit concurrent writes to Supabase and backend PostgreSQL, and #114 must verify no production path still writes to Supabase before retirement.",
       "id": "single-writer",
       "owner": "backend_operations",
       "validation_method": "cutover_checklist_gate"
@@ -376,7 +385,7 @@
     }
   },
   "tracking_issue": 120,
-  "updated_at_utc": "2026-07-18",
+  "updated_at_utc": "2026-07-20",
   "validation_strategy": {
     "checksums": {
       "emit": "hash digests only; no row data",
@@ -403,6 +412,8 @@
   "version": 1,
   "workflow_contract": {
     "cutover": {
+      "completed": true,
+      "completed_issue_comment": "https://github.com/ramideltoro/nutsnews-backend/issues/119#issuecomment-5019058772",
       "issue": 119,
       "requires_explicit_approval": true,
       "supabase_remains_writer_until_approved": true

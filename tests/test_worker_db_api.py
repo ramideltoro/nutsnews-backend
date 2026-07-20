@@ -19,12 +19,15 @@ class FakeStore:
     writes_enabled = False
     max_limit = 10000
 
-    def __init__(self) -> None:
+    def __init__(self, *, fetch_all_results: list[list[dict]] | None = None) -> None:
         self.fetches: list[tuple[str, tuple]] = []
         self.executes: list[tuple[str, tuple]] = []
+        self.fetch_all_results = list(fetch_all_results or [])
 
     def fetch_all(self, query: str, params: tuple = ()) -> list[dict]:
         self.fetches.append((query, params))
+        if self.fetch_all_results:
+            return self.fetch_all_results.pop(0)
         return [{"source": "Example", "url": "https://example.com/rss", "is_positive_source": True}]
 
     def fetch_one(self, query: str, params: tuple = ()) -> dict | None:
@@ -98,6 +101,150 @@ class WorkerDbApiTests(unittest.TestCase):
         self.assertIn("duration_ms", query)
         self.assertNotIn("malicious", query)
         self.assertEqual(len(params), len(worker_db_api.WRITE_TABLE_COLUMNS["worker_runs"]))
+
+    def test_save_accepted_articles_rejects_already_published_rows(self) -> None:
+        store = FakeStore()
+        store.writes_enabled = True
+
+        with self.assertRaises(worker_db_api.ApiError) as error:
+            worker_db_api.handle_operation(
+                "save-accepted-articles-batch",
+                {
+                    "providerMode": "backend_postgres_primary",
+                    "articles": [
+                        {
+                            "source": "Example",
+                            "title": "Published without translations",
+                            "original_url": "https://example.com/published",
+                            "status": "published",
+                        }
+                    ],
+                },
+                store,
+            )
+
+        self.assertEqual(409, error.exception.status)
+        self.assertEqual([], store.executes)
+
+    def test_save_accepted_articles_allows_translation_pending_rows(self) -> None:
+        store = FakeStore()
+        store.writes_enabled = True
+
+        result = worker_db_api.handle_operation(
+            "save-accepted-articles-batch",
+            {
+                "providerMode": "backend_postgres_primary",
+                "articles": [
+                    {
+                        "source": "Example",
+                        "title": "Pending translations",
+                        "original_url": "https://example.com/pending",
+                        "status": "translation_pending",
+                    }
+                ],
+            },
+            store,
+        )
+
+        query, params = store.executes[0]
+        self.assertEqual({"ok": True}, result)
+        self.assertIn("insert into public.articles", query)
+        self.assertEqual("translation_pending", params[-1])
+
+    def test_publish_requires_enabled_translation_languages(self) -> None:
+        store = FakeStore()
+        store.writes_enabled = True
+
+        with self.assertRaises(worker_db_api.ApiError) as error:
+            worker_db_api.handle_operation(
+                "publish-articles-batch",
+                {
+                    "providerMode": "backend_postgres_primary",
+                    "originalUrls": ["https://example.com/pending"],
+                    "status": "published",
+                },
+                store,
+            )
+
+        self.assertEqual(400, error.exception.status)
+        self.assertEqual([], store.fetches)
+        self.assertEqual([], store.executes)
+
+    def test_publish_blocks_articles_above_translation_budget_until_gaps_recover(self) -> None:
+        store = FakeStore(
+            fetch_all_results=[
+                [
+                    {"original_url": "https://example.com/over-budget", "language_code": "de"},
+                    {"original_url": "https://example.com/over-budget", "language_code": "el"},
+                ],
+                [],
+                [{"original_url": "https://example.com/over-budget"}],
+            ]
+        )
+        store.writes_enabled = True
+
+        blocked = worker_db_api.handle_operation(
+            "publish-articles-batch",
+            {
+                "providerMode": "backend_postgres_primary",
+                "originalUrls": ["https://example.com/over-budget"],
+                "languageCodes": ["fr", "ja", "de-CH", "de", "el"],
+                "status": "published",
+            },
+            store,
+        )
+        recovered = worker_db_api.handle_operation(
+            "publish-articles-batch",
+            {
+                "providerMode": "backend_postgres_primary",
+                "originalUrls": ["https://example.com/over-budget"],
+                "languageCodes": ["fr", "ja", "de-CH", "de", "el"],
+                "status": "published",
+            },
+            store,
+        )
+
+        self.assertFalse(blocked["ok"])
+        self.assertEqual(1, blocked["blockedCount"])
+        self.assertEqual(
+            [
+                {"original_url": "https://example.com/over-budget", "language_code": "de"},
+                {"original_url": "https://example.com/over-budget", "language_code": "el"},
+            ],
+            blocked["missingTranslations"],
+        )
+        self.assertEqual(
+            {"ok": True, "requestedCount": 1, "publishedCount": 1, "blockedCount": 0, "missingTranslations": []},
+            recovered,
+        )
+        gap_query, gap_params = store.fetches[0]
+        update_query, update_params = store.fetches[2]
+        self.assertIn("from unnest(%s::text[])", gap_query)
+        self.assertIn("left join public.article_summaries", gap_query)
+        self.assertEqual((["https://example.com/over-budget"], ["fr", "ja", "de-CH", "de", "el"], 5), gap_params)
+        self.assertIn("update public.articles", update_query)
+        self.assertIn("returning original_url", update_query)
+        self.assertEqual((["https://example.com/over-budget"],), update_params)
+        self.assertEqual([], store.executes)
+
+    def test_publish_rejects_unsupported_translation_language(self) -> None:
+        store = FakeStore()
+        store.writes_enabled = True
+
+        with self.assertRaises(worker_db_api.ApiError) as error:
+            worker_db_api.handle_operation(
+                "publish-articles-batch",
+                {
+                    "providerMode": "backend_postgres_primary",
+                    "originalUrls": ["https://example.com/pending"],
+                    "languageCodes": ["fr", "en"],
+                    "status": "published",
+                },
+                store,
+            )
+
+        self.assertEqual(400, error.exception.status)
+        self.assertEqual([], store.fetches)
 
     def test_app_smoke_does_not_touch_database(self) -> None:
         store = FakeStore()
@@ -212,6 +359,23 @@ class WorkerDbApiTests(unittest.TestCase):
             ("outbound_click", "00000000-0000-0000-0000-000000000001", "Example", "Science", 1),
             params,
         )
+
+    def test_summary_translation_recovery_includes_published_and_pending_articles(self) -> None:
+        store = FakeStore()
+
+        worker_db_api.handle_operation(
+            "load-summary-translation-recovery-articles",
+            {
+                "providerMode": "backend_postgres_shadow",
+                "lookbackLimit": 25,
+            },
+            store,
+        )
+
+        query, params = store.fetches[0]
+        self.assertIn("status in ('published', 'translation_pending')", query)
+        self.assertIn("ai_summary is not null", query)
+        self.assertEqual((25,), params)
 
 
 if __name__ == "__main__":

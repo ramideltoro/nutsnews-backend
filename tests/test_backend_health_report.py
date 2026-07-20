@@ -121,6 +121,27 @@ class BackendHealthReportTests(unittest.TestCase):
         alerts = backend_health_report.current_alerts_from_checks([by_name["postgres_replication_health"]])
         self.assertEqual(alerts[0]["failure_class"], "replication_health")
 
+    def test_postgres_replication_health_allows_idle_slot_when_lag_is_healthy(self):
+        checks, _ = backend_health_report.classify(
+            fixture_report(
+                postgres_replication_health=command(
+                    "{"
+                    '"replication":{'
+                    '"mode":"logical_replication",'
+                    '"lag_status":"healthy",'
+                    '"max_lag_seconds":5,'
+                    '"slot_status":"inactive",'
+                    '"validation_status":"current",'
+                    '"blockers":[]'
+                    "}"
+                    "}\n"
+                )
+            )
+        )
+        by_name = {item["name"]: item for item in checks}
+        self.assertEqual(by_name["postgres_replication_health"]["status"], "healthy")
+        self.assertEqual(backend_health_report.current_alerts_from_checks([by_name["postgres_replication_health"]]), [])
+
     def test_cleanup_status_is_exposed_when_present(self):
         checks, _ = backend_health_report.classify(
             fixture_report(

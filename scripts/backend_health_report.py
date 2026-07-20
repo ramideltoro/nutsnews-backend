@@ -239,7 +239,7 @@ def status_from_replication(replication: dict[str, Any]) -> str:
     slot_status = str(replication.get("slot_status") or "not_configured")
     validation_status = str(replication.get("validation_status") or "not_configured")
     blockers = replication.get("blockers", [])
-    if blockers or lag_status in {"lagging", "inactive"} or slot_status == "inactive":
+    if blockers or lag_status in {"lagging", "inactive"}:
         return "critical"
     if lag_status in {"unknown"} or slot_status == "unknown" or validation_status == "stale":
         return "warning"

@@ -38,6 +38,39 @@ class FakeStore:
         self.executes.append((query, params))
 
 
+def edge_article(overrides: dict | None = None) -> dict:
+    row = {
+        "id": "article-1",
+        "source": "Example",
+        "title": "English edge title",
+        "original_url": "https://example.com/article-1",
+        "image_url": "https://example.com/image.jpg",
+        "published_at": "2026-07-16T00:00:00Z",
+        "published_on_site_at": "2026-07-16T01:00:00Z",
+        "ai_summary": "English edge summary.",
+        "category": "Science",
+        "positivity_score": 0.91,
+    }
+    if overrides:
+        row.update(overrides)
+    return row
+
+
+class EdgeSnapshotStore(FakeStore):
+    def __init__(self, summaries: list[dict] | None = None) -> None:
+        super().__init__()
+        self.snapshot_rows = [edge_article()]
+        self.summary_rows = summaries or []
+
+    def fetch_all(self, query: str, params: tuple = ()) -> list[dict]:
+        self.fetches.append((query, params))
+        if "from public.public_feed_snapshot" in query:
+            return self.snapshot_rows
+        if "from public.article_summaries" in query:
+            return self.summary_rows
+        return super().fetch_all(query, params)
+
+
 class WorkerDbApiTests(unittest.TestCase):
     def test_shadow_feed_read_uses_bounded_select(self) -> None:
         store = FakeStore()
@@ -51,6 +84,69 @@ class WorkerDbApiTests(unittest.TestCase):
         query, params = store.fetches[0]
         self.assertIn("from public.rss_feeds", query)
         self.assertEqual((1, 0), params)
+
+    def test_worker_edge_snapshot_rows_default_to_english_metadata(self) -> None:
+        store = EdgeSnapshotStore()
+
+        result = worker_db_api.handle_operation(
+            "load-public-feed-snapshot-rows",
+            {"providerMode": "backend_postgres_shadow", "limit": 1},
+            store,
+        )
+
+        self.assertEqual("English edge title", result[0]["title"])
+        self.assertEqual("English edge summary.", result[0]["ai_summary"])
+        self.assertEqual("en", result[0]["language_code"])
+        self.assertEqual("en", result[0]["requested_language_code"])
+        self.assertIs(result[0]["translation_available"], True)
+        self.assertEqual(1, len(store.fetches))
+        query, params = store.fetches[0]
+        self.assertIn("from public.public_feed_snapshot p", query)
+        self.assertIn("order by p.snapshot_rank asc", query)
+        self.assertEqual((1,), params)
+
+    def test_worker_edge_snapshot_rows_localize_requested_language(self) -> None:
+        store = EdgeSnapshotStore(
+            summaries=[
+                {
+                    "original_url": "https://example.com/article-1",
+                    "language_code": "fr",
+                    "title": "Titre de bord francais",
+                    "summary": "Resume de bord francais.",
+                }
+            ]
+        )
+
+        result = worker_db_api.handle_operation(
+            "load-public-feed-snapshot-rows",
+            {"providerMode": "backend_postgres_shadow", "limit": 1, "languageCode": "fr"},
+            store,
+        )
+
+        self.assertEqual("Titre de bord francais", result[0]["title"])
+        self.assertEqual("Resume de bord francais.", result[0]["ai_summary"])
+        self.assertEqual("fr", result[0]["language_code"])
+        self.assertEqual("fr", result[0]["requested_language_code"])
+        self.assertIs(result[0]["translation_available"], True)
+        self.assertEqual(2, len(store.fetches))
+        summary_query, summary_params = store.fetches[1]
+        self.assertIn("from public.article_summaries", summary_query)
+        self.assertEqual((["https://example.com/article-1"], "fr", 1), summary_params)
+
+    def test_worker_edge_snapshot_rows_mark_missing_translation_as_english_fallback(self) -> None:
+        store = EdgeSnapshotStore()
+
+        result = worker_db_api.handle_operation(
+            "load-public-feed-snapshot-rows",
+            {"providerMode": "backend_postgres_shadow", "limit": 1, "languageCode": "fr"},
+            store,
+        )
+
+        self.assertEqual("English edge title", result[0]["title"])
+        self.assertEqual("English edge summary.", result[0]["ai_summary"])
+        self.assertEqual("en", result[0]["language_code"])
+        self.assertEqual("fr", result[0]["requested_language_code"])
+        self.assertIs(result[0]["translation_available"], False)
 
     def test_shadow_write_is_rejected_before_database_call(self) -> None:
         store = FakeStore()

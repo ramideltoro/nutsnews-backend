@@ -63,13 +63,17 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("{{ backend_postgres_worker_api_user }}", enforce_grant)
         self.assertIn("not ansible_check_mode", enforce_grant)
         self.assertIn("Ensure Worker API read role exists", tasks)
-        self.assertIn("Allow database API role to read future-primary shadow app and worker objects", tasks)
+        self.assertIn("Allow database API roles to read future-primary shadow app and worker objects", tasks)
         self.assertIn("GRANT SELECT ON TABLE %s TO %I", tasks)
         self.assertIn("public.rss_feeds", tasks)
         self.assertIn("public.runtime_feature_flags", tasks)
         self.assertIn("public.quota_usage_events", tasks)
+        self.assertIn("{{ backend_postgres_app_user }}", tasks)
+        self.assertIn("GRANT INSERT, UPDATE ON TABLE %s TO %I", tasks)
+        self.assertIn("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %I", tasks)
         self.assertIn("public.article_engagement_source_category_summary", tasks)
         self.assertIn("GRANT EXECUTE ON FUNCTION public.record_article_engagement_event", tasks)
+        self.assertIn("GRANT EXECUTE ON FUNCTION public.refresh_public_feed_snapshot()", tasks)
         self.assertNotIn("GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO %I', '{{ backend_postgres_worker_api_user }}'", tasks)
 
     def test_caddy_exposes_adminer_only_on_loopback(self):

@@ -71,6 +71,9 @@ RUNTIME_FEATURE_FLAG_DEFAULTS = {
     "worker_public_feed_edge_snapshot_publish": True,
 }
 
+DEFAULT_LANGUAGE_CODE = "en"
+SUPPORTED_EDGE_SNAPSHOT_LANGUAGE_CODES = {"en", "fr", "ja", "de-CH", "de", "el"}
+
 PUBLIC_FEED_EDGE_SNAPSHOT_COLUMNS = (
     "id",
     "source",
@@ -367,6 +370,79 @@ def optional_bool(body: dict[str, Any], key: str, *, default: bool = False) -> b
     return value
 
 
+def normalize_edge_snapshot_language_code(value: str | None) -> str:
+    if not value:
+        return DEFAULT_LANGUAGE_CODE
+
+    normalized = value.strip()
+    if not normalized:
+        return DEFAULT_LANGUAGE_CODE
+
+    lowered = normalized.lower()
+    if lowered in {"de-ch", "de_ch", "ch"}:
+        return "de-CH"
+
+    return lowered if lowered in SUPPORTED_EDGE_SNAPSHOT_LANGUAGE_CODES else DEFAULT_LANGUAGE_CODE
+
+
+def requested_edge_snapshot_language_code(body: dict[str, Any]) -> str:
+    return normalize_edge_snapshot_language_code(
+        optional_string(body, "languageCode", maximum=16)
+        or optional_string(body, "requestedLanguageCode", maximum=16)
+        or optional_string(body, "lang", maximum=16)
+    )
+
+
+def has_usable_summary_translation(summary: dict[str, Any] | None, requested_language_code: str) -> bool:
+    if requested_language_code == DEFAULT_LANGUAGE_CODE or not summary:
+        return False
+
+    title = summary.get("title")
+    text = summary.get("summary")
+    language_code = normalize_edge_snapshot_language_code(str(summary.get("language_code") or ""))
+    return (
+        language_code == requested_language_code
+        and isinstance(title, str)
+        and bool(title.strip())
+        and isinstance(text, str)
+        and bool(text.strip())
+    )
+
+
+def localize_public_feed_edge_snapshot_articles(
+    articles: list[dict[str, Any]],
+    summaries: list[dict[str, Any]],
+    requested_language_code: str,
+) -> list[dict[str, Any]]:
+    summaries_by_url = {
+        str(summary.get("original_url")): summary
+        for summary in summaries
+        if summary.get("original_url")
+    }
+    localized_articles: list[dict[str, Any]] = []
+
+    for article in articles:
+        original_url = str(article.get("original_url") or "")
+        summary = summaries_by_url.get(original_url)
+        has_translation = has_usable_summary_translation(summary, requested_language_code)
+        localized_article = dict(article)
+
+        if has_translation and summary is not None:
+            localized_article["title"] = summary["title"]
+            localized_article["ai_summary"] = summary["summary"]
+            localized_article["language_code"] = requested_language_code
+            localized_article["requested_language_code"] = requested_language_code
+            localized_article["translation_available"] = True
+        else:
+            localized_article["language_code"] = DEFAULT_LANGUAGE_CODE
+            localized_article["requested_language_code"] = requested_language_code
+            localized_article["translation_available"] = requested_language_code == DEFAULT_LANGUAGE_CODE
+
+        localized_articles.append(localized_article)
+
+    return localized_articles
+
+
 def bool_from_env(name: str, default: bool = False) -> bool:
     value = os.environ.get(name, "")
     if not value:
@@ -535,16 +611,35 @@ def handle_operation(operation: str, body: dict[str, Any], store: PostgresStore)
 
     if operation == "load-public-feed-snapshot-rows":
         limit = bounded_int(body, "limit", default=50, minimum=1, maximum=store.max_limit)
-        columns = ", ".join(PUBLIC_FEED_EDGE_SNAPSHOT_COLUMNS)
-        return store.fetch_all(
+        requested_language_code = requested_edge_snapshot_language_code(body)
+        columns = ", ".join(f"p.{column}" for column in PUBLIC_FEED_EDGE_SNAPSHOT_COLUMNS)
+        articles = store.fetch_all(
             f"""
             select {columns}
-            from public.public_feed_snapshot
-            order by snapshot_rank asc
+            from public.public_feed_snapshot p
+            order by p.snapshot_rank asc
             limit %s
             """,
             (limit,),
         )
+        summaries: list[dict[str, Any]] = []
+        original_urls = [
+            str(article.get("original_url"))
+            for article in articles
+            if article.get("original_url")
+        ]
+        if requested_language_code != DEFAULT_LANGUAGE_CODE and original_urls:
+            summaries = store.fetch_all(
+                """
+                select original_url, language_code, title, summary
+                from public.article_summaries
+                where original_url = any(%s)
+                  and language_code = %s
+                limit %s
+                """,
+                (original_urls, requested_language_code, min(store.max_limit, len(original_urls))),
+            )
+        return localize_public_feed_edge_snapshot_articles(articles, summaries, requested_language_code)
 
     if operation == "load-existing-summary-language-rows":
         original_urls = string_list(body, "originalUrls", maximum=store.max_limit)

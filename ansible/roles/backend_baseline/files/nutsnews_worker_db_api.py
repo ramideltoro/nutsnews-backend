@@ -65,6 +65,9 @@ APP_WRITE_OPERATIONS = {
 }
 
 ALLOWED_PROVIDER_MODES = {"backend_postgres_shadow", "backend_postgres_primary"}
+SUMMARY_TRANSLATION_LANGUAGE_CODES = ("fr", "ja", "de-CH", "de", "el")
+SUMMARY_TRANSLATION_LANGUAGE_CODE_SET = set(SUMMARY_TRANSLATION_LANGUAGE_CODES)
+ARTICLE_STATUSES = {"published", "translation_pending"}
 
 RUNTIME_FEATURE_FLAG_DEFAULTS = {
     "reader_archive_search": True,
@@ -370,6 +373,26 @@ def optional_bool(body: dict[str, Any], key: str, *, default: bool = False) -> b
     return value
 
 
+def summary_translation_language_codes(body: dict[str, Any]) -> list[str]:
+    language_codes = string_list(body, "languageCodes", maximum=20)
+    deduped = list(dict.fromkeys(language_codes))
+    unsupported = [code for code in deduped if code not in SUMMARY_TRANSLATION_LANGUAGE_CODE_SET]
+    if unsupported:
+        raise ApiError(
+            400,
+            "languageCodes must contain supported summary translation languages: "
+            + ", ".join(SUMMARY_TRANSLATION_LANGUAGE_CODES),
+        )
+    return deduped
+
+
+def article_status(body: dict[str, Any]) -> str:
+    status = optional_string(body, "status", maximum=64) or "published"
+    if status not in ARTICLE_STATUSES:
+        raise ApiError(400, "status must be published or translation_pending")
+    return status
+
+
 def normalize_edge_snapshot_language_code(value: str | None) -> str:
     if not value:
         return DEFAULT_LANGUAGE_CODE
@@ -535,6 +558,96 @@ def insert_rows(store: PostgresStore, table: str, rows: list[dict[str, Any]], *,
         else:
             query += f" on conflict ({conflict_sql}) do nothing"
     store.execute(query, tuple(values))
+
+
+def assert_accepted_articles_are_not_published(articles: Any) -> None:
+    if not articles:
+        return
+    if not isinstance(articles, list) or not all(isinstance(row, dict) for row in articles):
+        return
+    published_urls = [
+        row.get("original_url")
+        for row in articles
+        if row.get("status") == "published" and row.get("original_url")
+    ]
+    if published_urls:
+        raise ApiError(
+            409,
+            "save-accepted-articles-batch cannot insert published articles; "
+            "save accepted rows as translation_pending and publish after article_summaries rows exist",
+        )
+
+
+def load_missing_summary_translation_rows(
+    store: PostgresStore,
+    original_urls: list[str],
+    language_codes: list[str],
+) -> list[dict[str, Any]]:
+    if not original_urls or not language_codes:
+        return []
+    return store.fetch_all(
+        """
+        select requested_urls.original_url, requested_languages.language_code
+        from unnest(%s::text[]) as requested_urls(original_url)
+        cross join unnest(%s::text[]) as requested_languages(language_code)
+        left join public.article_summaries summaries
+          on summaries.original_url = requested_urls.original_url
+         and summaries.language_code = requested_languages.language_code
+        where summaries.original_url is null
+        order by requested_urls.original_url asc, requested_languages.language_code asc
+        limit %s
+        """,
+        (original_urls, language_codes, len(original_urls) * len(language_codes)),
+    )
+
+
+def publish_articles_with_translation_guard(
+    store: PostgresStore,
+    original_urls: list[str],
+    language_codes: list[str],
+) -> dict[str, Any]:
+    if not original_urls:
+        return {
+            "ok": True,
+            "requestedCount": 0,
+            "publishedCount": 0,
+            "blockedCount": 0,
+            "missingTranslations": [],
+        }
+    if not language_codes:
+        raise ApiError(400, "languageCodes is required when publishing articles")
+    missing_translations = load_missing_summary_translation_rows(store, original_urls, language_codes)
+    if missing_translations:
+        blocked_urls = sorted(
+            {
+                str(row["original_url"])
+                for row in missing_translations
+                if isinstance(row.get("original_url"), str) and row.get("original_url")
+            }
+        )
+        return {
+            "ok": False,
+            "requestedCount": len(original_urls),
+            "publishedCount": 0,
+            "blockedCount": len(blocked_urls),
+            "missingTranslations": missing_translations,
+        }
+    published_rows = store.fetch_all(
+        """
+        update public.articles
+        set status = 'published'
+        where original_url = any(%s)
+        returning original_url
+        """,
+        (original_urls,),
+    )
+    return {
+        "ok": True,
+        "requestedCount": len(original_urls),
+        "publishedCount": len(published_rows),
+        "blockedCount": 0,
+        "missingTranslations": [],
+    }
 
 
 def handle_operation(operation: str, body: dict[str, Any], store: PostgresStore) -> Any:
@@ -705,14 +818,19 @@ def handle_operation(operation: str, body: dict[str, Any], store: PostgresStore)
         return {"ok": True}
 
     if operation == "save-accepted-articles-batch":
-        insert_rows(store, "articles", body.get("articles", []), conflict=("original_url",), update=False)
+        articles = body.get("articles", [])
+        assert_accepted_articles_are_not_published(articles)
+        insert_rows(store, "articles", articles, conflict=("original_url",), update=False)
         return {"ok": True}
 
     if operation == "publish-articles-batch":
         original_urls = string_list(body, "originalUrls", maximum=store.max_limit)
+        status = article_status(body)
+        if status == "published":
+            return publish_articles_with_translation_guard(store, original_urls, summary_translation_language_codes(body))
         if original_urls:
-            store.execute("update public.articles set status = %s where original_url = any(%s)", (body.get("status", "published"), original_urls))
-        return {"ok": True}
+            store.execute("update public.articles set status = %s where original_url = any(%s)", (status, original_urls))
+        return {"ok": True, "requestedCount": len(original_urls)}
 
     if operation == "refresh-public-feed-snapshot":
         row = store.fetch_one("select public.refresh_public_feed_snapshot() as refreshed_at")

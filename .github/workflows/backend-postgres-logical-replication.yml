@@ -69,6 +69,7 @@ jobs:
         shell: bash
         env:
           ENVIRONMENT_NAME: ${{ inputs.environment_name }}
+          OPERATION: ${{ inputs.operation }}
           NUTSNEWS_STAGING_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_STAGING_SUPABASE_DB_URL }}
           NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
           NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}

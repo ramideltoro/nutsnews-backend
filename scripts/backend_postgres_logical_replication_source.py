@@ -80,7 +80,7 @@ def direct_url_status(db_url: str) -> dict[str, object]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--operation", choices=("status", "setup"), default="status")
+    parser.add_argument("--operation", choices=("status", "setup", "teardown-dry-run", "teardown"), default="status")
     parser.add_argument("--source-db-url-env", default="NUTSNEWS_SOURCE_DB_URL")
     parser.add_argument("--environment-name", choices=("staging", "production"), default="staging")
     parser.add_argument("--output", default="")
@@ -184,8 +184,25 @@ end $$;
         if error:
             blockers.append("source_slot_setup_failed")
 
+    publication_status = "skipped"
+    publication_count = 0
+    if not blockers:
+        publication_sql = f"""
+select count(*)::int
+from pg_publication
+where pubname = {sql_literal(publication)}
+"""
+        raw, error = run_psql(source_db_url, publication_sql)
+        if error:
+            blockers.append("source_publication_status_failed")
+            publication_status = "unknown"
+        else:
+            publication_count = int(raw or "0")
+            publication_status = "configured" if publication_count else "not_configured"
+
     slot_status = "skipped"
     slot_count = 0
+    slots: list[dict[str, object]] = []
     if not blockers:
         slot_sql = f"""
 select coalesce(jsonb_agg(jsonb_build_object(
@@ -200,13 +217,45 @@ where slot_name = {sql_literal(slot)}
         raw, error = run_psql(source_db_url, slot_sql)
         if error:
             blockers.append("source_slot_status_failed")
-            slots = []
             slot_status = "unknown"
         else:
             slots = json.loads(raw or "[]")
             slot_count = len(slots)
             slot_status = "configured" if slots else "not_configured"
         checks["slots"] = slots
+
+    teardown_actions: list[str] = []
+    if args.operation in {"teardown-dry-run", "teardown"}:
+        teardown_actions = [
+            "drop_backend_subscription_before_source_teardown",
+            "drop_source_replication_slot_if_inactive",
+            "drop_source_publication",
+        ]
+
+    if args.operation == "teardown" and not blockers:
+        active_slots = [slot_info for slot_info in slots if slot_info.get("active")]
+        if active_slots:
+            blockers.append("source_slot_active")
+        else:
+            teardown_sql = f"""
+do $$
+begin
+  if exists (select 1 from pg_replication_slots where slot_name = {sql_literal(slot)}) then
+    perform pg_drop_replication_slot({sql_literal(slot)});
+  end if;
+end $$;
+drop publication if exists {quote_ident(publication)};
+"""
+            _, error = run_psql(source_db_url, teardown_sql)
+            if error:
+                blockers.append("source_teardown_failed")
+            else:
+                publication_count = 0
+                publication_status = "not_configured"
+                slot_count = 0
+                slot_status = "not_configured"
+                slots = []
+                checks["slots"] = slots
 
     status = "blocked" if blockers else "pass"
     report = {
@@ -219,8 +268,11 @@ where slot_name = {sql_literal(slot)}
         "publication": publication,
         "slot": slot,
         "publication_table_count": len(tables),
+        "publication_status": publication_status,
+        "publication_count": publication_count,
         "slot_status": slot_status,
         "slot_count": slot_count,
+        "teardown_actions": teardown_actions,
         "checks": checks,
         "blockers": blockers,
         "safe_metadata_only": True,

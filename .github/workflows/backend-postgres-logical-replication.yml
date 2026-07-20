@@ -12,15 +12,17 @@ on:
           - staging
           - production
       operation:
-        description: Inspect or configure source publication/slot and backend subscription.
+        description: Inspect, configure, or prepare protected teardown for source publication/slot and backend subscription.
         required: true
         default: status
         type: choice
         options:
           - status
           - setup
+          - teardown-dry-run
+          - teardown
       confirmation:
-        description: For setup, type setup-staging-logical-replication or setup-production-logical-replication.
+        description: For setup or teardown, type setup-<environment>-logical-replication or teardown-<environment>-logical-replication.
         required: false
         default: ""
         type: string
@@ -54,11 +56,11 @@ jobs:
         run: |
           set -euo pipefail
           case "$ENVIRONMENT_NAME" in staging|production) ;; *) exit 1 ;; esac
-          case "$OPERATION" in status|setup) ;; *) exit 1 ;; esac
-          if [[ "$OPERATION" == "setup" ]]; then
-            expected="setup-${ENVIRONMENT_NAME}-logical-replication"
+          case "$OPERATION" in status|setup|teardown-dry-run|teardown) ;; *) exit 1 ;; esac
+          if [[ "$OPERATION" == "setup" || "$OPERATION" == "teardown" ]]; then
+            expected="${OPERATION}-${ENVIRONMENT_NAME}-logical-replication"
             if [[ "$CONFIRMATION" != "$expected" ]]; then
-              echo "setup requires confirmation to be exactly $expected." >&2
+              echo "$OPERATION requires confirmation to be exactly $expected." >&2
               exit 1
             fi
           fi
@@ -113,6 +115,7 @@ jobs:
           ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
 
       - name: Configure source publication and slot
+        if: inputs.operation == 'status' || inputs.operation == 'setup' || inputs.operation == 'teardown-dry-run'
         shell: bash
         env:
           ENVIRONMENT_NAME: ${{ inputs.environment_name }}
@@ -167,7 +170,7 @@ jobs:
             "$RUNNER_TEMP/backend-postgres-logical-replication-source.json"
 
       - name: Configure backend subscription
-        if: inputs.operation == 'setup'
+        if: inputs.operation == 'setup' || inputs.operation == 'teardown-dry-run' || inputs.operation == 'teardown'
         shell: bash
         env:
           ENVIRONMENT_NAME: ${{ inputs.environment_name }}
@@ -234,8 +237,63 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
-            "sudo -n env TARGET_DATABASE='$target_database' SOURCE_DB_URL='$source_url' PUBLICATION_NAME='$publication' SLOT_NAME='$slot' SUBSCRIPTION_NAME='$subscription' bash '$remote_dir/backend_postgres_logical_replication_target_remote.sh'" \
+            "sudo -n env OPERATION='$OPERATION' TARGET_DATABASE='$target_database' SOURCE_DB_URL='$source_url' PUBLICATION_NAME='$publication' SLOT_NAME='$slot' SUBSCRIPTION_NAME='$subscription' bash '$remote_dir/backend_postgres_logical_replication_target_remote.sh'" \
             | tee "$RUNNER_TEMP/backend-postgres-logical-replication-target.json"
+
+      - name: Teardown source publication and slot
+        if: inputs.operation == 'teardown'
+        shell: bash
+        env:
+          ENVIRONMENT_NAME: ${{ inputs.environment_name }}
+          OPERATION: ${{ inputs.operation }}
+          NUTSNEWS_STAGING_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_STAGING_SUPABASE_DB_URL }}
+          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          case "$ENVIRONMENT_NAME" in
+            staging) source_url="$NUTSNEWS_STAGING_SUPABASE_DB_URL" ;;
+            production) source_url="$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL" ;;
+          esac
+          echo "::add-mask::$source_url"
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          remote_dir="/tmp/nutsnews-postgres-logical-replication-source-teardown-${GITHUB_RUN_ID}"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "install -m 0700 -d '$remote_dir/scripts' '$remote_dir/docs'"
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            scripts/backend_postgres_logical_replication_source.py \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/scripts/"
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            docs/backend-postgres-logical-replication-plan.json \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/docs/"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "cd '$remote_dir' && NUTSNEWS_SOURCE_DB_URL='$source_url' python3 scripts/backend_postgres_logical_replication_source.py --operation '$OPERATION' --environment-name '$ENVIRONMENT_NAME' --output '$remote_dir/backend-postgres-logical-replication-source.json' --enforce"
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/backend-postgres-logical-replication-source.json" \
+            "$RUNNER_TEMP/backend-postgres-logical-replication-source.json"
 
       - name: Summarize safe metadata
         if: always()

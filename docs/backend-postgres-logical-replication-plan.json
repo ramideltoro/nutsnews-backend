@@ -48,6 +48,7 @@
     "subscription": "nutsnews_backend_migration_sub"
   },
   "rollback": [
+    "run protected teardown-dry-run before destructive cleanup",
     "disable or drop backend subscription",
     "drop Supabase replication slot after confirming no subscriber needs it",
     "drop Supabase publication only after production cutover path no longer depends on it",
@@ -97,7 +98,20 @@
     "safe_metadata_artifact": "backend-postgres-logical-replication",
     "production_writes_allowed": false
   },
-  "status": "planned_blocked_on_211_212_215_and_protected_approval",
+  "post_cutover_teardown": {
+    "issue": 114,
+    "dry_run_operation": "environment_name=production operation=teardown-dry-run",
+    "apply_operation": "environment_name=production operation=teardown confirmation=teardown-production-logical-replication",
+    "requires_before_apply": [
+      "post-cutover observation-window reconciliation pass",
+      "rollback owner coverage through the rollback window",
+      "Supabase archive or retirement decision",
+      "explicit issue #114 teardown approval"
+    ],
+    "source_slot_must_be_inactive": true,
+    "safe_metadata_artifact": "backend-postgres-logical-replication"
+  },
+  "status": "post_cutover_teardown_ready_pending_114_approval",
   "target": {
     "database_variable": "NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE",
     "database": "nutsnews_primary_shadow",

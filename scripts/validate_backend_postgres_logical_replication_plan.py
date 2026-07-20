@@ -106,8 +106,20 @@ def main() -> int:
         errors.append("refresh policy must require manifest changes")
     if len(plan.get("rollback", [])) < 3:
         errors.append("rollback must include subscription, slot, and credential cleanup")
+    if not any("teardown-dry-run" in item for item in plan.get("rollback", [])):
+        errors.append("rollback must require protected teardown-dry-run before cleanup")
     if len(plan.get("live_blockers", [])) < 2:
         errors.append("live blockers must document current non-automatable setup blockers")
+
+    teardown = plan.get("post_cutover_teardown", {})
+    if teardown.get("issue") != 114:
+        errors.append("post-cutover teardown must be tracked by issue 114")
+    if "teardown-dry-run" not in teardown.get("dry_run_operation", ""):
+        errors.append("post-cutover teardown must document a dry-run operation")
+    if "teardown-production-logical-replication" not in teardown.get("apply_operation", ""):
+        errors.append("post-cutover teardown apply must require explicit production confirmation")
+    if teardown.get("source_slot_must_be_inactive") is not True:
+        errors.append("post-cutover teardown must require an inactive source slot before source cleanup")
 
     references = set(plan.get("external_references", []))
     for url in (

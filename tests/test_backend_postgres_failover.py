@@ -171,8 +171,21 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         replication_target = (ROOT / "scripts/backend_postgres_logical_replication_target_remote.sh").read_text(
             encoding="utf-8"
         )
+        replication_source = (ROOT / "scripts/backend_postgres_logical_replication_source.py").read_text(
+            encoding="utf-8"
+        )
+        replication_workflow = (ROOT / ".github/workflows/backend-postgres-logical-replication.yml").read_text(
+            encoding="utf-8"
+        )
         self.assertIn('"$sub_exists" == "true"', replication_target)
         self.assertIn('os.environ["WORKER_PRESENT"] in {"1", "t", "true"}', replication_target)
+        self.assertIn("teardown-dry-run", replication_workflow)
+        self.assertIn("${OPERATION}-${ENVIRONMENT_NAME}-logical-replication", replication_workflow)
+        self.assertIn("ALTER SUBSCRIPTION :\"subscription\" SET (slot_name = NONE);", replication_target)
+        self.assertIn("DROP SUBSCRIPTION IF EXISTS :\"subscription\";", replication_target)
+        self.assertIn("source_slot_active", replication_source)
+        self.assertIn("pg_drop_replication_slot", replication_source)
+        self.assertIn("drop publication if exists", replication_source)
 
     def test_plan_forbids_multi_writer_and_production_cutover(self):
         plan = json.loads(PLAN.read_text(encoding="utf-8"))

@@ -1,7 +1,7 @@
 {
   "contract_id": "backend-database-provider-switch",
   "issue": 117,
-  "status": "app_worker_switch_contract_ready_production_primary_protected",
+  "status": "production_primary_cutover_complete_post_cutover_retirement_pending",
   "depends_on": [
     "docs/backend-api-compatibility-contract.json"
   ],
@@ -95,6 +95,31 @@
   "validation": {
     "local_validator": "python3 scripts/validate_backend_database_provider_switch.py",
     "dry_run_workflow": ".github/workflows/backend-database-provider-switch-dry-run.yml",
-    "live_status": "app and worker provider modes implemented; production backend_postgres_primary remains blocked outside protected cutover until provider switch owner approval and final go/no-go are recorded"
+    "live_status": "app and worker provider modes implemented; protected cutover completed after provider switch owner approval and final go/no-go; production backend_postgres_primary is live and Supabase retirement remains blocked on issue #114 approval"
+  },
+  "post_cutover_status": {
+    "recorded_at_utc": "2026-07-20T05:31:00Z",
+    "cutover_issue": 119,
+    "retirement_issue": 114,
+    "production_provider_mode": "backend_postgres_primary",
+    "production_writes_paused": false,
+    "public_readiness": [
+      "https://vps.nutsnews.com/readyz",
+      "https://www.nutsnews.com/readyz"
+    ],
+    "completed_evidence": {
+      "app_production_promotion": "https://github.com/ramideltoro/nutsnews-infra/actions/runs/29717454520",
+      "protected_vps_apply": "https://github.com/ramideltoro/nutsnews-infra/actions/runs/29717472644",
+      "worker_provider_switch": "https://github.com/ramideltoro/nutsnews-worker/actions/runs/29717841678",
+      "supabase_write_watermark": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29719176421",
+      "production_parity_validation": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29719283886",
+      "backend_health_report": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29719066640"
+    },
+    "retirement_pending": [
+      "rollback-window retention owner approval",
+      "Supabase write credential rotation or removal",
+      "logical replication resource cleanup",
+      "Supabase archive or retirement decision"
+    ]
   }
 }

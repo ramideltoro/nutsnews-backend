@@ -924,10 +924,11 @@ def handle_app_operation(operation: str, body: dict[str, Any], store: PostgresSt
         max_limit = min(store.max_limit, 250)
         limit = bounded_int(body, "limit", default=default_limit, minimum=1, maximum=max_limit)
         offset = bounded_int(body, "offset", default=0, minimum=0, maximum=1_000_000)
+        requested_language_code = requested_edge_snapshot_language_code(body)
         params: list[Any] = []
         where = " where true" + category_clause(body, params)
         params.extend((limit, offset))
-        return store.fetch_all(
+        articles = store.fetch_all(
             f"""
             select {app_article_columns()}
             from public.public_feed_snapshot
@@ -937,6 +938,24 @@ def handle_app_operation(operation: str, body: dict[str, Any], store: PostgresSt
             """,
             tuple(params),
         )
+        summaries: list[dict[str, Any]] = []
+        original_urls = [
+            str(article.get("original_url"))
+            for article in articles
+            if article.get("original_url")
+        ]
+        if requested_language_code != DEFAULT_LANGUAGE_CODE and original_urls:
+            summaries = store.fetch_all(
+                """
+                select original_url, language_code, title, summary
+                from public.article_summaries
+                where original_url = any(%s)
+                  and language_code = %s
+                limit %s
+                """,
+                (original_urls, requested_language_code, min(store.max_limit, len(original_urls))),
+            )
+        return localize_public_feed_edge_snapshot_articles(articles, summaries, requested_language_code)
 
     if operation == "load-published-articles":
         limit = bounded_int(body, "limit", default=6, minimum=1, maximum=min(store.max_limit, 100))

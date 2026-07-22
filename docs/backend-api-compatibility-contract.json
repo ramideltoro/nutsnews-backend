@@ -65,7 +65,8 @@
       "supabase_dependency": "service-role count and dashboard queries",
       "backend_contract": "Server-only admin API uses least-privilege backend credentials and existing admin session checks.",
       "operations": [
-        "load-admin-production-readiness"
+        "load-admin-production-readiness",
+        "load-admin-article-reviews"
       ],
       "validated_by": "backend_postgres_smoke_tests admin"
     },
@@ -158,8 +159,9 @@
       "checks": [
         "app-provider-smoke 200",
         "load-public-feed-snapshot rows 5",
+        "load-admin-article-reviews snapshot row 1",
         "backend_postgres_shadow write rejected 409",
-        "backend_postgres_primary guarded write rejected 403"
+        "backend_postgres_primary guarded write skipped when writes are enabled"
       ],
       "supabase_required": false
     },

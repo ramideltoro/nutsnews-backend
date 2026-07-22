@@ -187,6 +187,52 @@ def main() -> int:
     ):
         failures.append("load-admin-article-reviews")
 
+    engagement_status, engagement_payload = request_json(
+        base_url,
+        token,
+        "load-admin-article-engagement",
+        {
+            "providerMode": "backend_postgres_primary",
+            "sourceCategoryLimit": 10,
+            "articleLimit": 5,
+        },
+    )
+    engagement_rows = (
+        engagement_payload.get("rows")
+        if isinstance(engagement_payload, dict)
+        else None
+    )
+    engagement_snapshot = (
+        engagement_rows[0]
+        if isinstance(engagement_rows, list) and engagement_rows
+        else {}
+    )
+    missing_engagement_fields = sorted(
+        field
+        for field in {
+            "sourceCategoryRows",
+            "sourceCategoryError",
+            "articleRows",
+            "articleError",
+        }
+        if not isinstance(engagement_snapshot, dict) or field not in engagement_snapshot
+    )
+    checks.append(
+        {
+            "operation": "load-admin-article-engagement",
+            "status": engagement_status,
+            "row_count": len(engagement_rows) if isinstance(engagement_rows, list) else None,
+            "missing_fields": missing_engagement_fields,
+        }
+    )
+    if (
+        engagement_status != 200
+        or not isinstance(engagement_rows, list)
+        or not engagement_rows
+        or missing_engagement_fields
+    ):
+        failures.append("load-admin-article-engagement")
+
     shadow_write_status, shadow_write_payload = request_json(
         base_url,
         token,

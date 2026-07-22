@@ -66,7 +66,8 @@
       "backend_contract": "Server-only admin API uses least-privilege backend credentials and existing admin session checks.",
       "operations": [
         "load-admin-production-readiness",
-        "load-admin-article-reviews"
+        "load-admin-article-reviews",
+        "load-admin-article-engagement"
       ],
       "validated_by": "backend_postgres_smoke_tests admin"
     },
@@ -160,6 +161,7 @@
         "app-provider-smoke 200",
         "load-public-feed-snapshot rows 5",
         "load-admin-article-reviews snapshot row 1",
+        "load-admin-article-engagement snapshot row 1",
         "backend_postgres_shadow write rejected 409",
         "backend_postgres_primary guarded write skipped when writes are enabled"
       ],

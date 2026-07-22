@@ -52,6 +52,7 @@ APP_READ_OPERATIONS = {
     "search-published-articles",
     "load-admin-production-readiness",
     "load-admin-article-reviews",
+    "load-admin-article-engagement",
     "load-admin-quota-usage-events",
     "load-admin-article-engagement-source-category-summary",
     "load-admin-article-engagement-article-summary",
@@ -167,6 +168,29 @@ AI_DECISION_VERSION_REPORT_COLUMNS = (
     "average_score_delta",
     "first_reviewed_at",
     "latest_reviewed_at",
+)
+
+ADMIN_ARTICLE_ENGAGEMENT_SOURCE_CATEGORY_COLUMNS = (
+    "source",
+    "category",
+    "outbound_click_count",
+    "category_interest_count",
+    "total_engagement_count",
+    "first_event_date",
+    "latest_event_date",
+    "last_updated_at",
+)
+
+ADMIN_ARTICLE_ENGAGEMENT_ARTICLE_COLUMNS = (
+    "article_id",
+    "title",
+    "original_url",
+    "source",
+    "category",
+    "outbound_click_count",
+    "first_event_date",
+    "latest_event_date",
+    "last_updated_at",
 )
 
 ADMIN_TABLE_READS = {
@@ -938,6 +962,14 @@ def ai_decision_version_report_columns() -> str:
     return ", ".join(AI_DECISION_VERSION_REPORT_COLUMNS)
 
 
+def admin_article_engagement_source_category_columns() -> str:
+    return ", ".join(ADMIN_ARTICLE_ENGAGEMENT_SOURCE_CATEGORY_COLUMNS)
+
+
+def admin_article_engagement_article_columns() -> str:
+    return ", ".join(ADMIN_ARTICLE_ENGAGEMENT_ARTICLE_COLUMNS)
+
+
 def category_clause(body: dict[str, Any], params: list[Any]) -> str:
     category = optional_string(body, "category", maximum=96)
     if category is None or category.lower() == "all":
@@ -1279,6 +1311,66 @@ def load_app_admin_article_reviews(body: dict[str, Any], store: PostgresStore) -
     }
 
 
+def load_app_admin_article_engagement(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
+    source_category_limit = bounded_int(
+        body,
+        "sourceCategoryLimit",
+        default=100,
+        minimum=1,
+        maximum=min(store.max_limit, 1000),
+    )
+    article_limit = bounded_int(
+        body,
+        "articleLimit",
+        default=25,
+        minimum=1,
+        maximum=min(store.max_limit, 1000),
+    )
+
+    try:
+        source_category_rows = store.fetch_all(
+            f"""
+            select {admin_article_engagement_source_category_columns()}
+            from public.article_engagement_source_category_summary
+            order by total_engagement_count desc, latest_event_date desc nulls last
+            limit %s
+            """,
+            (source_category_limit,),
+        )
+        source_category_error = None
+    except Exception:
+        source_category_rows = []
+        source_category_error = "article_engagement_source_category_summary query failed"
+
+    try:
+        article_rows = store.fetch_all(
+            f"""
+            select {admin_article_engagement_article_columns()}
+            from public.article_engagement_article_summary
+            order by outbound_click_count desc, latest_event_date desc nulls last
+            limit %s
+            """,
+            (article_limit,),
+        )
+        article_error = None
+    except Exception:
+        article_rows = []
+        article_error = "article_engagement_article_summary query failed"
+
+    return {
+        "rows": [
+            {
+                "sourceCategoryRows": source_category_rows,
+                "sourceCategoryError": source_category_error,
+                "articleRows": article_rows,
+                "articleError": article_error,
+            }
+        ],
+        "rowCount": 1,
+        "generatedAt": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
+
+
 def load_app_admin_production_readiness(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
     recent_article_limit = bounded_int(
         body,
@@ -1549,6 +1641,9 @@ def handle_app_operation(operation: str, body: dict[str, Any], store: PostgresSt
 
     if operation == "load-admin-article-reviews":
         return load_app_admin_article_reviews(body, store)
+
+    if operation == "load-admin-article-engagement":
+        return load_app_admin_article_engagement(body, store)
 
     if operation in ADMIN_TABLE_READS:
         return load_app_admin_rows(operation, body, store)

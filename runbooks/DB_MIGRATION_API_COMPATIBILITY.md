@@ -98,6 +98,15 @@ quota usage writes, article engagement writes, and runtime feature flag writes.
 Write operations must return `409` in `backend_postgres_shadow` and `403` when
 `backend_postgres_primary` is selected but deployment writes are still disabled.
 
+Production readiness uses the read-only app operation
+`load-admin-production-readiness`. A tokened POST to
+`https://backend.nutsnews.com/api/app/db/load-admin-production-readiness` with
+`providerMode=backend_postgres_primary` must return one dashboard snapshot row
+containing article counts, public feed snapshot count, recent published
+articles, the latest Worker run, recent growth counts, and translation summary
+coverage. The operation must use backend PostgreSQL least-privilege read access
+and must not require Supabase service-role access in backend-primary mode.
+
 ## Authorization Rules
 
 - Browser code must not receive database credentials or service-role style

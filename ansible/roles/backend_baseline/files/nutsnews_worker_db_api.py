@@ -6,7 +6,7 @@ from __future__ import annotations
 import hmac
 import json
 import os
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -48,6 +48,7 @@ APP_READ_OPERATIONS = {
     "load-published-article-sitemap-count",
     "load-article-sitemap-items-page",
     "search-published-articles",
+    "load-admin-production-readiness",
     "load-admin-quota-usage-events",
     "load-admin-article-engagement-source-category-summary",
     "load-admin-article-engagement-article-summary",
@@ -880,6 +881,161 @@ def published_article_filters(body: dict[str, Any], params: list[Any]) -> str:
     return clause
 
 
+def production_readiness_target_language_codes(body: dict[str, Any]) -> list[str]:
+    values = string_list(body, "targetLanguageCodes", maximum=20)
+    if not values:
+        values = list(SUMMARY_TRANSLATION_LANGUAGE_CODES)
+    default_language_code = normalize_edge_snapshot_language_code(
+        optional_string(body, "defaultLanguageCode", maximum=16)
+    )
+    language_codes: list[str] = []
+    for value in values:
+        normalized = "de-CH" if value.strip().lower() in {"de-ch", "de_ch", "ch"} else value.strip().lower()
+        if normalized == default_language_code or normalized == DEFAULT_LANGUAGE_CODE:
+            continue
+        if normalized not in SUMMARY_TRANSLATION_LANGUAGE_CODE_SET:
+            raise ApiError(
+                400,
+                "targetLanguageCodes must contain supported summary translation languages: "
+                + ", ".join(SUMMARY_TRANSLATION_LANGUAGE_CODES),
+            )
+        if normalized not in language_codes:
+            language_codes.append(normalized)
+    return language_codes
+
+
+def production_readiness_growth_window_hours(body: dict[str, Any], index: int, default: int) -> int:
+    values = body.get("articleGrowthWindowsHours", [])
+    if values is None:
+        return default
+    if not isinstance(values, list):
+        raise ApiError(400, "articleGrowthWindowsHours must be an array")
+    if index >= len(values):
+        return default
+    value = values[index]
+    if isinstance(value, bool):
+        raise ApiError(400, "articleGrowthWindowsHours values must be integers")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ApiError(400, "articleGrowthWindowsHours values must be integers") from exc
+    return max(1, min(24 * 365, parsed))
+
+
+def count_value(row: dict[str, Any] | None, key: str) -> int:
+    if not row:
+        return 0
+    value = row.get(key)
+    if value is None:
+        return 0
+    return int(value)
+
+
+def count_published_articles_since(store: PostgresStore, hours: int) -> int:
+    row = store.fetch_one(
+        """
+        select count(*)::bigint as article_count
+        from public.articles
+        where status = 'published'
+          and created_at >= now() - (%s * interval '1 hour')
+        """,
+        (hours,),
+    )
+    return count_value(row, "article_count")
+
+
+def load_app_admin_production_readiness(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
+    recent_article_limit = bounded_int(
+        body,
+        "recentArticleLimit",
+        default=100,
+        minimum=1,
+        maximum=min(store.max_limit, 500),
+    )
+    translation_sample_limit = bounded_int(
+        body,
+        "translationSampleLimit",
+        default=60,
+        minimum=1,
+        maximum=min(store.max_limit, recent_article_limit),
+    )
+    target_language_codes = production_readiness_target_language_codes(body)
+    articles_last_24_hours_window = production_readiness_growth_window_hours(body, 0, 24)
+    articles_last_7_days_window = production_readiness_growth_window_hours(body, 1, 24 * 7)
+
+    article_count = count_value(
+        store.fetch_one("select count(*)::bigint as article_count from public.articles"),
+        "article_count",
+    )
+    public_feed_snapshot_count = count_value(
+        store.fetch_one(
+            "select count(*)::bigint as public_feed_snapshot_count from public.public_feed_snapshot"
+        ),
+        "public_feed_snapshot_count",
+    )
+    recent_articles = store.fetch_all(
+        """
+        select id, original_url, image_url, published_on_site_at, created_at
+        from public.articles
+        where status = 'published'
+        order by published_on_site_at desc nulls last, created_at desc nulls last, id desc
+        limit %s
+        """,
+        (recent_article_limit,),
+    )
+    worker_run = store.fetch_one(
+        """
+        select id, run_started_at, run_completed_at, success, error_name, error_message,
+               feed_count, fetched_count, candidate_count, accepted_count, rejected_count, duration_ms
+        from public.worker_runs
+        order by run_started_at desc nulls last, id desc
+        limit 1
+        """
+    )
+    articles_last_24_hours = count_published_articles_since(store, articles_last_24_hours_window)
+    articles_last_7_days = count_published_articles_since(store, articles_last_7_days_window)
+
+    translation_original_urls = [
+        str(article.get("original_url"))
+        for article in recent_articles[:translation_sample_limit]
+        if article.get("original_url")
+    ]
+    translation_expected_count = len(translation_original_urls) * len(target_language_codes)
+    translation_summaries: list[dict[str, Any]] = []
+    if translation_expected_count:
+        translation_summaries = store.fetch_all(
+            """
+            select original_url, language_code
+            from public.article_summaries
+            where original_url = any(%s)
+              and language_code = any(%s)
+            limit %s
+            """,
+            (
+                translation_original_urls,
+                target_language_codes,
+                min(store.max_limit, translation_expected_count),
+            ),
+        )
+
+    return {
+        "rows": [
+            {
+                "articleCount": article_count,
+                "publicFeedSnapshotCount": public_feed_snapshot_count,
+                "recentArticles": recent_articles,
+                "workerRun": worker_run,
+                "articlesLast24Hours": articles_last_24_hours,
+                "articlesLast7Days": articles_last_7_days,
+                "translationSummaries": translation_summaries,
+                "translationExpectedCount": translation_expected_count,
+            }
+        ],
+        "rowCount": 1,
+        "generatedAt": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
+
+
 def load_app_admin_rows(operation: str, body: dict[str, Any], store: PostgresStore) -> list[dict[str, Any]]:
     table, columns, order_by = ADMIN_TABLE_READS[operation]
     limit = bounded_int(body, "limit", default=100, minimum=1, maximum=store.max_limit)
@@ -1052,6 +1208,9 @@ def handle_app_operation(operation: str, body: dict[str, Any], store: PostgresSt
             f"select {app_article_columns()} from public.search_articles(%s, %s, %s)",
             (query, page_size, page_offset),
         )
+
+    if operation == "load-admin-production-readiness":
+        return load_app_admin_production_readiness(body, store)
 
     if operation in ADMIN_TABLE_READS:
         return load_app_admin_rows(operation, body, store)

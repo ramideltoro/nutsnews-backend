@@ -96,6 +96,34 @@ def main() -> int:
     if read_status != 200 or not isinstance(read_payload, list):
         failures.append("load-public-feed-snapshot")
 
+    readiness_status, readiness_payload = request_json(
+        base_url,
+        token,
+        "load-admin-production-readiness",
+        {
+            "providerMode": "backend_postgres_primary",
+            "recentArticleLimit": 100,
+            "translationSampleLimit": 60,
+            "defaultLanguageCode": "en",
+            "targetLanguageCodes": ["fr", "ja", "de-CH", "de", "el"],
+            "articleGrowthWindowsHours": [24, 24 * 7],
+        },
+    )
+    readiness_rows = (
+        readiness_payload.get("rows")
+        if isinstance(readiness_payload, dict)
+        else None
+    )
+    checks.append(
+        {
+            "operation": "load-admin-production-readiness",
+            "status": readiness_status,
+            "row_count": len(readiness_rows) if isinstance(readiness_rows, list) else None,
+        }
+    )
+    if readiness_status != 200 or not isinstance(readiness_rows, list) or not readiness_rows:
+        failures.append("load-admin-production-readiness")
+
     shadow_write_status, shadow_write_payload = request_json(
         base_url,
         token,

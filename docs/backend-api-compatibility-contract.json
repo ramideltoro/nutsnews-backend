@@ -64,6 +64,9 @@
       "access": "admin_read",
       "supabase_dependency": "service-role count and dashboard queries",
       "backend_contract": "Server-only admin API uses least-privilege backend credentials and existing admin session checks.",
+      "operations": [
+        "load-admin-production-readiness"
+      ],
       "validated_by": "backend_postgres_smoke_tests admin"
     },
     {

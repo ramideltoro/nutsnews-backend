@@ -107,6 +107,17 @@ articles, the latest Worker run, recent growth counts, and translation summary
 coverage. The operation must use backend PostgreSQL least-privilege read access
 and must not require Supabase service-role access in backend-primary mode.
 
+Article review dashboards use the read-only app operation
+`load-admin-article-reviews`. A tokened POST to
+`https://backend.nutsnews.com/api/app/db/load-admin-article-reviews` with
+`providerMode=backend_postgres_primary` must return one dashboard snapshot row
+containing source/category filter options, recent published article rows and
+their review lookup rows, AI decision version report rows or a nullable report
+error, filtered review rows, matching published articles, a total match count,
+and a nullable review error. Filters and pagination must be bounded and
+parameterized, and the operation must not require Supabase service-role access
+in backend-primary mode.
+
 ## Authorization Rules
 
 - Browser code must not receive database credentials or service-role style

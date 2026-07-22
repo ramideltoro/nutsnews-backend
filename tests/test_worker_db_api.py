@@ -137,6 +137,131 @@ class ProductionReadinessStore(FakeStore):
         return super().fetch_one(query, params)
 
 
+class ArticleReviewsStore(FakeStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.option_rows = [
+            {"source": "Reuters", "category": "World|Science"},
+            {"source": "TechCrunch", "category": "Science"},
+        ]
+        self.recent_articles = [
+            {
+                "id": "published-recent",
+                "original_url": "https://example.com/recent-published",
+                "source": "Reuters",
+                "title": "Published recent",
+                "image_url": "https://cdn.example.com/recent.jpg",
+                "published_at": "2026-07-22T09:30:00Z",
+                "published_on_site_at": "2026-07-22T09:45:00Z",
+                "created_at": "2026-07-22T09:20:00Z",
+                "ai_summary": "Published article summary.",
+                "category": "World",
+                "positivity_score": 7,
+                "status": "published",
+            }
+        ]
+        self.recent_review_rows = [
+            {
+                "id": 11,
+                "reviewed_at": "2026-07-22T10:00:00Z",
+                "original_url": "https://example.com/recent-published",
+                "source": "Reuters",
+                "title": "Recent review",
+                "decision": "reject",
+                "category": "World",
+                "positivity_score": 5,
+                "summary": "A concise article summary.",
+                "reason": "Needs more positive framing.",
+                "ai_provider": "openai",
+                "ai_model": "gpt-4o-mini",
+                "prompt_version": "2026-07-01",
+                "model_version": "gpt-4o-mini-2026-07",
+                "review_duration_ms": 1200,
+            }
+        ]
+        self.version_rows = [
+            {
+                "version_window": "current",
+                "version_rank": 1,
+                "prompt_version": "2026-07-01",
+                "model_version": "gpt-4o-mini-2026-07",
+                "ai_provider": "openai",
+                "ai_model": "gpt-4o-mini",
+                "total_reviews": 80,
+                "accepted_reviews": 50,
+                "rejected_reviews": 30,
+                "acceptance_rate_pct": 62.5,
+                "rejection_rate_pct": 37.5,
+                "average_positivity_score": 6.4,
+                "previous_acceptance_rate_pct": 60,
+                "previous_rejection_rate_pct": 40,
+                "previous_average_positivity_score": 6.1,
+                "acceptance_rate_delta_pct": 2.5,
+                "rejection_rate_delta_pct": -2.5,
+                "average_score_delta": 0.3,
+                "first_reviewed_at": "2026-07-21T00:00:00Z",
+                "latest_reviewed_at": "2026-07-22T10:00:00Z",
+            }
+        ]
+        self.review_rows = [
+            {
+                "id": 10,
+                "reviewed_at": "2026-07-22T10:00:00Z",
+                "original_url": "https://example.com/reviewed",
+                "source": "Reuters",
+                "title": "Visible review",
+                "decision": "reject",
+                "category": "World",
+                "positivity_score": 5,
+                "summary": "A concise article summary.",
+                "reason": "Needs more positive framing.",
+                "ai_provider": "openai",
+                "ai_model": "gpt-4o-mini",
+                "prompt_version": "2026-07-01",
+                "model_version": "gpt-4o-mini-2026-07",
+                "review_duration_ms": 1200,
+            }
+        ]
+        self.published_review_articles = [
+            {
+                "id": "published-visible",
+                "original_url": "https://example.com/reviewed",
+                "source": "Reuters",
+                "title": "Published visible",
+                "image_url": "https://cdn.example.com/visible.jpg",
+                "published_at": "2026-07-22T09:30:00Z",
+                "published_on_site_at": "2026-07-22T09:45:00Z",
+                "created_at": "2026-07-22T09:20:00Z",
+                "ai_summary": "Published article summary.",
+                "category": "World",
+                "positivity_score": 7,
+                "status": "published",
+            }
+        ]
+
+    def fetch_all(self, query: str, params: tuple = ()) -> list[dict]:
+        self.fetches.append((query, params))
+        if "select source, category" in query and "from public.article_ai_reviews" in query:
+            return self.option_rows
+        if "from public.articles" in query and "where status = 'published'" in query:
+            return self.recent_articles[: params[0]]
+        if "from public.article_ai_reviews" in query and "original_url = any(%s)" in query:
+            return self.recent_review_rows
+        if "from public.ai_decision_version_report" in query:
+            return self.version_rows
+        if "from public.article_ai_reviews" in query and "order by reviewed_at asc" in query:
+            return self.review_rows
+        if "from public.articles" in query and "where original_url = any(%s)" in query:
+            return self.published_review_articles
+        return super().fetch_all(query, params)
+
+    def fetch_one(self, query: str, params: tuple = ()) -> dict | None:
+        self.fetches.append((query, params))
+        if "count(*)::bigint as total_matching_reviews" in query:
+            return {"total_matching_reviews": 125}
+        return super().fetch_one(query, params)
+
+
 class WorkerDbApiTests(unittest.TestCase):
     def test_shadow_feed_read_uses_bounded_select(self) -> None:
         store = FakeStore()
@@ -553,6 +678,75 @@ class WorkerDbApiTests(unittest.TestCase):
             ),
             summary_params,
         )
+
+    def test_app_admin_article_reviews_returns_dashboard_snapshot(self) -> None:
+        store = ArticleReviewsStore()
+
+        result = worker_db_api.handle_app_operation(
+            "load-admin-article-reviews",
+            {
+                "providerMode": "backend_postgres_primary",
+                "filters": {
+                    "decision": "reject",
+                    "source": "Reuters",
+                    "category": "World",
+                    "minScore": 4,
+                    "maxScore": 8,
+                    "page": 1,
+                    "sort": "oldest",
+                },
+                "pageSize": 2,
+                "recentPublishedArticleLimit": 1,
+                "aiDecisionVersionReportLimit": 1,
+                "maxOptionRows": 3,
+            },
+            store,
+        )
+
+        self.assertEqual(1, result["rowCount"])
+        self.assertIn("generatedAt", result)
+        row = result["rows"][0]
+        self.assertEqual(["Reuters", "TechCrunch"], row["sourceOptions"])
+        self.assertEqual(["Science", "World"], row["categoryOptions"])
+        self.assertEqual(store.recent_articles, row["recentPublishedArticleRows"])
+        self.assertEqual(store.recent_review_rows, row["recentPublishedReviewRows"])
+        self.assertEqual(store.version_rows, row["versionReportRows"])
+        self.assertIsNone(row["versionReportError"])
+        self.assertEqual(store.review_rows, row["reviewRows"])
+        self.assertEqual(store.published_review_articles, row["publishedArticlesForReviews"])
+        self.assertEqual(125, row["totalMatchingReviews"])
+        self.assertIsNone(row["reviewError"])
+        self.assertEqual([], store.executes)
+
+        count_query, count_params = next(
+            (query, params)
+            for query, params in store.fetches
+            if "count(*)::bigint as total_matching_reviews" in query
+        )
+        self.assertIn("decision = %s", count_query)
+        self.assertIn("source = %s", count_query)
+        self.assertIn("category ilike %s", count_query)
+        self.assertIn("positivity_score >= %s", count_query)
+        self.assertIn("positivity_score <= %s", count_query)
+        self.assertEqual(("reject", "Reuters", "%World%", 4, 8), count_params)
+
+        review_query, review_params = next(
+            (query, params)
+            for query, params in store.fetches
+            if "from public.article_ai_reviews" in query and "order by reviewed_at asc" in query
+        )
+        self.assertIn("prompt_version", review_query)
+        self.assertIn("model_version", review_query)
+        self.assertIn("limit %s offset %s", review_query)
+        self.assertEqual(("reject", "Reuters", "%World%", 4, 8, 2, 2), review_params)
+
+        recent_query, recent_params = next(
+            (query, params)
+            for query, params in store.fetches
+            if "from public.articles" in query and "where status = 'published'" in query
+        )
+        self.assertIn("published_on_site_at desc nulls last", recent_query)
+        self.assertEqual((1,), recent_params)
 
     def test_app_shadow_write_is_rejected_before_database_call(self) -> None:
         store = FakeStore()

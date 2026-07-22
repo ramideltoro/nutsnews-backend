@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import hmac
 import json
+import math
 import os
+import re
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -49,6 +51,7 @@ APP_READ_OPERATIONS = {
     "load-article-sitemap-items-page",
     "search-published-articles",
     "load-admin-production-readiness",
+    "load-admin-article-reviews",
     "load-admin-quota-usage-events",
     "load-admin-article-engagement-source-category-summary",
     "load-admin-article-engagement-article-summary",
@@ -108,6 +111,62 @@ SITEMAP_ARTICLE_COLUMNS = (
     "id",
     "published_on_site_at",
     "published_at",
+)
+
+ADMIN_ARTICLE_REVIEW_COLUMNS = (
+    "id",
+    "reviewed_at",
+    "original_url",
+    "source",
+    "title",
+    "decision",
+    "category",
+    "positivity_score",
+    "summary",
+    "reason",
+    "ai_provider",
+    "ai_model",
+    "prompt_version",
+    "model_version",
+    "review_duration_ms",
+)
+
+ADMIN_PUBLISHED_ARTICLE_COLUMNS = (
+    "id",
+    "original_url",
+    "source",
+    "title",
+    "image_url",
+    "published_at",
+    "published_on_site_at",
+    "created_at",
+    "ai_summary",
+    "category",
+    "positivity_score",
+    "status",
+)
+
+AI_DECISION_VERSION_REPORT_COLUMNS = (
+    "version_window",
+    "version_rank",
+    "prompt_version",
+    "model_version",
+    "ai_provider",
+    "ai_model",
+    "total_reviews",
+    "accepted_reviews",
+    "rejected_reviews",
+    "acceptance_rate_pct",
+    "rejection_rate_pct",
+    "average_positivity_score",
+    "previous_acceptance_rate_pct",
+    "previous_rejection_rate_pct",
+    "previous_average_positivity_score",
+    "acceptance_rate_delta_pct",
+    "rejection_rate_delta_pct",
+    "average_score_delta",
+    "first_reviewed_at",
+    "latest_reviewed_at",
 )
 
 ADMIN_TABLE_READS = {
@@ -329,8 +388,9 @@ def json_default(value: Any) -> Any:
     return str(value)
 
 
-def bounded_int(body: dict[str, Any], key: str, *, default: int, minimum: int, maximum: int) -> int:
-    value = body.get(key, default)
+def bounded_int_value(value: Any, key: str, *, default: int, minimum: int, maximum: int) -> int:
+    if value is None:
+        value = default
     if isinstance(value, bool):
         raise ApiError(400, f"{key} must be an integer")
     try:
@@ -338,6 +398,10 @@ def bounded_int(body: dict[str, Any], key: str, *, default: int, minimum: int, m
     except (TypeError, ValueError) as exc:
         raise ApiError(400, f"{key} must be an integer") from exc
     return max(minimum, min(maximum, parsed))
+
+
+def bounded_int(body: dict[str, Any], key: str, *, default: int, minimum: int, maximum: int) -> int:
+    return bounded_int_value(body.get(key, default), key, default=default, minimum=minimum, maximum=maximum)
 
 
 def string_list(body: dict[str, Any], key: str, *, maximum: int = 1000) -> list[str]:
@@ -862,6 +926,18 @@ def sitemap_article_columns() -> str:
     return ", ".join(SITEMAP_ARTICLE_COLUMNS)
 
 
+def admin_article_review_columns() -> str:
+    return ", ".join(ADMIN_ARTICLE_REVIEW_COLUMNS)
+
+
+def admin_published_article_columns() -> str:
+    return ", ".join(ADMIN_PUBLISHED_ARTICLE_COLUMNS)
+
+
+def ai_decision_version_report_columns() -> str:
+    return ", ".join(AI_DECISION_VERSION_REPORT_COLUMNS)
+
+
 def category_clause(body: dict[str, Any], params: list[Any]) -> str:
     category = optional_string(body, "category", maximum=96)
     if category is None or category.lower() == "all":
@@ -942,6 +1018,265 @@ def count_published_articles_since(store: PostgresStore, hours: int) -> int:
         (hours,),
     )
     return count_value(row, "article_count")
+
+
+def clean_admin_option(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def sorted_admin_options(values: set[str]) -> list[str]:
+    return sorted(value for value in values if value)
+
+
+def load_admin_article_review_options(store: PostgresStore, limit: int) -> dict[str, list[str]]:
+    rows = store.fetch_all(
+        """
+        select source, category
+        from public.article_ai_reviews
+        order by reviewed_at desc nulls last, id desc
+        limit %s
+        """,
+        (limit,),
+    )
+    sources: set[str] = set()
+    categories: set[str] = set()
+    for row in rows:
+        source = clean_admin_option(row.get("source"))
+        category = clean_admin_option(row.get("category"))
+        if source:
+            sources.add(source)
+        if category:
+            for value in re.split(r"[|,;/]+", category):
+                clean_value = value.strip()
+                if clean_value:
+                    categories.add(clean_value)
+    return {
+        "sourceOptions": sorted_admin_options(sources),
+        "categoryOptions": sorted_admin_options(categories),
+    }
+
+
+def admin_article_review_filter_string(filters: dict[str, Any], key: str, maximum: int) -> str:
+    value = filters.get(key)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ApiError(400, f"filters.{key} must be a string")
+    return value.strip()[:maximum]
+
+
+def admin_article_review_score(filters: dict[str, Any], key: str) -> int | None:
+    value = filters.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ApiError(400, f"filters.{key} must be a number")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ApiError(400, f"filters.{key} must be a number") from exc
+    if not math.isfinite(parsed):
+        raise ApiError(400, f"filters.{key} must be a finite number")
+    return max(0, min(10, math.floor(parsed)))
+
+
+def admin_article_review_filters(body: dict[str, Any]) -> dict[str, Any]:
+    raw_filters = body.get("filters", {})
+    if raw_filters is None:
+        raw_filters = {}
+    if not isinstance(raw_filters, dict):
+        raise ApiError(400, "filters must be an object")
+
+    decision = raw_filters.get("decision", "all")
+    if not isinstance(decision, str) or decision not in {"all", "accept", "reject"}:
+        decision = "all"
+    sort = raw_filters.get("sort", "newest")
+    if not isinstance(sort, str) or sort not in {"newest", "oldest"}:
+        sort = "newest"
+
+    return {
+        "decision": decision,
+        "source": admin_article_review_filter_string(raw_filters, "source", 160),
+        "category": admin_article_review_filter_string(raw_filters, "category", 96),
+        "minScore": admin_article_review_score(raw_filters, "minScore"),
+        "maxScore": admin_article_review_score(raw_filters, "maxScore"),
+        "page": bounded_int_value(raw_filters.get("page", 0), "filters.page", default=0, minimum=0, maximum=100_000),
+        "sort": sort,
+    }
+
+
+def admin_article_review_filter_clause(filters: dict[str, Any], params: list[Any]) -> str:
+    conditions = ["true"]
+    if filters["decision"] != "all":
+        conditions.append("decision = %s")
+        params.append(filters["decision"])
+    if filters["source"]:
+        conditions.append("source = %s")
+        params.append(filters["source"])
+    if filters["category"]:
+        conditions.append("category ilike %s")
+        params.append(f"%{filters['category']}%")
+    if filters["minScore"] is not None:
+        conditions.append("positivity_score >= %s")
+        params.append(filters["minScore"])
+    if filters["maxScore"] is not None:
+        conditions.append("positivity_score <= %s")
+        params.append(filters["maxScore"])
+    return " where " + " and ".join(conditions)
+
+
+def load_admin_recent_published_article_rows(store: PostgresStore, limit: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    article_rows = store.fetch_all(
+        f"""
+        select {admin_published_article_columns()}
+        from public.articles
+        where status = 'published'
+        order by published_on_site_at desc nulls last, published_at desc nulls last, id desc
+        limit %s
+        """,
+        (limit,),
+    )
+    original_urls = [
+        str(row.get("original_url"))
+        for row in article_rows
+        if row.get("original_url")
+    ]
+    review_rows: list[dict[str, Any]] = []
+    if original_urls:
+        review_rows = store.fetch_all(
+            f"""
+            select {admin_article_review_columns()}
+            from public.article_ai_reviews
+            where original_url = any(%s)
+            order by reviewed_at desc nulls last, id desc
+            limit %s
+            """,
+            (original_urls, min(store.max_limit, len(original_urls))),
+        )
+    return article_rows, review_rows
+
+
+def load_admin_article_review_page_rows(
+    body: dict[str, Any],
+    store: PostgresStore,
+    filters: dict[str, Any],
+) -> dict[str, Any]:
+    page_size = bounded_int(
+        body,
+        "pageSize",
+        default=50,
+        minimum=1,
+        maximum=min(store.max_limit, 200),
+    )
+    offset = min(5_000_000, filters["page"] * page_size)
+    filter_params: list[Any] = []
+    where = admin_article_review_filter_clause(filters, filter_params)
+    total_row = store.fetch_one(
+        f"""
+        select count(*)::bigint as total_matching_reviews
+        from public.article_ai_reviews
+        {where}
+        """,
+        tuple(filter_params),
+    )
+    order_direction = "asc" if filters["sort"] == "oldest" else "desc"
+    review_rows = store.fetch_all(
+        f"""
+        select {admin_article_review_columns()}
+        from public.article_ai_reviews
+        {where}
+        order by reviewed_at {order_direction} nulls last, id {order_direction}
+        limit %s offset %s
+        """,
+        tuple(filter_params + [page_size, offset]),
+    )
+    original_urls = [
+        str(row.get("original_url"))
+        for row in review_rows
+        if row.get("original_url")
+    ]
+    published_articles: list[dict[str, Any]] = []
+    if original_urls:
+        published_articles = store.fetch_all(
+            f"""
+            select {admin_published_article_columns()}
+            from public.articles
+            where original_url = any(%s)
+            limit %s
+            """,
+            (original_urls, min(store.max_limit, len(original_urls))),
+        )
+    return {
+        "reviewRows": review_rows,
+        "publishedArticlesForReviews": published_articles,
+        "totalMatchingReviews": count_value(total_row, "total_matching_reviews"),
+        "reviewError": None,
+    }
+
+
+def load_app_admin_article_reviews(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
+    filters = admin_article_review_filters(body)
+    max_option_rows = bounded_int(
+        body,
+        "maxOptionRows",
+        default=5000,
+        minimum=1,
+        maximum=min(store.max_limit, 5000),
+    )
+    recent_published_article_limit = bounded_int(
+        body,
+        "recentPublishedArticleLimit",
+        default=10,
+        minimum=1,
+        maximum=min(store.max_limit, 100),
+    )
+    version_report_limit = bounded_int(
+        body,
+        "aiDecisionVersionReportLimit",
+        default=20,
+        minimum=1,
+        maximum=min(store.max_limit, 100),
+    )
+
+    options = load_admin_article_review_options(store, max_option_rows)
+    recent_article_rows, recent_review_rows = load_admin_recent_published_article_rows(
+        store,
+        recent_published_article_limit,
+    )
+    try:
+        version_report_rows = store.fetch_all(
+            f"""
+            select {ai_decision_version_report_columns()}
+            from public.ai_decision_version_report
+            order by version_rank asc
+            limit %s
+            """,
+            (version_report_limit,),
+        )
+        version_report_error = None
+    except Exception:
+        version_report_rows = []
+        version_report_error = "ai_decision_version_report query failed"
+    review_page = load_admin_article_review_page_rows(body, store, filters)
+
+    return {
+        "rows": [
+            {
+                "sourceOptions": options["sourceOptions"],
+                "categoryOptions": options["categoryOptions"],
+                "recentPublishedArticleRows": recent_article_rows,
+                "recentPublishedReviewRows": recent_review_rows,
+                "versionReportRows": version_report_rows,
+                "versionReportError": version_report_error,
+                "reviewRows": review_page["reviewRows"],
+                "publishedArticlesForReviews": review_page["publishedArticlesForReviews"],
+                "totalMatchingReviews": review_page["totalMatchingReviews"],
+                "reviewError": review_page["reviewError"],
+            }
+        ],
+        "rowCount": 1,
+        "generatedAt": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
 
 
 def load_app_admin_production_readiness(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
@@ -1211,6 +1546,9 @@ def handle_app_operation(operation: str, body: dict[str, Any], store: PostgresSt
 
     if operation == "load-admin-production-readiness":
         return load_app_admin_production_readiness(body, store)
+
+    if operation == "load-admin-article-reviews":
+        return load_app_admin_article_reviews(body, store)
 
     if operation in ADMIN_TABLE_READS:
         return load_app_admin_rows(operation, body, store)

@@ -84,6 +84,7 @@ def main() -> int:
     checks.append({"operation": "app-provider-smoke", "status": smoke_status, "payload": smoke_payload})
     if smoke_status != 200 or smoke_payload.get("ok") is not True:
         failures.append("app-provider-smoke")
+    writes_enabled = bool(smoke_payload.get("writesEnabled")) if isinstance(smoke_payload, dict) else False
 
     read_status, read_payload = request_json(
         base_url,
@@ -124,6 +125,68 @@ def main() -> int:
     if readiness_status != 200 or not isinstance(readiness_rows, list) or not readiness_rows:
         failures.append("load-admin-production-readiness")
 
+    article_reviews_status, article_reviews_payload = request_json(
+        base_url,
+        token,
+        "load-admin-article-reviews",
+        {
+            "providerMode": "backend_postgres_primary",
+            "filters": {
+                "decision": "all",
+                "source": "",
+                "category": "",
+                "minScore": None,
+                "maxScore": None,
+                "page": 0,
+                "sort": "newest",
+            },
+            "pageSize": 5,
+            "recentPublishedArticleLimit": 3,
+            "aiDecisionVersionReportLimit": 3,
+            "maxOptionRows": 100,
+        },
+    )
+    article_reviews_rows = (
+        article_reviews_payload.get("rows")
+        if isinstance(article_reviews_payload, dict)
+        else None
+    )
+    article_reviews_snapshot = (
+        article_reviews_rows[0]
+        if isinstance(article_reviews_rows, list) and article_reviews_rows
+        else {}
+    )
+    required_article_review_fields = {
+        "sourceOptions",
+        "categoryOptions",
+        "recentPublishedArticleRows",
+        "recentPublishedReviewRows",
+        "versionReportRows",
+        "reviewRows",
+        "publishedArticlesForReviews",
+        "totalMatchingReviews",
+    }
+    missing_article_review_fields = sorted(
+        field
+        for field in required_article_review_fields
+        if not isinstance(article_reviews_snapshot, dict) or field not in article_reviews_snapshot
+    )
+    checks.append(
+        {
+            "operation": "load-admin-article-reviews",
+            "status": article_reviews_status,
+            "row_count": len(article_reviews_rows) if isinstance(article_reviews_rows, list) else None,
+            "missing_fields": missing_article_review_fields,
+        }
+    )
+    if (
+        article_reviews_status != 200
+        or not isinstance(article_reviews_rows, list)
+        or not article_reviews_rows
+        or missing_article_review_fields
+    ):
+        failures.append("load-admin-article-reviews")
+
     shadow_write_status, shadow_write_payload = request_json(
         base_url,
         token,
@@ -144,25 +207,34 @@ def main() -> int:
     if shadow_write_status != 409:
         failures.append("record-quota-usage-event-shadow")
 
-    guarded_write_status, guarded_write_payload = request_json(
-        base_url,
-        token,
-        "record-quota-usage-event",
-        {
-            "providerMode": "backend_postgres_primary",
-            "eventType": "backend_app_db_api_smoke",
-            "eventSource": "backend",
-        },
-    )
-    checks.append(
-        {
-            "operation": "record-quota-usage-event-primary-guarded",
-            "status": guarded_write_status,
-            "payload": guarded_write_payload,
-        }
-    )
-    if guarded_write_status != 403:
-        failures.append("record-quota-usage-event-primary-guarded")
+    if writes_enabled:
+        checks.append(
+            {
+                "operation": "record-quota-usage-event-primary-guarded",
+                "status": "skipped",
+                "reason": "backend primary writes are enabled",
+            }
+        )
+    else:
+        guarded_write_status, guarded_write_payload = request_json(
+            base_url,
+            token,
+            "record-quota-usage-event",
+            {
+                "providerMode": "backend_postgres_primary",
+                "eventType": "backend_app_db_api_smoke",
+                "eventSource": "backend",
+            },
+        )
+        checks.append(
+            {
+                "operation": "record-quota-usage-event-primary-guarded",
+                "status": guarded_write_status,
+                "payload": guarded_write_payload,
+            }
+        )
+        if guarded_write_status != 403:
+            failures.append("record-quota-usage-event-primary-guarded")
 
     report = {
         "status": "pass" if not failures else "fail",

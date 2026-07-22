@@ -118,6 +118,15 @@ and a nullable review error. Filters and pagination must be bounded and
 parameterized, and the operation must not require Supabase service-role access
 in backend-primary mode.
 
+Article engagement dashboards use the read-only app operation
+`load-admin-article-engagement`. A tokened POST to
+`https://backend.nutsnews.com/api/app/db/load-admin-article-engagement` with
+`providerMode=backend_postgres_primary` must return one dashboard snapshot row
+containing source/category aggregate rows, a nullable source/category error,
+article aggregate rows, and a nullable article error. Source/category and
+article limits must be bounded and parameterized, and the operation must not
+require Supabase service-role access in backend-primary mode.
+
 ## Authorization Rules
 
 - Browser code must not receive database credentials or service-role style

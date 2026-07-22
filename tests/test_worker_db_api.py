@@ -262,6 +262,54 @@ class ArticleReviewsStore(FakeStore):
         return super().fetch_one(query, params)
 
 
+class ArticleEngagementStore(FakeStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.source_category_rows = [
+            {
+                "source": "Reuters",
+                "category": "World",
+                "outbound_click_count": "5",
+                "category_interest_count": 3,
+                "total_engagement_count": "8",
+                "first_event_date": "2026-07-20",
+                "latest_event_date": "2026-07-21",
+                "last_updated_at": "2026-07-22T10:00:00Z",
+            },
+            {
+                "source": "AP",
+                "category": "Technology",
+                "outbound_click_count": 2,
+                "category_interest_count": "4",
+                "total_engagement_count": 6,
+                "first_event_date": "2026-07-20",
+                "latest_event_date": "2026-07-21",
+                "last_updated_at": None,
+            },
+        ]
+        self.article_rows = [
+            {
+                "article_id": "4a225989-6ca9-4b31-a727-873ab7a6d8e0",
+                "title": "Election results point to coalition talks",
+                "original_url": "https://publisher.example.com/election-results",
+                "source": "Reuters",
+                "category": "World",
+                "outbound_click_count": "5",
+                "first_event_date": "2026-07-20",
+                "latest_event_date": "2026-07-21",
+                "last_updated_at": "2026-07-22T10:00:00Z",
+            }
+        ]
+
+    def fetch_all(self, query: str, params: tuple = ()) -> list[dict]:
+        self.fetches.append((query, params))
+        if "from public.article_engagement_source_category_summary" in query:
+            return self.source_category_rows[: params[0]]
+        if "from public.article_engagement_article_summary" in query:
+            return self.article_rows[: params[0]]
+        return super().fetch_all(query, params)
+
+
 class WorkerDbApiTests(unittest.TestCase):
     def test_shadow_feed_read_uses_bounded_select(self) -> None:
         store = FakeStore()
@@ -747,6 +795,49 @@ class WorkerDbApiTests(unittest.TestCase):
         )
         self.assertIn("published_on_site_at desc nulls last", recent_query)
         self.assertEqual((1,), recent_params)
+
+    def test_app_admin_article_engagement_returns_dashboard_snapshot(self) -> None:
+        store = ArticleEngagementStore()
+
+        result = worker_db_api.handle_app_operation(
+            "load-admin-article-engagement",
+            {
+                "providerMode": "backend_postgres_primary",
+                "sourceCategoryLimit": 2,
+                "articleLimit": 1,
+            },
+            store,
+        )
+
+        self.assertEqual(1, result["rowCount"])
+        self.assertIn("generatedAt", result)
+        row = result["rows"][0]
+        self.assertEqual(store.source_category_rows, row["sourceCategoryRows"])
+        self.assertIsNone(row["sourceCategoryError"])
+        self.assertEqual(store.article_rows, row["articleRows"])
+        self.assertIsNone(row["articleError"])
+        self.assertEqual([], store.executes)
+
+        source_query, source_params = next(
+            (query, params)
+            for query, params in store.fetches
+            if "from public.article_engagement_source_category_summary" in query
+        )
+        self.assertIn("outbound_click_count", source_query)
+        self.assertIn("category_interest_count", source_query)
+        self.assertIn("order by total_engagement_count desc", source_query)
+        self.assertIn("latest_event_date desc nulls last", source_query)
+        self.assertEqual((2,), source_params)
+
+        article_query, article_params = next(
+            (query, params)
+            for query, params in store.fetches
+            if "from public.article_engagement_article_summary" in query
+        )
+        self.assertIn("article_id", article_query)
+        self.assertIn("original_url", article_query)
+        self.assertIn("order by outbound_click_count desc", article_query)
+        self.assertEqual((1,), article_params)
 
     def test_app_shadow_write_is_rejected_before_database_call(self) -> None:
         store = FakeStore()

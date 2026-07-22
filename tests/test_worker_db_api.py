@@ -71,6 +71,72 @@ class EdgeSnapshotStore(FakeStore):
         return super().fetch_all(query, params)
 
 
+class ProductionReadinessStore(FakeStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.recent_articles = [
+            {
+                "id": "article-1",
+                "original_url": "https://example.com/article-1",
+                "image_url": "https://example.com/image-1.jpg",
+                "published_on_site_at": "2026-07-22T11:00:00Z",
+                "created_at": "2026-07-22T10:00:00Z",
+            },
+            {
+                "id": "article-2",
+                "original_url": "https://example.com/article-2",
+                "image_url": None,
+                "published_on_site_at": "2026-07-21T11:00:00Z",
+                "created_at": "2026-07-21T10:00:00Z",
+            },
+            {
+                "id": "article-3",
+                "original_url": "https://example.com/article-3",
+                "image_url": "https://example.com/image-3.jpg",
+                "published_on_site_at": "2026-07-20T11:00:00Z",
+                "created_at": "2026-07-20T10:00:00Z",
+            },
+        ]
+        self.summary_rows = [
+            {"original_url": "https://example.com/article-1", "language_code": "fr"},
+            {"original_url": "https://example.com/article-2", "language_code": "ja"},
+        ]
+        self.worker_run = {
+            "id": 42,
+            "run_started_at": "2026-07-22T09:00:00Z",
+            "run_completed_at": "2026-07-22T09:02:00Z",
+            "success": True,
+            "error_name": None,
+            "error_message": None,
+            "feed_count": 12,
+            "fetched_count": 30,
+            "candidate_count": 18,
+            "accepted_count": 9,
+            "rejected_count": 4,
+            "duration_ms": 120000,
+        }
+
+    def fetch_all(self, query: str, params: tuple = ()) -> list[dict]:
+        self.fetches.append((query, params))
+        if "from public.articles" in query and "select id, original_url" in query:
+            return self.recent_articles[: params[0]]
+        if "from public.article_summaries" in query:
+            return self.summary_rows
+        return super().fetch_all(query, params)
+
+    def fetch_one(self, query: str, params: tuple = ()) -> dict | None:
+        self.fetches.append((query, params))
+        if "from public.articles" in query and "created_at >= now()" in query:
+            return {"article_count": 2 if params == (24,) else 7}
+        if "from public.articles" in query and "count(*)::bigint as article_count" in query:
+            return {"article_count": 123}
+        if "from public.public_feed_snapshot" in query:
+            return {"public_feed_snapshot_count": 87}
+        if "from public.worker_runs" in query:
+            return self.worker_run
+        return super().fetch_one(query, params)
+
+
 class WorkerDbApiTests(unittest.TestCase):
     def test_shadow_feed_read_uses_bounded_select(self) -> None:
         store = FakeStore()
@@ -434,6 +500,59 @@ class WorkerDbApiTests(unittest.TestCase):
         self.assertIn("category ilike %s", query)
         self.assertIn("order by snapshot_rank asc", query)
         self.assertEqual(("%science%", 2, 3), params)
+
+    def test_app_admin_production_readiness_returns_dashboard_snapshot(self) -> None:
+        store = ProductionReadinessStore()
+
+        result = worker_db_api.handle_app_operation(
+            "load-admin-production-readiness",
+            {
+                "providerMode": "backend_postgres_primary",
+                "recentArticleLimit": 3,
+                "translationSampleLimit": 2,
+                "targetLanguageCodes": ["fr", "ja", "en", "fr"],
+                "articleGrowthWindowsHours": [24, 24 * 7],
+            },
+            store,
+        )
+
+        self.assertEqual(1, result["rowCount"])
+        self.assertIn("generatedAt", result)
+        row = result["rows"][0]
+        self.assertEqual(123, row["articleCount"])
+        self.assertEqual(87, row["publicFeedSnapshotCount"])
+        self.assertEqual(store.recent_articles, row["recentArticles"])
+        self.assertEqual(store.worker_run, row["workerRun"])
+        self.assertEqual(2, row["articlesLast24Hours"])
+        self.assertEqual(7, row["articlesLast7Days"])
+        self.assertEqual(store.summary_rows, row["translationSummaries"])
+        self.assertEqual(4, row["translationExpectedCount"])
+        self.assertEqual([], store.executes)
+
+        recent_query, recent_params = next(
+            (query, params)
+            for query, params in store.fetches
+            if "from public.articles" in query and "select id, original_url" in query
+        )
+        self.assertIn("where status = 'published'", recent_query)
+        self.assertIn("order by published_on_site_at desc nulls last", recent_query)
+        self.assertEqual((3,), recent_params)
+
+        summary_query, summary_params = next(
+            (query, params)
+            for query, params in store.fetches
+            if "from public.article_summaries" in query
+        )
+        self.assertIn("original_url = any(%s)", summary_query)
+        self.assertIn("language_code = any(%s)", summary_query)
+        self.assertEqual(
+            (
+                ["https://example.com/article-1", "https://example.com/article-2"],
+                ["fr", "ja"],
+                4,
+            ),
+            summary_params,
+        )
 
     def test_app_shadow_write_is_rejected_before_database_call(self) -> None:
         store = FakeStore()

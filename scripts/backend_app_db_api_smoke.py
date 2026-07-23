@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import sys
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -232,6 +233,86 @@ def main() -> int:
         or missing_engagement_fields
     ):
         failures.append("load-admin-article-engagement")
+
+    ai_usage_since = (
+        datetime.now(UTC)
+        - timedelta(days=30)
+    ).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    ai_usage_status, ai_usage_payload = request_json(
+        base_url,
+        token,
+        "load-admin-ai-usage",
+        {
+            "providerMode": "backend_postgres_primary",
+            "since": ai_usage_since,
+            "limit": 20,
+        },
+    )
+    ai_usage_rows = (
+        ai_usage_payload.get("rows")
+        if isinstance(ai_usage_payload, dict)
+        else None
+    )
+    ai_usage_snapshot = (
+        ai_usage_rows[0]
+        if isinstance(ai_usage_rows, list) and ai_usage_rows
+        else {}
+    )
+    usage_run_rows = (
+        ai_usage_snapshot.get("usageRunRows")
+        if isinstance(ai_usage_snapshot, dict)
+        else None
+    )
+    missing_ai_usage_fields = sorted(
+        field
+        for field in {"usageRunRows"}
+        if not isinstance(ai_usage_snapshot, dict) or field not in ai_usage_snapshot
+    )
+    required_ai_usage_run_fields = {
+        "run_started_at",
+        "openai_model",
+        "openai_call_count",
+        "openai_total_tokens",
+        "estimated_openai_cost_usd",
+        "openai_review_count",
+        "openai_translation_count",
+        "local_ai_model",
+        "local_ai_call_count",
+        "local_ai_total_tokens",
+        "estimated_local_ai_savings_usd",
+        "duration_ms",
+    }
+    first_usage_run = (
+        usage_run_rows[0]
+        if isinstance(usage_run_rows, list) and usage_run_rows
+        else {}
+    )
+    missing_ai_usage_run_fields = sorted(
+        field
+        for field in required_ai_usage_run_fields
+        if isinstance(first_usage_run, dict)
+        and first_usage_run
+        and field not in first_usage_run
+    )
+    checks.append(
+        {
+            "operation": "load-admin-ai-usage",
+            "status": ai_usage_status,
+            "row_count": len(ai_usage_rows) if isinstance(ai_usage_rows, list) else None,
+            "usage_run_count": len(usage_run_rows) if isinstance(usage_run_rows, list) else None,
+            "missing_fields": missing_ai_usage_fields,
+            "missing_run_fields": missing_ai_usage_run_fields,
+        }
+    )
+    if (
+        ai_usage_status != 200
+        or not isinstance(ai_usage_rows, list)
+        or not ai_usage_rows
+        or not isinstance(usage_run_rows, list)
+        or missing_ai_usage_fields
+        or missing_ai_usage_run_fields
+    ):
+        failures.append("load-admin-ai-usage")
 
     shadow_write_status, shadow_write_payload = request_json(
         base_url,

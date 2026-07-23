@@ -310,6 +310,80 @@ class ArticleEngagementStore(FakeStore):
         return super().fetch_all(query, params)
 
 
+class AiUsageStore(FakeStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.usage_rows = [
+            {
+                "id": 101,
+                "created_at": "2026-07-22T09:59:00Z",
+                "run_started_at": "2026-07-22T10:00:00Z",
+                "run_completed_at": "2026-07-22T10:02:00Z",
+                "run_source": "scheduled",
+                "request_id": "req-ai-usage",
+                "shard_index": 2,
+                "feeds_per_shard": 12,
+                "max_ai_reviews": 40,
+                "feed_count": 12,
+                "fetched_count": 100,
+                "candidate_count": 55,
+                "already_reviewed_count": 10,
+                "unreviewed_count": 45,
+                "eligible_for_ai_count": 30,
+                "ai_reviewed_count": 20,
+                "openai_model": "gpt-4o-mini",
+                "openai_call_count": 8,
+                "openai_prompt_tokens": 1200,
+                "openai_completion_tokens": 700,
+                "openai_total_tokens": 1900,
+                "estimated_openai_cost_usd": "0.0031",
+                "openai_review_count": 5,
+                "openai_review_prompt_tokens": 800,
+                "openai_review_completion_tokens": 500,
+                "openai_review_total_tokens": 1300,
+                "estimated_openai_review_cost_usd": "0.0020",
+                "openai_translation_count": 3,
+                "openai_translation_prompt_tokens": 400,
+                "openai_translation_completion_tokens": 200,
+                "openai_translation_total_tokens": 600,
+                "estimated_openai_translation_cost_usd": "0.0011",
+                "local_ai_model": "llama-3.1",
+                "local_ai_call_count": 7,
+                "local_ai_prompt_tokens": 900,
+                "local_ai_completion_tokens": 300,
+                "local_ai_total_tokens": 1200,
+                "local_ai_accepted_count": 4,
+                "local_ai_rejected_count": 3,
+                "local_ai_review_count": 6,
+                "local_ai_review_prompt_tokens": 750,
+                "local_ai_review_completion_tokens": 250,
+                "local_ai_review_total_tokens": 1000,
+                "local_ai_translation_count": 1,
+                "local_ai_translation_prompt_tokens": 150,
+                "local_ai_translation_completion_tokens": 50,
+                "local_ai_translation_total_tokens": 200,
+                "estimated_local_ai_savings_usd": "0.0045",
+                "openai_accepted_count": 9,
+                "openai_rejected_count": 2,
+                "published_accepted_count": 8,
+                "total_rejected_count": 5,
+                "no_thumbnail_rejected_count": 1,
+                "locally_rejected_count": 3,
+                "cost_protection_limit_reached": False,
+                "spike_warning_triggered": True,
+                "review_save_ok": True,
+                "article_save_ok": True,
+                "duration_ms": 120000,
+            }
+        ]
+
+    def fetch_all(self, query: str, params: tuple = ()) -> list[dict]:
+        self.fetches.append((query, params))
+        if "from public.ai_usage_runs" in query:
+            return self.usage_rows[: params[1]]
+        return super().fetch_all(query, params)
+
+
 class WorkerDbApiTests(unittest.TestCase):
     def test_shadow_feed_read_uses_bounded_select(self) -> None:
         store = FakeStore()
@@ -838,6 +912,38 @@ class WorkerDbApiTests(unittest.TestCase):
         self.assertIn("original_url", article_query)
         self.assertIn("order by outbound_click_count desc", article_query)
         self.assertEqual((1,), article_params)
+
+    def test_app_admin_ai_usage_returns_dashboard_snapshot(self) -> None:
+        store = AiUsageStore()
+        since = "2026-06-22T00:00:00.000Z"
+
+        result = worker_db_api.handle_app_operation(
+            "load-admin-ai-usage",
+            {
+                "providerMode": "backend_postgres_primary",
+                "since": since,
+                "limit": 2,
+            },
+            store,
+        )
+
+        self.assertEqual(1, result["rowCount"])
+        self.assertIn("generatedAt", result)
+        row = result["rows"][0]
+        self.assertEqual(store.usage_rows, row["usageRunRows"])
+        self.assertEqual([], store.executes)
+
+        query, params = store.fetches[0]
+        self.assertIn("from public.ai_usage_runs", query)
+        self.assertIn("created_at", query)
+        self.assertIn("openai_review_count", query)
+        self.assertIn("openai_translation_total_tokens", query)
+        self.assertIn("local_ai_review_count", query)
+        self.assertIn("local_ai_translation_total_tokens", query)
+        self.assertIn("estimated_local_ai_savings_usd", query)
+        self.assertIn("where run_started_at >= %s::timestamptz", query)
+        self.assertIn("order by run_started_at desc nulls last, id desc", query)
+        self.assertEqual((since, 2), params)
 
     def test_app_shadow_write_is_rejected_before_database_call(self) -> None:
         store = FakeStore()

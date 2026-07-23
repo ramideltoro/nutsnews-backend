@@ -506,6 +506,19 @@
     - backend_rabbitmq_topology_enabled | bool
     - not ansible_check_mode
 
+- name: Reset RabbitMQ private canary service failure state after apply canary
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - reset-failed
+      - nutsnews-rabbitmq-canary.service
+  changed_when: false
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - backend_rabbitmq_topology_enabled | bool
+    - not ansible_check_mode
+    - backend_rabbitmq_canary_once is succeeded
+
 - name: Ensure RabbitMQ private canary timer is enabled and started
   ansible.builtin.systemd:
     name: nutsnews-rabbitmq-canary.timer

@@ -216,6 +216,17 @@ grade, quality reason, and updated timestamps. The operation must use backend
 PostgreSQL least-privilege read access and must not require Supabase
 service-role access in backend-primary mode.
 
+Admin audit dashboards use the read-only app operation
+`load-admin-audit-log`. A tokened POST to
+`https://backend.nutsnews.com/api/app/db/load-admin-audit-log` with
+`providerMode=backend_postgres_primary` must return one dashboard snapshot row
+containing bounded `auditEventRows` from `public.admin_audit_events`. The
+selected fields must preserve the app contract for audit event identity,
+creation time, actor email, action, target type, target id, target label,
+before/after values, and metadata. The operation must use backend PostgreSQL
+least-privilege read access and must not require Supabase service-role access in
+backend-primary mode.
+
 ## Authorization Rules
 
 - Browser code must not receive database credentials or service-role style

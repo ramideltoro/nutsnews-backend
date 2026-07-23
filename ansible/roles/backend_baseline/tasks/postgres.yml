@@ -383,6 +383,7 @@
             'public.article_ai_reviews',
             'public.article_summaries',
             'public.ai_usage_runs',
+            'public.admin_audit_events',
             'public.article_engagement_article_summary',
             'public.article_engagement_daily',
             'public.article_engagement_source_category_summary',

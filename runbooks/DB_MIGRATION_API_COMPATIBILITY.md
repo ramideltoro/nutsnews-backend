@@ -165,6 +165,20 @@ model, updated timestamp, language coverage, and issue summarization. The
 operation must use backend PostgreSQL least-privilege read access and must not
 require Supabase service-role access in backend-primary mode.
 
+Cost guardrail dashboards use the read-only app operation
+`load-admin-guardrails`. A tokened POST to
+`https://backend.nutsnews.com/api/app/db/load-admin-guardrails` with
+`providerMode=backend_postgres_primary` must return one dashboard snapshot row
+containing bounded `aiUsageRunRows`, `workerRunRows`, `quotaUsageEventRows`,
+the fixed content counts `articleCount`, `summaryCount`, and `feedCount`, plus
+`partialErrors`. Telemetry rows must be filtered by a validated `since`
+timestamp and limited by a bounded `limit`; count tables must be restricted to
+`articles`, `article_summaries`, and `rss_feeds`. The selected fields must
+preserve the app contract for cost, quota, usage windows, 30-day forecast
+inputs, and guardrail status calculations. The operation must use backend
+PostgreSQL least-privilege read access and must not require Supabase
+service-role access in backend-primary mode.
+
 ## Authorization Rules
 
 - Browser code must not receive database credentials or service-role style

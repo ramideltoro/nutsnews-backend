@@ -70,7 +70,8 @@
         "load-admin-article-engagement",
         "load-admin-ai-usage",
         "load-admin-local-ai",
-        "load-admin-translation-quality"
+        "load-admin-translation-quality",
+        "load-admin-guardrails"
       ],
       "validated_by": "backend_postgres_smoke_tests admin"
     },
@@ -168,6 +169,7 @@
         "load-admin-ai-usage snapshot row 1",
         "load-admin-local-ai snapshot row 1",
         "load-admin-translation-quality snapshot row 1",
+        "load-admin-guardrails snapshot row 1",
         "backend_postgres_shadow write rejected 409",
         "backend_postgres_primary guarded write skipped when writes are enabled"
       ],

@@ -490,6 +490,66 @@ class TranslationQualityStore(FakeStore):
         return super().fetch_all(query, params)
 
 
+class GuardrailsStore(FakeStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.ai_usage_rows = [
+            {
+                "run_started_at": "2026-07-22T10:00:00Z",
+                "openai_call_count": 8,
+                "openai_prompt_tokens": 1200,
+                "openai_completion_tokens": 700,
+                "openai_total_tokens": 1900,
+                "estimated_openai_cost_usd": "0.0031",
+                "cost_protection_limit_reached": False,
+                "spike_warning_triggered": True,
+                "local_ai_call_count": 7,
+                "local_ai_total_tokens": 1200,
+            }
+        ]
+        self.worker_rows = [
+            {
+                "run_started_at": "2026-07-22T10:00:00Z",
+                "success": True,
+                "shard_index": 2,
+                "fetched_count": 100,
+                "ai_reviewed_count": 20,
+                "accepted_count": 9,
+                "rejected_count": 4,
+                "duration_ms": 120000,
+                "cost_protection_limit_reached": False,
+                "spike_warning_triggered": True,
+            }
+        ]
+        self.quota_rows = [
+            {
+                "event_type": "email_send",
+                "quantity": 2,
+                "created_at": "2026-07-22T10:10:00Z",
+            }
+        ]
+
+    def fetch_all(self, query: str, params: tuple = ()) -> list[dict]:
+        self.fetches.append((query, params))
+        if "from public.ai_usage_runs" in query:
+            return self.ai_usage_rows[: params[1]]
+        if "from public.worker_runs" in query:
+            return self.worker_rows[: params[1]]
+        if "from public.quota_usage_events" in query:
+            return self.quota_rows[: params[1]]
+        return super().fetch_all(query, params)
+
+    def fetch_one(self, query: str, params: tuple = ()) -> dict | None:
+        self.fetches.append((query, params))
+        if "from public.articles" in query:
+            return {"article_count": 123}
+        if "from public.article_summaries" in query:
+            return {"summary_count": 456}
+        if "from public.rss_feeds" in query:
+            return {"feed_count": 12}
+        return super().fetch_one(query, params)
+
+
 class WorkerDbApiTests(unittest.TestCase):
     def test_shadow_feed_read_uses_bounded_select(self) -> None:
         store = FakeStore()
@@ -1139,6 +1199,81 @@ class WorkerDbApiTests(unittest.TestCase):
             ),
             summary_params,
         )
+
+    def test_app_admin_guardrails_returns_dashboard_snapshot(self) -> None:
+        store = GuardrailsStore()
+        since = "2026-06-22T00:00:00.000Z"
+
+        result = worker_db_api.handle_app_operation(
+            "load-admin-guardrails",
+            {
+                "providerMode": "backend_postgres_primary",
+                "since": since,
+                "limit": 2,
+                "countTables": ["articles", "article_summaries", "rss_feeds"],
+            },
+            store,
+        )
+
+        self.assertEqual(1, result["rowCount"])
+        self.assertIn("generatedAt", result)
+        row = result["rows"][0]
+        self.assertEqual(store.ai_usage_rows, row["aiUsageRunRows"])
+        self.assertEqual(store.worker_rows, row["workerRunRows"])
+        self.assertEqual(store.quota_rows, row["quotaUsageEventRows"])
+        self.assertEqual(123, row["articleCount"])
+        self.assertEqual(456, row["summaryCount"])
+        self.assertEqual(12, row["feedCount"])
+        self.assertEqual([], row["partialErrors"])
+        self.assertEqual([], store.executes)
+
+        ai_query, ai_params = store.fetches[0]
+        self.assertIn("from public.ai_usage_runs", ai_query)
+        self.assertIn("openai_call_count", ai_query)
+        self.assertIn("estimated_openai_cost_usd", ai_query)
+        self.assertIn("local_ai_total_tokens", ai_query)
+        self.assertIn("where run_started_at >= %s::timestamptz", ai_query)
+        self.assertIn("order by run_started_at desc nulls last, id desc", ai_query)
+        self.assertEqual((since, 2), ai_params)
+
+        worker_query, worker_params = store.fetches[1]
+        self.assertIn("from public.worker_runs", worker_query)
+        self.assertIn("success", worker_query)
+        self.assertIn("accepted_count", worker_query)
+        self.assertIn("cost_protection_limit_reached", worker_query)
+        self.assertIn("where run_started_at >= %s::timestamptz", worker_query)
+        self.assertIn("order by run_started_at desc nulls last, id desc", worker_query)
+        self.assertEqual((since, 2), worker_params)
+
+        quota_query, quota_params = store.fetches[2]
+        self.assertIn("from public.quota_usage_events", quota_query)
+        self.assertIn("event_type", quota_query)
+        self.assertIn("quantity", quota_query)
+        self.assertIn("where created_at >= %s::timestamptz", quota_query)
+        self.assertIn("order by created_at desc nulls last, id desc", quota_query)
+        self.assertEqual((since, 2), quota_params)
+
+        self.assertTrue(any("from public.articles" in query for query, _ in store.fetches))
+        self.assertTrue(any("from public.article_summaries" in query for query, _ in store.fetches))
+        self.assertTrue(any("from public.rss_feeds" in query for query, _ in store.fetches))
+
+    def test_app_admin_guardrails_rejects_unsupported_count_table(self) -> None:
+        store = GuardrailsStore()
+
+        with self.assertRaises(worker_db_api.ApiError) as error:
+            worker_db_api.handle_app_operation(
+                "load-admin-guardrails",
+                {
+                    "providerMode": "backend_postgres_primary",
+                    "since": "2026-06-22T00:00:00.000Z",
+                    "countTables": ["articles", "auth.users"],
+                },
+                store,
+            )
+
+        self.assertEqual(400, error.exception.status)
+        self.assertEqual([], store.fetches)
+        self.assertEqual([], store.executes)
 
     def test_app_shadow_write_is_rejected_before_database_call(self) -> None:
         store = FakeStore()

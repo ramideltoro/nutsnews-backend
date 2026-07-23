@@ -56,6 +56,7 @@ APP_READ_OPERATIONS = {
     "load-admin-ai-usage",
     "load-admin-local-ai",
     "load-admin-translation-quality",
+    "load-admin-guardrails",
     "load-admin-quota-usage-events",
     "load-admin-article-engagement-source-category-summary",
     "load-admin-article-engagement-article-summary",
@@ -314,6 +315,48 @@ ADMIN_TRANSLATION_QUALITY_SUMMARY_COLUMNS = (
     "generated_by",
     "model",
 )
+
+ADMIN_GUARDRAILS_AI_USAGE_RUN_COLUMNS = (
+    "run_started_at",
+    "openai_call_count",
+    "openai_prompt_tokens",
+    "openai_completion_tokens",
+    "openai_total_tokens",
+    "estimated_openai_cost_usd",
+    "cost_protection_limit_reached",
+    "spike_warning_triggered",
+    "local_ai_call_count",
+    "local_ai_total_tokens",
+)
+
+ADMIN_GUARDRAILS_WORKER_RUN_COLUMNS = (
+    "run_started_at",
+    "success",
+    "shard_index",
+    "fetched_count",
+    "ai_reviewed_count",
+    "accepted_count",
+    "rejected_count",
+    "duration_ms",
+    "cost_protection_limit_reached",
+    "spike_warning_triggered",
+)
+
+ADMIN_GUARDRAILS_QUOTA_USAGE_EVENT_COLUMNS = (
+    "event_type",
+    "quantity",
+    "created_at",
+)
+
+ADMIN_GUARDRAILS_COUNT_TABLES = {
+    "articles": ("public.articles", "articleCount", "article_count"),
+    "article_summaries": (
+        "public.article_summaries",
+        "summaryCount",
+        "summary_count",
+    ),
+    "rss_feeds": ("public.rss_feeds", "feedCount", "feed_count"),
+}
 
 ADMIN_TABLE_READS = {
     "load-admin-quota-usage-events": (
@@ -1121,6 +1164,18 @@ def admin_translation_quality_summary_columns() -> str:
     return ", ".join(ADMIN_TRANSLATION_QUALITY_SUMMARY_COLUMNS)
 
 
+def admin_guardrails_ai_usage_run_columns() -> str:
+    return ", ".join(ADMIN_GUARDRAILS_AI_USAGE_RUN_COLUMNS)
+
+
+def admin_guardrails_worker_run_columns() -> str:
+    return ", ".join(ADMIN_GUARDRAILS_WORKER_RUN_COLUMNS)
+
+
+def admin_guardrails_quota_usage_event_columns() -> str:
+    return ", ".join(ADMIN_GUARDRAILS_QUOTA_USAGE_EVENT_COLUMNS)
+
+
 def category_clause(body: dict[str, Any], params: list[Any]) -> str:
     category = optional_string(body, "category", maximum=96)
     if category is None or category.lower() == "all":
@@ -1665,6 +1720,137 @@ def load_app_admin_translation_quality(body: dict[str, Any], store: PostgresStor
     }
 
 
+def guardrails_count_tables(body: dict[str, Any]) -> list[str]:
+    if "countTables" not in body:
+        return list(ADMIN_GUARDRAILS_COUNT_TABLES)
+
+    count_tables = list(dict.fromkeys(string_list(body, "countTables", maximum=10)))
+    unsupported = [
+        table_name
+        for table_name in count_tables
+        if table_name not in ADMIN_GUARDRAILS_COUNT_TABLES
+    ]
+    if unsupported:
+        raise ApiError(
+            400,
+            "countTables must only contain articles, article_summaries, and rss_feeds",
+        )
+    return count_tables
+
+
+def guardrails_fetch_all(
+    store: PostgresStore,
+    query: str,
+    params: tuple[Any, ...],
+    *,
+    label: str,
+    partial_errors: list[str],
+) -> list[dict[str, Any]]:
+    try:
+        return store.fetch_all(query, params)
+    except Exception:
+        partial_errors.append(f"{label} query failed")
+        return []
+
+
+def guardrails_count_table(
+    store: PostgresStore,
+    table_name: str,
+    *,
+    partial_errors: list[str],
+) -> int | None:
+    table_sql, _response_key, query_key = ADMIN_GUARDRAILS_COUNT_TABLES[table_name]
+    try:
+        return count_value(
+            store.fetch_one(f"select count(*)::bigint as {query_key} from {table_sql}"),
+            query_key,
+        )
+    except Exception:
+        partial_errors.append(f"{table_name} count query failed")
+        return None
+
+
+def load_app_admin_guardrails(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
+    since = required_iso_datetime_string(body, "since")
+    limit = bounded_int(
+        body,
+        "limit",
+        default=10000,
+        minimum=1,
+        maximum=min(store.max_limit, 10000),
+    )
+    requested_count_tables = guardrails_count_tables(body)
+    partial_errors: list[str] = []
+
+    ai_usage_run_rows = guardrails_fetch_all(
+        store,
+        f"""
+        select {admin_guardrails_ai_usage_run_columns()}
+        from public.ai_usage_runs
+        where run_started_at >= %s::timestamptz
+        order by run_started_at desc nulls last, id desc
+        limit %s
+        """,
+        (since, limit),
+        label="ai_usage_runs",
+        partial_errors=partial_errors,
+    )
+    worker_run_rows = guardrails_fetch_all(
+        store,
+        f"""
+        select {admin_guardrails_worker_run_columns()}
+        from public.worker_runs
+        where run_started_at >= %s::timestamptz
+        order by run_started_at desc nulls last, id desc
+        limit %s
+        """,
+        (since, limit),
+        label="worker_runs",
+        partial_errors=partial_errors,
+    )
+    quota_usage_event_rows = guardrails_fetch_all(
+        store,
+        f"""
+        select {admin_guardrails_quota_usage_event_columns()}
+        from public.quota_usage_events
+        where created_at >= %s::timestamptz
+        order by created_at desc nulls last, id desc
+        limit %s
+        """,
+        (since, limit),
+        label="quota_usage_events",
+        partial_errors=partial_errors,
+    )
+    counts = {
+        "articleCount": None,
+        "summaryCount": None,
+        "feedCount": None,
+    }
+    for table_name in requested_count_tables:
+        _table_sql, response_key, _query_key = ADMIN_GUARDRAILS_COUNT_TABLES[table_name]
+        counts[response_key] = guardrails_count_table(
+            store,
+            table_name,
+            partial_errors=partial_errors,
+        )
+
+    return {
+        "rows": [
+            {
+                "aiUsageRunRows": ai_usage_run_rows,
+                "workerRunRows": worker_run_rows,
+                "quotaUsageEventRows": quota_usage_event_rows,
+                "articleCount": counts["articleCount"],
+                "summaryCount": counts["summaryCount"],
+                "feedCount": counts["feedCount"],
+                "partialErrors": partial_errors,
+            }
+        ],
+        "rowCount": 1,
+        "generatedAt": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
+
+
 def load_app_admin_production_readiness(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
     recent_article_limit = bounded_int(
         body,
@@ -1947,6 +2133,9 @@ def handle_app_operation(operation: str, body: dict[str, Any], store: PostgresSt
 
     if operation == "load-admin-translation-quality":
         return load_app_admin_translation_quality(body, store)
+
+    if operation == "load-admin-guardrails":
+        return load_app_admin_guardrails(body, store)
 
     if operation in ADMIN_TABLE_READS:
         return load_app_admin_rows(operation, body, store)

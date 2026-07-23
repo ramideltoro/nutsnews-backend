@@ -516,6 +516,145 @@ def main() -> int:
     ):
         failures.append("load-admin-translation-quality")
 
+    guardrails_status, guardrails_payload = request_json(
+        base_url,
+        token,
+        "load-admin-guardrails",
+        {
+            "providerMode": "backend_postgres_primary",
+            "since": ai_usage_since,
+            "limit": 20,
+            "countTables": ["articles", "article_summaries", "rss_feeds"],
+        },
+    )
+    guardrails_rows = (
+        guardrails_payload.get("rows")
+        if isinstance(guardrails_payload, dict)
+        else None
+    )
+    guardrails_snapshot = (
+        guardrails_rows[0]
+        if isinstance(guardrails_rows, list) and guardrails_rows
+        else {}
+    )
+    guardrails_ai_rows = (
+        guardrails_snapshot.get("aiUsageRunRows")
+        if isinstance(guardrails_snapshot, dict)
+        else None
+    )
+    guardrails_worker_rows = (
+        guardrails_snapshot.get("workerRunRows")
+        if isinstance(guardrails_snapshot, dict)
+        else None
+    )
+    guardrails_quota_rows = (
+        guardrails_snapshot.get("quotaUsageEventRows")
+        if isinstance(guardrails_snapshot, dict)
+        else None
+    )
+    missing_guardrails_fields = sorted(
+        field
+        for field in {
+            "aiUsageRunRows",
+            "workerRunRows",
+            "quotaUsageEventRows",
+            "articleCount",
+            "summaryCount",
+            "feedCount",
+            "partialErrors",
+        }
+        if not isinstance(guardrails_snapshot, dict) or field not in guardrails_snapshot
+    )
+    first_guardrails_ai_row = (
+        guardrails_ai_rows[0]
+        if isinstance(guardrails_ai_rows, list) and guardrails_ai_rows
+        else {}
+    )
+    missing_guardrails_ai_fields = sorted(
+        field
+        for field in {
+            "run_started_at",
+            "openai_call_count",
+            "openai_prompt_tokens",
+            "openai_completion_tokens",
+            "openai_total_tokens",
+            "estimated_openai_cost_usd",
+            "cost_protection_limit_reached",
+            "spike_warning_triggered",
+            "local_ai_call_count",
+            "local_ai_total_tokens",
+        }
+        if isinstance(first_guardrails_ai_row, dict)
+        and first_guardrails_ai_row
+        and field not in first_guardrails_ai_row
+    )
+    first_guardrails_worker_row = (
+        guardrails_worker_rows[0]
+        if isinstance(guardrails_worker_rows, list) and guardrails_worker_rows
+        else {}
+    )
+    missing_guardrails_worker_fields = sorted(
+        field
+        for field in {
+            "run_started_at",
+            "success",
+            "shard_index",
+            "fetched_count",
+            "ai_reviewed_count",
+            "accepted_count",
+            "rejected_count",
+            "duration_ms",
+            "cost_protection_limit_reached",
+            "spike_warning_triggered",
+        }
+        if isinstance(first_guardrails_worker_row, dict)
+        and first_guardrails_worker_row
+        and field not in first_guardrails_worker_row
+    )
+    first_guardrails_quota_row = (
+        guardrails_quota_rows[0]
+        if isinstance(guardrails_quota_rows, list) and guardrails_quota_rows
+        else {}
+    )
+    missing_guardrails_quota_fields = sorted(
+        field
+        for field in {"event_type", "quantity", "created_at"}
+        if isinstance(first_guardrails_quota_row, dict)
+        and first_guardrails_quota_row
+        and field not in first_guardrails_quota_row
+    )
+    checks.append(
+        {
+            "operation": "load-admin-guardrails",
+            "status": guardrails_status,
+            "row_count": len(guardrails_rows) if isinstance(guardrails_rows, list) else None,
+            "ai_usage_run_count": len(guardrails_ai_rows) if isinstance(guardrails_ai_rows, list) else None,
+            "worker_run_count": len(guardrails_worker_rows) if isinstance(guardrails_worker_rows, list) else None,
+            "quota_event_count": len(guardrails_quota_rows) if isinstance(guardrails_quota_rows, list) else None,
+            "article_count": guardrails_snapshot.get("articleCount") if isinstance(guardrails_snapshot, dict) else None,
+            "summary_count": guardrails_snapshot.get("summaryCount") if isinstance(guardrails_snapshot, dict) else None,
+            "feed_count": guardrails_snapshot.get("feedCount") if isinstance(guardrails_snapshot, dict) else None,
+            "partial_errors": guardrails_snapshot.get("partialErrors") if isinstance(guardrails_snapshot, dict) else None,
+            "missing_fields": missing_guardrails_fields,
+            "missing_ai_fields": missing_guardrails_ai_fields,
+            "missing_worker_fields": missing_guardrails_worker_fields,
+            "missing_quota_fields": missing_guardrails_quota_fields,
+        }
+    )
+    if (
+        guardrails_status != 200
+        or not isinstance(guardrails_rows, list)
+        or not guardrails_rows
+        or not isinstance(guardrails_ai_rows, list)
+        or not isinstance(guardrails_worker_rows, list)
+        or not isinstance(guardrails_quota_rows, list)
+        or missing_guardrails_fields
+        or missing_guardrails_ai_fields
+        or missing_guardrails_worker_fields
+        or missing_guardrails_quota_fields
+    ):
+        failures.append("load-admin-guardrails")
+
     shadow_write_status, shadow_write_payload = request_json(
         base_url,
         token,

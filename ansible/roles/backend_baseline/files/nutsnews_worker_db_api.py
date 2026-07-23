@@ -60,6 +60,7 @@ APP_READ_OPERATIONS = {
     "load-admin-worker-shards",
     "load-admin-rss-feed-health",
     "load-admin-feed-management",
+    "load-admin-audit-log",
     "load-admin-quota-usage-events",
     "load-admin-article-engagement-source-category-summary",
     "load-admin-article-engagement-article-summary",
@@ -466,6 +467,19 @@ ADMIN_FEED_MANAGEMENT_FEED_QUALITY_COLUMNS = (
     "quality_grade",
     "quality_reason",
     "updated_at",
+)
+
+ADMIN_AUDIT_LOG_EVENT_COLUMNS = (
+    "id",
+    "created_at",
+    "actor_email",
+    "action",
+    "target_type",
+    "target_id",
+    "target_label",
+    "before_values",
+    "after_values",
+    "metadata",
 )
 
 ADMIN_TABLE_READS = {
@@ -1302,6 +1316,10 @@ def admin_feed_management_feed_quality_columns() -> str:
     return ", ".join(ADMIN_FEED_MANAGEMENT_FEED_QUALITY_COLUMNS)
 
 
+def admin_audit_log_event_columns() -> str:
+    return ", ".join(ADMIN_AUDIT_LOG_EVENT_COLUMNS)
+
+
 def category_clause(body: dict[str, Any], params: list[Any]) -> str:
     category = optional_string(body, "category", maximum=96)
     if category is None or category.lower() == "all":
@@ -2089,6 +2107,36 @@ def load_app_admin_feed_management(body: dict[str, Any], store: PostgresStore) -
     }
 
 
+def load_app_admin_audit_log(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
+    limit = bounded_int(
+        body,
+        "limit",
+        default=50,
+        minimum=1,
+        maximum=min(store.max_limit, 50),
+    )
+
+    audit_event_rows = store.fetch_all(
+        f"""
+        select {admin_audit_log_event_columns()}
+        from public.admin_audit_events
+        order by created_at desc nulls last, id desc
+        limit %s
+        """,
+        (limit,),
+    )
+
+    return {
+        "rows": [
+            {
+                "auditEventRows": audit_event_rows,
+            }
+        ],
+        "rowCount": 1,
+        "generatedAt": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
+
+
 def load_app_admin_production_readiness(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
     recent_article_limit = bounded_int(
         body,
@@ -2383,6 +2431,9 @@ def handle_app_operation(operation: str, body: dict[str, Any], store: PostgresSt
 
     if operation == "load-admin-feed-management":
         return load_app_admin_feed_management(body, store)
+
+    if operation == "load-admin-audit-log":
+        return load_app_admin_audit_log(body, store)
 
     if operation in ADMIN_TABLE_READS:
         return load_app_admin_rows(operation, body, store)

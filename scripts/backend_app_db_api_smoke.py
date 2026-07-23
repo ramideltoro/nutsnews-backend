@@ -429,6 +429,78 @@ def main() -> int:
     ):
         failures.append("load-admin-feed-management")
 
+    audit_log_status, audit_log_payload = request_json(
+        base_url,
+        token,
+        "load-admin-audit-log",
+        {
+            "providerMode": "backend_postgres_primary",
+            "limit": 20,
+        },
+    )
+    audit_log_rows = (
+        audit_log_payload.get("rows")
+        if isinstance(audit_log_payload, dict)
+        else None
+    )
+    audit_log_snapshot = (
+        audit_log_rows[0]
+        if isinstance(audit_log_rows, list) and audit_log_rows
+        else {}
+    )
+    audit_event_rows = (
+        audit_log_snapshot.get("auditEventRows")
+        if isinstance(audit_log_snapshot, dict)
+        else None
+    )
+    missing_audit_log_fields = sorted(
+        field
+        for field in {"auditEventRows"}
+        if not isinstance(audit_log_snapshot, dict) or field not in audit_log_snapshot
+    )
+    first_audit_event = (
+        audit_event_rows[0]
+        if isinstance(audit_event_rows, list) and audit_event_rows
+        else {}
+    )
+    missing_audit_event_fields = sorted(
+        field
+        for field in {
+            "id",
+            "created_at",
+            "actor_email",
+            "action",
+            "target_type",
+            "target_id",
+            "target_label",
+            "before_values",
+            "after_values",
+            "metadata",
+        }
+        if isinstance(first_audit_event, dict)
+        and first_audit_event
+        and field not in first_audit_event
+    )
+    checks.append(
+        {
+            "operation": "load-admin-audit-log",
+            "status": audit_log_status,
+            "row_count": len(audit_log_rows) if isinstance(audit_log_rows, list) else None,
+            "audit_event_count": len(audit_event_rows) if isinstance(audit_event_rows, list) else None,
+            "missing_fields": missing_audit_log_fields,
+            "missing_event_fields": missing_audit_event_fields,
+        }
+    )
+    if (
+        audit_log_status != 200
+        or not isinstance(audit_log_rows, list)
+        or not audit_log_rows
+        or not isinstance(audit_event_rows, list)
+        or missing_audit_log_fields
+        or missing_audit_event_fields
+    ):
+        failures.append("load-admin-audit-log")
+
     article_reviews_status, article_reviews_payload = request_json(
         base_url,
         token,

@@ -702,6 +702,37 @@ class FeedManagementStore(FakeStore):
         return super().fetch_all(query, params)
 
 
+class AuditLogStore(FakeStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.audit_rows = [
+            {
+                "id": "9f3f4286-e859-406c-bc39-4f3356ab3a00",
+                "created_at": "2026-07-22T10:00:00Z",
+                "actor_email": "admin@example.com",
+                "action": "rss_feed.trust_tier_update",
+                "target_type": "rss_feed",
+                "target_id": "501",
+                "target_label": "Reuters",
+                "before_values": {
+                    "source_trust_tier": "experimental",
+                    "publisher_allowlist_status": "candidate",
+                },
+                "after_values": {
+                    "source_trust_tier": "trusted",
+                    "publisher_allowlist_status": "allowlisted",
+                },
+                "metadata": {"reason": "Consistently high quality."},
+            }
+        ]
+
+    def fetch_all(self, query: str, params: tuple = ()) -> list[dict]:
+        self.fetches.append((query, params))
+        if "from public.admin_audit_events" in query:
+            return self.audit_rows[: params[0]]
+        return super().fetch_all(query, params)
+
+
 class WorkerDbApiTests(unittest.TestCase):
     def test_shadow_feed_read_uses_bounded_select(self) -> None:
         store = FakeStore()
@@ -1591,6 +1622,39 @@ class WorkerDbApiTests(unittest.TestCase):
         self.assertIn("updated_at", query)
         self.assertIn("order by quality_score asc nulls first", query)
         self.assertIn("total_accepted_count desc nulls last", query)
+        self.assertEqual((2,), params)
+
+    def test_app_admin_audit_log_returns_dashboard_snapshot(self) -> None:
+        store = AuditLogStore()
+
+        result = worker_db_api.handle_app_operation(
+            "load-admin-audit-log",
+            {
+                "providerMode": "backend_postgres_primary",
+                "limit": 2,
+            },
+            store,
+        )
+
+        self.assertEqual(1, result["rowCount"])
+        self.assertIn("generatedAt", result)
+        row = result["rows"][0]
+        self.assertEqual(store.audit_rows, row["auditEventRows"])
+        self.assertEqual([], store.executes)
+
+        query, params = store.fetches[0]
+        self.assertIn("from public.admin_audit_events", query)
+        self.assertIn("id", query)
+        self.assertIn("created_at", query)
+        self.assertIn("actor_email", query)
+        self.assertIn("action", query)
+        self.assertIn("target_type", query)
+        self.assertIn("target_id", query)
+        self.assertIn("target_label", query)
+        self.assertIn("before_values", query)
+        self.assertIn("after_values", query)
+        self.assertIn("metadata", query)
+        self.assertIn("order by created_at desc nulls last, id desc", query)
         self.assertEqual((2,), params)
 
     def test_app_shadow_write_is_rejected_before_database_call(self) -> None:

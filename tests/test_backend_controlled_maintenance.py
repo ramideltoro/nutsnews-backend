@@ -93,6 +93,16 @@ class BackendControlledMaintenanceTests(unittest.TestCase):
         blockers = maintenance.mutation_blockers("reboot", checks)
         self.assertIn({"check": "backup_freshness", "status": "not_configured"}, blockers)
 
+    def test_reboot_allows_missing_active_alert_state(self):
+        checks = maintenance.classify_prechecks(evidence(active_alerts=command("not_configured\n")))
+        blockers = maintenance.mutation_blockers("reboot", checks)
+        self.assertNotIn({"check": "active_alerts", "status": "not_configured"}, blockers)
+
+    def test_reboot_blocks_when_active_alerts_are_present(self):
+        checks = maintenance.classify_prechecks(evidence(active_alerts=command("root_disk.active\n")))
+        blockers = maintenance.mutation_blockers("reboot", checks)
+        self.assertIn({"check": "active_alerts", "status": "critical"}, blockers)
+
     def test_backup_status_json_can_satisfy_reboot_freshness_gate(self):
         checks = maintenance.classify_prechecks(
             evidence(backup_state=command('{"status":"healthy","freshness_status":"healthy","snapshot_id":"abc"}\n'))

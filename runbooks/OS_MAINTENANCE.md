@@ -63,8 +63,9 @@ Prechecks include:
 - unattended-upgrade availability.
 
 Current expected not-configured states are explicit. A reboot is blocked until
-backup freshness and active-alert state are healthy, so it should normally be
-run after backup and alerting issues are complete.
+backup freshness is healthy and no active alerts are present. If the active
+alert state directory is not yet configured, the workflow reports that gap but
+does not block an otherwise healthy controlled reboot.
 
 ## Apply Path
 

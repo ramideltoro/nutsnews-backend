@@ -1,0 +1,322 @@
+{
+  "adr_id": "worker-uplift-architecture",
+  "version": 1,
+  "tracking_issue": 69,
+  "status": "approved_for_implementation_not_cutover",
+  "decision_date_utc": "2026-07-23",
+  "implementation_repo": "ramideltoro/nutsnews-backend",
+  "tracking_repo": "ramideltoro/nutsnews-worker",
+  "decision": "Use a single-host RabbitMQ plus backend PostgreSQL staged pipeline with final domain writes through the backend Worker DB API during initial cutover.",
+  "non_decisions": [
+    "This ADR does not enable production writes.",
+    "This ADR does not deploy RabbitMQ, service containers, PostgreSQL schemas, or worker service code.",
+    "This ADR does not change legacy Cloudflare Worker ingestion, Worker bindings, Cloudflare secrets, DNS failover, or routes.",
+    "This ADR does not move Grafana Cloud resource management from nutsnews-infra."
+  ],
+  "official_docs_retrieved": [
+    "https://www.rabbitmq.com/docs/access-control",
+    "https://www.rabbitmq.com/docs/clustering",
+    "https://www.rabbitmq.com/docs/management",
+    "https://www.rabbitmq.com/docs/monitoring",
+    "https://www.rabbitmq.com/docs/http-api-reference"
+  ],
+  "depends_on": [
+    "docs/worker-uplift-legacy-parity-baseline.md",
+    "docs/worker-uplift-api-admin-compatibility-contract.json",
+    "docs/worker-uplift-runtime-identities.json",
+    "docs/worker-uplift-runtime-readiness.json",
+    "docs/backend-api-compatibility-contract.json",
+    "docs/backend-production-cutover-plan.json"
+  ],
+  "pipeline": {
+    "ordered_stages": [
+      "scheduler",
+      "fetcher",
+      "canonicalizer",
+      "enrichment",
+      "approval",
+      "translation",
+      "persistence",
+      "publication"
+    ],
+    "stage_repos": {
+      "scheduler": "ramideltoro/nutsnews-worker-feed-scheduler",
+      "fetcher": "ramideltoro/nutsnews-worker-feed-fetcher",
+      "canonicalizer": "ramideltoro/nutsnews-worker-article-canonicalizer",
+      "enrichment": "ramideltoro/nutsnews-worker-article-enrichment",
+      "approval": "ramideltoro/nutsnews-worker-article-approval",
+      "translation": "ramideltoro/nutsnews-worker-article-translation",
+      "persistence": "ramideltoro/nutsnews-worker-article-persistence",
+      "publication": "ramideltoro/nutsnews-worker-article-publication"
+    },
+    "reason_to_change": {
+      "scheduler": "feed cadence, sharding, lease, and queue publication policy",
+      "fetcher": "RSS/Atom fetch, parse, feed health, and fetch error normalization",
+      "canonicalizer": "URL normalization, duplicate suppression, and canonical candidate selection",
+      "enrichment": "article-page metadata and image hydration",
+      "approval": "local prefilter, Qwen/local AI review, provider metadata, and approval decisions",
+      "translation": "summary translation tasks, language coverage, and quality samples",
+      "persistence": "idempotent final domain write requests through the backend Worker DB API",
+      "publication": "translation-gated publish decisions and public-feed snapshot refresh"
+    }
+  },
+  "message_contract": {
+    "delivery": "at_least_once",
+    "acknowledgement": "manual_ack_after_stage_state_commit_and_publish_confirm",
+    "publisher_confirms": true,
+    "retry": "confirmed_retry_or_dlx_republish_with_bounded_attempts",
+    "max_attempts_default": 5,
+    "poison_message_policy": "after bounded attempts, park message in route DLQ, persist sanitized failure metadata, alert through backend telemetry, and require explicit replay",
+    "ordering": "no_global_ordering_assumption",
+    "message_payload": "bounded_id_only_message",
+    "message_required_fields": [
+      "message_id",
+      "pipeline_run_id",
+      "stage",
+      "schema_version",
+      "operation_version",
+      "entity_kind",
+      "entity_id",
+      "original_url_hash",
+      "attempt",
+      "created_at_utc"
+    ],
+    "message_forbidden_fields": [
+      "article_body",
+      "full_prompt",
+      "secret",
+      "credential",
+      "bearer_token",
+      "raw_provider_response"
+    ],
+    "version_checks": "Each consumer rejects unsupported schema_version/operation_version to DLQ with stale-version metadata instead of trying to coerce payloads."
+  },
+  "state_and_recovery_model": {
+    "authoritative_state": "backend PostgreSQL stage schemas with inbox, outbox, attempt, reconciliation, and watermark tables",
+    "transport_role": "RabbitMQ is durable transport and backpressure surface, not the only copy and not the disaster-recovery source.",
+    "broker_loss_recovery": [
+      "Stop service consumers/producers.",
+      "Rebuild RabbitMQ topology from backend-owned Ansible/config before replay.",
+      "Replay pending stage outbox rows that have no confirmed downstream commit.",
+      "Use per-stage reconciliation watermarks to avoid duplicate final domain writes.",
+      "Run shadow parity checks before production-write resume."
+    ],
+    "duplicate_replay_policy": "All stages are idempotent by message_id plus natural domain keys; replay is expected and must not create duplicate article/review/summary/domain rows.",
+    "watermark_policy": "Every stage records processed watermark and confirmed publish watermark. Cutover proof requires no lagging stage watermark, no unbounded DLQ, and no unverified outbox rows.",
+    "backup_boundary": "Backend PostgreSQL backups protect stage state. RabbitMQ queue contents are recoverable from stage outbox/reconciliation state."
+  },
+  "stage_boundaries": [
+    {
+      "stage": "scheduler",
+      "schema": "worker_uplift_scheduler",
+      "rabbitmq_produces": [
+        "scheduler_to_fetcher"
+      ],
+      "rabbitmq_consumes": [],
+      "backend_api_operations": [
+        "load-article-count-for-backpressure",
+        "get-runtime-feature-flag",
+        "save-worker-run"
+      ],
+      "final_domain_write_allowed": false
+    },
+    {
+      "stage": "fetcher",
+      "schema": "worker_uplift_fetcher",
+      "rabbitmq_produces": [
+        "fetcher_to_canonicalizer"
+      ],
+      "rabbitmq_consumes": [
+        "scheduler_to_fetcher"
+      ],
+      "backend_api_operations": [
+        "load-feeds-for-shard",
+        "save-feed-health-batch",
+        "save-worker-run"
+      ],
+      "final_domain_write_allowed": false
+    },
+    {
+      "stage": "canonicalizer",
+      "schema": "worker_uplift_canonicalizer",
+      "rabbitmq_produces": [
+        "canonicalizer_to_enrichment"
+      ],
+      "rabbitmq_consumes": [
+        "fetcher_to_canonicalizer"
+      ],
+      "backend_api_operations": [
+        "load-reviewed-url-rows",
+        "load-published-article-url-rows",
+        "save-worker-run"
+      ],
+      "final_domain_write_allowed": false
+    },
+    {
+      "stage": "enrichment",
+      "schema": "worker_uplift_enrichment",
+      "rabbitmq_produces": [
+        "enrichment_to_approval"
+      ],
+      "rabbitmq_consumes": [
+        "canonicalizer_to_enrichment"
+      ],
+      "backend_api_operations": [
+        "save-worker-run"
+      ],
+      "final_domain_write_allowed": false
+    },
+    {
+      "stage": "approval",
+      "schema": "worker_uplift_approval",
+      "rabbitmq_produces": [
+        "approval_to_translation"
+      ],
+      "rabbitmq_consumes": [
+        "enrichment_to_approval"
+      ],
+      "backend_api_operations": [
+        "save-article-reviews-batch",
+        "save-ai-usage-run",
+        "save-worker-run"
+      ],
+      "final_domain_write_allowed": false
+    },
+    {
+      "stage": "translation",
+      "schema": "worker_uplift_translation",
+      "rabbitmq_produces": [
+        "translation_to_persistence"
+      ],
+      "rabbitmq_consumes": [
+        "approval_to_translation"
+      ],
+      "backend_api_operations": [
+        "load-existing-summary-language-rows",
+        "load-summary-translation-recovery-articles",
+        "save-article-summaries-batch",
+        "save-ai-usage-run",
+        "save-worker-run"
+      ],
+      "final_domain_write_allowed": false
+    },
+    {
+      "stage": "persistence",
+      "schema": "worker_uplift_persistence",
+      "rabbitmq_produces": [
+        "persistence_to_publication"
+      ],
+      "rabbitmq_consumes": [
+        "translation_to_persistence"
+      ],
+      "backend_api_operations": [
+        "save-accepted-articles-batch",
+        "save-article-reviews-batch",
+        "save-article-summaries-batch",
+        "save-feed-health-batch",
+        "save-ai-usage-run",
+        "save-worker-run"
+      ],
+      "final_domain_write_allowed": "only_through_backend_worker_db_api"
+    },
+    {
+      "stage": "publication",
+      "schema": "worker_uplift_publication",
+      "rabbitmq_produces": [],
+      "rabbitmq_consumes": [
+        "persistence_to_publication"
+      ],
+      "backend_api_operations": [
+        "load-public-feed-snapshot-rows",
+        "publish-articles-batch",
+        "refresh-public-feed-snapshot",
+        "save-worker-run"
+      ],
+      "final_domain_write_allowed": "only_through_backend_worker_db_api"
+    }
+  ],
+  "ownership": [
+    {
+      "area": "backend.nutsnews.com host, RabbitMQ, service Compose/Ansible, PostgreSQL roles/schemas, backups, backend Alloy telemetry producer",
+      "owner_repo": "ramideltoro/nutsnews-backend"
+    },
+    {
+      "area": "Grafana Cloud folders, dashboards, alert rules, contact points, Synthetic Monitoring, quota guardrails, and management service accounts",
+      "owner_repo": "ramideltoro/nutsnews-infra"
+    },
+    {
+      "area": "worker stage source code and container image definitions",
+      "owner_repo": "stage-specific worker-uplift app repositories"
+    },
+    {
+      "area": "public web app and admin UI code",
+      "owner_repo": "ramideltoro/nutsnews"
+    },
+    {
+      "area": "shared explanatory diagrams and cross-repo operating guide",
+      "owner_repo": "ramideltoro/nutsnews-docs"
+    },
+    {
+      "area": "legacy Cloudflare Worker ingestion and DNS failover controller until explicit retirement",
+      "owner_repo": "ramideltoro/nutsnews-worker"
+    }
+  ],
+  "deployment_model": {
+    "initial_hosting": "single backend VPS",
+    "rabbitmq_initial_topology": "single RabbitMQ node",
+    "single_node_ha_statement": "A single RabbitMQ node is not high availability.",
+    "scaling_exit_criteria": [
+      "sustained queue backlog exceeds recovery SLO under measured host headroom",
+      "RabbitMQ disk or memory alarms recur under normal workload",
+      "consumer saturation persists after per-stage concurrency tuning",
+      "backend PostgreSQL stage-state write latency threatens pipeline SLO",
+      "recovery tests show single-node broker loss cannot meet proof requirements"
+    ],
+    "managed_or_multinode_trigger": "Move to managed RabbitMQ or a reviewed multi-node design when any scaling exit criterion is met for two consecutive observation windows or before workload growth makes broker recovery proof fail.",
+    "rejected_scope": [
+      "Kubernetes",
+      "service mesh",
+      "cross-region active-active RabbitMQ",
+      "public database ports",
+      "direct final domain writes from stage services"
+    ]
+  },
+  "shadow_cutover_and_rollback": {
+    "legacy_worker_status": "Legacy Cloudflare Worker ingestion remains active production owner until proof/readiness and cutover issues approve replacement.",
+    "dns_failover_status": "Cloudflare DNS failover controller remains independent and active after ingestion cutover.",
+    "shadow_mode": "Run pipeline with production-like messages and backend_postgres_shadow/domain writes disabled except safe validation artifacts.",
+    "production_write_gate": [
+      "NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED must remain false until cutover approval.",
+      "Stage services cannot bypass the backend Worker DB API for final domain writes.",
+      "Publication requires translation gate and snapshot refresh proof."
+    ],
+    "proof_requirements": [
+      "fixture parity against legacy cases from docs/worker-uplift-legacy-parity-baseline.md",
+      "shadow run metrics with no unbounded DLQ",
+      "watermark reconciliation for every stage",
+      "backend API compatibility smoke against /api/worker/db/*",
+      "backup and restore proof for stage PostgreSQL state",
+      "rollback rehearsal that keeps legacy Worker production owner"
+    ],
+    "rollback": [
+      "Before cutover, discard or pause uplift writes and keep legacy Worker as production owner.",
+      "During observation window, stop scheduler and producers first, drain consumers, compare watermarks, and leave DNS failover untouched.",
+      "After backend-only writes exceed a verified rollback sync point, rollback becomes forward recovery unless a reviewed sync-back procedure exists."
+    ]
+  },
+  "failure_behavior": {
+    "duplicate_message": "Consumer checks stage inbox/natural keys and returns success without duplicate downstream publish when already processed.",
+    "replay": "Replay starts from stage outbox/reconciliation state, not queue memory.",
+    "broker_loss": "Recover topology, then replay durable stage outbox rows.",
+    "poison_message": "Bounded attempts then DLQ with sanitized metadata and alert.",
+    "translation_policy": "Accepted rows remain translation_pending until all configured languages exist; publication is blocked by backend API translation gate.",
+    "stale_version": "Unsupported schema_version or operation_version goes to DLQ and blocks cutover until resolved.",
+    "backend_api_failure": "Stage records failed write attempt, does not ack until durable retry state is committed, and never reports success for partial final writes."
+  },
+  "validation": {
+    "local_validator": "python3 scripts/validate_worker_uplift_architecture_adr.py",
+    "runtime_identity_validator": "python3 scripts/validate_worker_uplift_runtime_identities.py",
+    "api_admin_contract_validator": "python3 scripts/validate_worker_uplift_api_admin_contract.py",
+    "cutover_guardrail_validator": "python3 scripts/validate_backend_production_cutover_plan.py"
+  }
+}

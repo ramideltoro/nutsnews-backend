@@ -172,6 +172,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_worker_uplift_api_admin_contract.py
 
+      - name: Validate worker uplift architecture ADR
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_architecture_adr.py
+
       - name: Validate backend database provider switch
         shell: bash
         run: python3 scripts/validate_backend_database_provider_switch.py

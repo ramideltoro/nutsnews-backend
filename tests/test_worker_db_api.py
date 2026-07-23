@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+from unittest.mock import patch
 import unittest
 from pathlib import Path
 
@@ -54,6 +55,52 @@ def edge_article(overrides: dict | None = None) -> dict:
     if overrides:
         row.update(overrides)
     return row
+
+
+def uplift_metadata(overrides: dict | None = None) -> dict:
+    body = {
+        "providerMode": "backend_postgres_shadow",
+        "idempotencyKey": "idem-uplift-1",
+        "messageId": "message-uplift-1",
+        "correlationId": "correlation-uplift-1",
+        "pipelineRunId": "pipeline-uplift-1",
+        "stageExecutionId": "stage-uplift-1",
+        "sourceMessageId": "source-message-uplift-1",
+        "actorService": "worker-uplift-persistence",
+        "schemaVersion": 1,
+        "operationVersion": 7,
+        "expectedArticleVersion": 6,
+    }
+    if overrides:
+        body.update(overrides)
+    return body
+
+
+def uplift_shadow_aggregate_body(overrides: dict | None = None) -> dict:
+    body = uplift_metadata(
+        {
+            "shadowAggregate": {
+                "articleIdentityHash": "article-hash-1",
+                "canonicalUrlHash": "canonical-hash-1",
+                "originalUrlHash": "original-hash-1",
+                "aggregateVersion": 7,
+                "sourceFeedUrl": "https://example.com/rss",
+                "titleRef": "payload://title/1",
+                "imageUrlRef": "payload://image/1",
+                "category": "Science",
+                "positivityScore": 8.5,
+                "approvalVersion": 3,
+                "translationLanguages": ["fr", "ja", "fr"],
+                "publicationStatus": "ready",
+                "payloadRef": "payload://aggregate/1",
+                "payloadDigest": "sha256:aggregate",
+                "diagnosticMetadata": {"safe": True},
+            }
+        }
+    )
+    if overrides:
+        body.update(overrides)
+    return body
 
 
 class EdgeSnapshotStore(FakeStore):
@@ -759,6 +806,28 @@ class RuntimeFeatureFlagsStore(FakeStore):
         return super().fetch_all(query, params)
 
 
+class ReceiptStore(FakeStore):
+    def __init__(self, receipt: dict) -> None:
+        super().__init__()
+        self.receipt = receipt
+
+    def fetch_one(self, query: str, params: tuple = ()) -> dict | None:
+        self.fetches.append((query, params))
+        if "from worker_uplift_final.api_command_receipts" in query:
+            return self.receipt
+        return None
+
+
+class StaleAggregateStore(FakeStore):
+    def fetch_one(self, query: str, params: tuple = ()) -> dict | None:
+        self.fetches.append((query, params))
+        if "from worker_uplift_final.api_command_receipts" in query:
+            return None
+        if "from worker_uplift_final.article_shadow_aggregates" in query:
+            return {"aggregate_version": 7}
+        return None
+
+
 class WorkerDbApiTests(unittest.TestCase):
     def test_shadow_feed_read_uses_bounded_select(self) -> None:
         store = FakeStore()
@@ -921,6 +990,178 @@ class WorkerDbApiTests(unittest.TestCase):
 
         self.assertEqual(403, error.exception.status)
         self.assertEqual([], store.executes)
+
+    def test_uplift_shadow_aggregate_records_receipt_without_public_write(self) -> None:
+        store = FakeStore()
+
+        result = worker_db_api.handle_operation(
+            "uplift-record-shadow-aggregate",
+            uplift_shadow_aggregate_body(),
+            store,
+            auth_scope="worker-uplift-persistence",
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual("shadow", result["mode"])
+        self.assertIs(result["productionSideEffect"], False)
+        self.assertEqual(2, len(store.executes))
+        aggregate_query, aggregate_params = store.executes[0]
+        receipt_query, receipt_params = store.executes[1]
+        self.assertIn("insert into worker_uplift_final.article_shadow_aggregates", aggregate_query)
+        self.assertIn("on conflict (article_identity_hash, aggregate_version)", aggregate_query)
+        self.assertNotIn("public.articles", aggregate_query)
+        self.assertEqual("article-hash-1", aggregate_params[0])
+        self.assertEqual(["fr", "ja"], aggregate_params[10])
+        self.assertEqual("ready", aggregate_params[11])
+        self.assertIn("insert into worker_uplift_final.api_command_receipts", receipt_query)
+        self.assertEqual("idem-uplift-1", receipt_params[0])
+        self.assertEqual("worker-uplift-persistence", receipt_params[5])
+        self.assertEqual("recorded_success", receipt_params[15])
+
+    def test_uplift_shadow_aggregate_rejects_stale_version(self) -> None:
+        store = StaleAggregateStore()
+
+        with self.assertRaises(worker_db_api.ApiError) as error:
+            worker_db_api.handle_operation(
+                "uplift-record-shadow-aggregate",
+                uplift_shadow_aggregate_body(),
+                store,
+                auth_scope="worker-uplift-persistence",
+            )
+
+        self.assertEqual(409, error.exception.status)
+        self.assertEqual([], store.executes)
+
+    def test_uplift_shadow_command_records_receipt_without_delegate_write(self) -> None:
+        store = FakeStore()
+
+        result = worker_db_api.handle_operation(
+            "uplift-save-worker-run",
+            uplift_metadata({"run": {"request_id": "run-1", "duration_ms": 10}}),
+            store,
+            auth_scope="worker-uplift-persistence",
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(1, len(store.executes))
+        query, _params = store.executes[0]
+        self.assertIn("worker_uplift_final.api_command_receipts", query)
+        self.assertNotIn("public.worker_runs", query)
+
+    def test_uplift_duplicate_request_returns_recorded_response(self) -> None:
+        body = uplift_metadata()
+        digest = worker_db_api.uplift_payload_digest("uplift-save-worker-run", body)
+        store = ReceiptStore(
+            {
+                "operation": "uplift-save-worker-run",
+                "payload_digest": digest,
+                "response_json": {"ok": True, "recorded": True},
+            }
+        )
+
+        result = worker_db_api.handle_operation(
+            "uplift-save-worker-run",
+            body,
+            store,
+            auth_scope="worker-uplift-persistence",
+        )
+
+        self.assertEqual({"ok": True, "recorded": True, "duplicate": True}, result)
+        self.assertEqual([], store.executes)
+
+    def test_uplift_idempotency_reuse_with_different_payload_conflicts(self) -> None:
+        store = ReceiptStore(
+            {
+                "operation": "uplift-save-worker-run",
+                "payload_digest": "different-digest",
+                "response_json": {"ok": True},
+            }
+        )
+
+        with self.assertRaises(worker_db_api.ApiError) as error:
+            worker_db_api.handle_operation(
+                "uplift-save-worker-run",
+                uplift_metadata(),
+                store,
+                auth_scope="worker-uplift-persistence",
+            )
+
+        self.assertEqual(409, error.exception.status)
+        self.assertEqual([], store.executes)
+
+    def test_uplift_scoped_token_denies_unrelated_operations(self) -> None:
+        store = FakeStore()
+
+        with self.assertRaises(worker_db_api.ApiError) as publication_error:
+            worker_db_api.handle_operation(
+                "uplift-save-accepted-articles-batch",
+                uplift_metadata({"actorService": "worker-uplift-publication"}),
+                store,
+                auth_scope="worker-uplift-publication",
+            )
+        with self.assertRaises(worker_db_api.ApiError) as legacy_error:
+            worker_db_api.handle_operation(
+                "uplift-save-worker-run",
+                uplift_metadata(),
+                store,
+                auth_scope=worker_db_api.LEGACY_WORKER_API_SCOPE,
+            )
+        with self.assertRaises(worker_db_api.ApiError) as scoped_legacy_error:
+            worker_db_api.handle_operation(
+                "save-worker-run",
+                {"providerMode": "backend_postgres_primary", "run": {"request_id": "x"}},
+                store,
+                auth_scope="worker-uplift-persistence",
+            )
+
+        self.assertEqual(403, publication_error.exception.status)
+        self.assertEqual(403, legacy_error.exception.status)
+        self.assertEqual(403, scoped_legacy_error.exception.status)
+        self.assertEqual([], store.executes)
+
+    def test_uplift_primary_command_requires_cutover_state(self) -> None:
+        store = FakeStore()
+        store.writes_enabled = True
+        store.worker_uplift_cutover_state = "shadow"
+        store.worker_uplift_production_writes_enabled = True
+
+        with self.assertRaises(worker_db_api.ApiError) as error:
+            worker_db_api.handle_operation(
+                "uplift-save-worker-run",
+                uplift_metadata({"providerMode": "backend_postgres_primary", "run": {"request_id": "run-1"}}),
+                store,
+                auth_scope="worker-uplift-persistence",
+            )
+
+        self.assertEqual(403, error.exception.status)
+        self.assertEqual([], store.executes)
+
+    def test_scoped_tokens_are_distinct_and_resolve_to_scope(self) -> None:
+        with patch.dict(
+            worker_db_api.os.environ,
+            {
+                "NUTSNEWS_BACKEND_API_TOKEN": "legacy-token",
+                "NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN": "persistence-token",
+                "NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN": "publication-token",
+            },
+            clear=False,
+        ):
+            self.assertEqual(
+                "worker-uplift-persistence",
+                worker_db_api.authenticate_database_api_token("Bearer persistence-token"),
+            )
+
+        with patch.dict(
+            worker_db_api.os.environ,
+            {
+                "NUTSNEWS_BACKEND_API_TOKEN": "same-token",
+                "NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN": "same-token",
+            },
+            clear=True,
+        ):
+            with self.assertRaises(worker_db_api.ApiError) as error:
+                worker_db_api.authenticate_database_api_token("Bearer same-token")
+            self.assertEqual(503, error.exception.status)
 
     def test_run_log_insert_uses_allowlisted_columns(self) -> None:
         store = FakeStore()

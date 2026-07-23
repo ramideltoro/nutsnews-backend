@@ -330,6 +330,34 @@ BEGIN
   $ddl$, final_schema);
 
   EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.api_command_receipts (
+      id bigserial PRIMARY KEY,
+      idempotency_key text NOT NULL,
+      operation text NOT NULL,
+      payload_digest text NOT NULL,
+      provider_mode text NOT NULL CHECK (provider_mode IN ('backend_postgres_shadow', 'backend_postgres_primary')),
+      actor_service text NOT NULL,
+      auth_scope text NOT NULL CHECK (auth_scope IN ('worker-uplift-persistence', 'worker-uplift-publication')),
+      schema_version integer NOT NULL CHECK (schema_version > 0),
+      operation_version integer NOT NULL CHECK (operation_version > 0),
+      pipeline_run_id text NOT NULL,
+      stage_execution_id text NOT NULL,
+      source_message_id text NOT NULL,
+      message_id text NOT NULL,
+      correlation_id text NOT NULL,
+      expected_article_version integer NOT NULL CHECK (expected_article_version >= 0),
+      response_json jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(response_json) = 'object'),
+      status text NOT NULL CHECK (status IN ('recorded_success', 'applied_success', 'rejected')),
+      shadow_only boolean NOT NULL DEFAULT true,
+      diagnostic_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(diagnostic_metadata) = 'object'),
+      redact_after timestamptz NOT NULL DEFAULT (now() + interval '90 days'),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (idempotency_key)
+    )
+  $ddl$, final_schema);
+
+  EXECUTE format($ddl$
     CREATE TABLE IF NOT EXISTS %I.publication_readiness (
       id bigserial PRIMARY KEY,
       article_identity_hash text NOT NULL,
@@ -364,6 +392,10 @@ BEGIN
   EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', final_schema, '{{ backend_worker_uplift_postgres_persistence_user }}');
   EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.article_shadow_aggregates TO %I', final_schema, '{{ backend_worker_uplift_postgres_persistence_user }}');
   EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', final_schema, '{{ backend_worker_uplift_postgres_persistence_user }}');
+  EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', final_schema, worker_api_role);
+  EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.article_shadow_aggregates TO %I', final_schema, worker_api_role);
+  EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.api_command_receipts TO %I', final_schema, worker_api_role);
+  EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', final_schema, worker_api_role);
   EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I, %I', final_schema, validation_role, readonly_role);
   EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO %I, %I', final_schema, validation_role, readonly_role);
 
@@ -378,6 +410,10 @@ BEGIN
   EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', final_schema, '{{ backend_worker_uplift_postgres_persistence_user }}');
   EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.article_shadow_aggregates TO %I', final_schema, '{{ backend_worker_uplift_postgres_persistence_user }}');
   EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', final_schema, '{{ backend_worker_uplift_postgres_persistence_user }}');
+  EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', final_schema, worker_api_role);
+  EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.article_shadow_aggregates TO %I', final_schema, worker_api_role);
+  EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.api_command_receipts TO %I', final_schema, worker_api_role);
+  EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', final_schema, worker_api_role);
 
   EXECUTE format($ddl$
     CREATE SCHEMA IF NOT EXISTS %I

@@ -50,7 +50,7 @@ STAGE_SPECIFIC_TABLES = {
     "worker_uplift_translation": ["translation_records"],
     "worker_uplift_persistence": ["write_requests"],
     "worker_uplift_publication": ["publication_readiness", "publication_decisions"],
-    FINAL_SCHEMA: ["article_shadow_aggregates"],
+    FINAL_SCHEMA: ["article_shadow_aggregates", "api_command_receipts"],
 }
 
 
@@ -101,6 +101,8 @@ def check_static_files() -> list[dict]:
         "sanitized_error_message",
         "REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA public",
         "GRANT SELECT, INSERT, UPDATE ON TABLE %I.article_shadow_aggregates",
+        "api_command_receipts",
+        "UNIQUE (idempotency_key)",
     ):
         if token not in template:
             failures.append(f"missing_template_guardrail:{token}")

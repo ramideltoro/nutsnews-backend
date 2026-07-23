@@ -26,6 +26,8 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("backend_worker_api_enabled: false", defaults)
         self.assertIn("backend_worker_api_bind: 127.0.0.1", defaults)
         self.assertIn("backend_worker_api_writes_enabled: false", defaults)
+        self.assertIn("backend_worker_api_uplift_cutover_state: shadow", defaults)
+        self.assertIn("backend_worker_api_uplift_production_writes_enabled: false", defaults)
         self.assertIn("backend_postgres_worker_api_user: nutsnews_worker_api", defaults)
         self.assertIn('backend_worker_api_db_user: "{{ backend_postgres_worker_api_user }}"', defaults)
         self.assertIn("  - acl", defaults)
@@ -121,6 +123,8 @@ class BackendPostgresFailoverTests(unittest.TestCase):
             "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD",
             "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD",
             "NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD",
+            "NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN",
+            "NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN",
             "NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD",
             "NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_PASSWORD",
             "NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_PASSWORD",
@@ -134,6 +138,9 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("NUTSNEWS_BACKEND_WORKER_API_ENABLED", build_step_env)
         self.assertIn("NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED", build_step_env)
         self.assertIn("NUTSNEWS_BACKEND_API_TOKEN", build_step_env)
+        self.assertIn("NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED", build_step_env)
+        self.assertIn("NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE", build_step_env)
+        self.assertIn("NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED", build_step_env)
         self.assertIn("NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD", build_step_env)
         self.assertIn("${{ vars.NUTSNEWS_BACKEND_WORKER_API_ENABLED || 'false' }}", build_step_env)
         self.assertIn("${{ vars.NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED || 'false' }}", build_step_env)
@@ -151,6 +158,10 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn('extra_vars[f"backend_worker_uplift_postgres_{stage_name}_password"]', build_step)
         self.assertIn('"backend_worker_api_enabled"] = True', build_step)
         self.assertIn('"backend_worker_api_token"] = token', build_step)
+        self.assertIn('"backend_worker_api_uplift_persistence_token"] = persistence_token', build_step)
+        self.assertIn('"backend_worker_api_uplift_publication_token"] = publication_token', build_step)
+        self.assertIn('"backend_worker_api_uplift_cutover_state"] = cutover_state', build_step)
+        self.assertIn('"backend_worker_api_uplift_production_writes_enabled"] = uplift_production_writes_enabled', build_step)
         self.assertIn('"backend_worker_api_writes_enabled"] = writes_enabled', build_step)
         self.assertIn('"backend_worker_api_db_user"] = "nutsnews_worker_api"', build_step)
         self.assertNotIn("postgres://", workflow)

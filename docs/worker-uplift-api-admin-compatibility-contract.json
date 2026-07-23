@@ -75,7 +75,16 @@
         "save-article-reviews-batch",
         "save-article-summaries-batch",
         "save-feed-health-batch",
-        "save-worker-run"
+        "save-worker-run",
+        "uplift-publish-articles-batch",
+        "uplift-record-shadow-aggregate",
+        "uplift-refresh-public-feed-snapshot",
+        "uplift-save-accepted-articles-batch",
+        "uplift-save-ai-usage-run",
+        "uplift-save-article-reviews-batch",
+        "uplift-save-article-summaries-batch",
+        "uplift-save-feed-health-batch",
+        "uplift-save-worker-run"
       ]
     },
     "app_admin_public_read": {
@@ -269,6 +278,45 @@
         "operation-specific payload validation"
       ]
     }
+  },
+  "worker_uplift_scoped_commands": {
+    "tracking_issue": 145,
+    "credential_policy": {
+      "legacy_token": "NUTSNEWS_BACKEND_API_TOKEN remains for legacy Worker/app compatibility.",
+      "persistence_token": "NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN can call only persistence-scoped uplift commands.",
+      "publication_token": "NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN can call only publication-scoped uplift commands.",
+      "distinct_token_required": true
+    },
+    "required_metadata_fields": [
+      "idempotencyKey",
+      "messageId",
+      "correlationId",
+      "pipelineRunId",
+      "stageExecutionId",
+      "sourceMessageId",
+      "actorService",
+      "schemaVersion",
+      "operationVersion",
+      "expectedArticleVersion"
+    ],
+    "shadow_receipt_table": "worker_uplift_final.api_command_receipts",
+    "persistence_scope": [
+      "uplift-record-shadow-aggregate",
+      "uplift-save-accepted-articles-batch",
+      "uplift-save-article-summaries-batch",
+      "uplift-save-article-reviews-batch",
+      "uplift-save-feed-health-batch",
+      "uplift-save-ai-usage-run",
+      "uplift-save-worker-run"
+    ],
+    "publication_scope": [
+      "uplift-publish-articles-batch",
+      "uplift-refresh-public-feed-snapshot",
+      "uplift-save-worker-run"
+    ],
+    "shadow_mode_behavior": "Scoped uplift commands record idempotency receipts and may upsert worker_uplift_final.article_shadow_aggregates, but do not alter public article visibility or refresh the live public snapshot.",
+    "production_mode_behavior": "Scoped uplift production commands require backend_postgres_primary, NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE=cutover-approved, NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED=true, and the existing Worker DB API write guard.",
+    "idempotency_behavior": "Duplicate requests with the same idempotencyKey and payload digest return the recorded response; reuse with a different payload returns 409."
   },
   "translation_policy": {
     "required_languages": [

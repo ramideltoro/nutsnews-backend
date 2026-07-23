@@ -66,12 +66,16 @@
       NUTSNEWS_WORKER_DB_API_BIND={{ backend_worker_api_bind }}
       NUTSNEWS_WORKER_DB_API_PORT={{ backend_worker_api_port }}
       NUTSNEWS_BACKEND_API_TOKEN={{ backend_worker_api_token }}
+      NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN={{ backend_worker_api_uplift_persistence_token }}
+      NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN={{ backend_worker_api_uplift_publication_token }}
       NUTSNEWS_WORKER_DB_API_DB_HOST={{ backend_worker_api_db_host }}
       NUTSNEWS_WORKER_DB_API_DB_PORT={{ backend_worker_api_db_port }}
       NUTSNEWS_WORKER_DB_API_DB_NAME={{ backend_worker_api_db_name }}
       NUTSNEWS_WORKER_DB_API_DB_USER={{ backend_worker_api_db_user }}
       NUTSNEWS_WORKER_DB_API_DB_PASSWORD={{ backend_worker_api_db_password }}
       NUTSNEWS_WORKER_DB_API_WRITES_ENABLED={{ backend_worker_api_writes_enabled | bool | lower }}
+      NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE={{ backend_worker_api_uplift_cutover_state }}
+      NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED={{ backend_worker_api_uplift_production_writes_enabled | bool | lower }}
       NUTSNEWS_WORKER_DB_API_MAX_LIMIT={{ backend_worker_api_max_limit }}
   no_log: true
   notify: Restart worker database API

@@ -21,6 +21,11 @@ from typing import Any
 
 CONFIRM_TARGET = "backend.nutsnews.com"
 VALID_STATUSES = {"healthy", "warning", "critical", "not_configured", "unknown"}
+RABBITMQ_PROBE_PATH = "/usr/local/sbin/nutsnews-rabbitmq-probe"
+RABBITMQ_ENV_PATH = "/etc/nutsnews-rabbitmq/rabbitmq.env"
+RABBITMQ_HOST_RESTART_STATE_PATH = "/var/lib/nutsnews/rabbitmq/host-restart-probe.json"
+RABBITMQ_HOST_RESTART_QUEUE = "worker.uplift.probe.host-restart"
+RABBITMQ_PROBE_TIMEOUT_SECONDS = 180
 
 TOKEN_RE = re.compile(
     r"(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+|"
@@ -47,6 +52,13 @@ REMOTE_COMMANDS: dict[str, str] = {
     "ufw_state": "systemctl is-active ufw 2>/dev/null || true",
     "fail2ban_state": "systemctl is-active fail2ban 2>/dev/null || true",
     "docker_state": "systemctl is-active docker 2>/dev/null || true",
+    "rabbitmq_state": "systemctl is-active nutsnews-rabbitmq 2>/dev/null || true",
+    "rabbitmq_health": (
+        "if systemctl is-active nutsnews-rabbitmq >/dev/null 2>&1 "
+        f"&& test -x {RABBITMQ_PROBE_PATH}; then "
+        f"sudo -n {RABBITMQ_PROBE_PATH} health --env {RABBITMQ_ENV_PATH} 2>/dev/null || echo critical; "
+        "else echo not_configured; fi"
+    ),
     "caddy_state": "systemctl is-active caddy 2>/dev/null || true",
     "backend_units": "systemctl list-units --type=service --all --no-legend 'nutsnews*' 2>/dev/null || true",
     "backend_endpoint": (
@@ -215,6 +227,27 @@ def classify_backup_state(text: str) -> tuple[str, str]:
     return "unknown", "unknown"
 
 
+def classify_rabbitmq_health(text: str) -> tuple[str, str]:
+    stripped = text.strip()
+    if stripped == "not_configured":
+        return "not_configured", "rabbitmq=not_configured"
+    if stripped == "critical":
+        return "critical", "rabbitmq=critical"
+    if stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError:
+            return "unknown", "rabbitmq health json invalid"
+        status = str(data.get("status") or "unknown")
+        if status not in VALID_STATUSES:
+            status = "unknown"
+        version = data.get("rabbitmq_version") or "unknown"
+        return status, f"rabbitmq={status} version={version}"
+    if stripped:
+        return "unknown", redact(stripped.splitlines()[-1])
+    return "unknown", "rabbitmq=unknown"
+
+
 def classify_prechecks(evidence: dict[str, Any]) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
 
@@ -268,9 +301,13 @@ def classify_prechecks(evidence: dict[str, Any]) -> list[dict[str, Any]]:
             service_check("service_ufw", command_stdout(evidence, "ufw_state"), required=True),
             service_check("service_fail2ban", command_stdout(evidence, "fail2ban_state"), required=True),
             service_check("service_docker", command_stdout(evidence, "docker_state"), required=False),
+            service_check("service_rabbitmq", command_stdout(evidence, "rabbitmq_state"), required=False),
             service_check("service_caddy", command_stdout(evidence, "caddy_state"), required=True),
         ]
     )
+
+    rabbitmq_status, rabbitmq_summary = classify_rabbitmq_health(command_stdout(evidence, "rabbitmq_health"))
+    checks.append({"name": "rabbitmq_health", "status": rabbitmq_status, "summary": rabbitmq_summary})
 
     endpoint = command_stdout(evidence, "backend_endpoint").strip()
     checks.append(
@@ -421,6 +458,16 @@ def write_summary(path: Path, report: dict[str, Any]) -> None:
             lines.append(f"| `{check['name']}` | `{check['status']}` | {check['summary']} |")
         lines.append(f"- Boot ID changed: `{report['postcheck'].get('boot_id_changed')}`")
         lines.append(f"- Kernel changed: `{report['postcheck'].get('kernel_changed')}`")
+    if report.get("rabbitmq_host_reboot_probe"):
+        probe = report["rabbitmq_host_reboot_probe"]
+        lines.extend(["", "## RabbitMQ Host-Reboot Probe", ""])
+        lines.append(f"- Required: `{probe.get('required')}`")
+        if probe.get("reason"):
+            lines.append(f"- Reason: `{probe.get('reason')}`")
+        if probe.get("publish"):
+            lines.append(f"- Publish: `{probe['publish'].get('status')}`")
+        if probe.get("verify"):
+            lines.append(f"- Verify: `{probe['verify'].get('status')}`")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -434,6 +481,46 @@ def execute_fixed_action(
 ) -> dict[str, Any]:
     command = MAINTENANCE_COMMANDS[action]
     return run_ssh_command(host, user, key, known_hosts, command, timeout)
+
+
+def rabbitmq_probe_command(action: str) -> str:
+    if action not in {"publish", "verify"}:
+        raise ValueError(f"unsupported RabbitMQ probe action: {action}")
+    args = (
+        f"{RABBITMQ_PROBE_PATH} {action} "
+        f"--env {RABBITMQ_ENV_PATH} "
+        f"--queue {RABBITMQ_HOST_RESTART_QUEUE} "
+        f"--state {RABBITMQ_HOST_RESTART_STATE_PATH} "
+        f"--timeout-seconds {RABBITMQ_PROBE_TIMEOUT_SECONDS}"
+    )
+    if action == "verify":
+        args = f"{args} --delete-queue"
+    return (
+        "if systemctl is-active nutsnews-rabbitmq >/dev/null 2>&1 "
+        f"&& test -x {RABBITMQ_PROBE_PATH}; then "
+        f"sudo -n {args}; "
+        "else echo not_configured; fi"
+    )
+
+
+def run_rabbitmq_probe_action(
+    action: str,
+    host: str,
+    user: str,
+    key: Path,
+    known_hosts: Path,
+    timeout: int,
+) -> dict[str, Any]:
+    probe_timeout = max(timeout, RABBITMQ_PROBE_TIMEOUT_SECONDS + 20)
+    result = run_ssh_command(host, user, key, known_hosts, rabbitmq_probe_command(action), probe_timeout)
+    status = "pass" if result["returncode"] == 0 and result["stdout"].strip() != "not_configured" else "fail"
+    return {
+        "action": action,
+        "returncode": result["returncode"],
+        "stdout": result["stdout"][-4000:],
+        "stderr": result["stderr"][-4000:],
+        "status": status,
+    }
 
 
 def wait_for_ssh(host: str, user: str, key: Path, known_hosts: Path, timeout: int, wait_seconds: int) -> bool:
@@ -478,6 +565,7 @@ def main(argv: list[str] | None = None) -> int:
         "status": "unknown",
         "precheck": {},
         "postcheck": None,
+        "rabbitmq_host_reboot_probe": None,
         "action_result": None,
         "secret_redaction": "fixed commands only; stdout/stderr redacted before summary reporting",
     }
@@ -499,6 +587,32 @@ def main(argv: list[str] | None = None) -> int:
             report["action_result"] = {"status": "not_run", "detail": "precheck blockers present"}
             exit_code = 1
         else:
+            rabbitmq_probe_required = False
+            if args.action == "reboot":
+                prechecks_by_name = {check["name"]: check for check in precheck["checks"]}
+                rabbitmq_probe_required = prechecks_by_name.get("rabbitmq_health", {}).get("status") == "healthy"
+                if rabbitmq_probe_required:
+                    publish_probe = run_rabbitmq_probe_action(
+                        "publish",
+                        args.ssh_host,
+                        args.ssh_user,
+                        args.ssh_key,
+                        args.known_hosts,
+                        args.timeout,
+                    )
+                    report["rabbitmq_host_reboot_probe"] = {"required": True, "publish": publish_probe, "verify": None}
+                    if publish_probe["status"] != "pass":
+                        report["status"] = "fail"
+                        report["action_result"] = {"status": "not_run", "detail": "RabbitMQ host-restart probe publish failed"}
+                        report["finished_at_utc"] = utc_now()
+                        args.output.parent.mkdir(parents=True, exist_ok=True)
+                        args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+                        if args.summary:
+                            write_summary(args.summary, report)
+                        print(json.dumps({"status": report["status"], "precheck_summary": precheck["summary"]}, indent=2))
+                        return 1
+                else:
+                    report["rabbitmq_host_reboot_probe"] = {"required": False, "reason": "rabbitmq_health_not_healthy_or_not_configured"}
             result = execute_fixed_action(args.action, args.ssh_host, args.ssh_user, args.ssh_key, args.known_hosts, args.timeout)
             report["action_result"] = {
                 "status": "run",
@@ -519,12 +633,25 @@ def main(argv: list[str] | None = None) -> int:
                     report["action_result"]["status"] = "ssh_reconnect_timeout"
                     exit_code = 1
                 else:
+                    verify_probe = None
+                    if rabbitmq_probe_required:
+                        verify_probe = run_rabbitmq_probe_action(
+                            "verify",
+                            args.ssh_host,
+                            args.ssh_user,
+                            args.ssh_key,
+                            args.known_hosts,
+                            args.timeout,
+                        )
+                        if isinstance(report["rabbitmq_host_reboot_probe"], dict):
+                            report["rabbitmq_host_reboot_probe"]["verify"] = verify_probe
                     post_evidence = collect_live(args.ssh_host, args.ssh_user, args.ssh_key, args.known_hosts, args.timeout)
                     postcheck = report_state(args.action, target, post_evidence)
                     postcheck["boot_id_changed"] = postcheck["boot_id"] != precheck["boot_id"]
                     postcheck["kernel_changed"] = postcheck["kernel"] != precheck["kernel"]
                     report["postcheck"] = postcheck
-                    report["status"] = "pass" if postcheck["boot_id_changed"] else "fail"
+                    rabbitmq_probe_passed = not rabbitmq_probe_required or (verify_probe is not None and verify_probe["status"] == "pass")
+                    report["status"] = "pass" if postcheck["boot_id_changed"] and rabbitmq_probe_passed else "fail"
                     exit_code = 0 if report["status"] == "pass" else 1
             else:
                 post_evidence = collect_live(args.ssh_host, args.ssh_user, args.ssh_key, args.known_hosts, args.timeout)

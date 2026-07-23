@@ -23,6 +23,7 @@ PLAYBOOK = ROOT / "ansible" / "playbooks" / "bootstrap.yml"
 PROTECTED_WORKFLOW = ROOT / ".github" / "workflows" / "protected-backend-ansible-apply.yml"
 BACKEND_CHECKS = ROOT / ".github" / "workflows" / "backend-checks.yml"
 SAFETY = ROOT / "scripts" / "backend_deployment_safety.py"
+CONTROLLED_MAINTENANCE = ROOT / "scripts" / "backend_controlled_maintenance.py"
 RUNBOOK = ROOT / "runbooks" / "WORKER_UPLIFT_RABBITMQ_PROVISIONING.md"
 
 
@@ -46,6 +47,7 @@ def main() -> int:
     protected = read(PROTECTED_WORKFLOW)
     checks = read(BACKEND_CHECKS)
     safety = read(SAFETY)
+    controlled_maintenance = read(CONTROLLED_MAINTENANCE)
     runbook = read(RUNBOOK)
     errors: list[str] = []
 
@@ -156,6 +158,15 @@ def main() -> int:
 
     if "rabbitmq_health" not in safety or "rabbitmq_post_apply_blockers" not in safety:
         errors.append("deployment safety must classify RabbitMQ post-apply health")
+    for required in (
+        "RABBITMQ_HOST_RESTART_QUEUE",
+        "rabbitmq_probe_command",
+        "run_rabbitmq_probe_action",
+        "rabbitmq_host_reboot_probe",
+        "RabbitMQ host-restart probe publish failed",
+    ):
+        if required not in controlled_maintenance:
+            errors.append(f"controlled maintenance reboot path missing RabbitMQ host-restart probe support: {required}")
 
     services = {service.get("id"): service for service in backup_matrix.get("services", [])}
     rabbitmq_backup = services.get("rabbitmq_broker_state")
@@ -174,6 +185,8 @@ def main() -> int:
         errors.append("Backend Checks must run RabbitMQ provisioning validator")
     if "host restart" not in runbook.lower() or "durable probe" not in runbook.lower():
         errors.append("RabbitMQ provisioning runbook must document durable probe and host restart verification")
+    if "Backend Controlled Maintenance" not in runbook or "backend-controlled-maintenance-report" not in runbook:
+        errors.append("RabbitMQ provisioning runbook must route host restart verification through controlled maintenance")
     if "legacy Cloudflare Worker" not in runbook:
         errors.append("RabbitMQ provisioning runbook must keep legacy Worker guardrail visible")
 
@@ -181,6 +194,8 @@ def main() -> int:
         errors.append("RabbitMQ probe must read credentials from env file")
     if "argparse" not in probe or "Authorization" not in probe:
         errors.append("RabbitMQ probe must use local management API without password args")
+    if "purge_probe_queue" not in probe:
+        errors.append("RabbitMQ probe publish must purge its own stale probe queue before publishing")
 
     if errors:
         for error in errors:

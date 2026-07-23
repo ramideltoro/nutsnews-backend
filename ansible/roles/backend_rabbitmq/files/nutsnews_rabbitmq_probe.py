@@ -124,6 +124,16 @@ def declare_probe_queue(args: argparse.Namespace, username: str, password: str, 
     )
 
 
+def purge_probe_queue(args: argparse.Namespace, username: str, password: str, vhost: str) -> None:
+    request_json(
+        base_url=args.management_url,
+        username=username,
+        password=password,
+        method="DELETE",
+        path=api_path("api", "queues", vhost, args.queue, "contents"),
+    )
+
+
 def action_health(args: argparse.Namespace) -> int:
     username, password, _ = rabbitmq_credentials(args.env)
     overview = wait_for_management(args, username, password)
@@ -145,6 +155,7 @@ def action_publish(args: argparse.Namespace) -> int:
     username, password, vhost = rabbitmq_credentials(args.env)
     wait_for_management(args, username, password)
     declare_probe_queue(args, username, password, vhost)
+    purge_probe_queue(args, username, password, vhost)
     message_id = str(uuid.uuid4())
     payload = {
         "probe": "nutsnews-rabbitmq-durable-restart",

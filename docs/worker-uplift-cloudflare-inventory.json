@@ -1,0 +1,405 @@
+{
+  "version": 1,
+  "repository": "ramideltoro/nutsnews-backend",
+  "tracking_issue": 65,
+  "tracking_repo": "ramideltoro/nutsnews-worker",
+  "captured_at_utc": "2026-07-23T02:22:18Z",
+  "capture_mode": "read_only",
+  "secret_value_policy": "No secret values, token fragments, secret IDs, store IDs, account IDs, namespace IDs, or generated credentials are recorded in this artifact.",
+  "cloudflare_docs_retrieved": [
+    "https://developers.cloudflare.com/secrets-store/integrations/workers/",
+    "https://developers.cloudflare.com/workers/configuration/secrets/",
+    "https://developers.cloudflare.com/workers/configuration/environment-variables/",
+    "https://developers.cloudflare.com/workers/wrangler/commands/secrets-store/",
+    "https://developers.cloudflare.com/workers/runtime-apis/bindings/"
+  ],
+  "live_evidence": {
+    "wrangler_versions_observed": [
+      "4.105.0",
+      "4.113.0"
+    ],
+    "cloudflare_account": {
+      "account_name": "Rami.deltoro@gmail.com's Account",
+      "account_id_recording": "redacted"
+    },
+    "secrets_store": {
+      "name": "nutsnews",
+      "store_id_recording": "redacted",
+      "scope": "workers",
+      "secret_names_active": [
+        "SUPABASE_URL",
+        "OPENAI_API_KEY",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "SENTRY_DSN",
+        "BETTER_STACK_SOURCE_TOKEN",
+        "BETTER_STACK_INGESTING_HOST",
+        "LOCAL_AI_API_KEY",
+        "UPSTASH_REDIS_REST_URL",
+        "UPSTASH_REDIS_REST_TOKEN",
+        "NUTSNEWS_BACKEND_API_URL",
+        "NUTSNEWS_BACKEND_API_TOKEN",
+        "NUTSNEWS_SHADOW_SMOKE_TOKEN"
+      ]
+    },
+    "controller": {
+      "worker": "nutsnews-controller",
+      "version_id": "b9cab8b3-3f5c-4cb1-b217-139571101a36",
+      "version_number": 47,
+      "created_on": "2026-07-22T18:12:02.228232Z",
+      "triggered_by": "secret",
+      "classic_secret_bindings": [
+        "NUTSNEWS_FAILOVER_STATUS_HMAC_SECRET"
+      ],
+      "durable_object_bindings": [
+        "FAILOVER_CONTROLLER_STATE"
+      ],
+      "plain_text_bindings": [
+        "MAX_AI_REVIEWS_PER_SHARD",
+        "NUTSNEWS_DNS_FAILOVER_APEX_HOSTNAME",
+        "NUTSNEWS_DNS_FAILOVER_DNS_API_TIMEOUT_MS",
+        "NUTSNEWS_DNS_FAILOVER_VERCEL_TARGETS",
+        "NUTSNEWS_DNS_FAILOVER_VPS_TARGETS",
+        "NUTSNEWS_DNS_FAILOVER_WWW_HOSTNAME",
+        "NUTSNEWS_FAILOVER_ALERT_RATE_LIMIT_SECONDS",
+        "NUTSNEWS_FAILOVER_ANALYTICS_ENVIRONMENT",
+        "NUTSNEWS_FAILOVER_APEX_READINESS_URL",
+        "NUTSNEWS_FAILOVER_CONSECUTIVE_VPS_FAILURES",
+        "NUTSNEWS_FAILOVER_CONTROLLER_STALE_AFTER_SECONDS",
+        "NUTSNEWS_FAILOVER_CONTROLLER_VERSION",
+        "NUTSNEWS_FAILOVER_HEALTH_CHECK_INTERVAL_SECONDS",
+        "NUTSNEWS_FAILOVER_LIVE_ORIGIN_PROPAGATION_WINDOW_SECONDS",
+        "NUTSNEWS_FAILOVER_LIVE_ORIGIN_READINESS_TIMEOUT_MS",
+        "NUTSNEWS_FAILOVER_STATUS_SIGNATURE_TTL_SECONDS",
+        "NUTSNEWS_FAILOVER_STATUS_URL",
+        "NUTSNEWS_FAILOVER_WWW_READINESS_URL",
+        "SHARD_COUNT",
+        "SHARD_RUN_INTERVAL_MINUTES",
+        "SHARD_WORKER_PREFIX",
+        "SHARD_WORKER_SUBDOMAIN",
+        "TRANSLATION_BACKLOG_ENABLED"
+      ]
+    },
+    "shards": {
+      "workers": "nutsnews-worker-0 through nutsnews-worker-24",
+      "shard_count": 25,
+      "binding_shape_verified_all_shards": true,
+      "distinct_binding_shapes": 1,
+      "latest_version_created_on_range_utc": {
+        "start": "2026-07-22T06:59:23.525858Z",
+        "end": "2026-07-22T07:01:10.847708Z"
+      },
+      "secret_store_bindings_all_shards": [
+        "BETTER_STACK_INGESTING_HOST",
+        "BETTER_STACK_SOURCE_TOKEN",
+        "LOCAL_AI_API_KEY",
+        "NUTSNEWS_BACKEND_API_TOKEN",
+        "OPENAI_API_KEY"
+      ],
+      "kv_bindings_all_shards": [
+        "NUTSNEWS_KV"
+      ],
+      "plain_text_bindings_all_shards": [
+        "AI_PROVIDER",
+        "AI_PROVIDER_FALLBACK_TO_OPENAI",
+        "AI_REVIEW_CONCURRENCY",
+        "ARTICLE_PAGE_FETCH_TIMEOUT_MS",
+        "ENABLED_SUMMARY_LANGUAGES",
+        "FEED_SHARD_INDEX",
+        "FEEDS_PER_SHARD",
+        "HOLD_ARTICLES_FOR_TRANSLATIONS",
+        "LOCAL_AI_MODEL",
+        "LOCAL_AI_TIMEOUT_MS",
+        "LOCAL_AI_URL",
+        "NUTSNEWS_BACKEND_API_URL",
+        "NUTSNEWS_BACKEND_POSTGRES_PRIMARY_CONFIRMATION",
+        "NUTSNEWS_DATABASE_PROVIDER_MODE",
+        "NUTSNEWS_PRODUCTION_WRITES_PAUSED",
+        "OPENAI_TIMEOUT_MS",
+        "RSS_FEED_FETCH_TIMEOUT_MS",
+        "SUMMARY_TRANSLATION_LIMIT"
+      ],
+      "deployed_non_secret_values": {
+        "AI_PROVIDER": "local",
+        "AI_PROVIDER_FALLBACK_TO_OPENAI": "true",
+        "AI_REVIEW_CONCURRENCY": "1",
+        "ARTICLE_PAGE_FETCH_TIMEOUT_MS": "10000",
+        "ENABLED_SUMMARY_LANGUAGES": "fr,ja,de-CH,de,el",
+        "FEEDS_PER_SHARD": "20",
+        "HOLD_ARTICLES_FOR_TRANSLATIONS": "true",
+        "LOCAL_AI_MODEL": "qwen2.5:3b",
+        "LOCAL_AI_TIMEOUT_MS": "15000",
+        "LOCAL_AI_URL": "https://ai.nutsnews.com",
+        "NUTSNEWS_BACKEND_API_URL": "https://backend.nutsnews.com",
+        "NUTSNEWS_BACKEND_POSTGRES_PRIMARY_CONFIRMATION": "enable-backend-postgres-primary",
+        "NUTSNEWS_DATABASE_PROVIDER_MODE": "backend_postgres_primary",
+        "NUTSNEWS_PRODUCTION_WRITES_PAUSED": "false",
+        "OPENAI_TIMEOUT_MS": "30000",
+        "RSS_FEED_FETCH_TIMEOUT_MS": "15000",
+        "SUMMARY_TRANSLATION_LIMIT": "5"
+      },
+      "per_shard_versions": [
+        { "worker": "nutsnews-worker-0", "shard": 0, "version_id": "5b1940b7-42f8-44a0-a62e-d2f1a1554cd2", "version_number": 112, "created_on": "2026-07-22T06:59:23.525858Z" },
+        { "worker": "nutsnews-worker-1", "shard": 1, "version_id": "9f16851e-3ef8-4683-93a5-13e62e2813d0", "version_number": 98, "created_on": "2026-07-22T06:59:26.889068Z" },
+        { "worker": "nutsnews-worker-2", "shard": 2, "version_id": "987a1498-eb1b-4510-8acb-3c6e2df4b5a1", "version_number": 97, "created_on": "2026-07-22T06:59:30.099392Z" },
+        { "worker": "nutsnews-worker-3", "shard": 3, "version_id": "eb0ee19f-0a8f-4b88-bce1-568f5f34e11e", "version_number": 86, "created_on": "2026-07-22T06:59:34.026698Z" },
+        { "worker": "nutsnews-worker-4", "shard": 4, "version_id": "a489d2ef-fa0b-4a25-84c3-08cd60e48443", "version_number": 86, "created_on": "2026-07-22T06:59:37.885811Z" },
+        { "worker": "nutsnews-worker-5", "shard": 5, "version_id": "8666030f-154e-44eb-9daf-e3f0a028ddc0", "version_number": 86, "created_on": "2026-07-22T06:59:41.491927Z" },
+        { "worker": "nutsnews-worker-6", "shard": 6, "version_id": "6e2ef910-4d2a-47a4-a3f6-3aac535a6332", "version_number": 85, "created_on": "2026-07-22T06:59:44.809751Z" },
+        { "worker": "nutsnews-worker-7", "shard": 7, "version_id": "235c90a6-5d47-4604-89aa-4a6dbd6a7ea5", "version_number": 85, "created_on": "2026-07-22T06:59:48.141347Z" },
+        { "worker": "nutsnews-worker-8", "shard": 8, "version_id": "70598ef3-e8bf-4be4-a14c-9b4ad0db009c", "version_number": 85, "created_on": "2026-07-22T06:59:51.568348Z" },
+        { "worker": "nutsnews-worker-9", "shard": 9, "version_id": "18afefc7-ec03-434a-b4c3-2b5cba91aeaa", "version_number": 85, "created_on": "2026-07-22T06:59:54.877667Z" },
+        { "worker": "nutsnews-worker-10", "shard": 10, "version_id": "33d8bcb6-e6a9-4aca-be81-622f527954fc", "version_number": 85, "created_on": "2026-07-22T06:59:58.790546Z" },
+        { "worker": "nutsnews-worker-11", "shard": 11, "version_id": "f2eabf72-8452-4bfb-b74c-5ae96dd3ed2b", "version_number": 85, "created_on": "2026-07-22T07:00:05.703990Z" },
+        { "worker": "nutsnews-worker-12", "shard": 12, "version_id": "0d08d359-21ea-4903-91a6-d58114b96a70", "version_number": 85, "created_on": "2026-07-22T07:00:11.836763Z" },
+        { "worker": "nutsnews-worker-13", "shard": 13, "version_id": "61e2b3ce-3edc-482e-b202-32f5c0fc38a2", "version_number": 85, "created_on": "2026-07-22T07:00:16.389548Z" },
+        { "worker": "nutsnews-worker-14", "shard": 14, "version_id": "2ed8dbe8-9802-4e5d-b3e2-9fb60a04de40", "version_number": 85, "created_on": "2026-07-22T07:00:20.778791Z" },
+        { "worker": "nutsnews-worker-15", "shard": 15, "version_id": "0dd3a641-bf1a-44f1-8884-7552f6634644", "version_number": 85, "created_on": "2026-07-22T07:00:25.610373Z" },
+        { "worker": "nutsnews-worker-16", "shard": 16, "version_id": "9cb320a3-f91b-4bd9-9307-dde48f5bf05e", "version_number": 85, "created_on": "2026-07-22T07:00:29.374827Z" },
+        { "worker": "nutsnews-worker-17", "shard": 17, "version_id": "396a383a-d9af-424e-afab-b9cc421115a0", "version_number": 85, "created_on": "2026-07-22T07:00:33.104639Z" },
+        { "worker": "nutsnews-worker-18", "shard": 18, "version_id": "aa83c563-a4a2-43d3-8437-532e2582dd58", "version_number": 85, "created_on": "2026-07-22T07:00:38.079325Z" },
+        { "worker": "nutsnews-worker-19", "shard": 19, "version_id": "e250e67a-23ed-4129-8093-b541208f5fc3", "version_number": 85, "created_on": "2026-07-22T07:00:41.972060Z" },
+        { "worker": "nutsnews-worker-20", "shard": 20, "version_id": "3c503657-d2c0-41d2-8856-aa77f021da13", "version_number": 85, "created_on": "2026-07-22T07:00:48.301349Z" },
+        { "worker": "nutsnews-worker-21", "shard": 21, "version_id": "126fa233-1533-4d87-af9b-c561d9cfdad4", "version_number": 85, "created_on": "2026-07-22T07:00:53.122838Z" },
+        { "worker": "nutsnews-worker-22", "shard": 22, "version_id": "00ab067e-cfa1-4b0a-b4e3-4b40204fbda3", "version_number": 85, "created_on": "2026-07-22T07:00:57.208195Z" },
+        { "worker": "nutsnews-worker-23", "shard": 23, "version_id": "8741250e-dd22-45ad-9a82-5470c2d123db", "version_number": 85, "created_on": "2026-07-22T07:01:05.527684Z" },
+        { "worker": "nutsnews-worker-24", "shard": 24, "version_id": "4cd0fc5f-af06-4938-8f58-e75fe9e5f263", "version_number": 85, "created_on": "2026-07-22T07:01:10.847708Z" }
+      ]
+    }
+  },
+  "repo_source_evidence": {
+    "legacy_worker_repository": "ramideltoro/nutsnews-worker",
+    "legacy_worker_commit": "7770ee5b8f7fde24c1860186d3c869d28fe1525f",
+    "generated_shard_config_count": 25,
+    "repo_generated_config_disagreement": [
+      "worker/generated-wrangler/*.jsonc still includes SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY Secrets Store bindings, but all 25 deployed shard versions captured here do not expose those bindings.",
+      "worker/generated-wrangler/*.jsonc sets AI_PROVIDER_FALLBACK_TO_OPENAI=false, but all 25 deployed shard versions captured here expose AI_PROVIDER_FALLBACK_TO_OPENAI=true.",
+      "The deployed shard versions expose NUTSNEWS_DATABASE_PROVIDER_MODE=backend_postgres_primary and NUTSNEWS_BACKEND_API_TOKEN, which is the live production-primary evidence for the uplift map."
+    ]
+  },
+  "classification_values": [
+    "required_uplift_runtime_secret",
+    "required_non_secret_variable",
+    "existing_backend_equivalent",
+    "validation_only",
+    "legacy_failover_only_retained_in_cloudflare",
+    "retirement_candidate"
+  ],
+  "secret_decisions": [
+    {
+      "name": "SUPABASE_URL",
+      "live_cloudflare_state": "active in Secrets Store; not bound on all 25 deployed shard versions captured at 2026-07-23T02:22:18Z",
+      "consumers": [
+        "repository-generated shard configs only",
+        "legacy Worker source types and old Supabase REST code paths"
+      ],
+      "classification": "legacy_failover_only_retained_in_cloudflare",
+      "destination_or_retention": "Retain in Cloudflare only while legacy/failover rollback may need old Supabase paths. Do not inject into uplift containers; backend PostgreSQL is current production primary.",
+      "canonical_owner": "ramideltoro/nutsnews-worker until legacy retirement; backend equivalents live under ramideltoro/nutsnews-backend production-backend",
+      "protected_environment": "Cloudflare Secrets Store for legacy retention; production-backend for backend equivalents",
+      "rotation_source_or_procedure": "Supabase project API settings or password manager source. Cloudflare secret values cannot be exported after creation; recreate or rotate from source if needed."
+    },
+    {
+      "name": "SUPABASE_SERVICE_ROLE_KEY",
+      "live_cloudflare_state": "active in Secrets Store; not bound on all 25 deployed shard versions captured at 2026-07-23T02:22:18Z",
+      "consumers": [
+        "repository-generated shard configs only",
+        "legacy Worker source types and old Supabase REST write code paths"
+      ],
+      "classification": "legacy_failover_only_retained_in_cloudflare",
+      "destination_or_retention": "Retain only for rollback/failover while legacy Worker remains active. Do not inject into uplift containers; protected backend automation owns any Supabase migration credentials.",
+      "canonical_owner": "ramideltoro/nutsnews-worker until legacy retirement; ramideltoro/nutsnews-backend owns protected migration equivalents",
+      "protected_environment": "Cloudflare Secrets Store for legacy retention; production-backend for backend migration equivalents",
+      "rotation_source_or_procedure": "Supabase project API key rotation or password manager source. Cloudflare secret values cannot be exported after creation."
+    },
+    {
+      "name": "OPENAI_API_KEY",
+      "live_cloudflare_state": "active in Secrets Store and bound on all 25 deployed shard versions",
+      "consumers": [
+        "nutsnews-worker-0 through nutsnews-worker-24 as OpenAI fallback"
+      ],
+      "classification": "legacy_failover_only_retained_in_cloudflare",
+      "destination_or_retention": "Retain in Cloudflare for legacy Worker fallback only. Do not inject into uplift containers unless a later AI fallback issue explicitly approves OpenAI fallback.",
+      "canonical_owner": "ramideltoro/nutsnews-worker for legacy fallback; any future backend-held fallback belongs to production-backend",
+      "protected_environment": "Cloudflare Secrets Store for legacy; production-backend only if a future approved fallback is needed",
+      "rotation_source_or_procedure": "OpenAI project API key rotation. Cloudflare secret values cannot be exported after creation."
+    },
+    {
+      "name": "SENTRY_DSN",
+      "live_cloudflare_state": "active in Secrets Store; not bound on controller or all 25 deployed shard versions",
+      "consumers": [
+        "no live Worker binding observed"
+      ],
+      "classification": "retirement_candidate",
+      "destination_or_retention": "Do not carry into uplift containers unless a later observability decision reintroduces Sentry. Prefer backend/Grafana observability ownership.",
+      "canonical_owner": "unassigned pending observability decision",
+      "protected_environment": "none for uplift",
+      "rotation_source_or_procedure": "Sentry project DSN settings if retained. Cloudflare secret values cannot be exported after creation."
+    },
+    {
+      "name": "BETTER_STACK_SOURCE_TOKEN",
+      "live_cloudflare_state": "active in Secrets Store and bound on all 25 deployed shard versions",
+      "consumers": [
+        "nutsnews-worker-0 through nutsnews-worker-24 structured log delivery"
+      ],
+      "classification": "legacy_failover_only_retained_in_cloudflare",
+      "destination_or_retention": "Retain for legacy Worker logs. Do not carry into uplift containers by default; Grafana Cloud resource management belongs to ramideltoro/nutsnews-infra.",
+      "canonical_owner": "ramideltoro/nutsnews-worker for legacy log shipping; ramideltoro/nutsnews-infra for future Grafana resources",
+      "protected_environment": "Cloudflare Secrets Store for legacy; no app repo destination",
+      "rotation_source_or_procedure": "Better Stack source token rotation or password manager source. Cloudflare secret values cannot be exported after creation."
+    },
+    {
+      "name": "BETTER_STACK_INGESTING_HOST",
+      "live_cloudflare_state": "active in Secrets Store and bound on all 25 deployed shard versions",
+      "consumers": [
+        "nutsnews-worker-0 through nutsnews-worker-24 structured log delivery"
+      ],
+      "classification": "retirement_candidate",
+      "destination_or_retention": "Host value is non-secret if retained, but current storage is Secrets Store. Do not carry into uplift containers by default; Grafana Cloud resources belong to ramideltoro/nutsnews-infra.",
+      "canonical_owner": "ramideltoro/nutsnews-worker for legacy log shipping; ramideltoro/nutsnews-infra for future Grafana resources",
+      "protected_environment": "Cloudflare Secrets Store for legacy; no app repo destination",
+      "rotation_source_or_procedure": "Better Stack source settings if retained. Cloudflare secret values cannot be exported after creation."
+    },
+    {
+      "name": "LOCAL_AI_API_KEY",
+      "live_cloudflare_state": "active in Secrets Store and bound on all 25 deployed shard versions",
+      "consumers": [
+        "nutsnews-worker-0 through nutsnews-worker-24 local Qwen calls"
+      ],
+      "classification": "required_uplift_runtime_secret",
+      "destination_or_retention": "Recreate or rotate into the backend-owned protected runtime boundary when worker containers need Qwen access. Do not store in app repositories.",
+      "canonical_owner": "ramideltoro/nutsnews-backend",
+      "protected_environment": "production-backend",
+      "rotation_source_or_procedure": "Local AI service credential source on backend/home AI host or password manager. Cloudflare secret values cannot be exported after creation."
+    },
+    {
+      "name": "UPSTASH_REDIS_REST_URL",
+      "live_cloudflare_state": "active in Secrets Store; not bound on controller or all 25 deployed shard versions",
+      "consumers": [
+        "optional legacy Worker lock/rate-limit code path only when deployed with Upstash bindings"
+      ],
+      "classification": "retirement_candidate",
+      "destination_or_retention": "Do not carry into uplift containers unless a later runtime locking decision chooses Upstash. RabbitMQ/backend runtime should define its own lock/backpressure model.",
+      "canonical_owner": "unassigned pending runtime lock decision",
+      "protected_environment": "none for uplift",
+      "rotation_source_or_procedure": "Upstash database REST endpoint setting if retained. Cloudflare secret values cannot be exported after creation."
+    },
+    {
+      "name": "UPSTASH_REDIS_REST_TOKEN",
+      "live_cloudflare_state": "active in Secrets Store; not bound on controller or all 25 deployed shard versions",
+      "consumers": [
+        "optional legacy Worker lock/rate-limit code path only when deployed with Upstash bindings"
+      ],
+      "classification": "retirement_candidate",
+      "destination_or_retention": "Do not carry into uplift containers unless a later runtime locking decision chooses Upstash.",
+      "canonical_owner": "unassigned pending runtime lock decision",
+      "protected_environment": "none for uplift",
+      "rotation_source_or_procedure": "Upstash token rotation or password manager source. Cloudflare secret values cannot be exported after creation."
+    },
+    {
+      "name": "NUTSNEWS_BACKEND_API_URL",
+      "live_cloudflare_state": "active in Secrets Store, but deployed shards use it as a plain-text binding rather than a Secrets Store binding",
+      "consumers": [
+        "nutsnews-worker-0 through nutsnews-worker-24 as backend Worker DB API URL"
+      ],
+      "classification": "required_non_secret_variable",
+      "destination_or_retention": "Represent as a non-secret backend/runtime variable, not a secret, for any uplift service that calls the backend API.",
+      "canonical_owner": "ramideltoro/nutsnews-backend",
+      "protected_environment": "production-backend variables or backend-managed deployment config",
+      "rotation_source_or_procedure": "DNS/backend routing source. No secret rotation required."
+    },
+    {
+      "name": "NUTSNEWS_BACKEND_API_TOKEN",
+      "live_cloudflare_state": "active in Secrets Store and bound on all 25 deployed shard versions",
+      "consumers": [
+        "nutsnews-worker-0 through nutsnews-worker-24 backend Worker DB API calls"
+      ],
+      "classification": "existing_backend_equivalent",
+      "destination_or_retention": "Use the existing backend-owned token boundary if uplift services call the backend Worker DB API. Do not store in app repositories.",
+      "canonical_owner": "ramideltoro/nutsnews-backend",
+      "protected_environment": "production-backend",
+      "rotation_source_or_procedure": "Backend Worker API token rotation in protected backend automation/password manager. Cloudflare secret values cannot be exported after creation."
+    },
+    {
+      "name": "NUTSNEWS_SHADOW_SMOKE_TOKEN",
+      "live_cloudflare_state": "active in Secrets Store; not bound on controller or all 25 deployed shard versions",
+      "consumers": [
+        "shadow smoke validation only"
+      ],
+      "classification": "validation_only",
+      "destination_or_retention": "Recreate or rotate only for protected shadow validation workflows when those workflows are implemented. Do not inject into runtime containers by default.",
+      "canonical_owner": "ramideltoro/nutsnews-backend",
+      "protected_environment": "production-backend or a protected validation environment",
+      "rotation_source_or_procedure": "Shadow smoke token generator/password manager source. Cloudflare secret values cannot be exported after creation."
+    },
+    {
+      "name": "NUTSNEWS_FAILOVER_STATUS_HMAC_SECRET",
+      "live_cloudflare_state": "classic Worker secret bound to nutsnews-controller",
+      "consumers": [
+        "nutsnews-controller failover status signing"
+      ],
+      "classification": "legacy_failover_only_retained_in_cloudflare",
+      "destination_or_retention": "Retain in Cloudflare controller only. It is not an ingestion secret and must not be injected into uplift worker containers.",
+      "canonical_owner": "ramideltoro/nutsnews-worker controller until failover ownership is moved",
+      "protected_environment": "Cloudflare Worker classic secret",
+      "rotation_source_or_procedure": "Failover controller HMAC secret generator/password manager source. Classic Worker secret values cannot be exported after creation."
+    }
+  ],
+  "binding_decisions": [
+    {
+      "binding_group": "shard_plain_text_bindings",
+      "names": [
+        "AI_PROVIDER",
+        "AI_PROVIDER_FALLBACK_TO_OPENAI",
+        "AI_REVIEW_CONCURRENCY",
+        "ARTICLE_PAGE_FETCH_TIMEOUT_MS",
+        "ENABLED_SUMMARY_LANGUAGES",
+        "FEED_SHARD_INDEX",
+        "FEEDS_PER_SHARD",
+        "HOLD_ARTICLES_FOR_TRANSLATIONS",
+        "LOCAL_AI_MODEL",
+        "LOCAL_AI_TIMEOUT_MS",
+        "LOCAL_AI_URL",
+        "NUTSNEWS_BACKEND_API_URL",
+        "NUTSNEWS_BACKEND_POSTGRES_PRIMARY_CONFIRMATION",
+        "NUTSNEWS_DATABASE_PROVIDER_MODE",
+        "NUTSNEWS_PRODUCTION_WRITES_PAUSED",
+        "OPENAI_TIMEOUT_MS",
+        "RSS_FEED_FETCH_TIMEOUT_MS",
+        "SUMMARY_TRANSLATION_LIMIT"
+      ],
+      "owner": "ramideltoro/nutsnews-backend for uplift runtime config; ramideltoro/nutsnews-worker while legacy remains active",
+      "classification": "required_non_secret_variable",
+      "destination_or_retention": "Translate retained runtime settings into backend-owned deployment config or service-specific non-secret variables. Do not store as repository secrets."
+    },
+    {
+      "binding_group": "controller_failover_plain_text_and_durable_object_bindings",
+      "names": [
+        "FAILOVER_CONTROLLER_STATE",
+        "NUTSNEWS_DNS_FAILOVER_*",
+        "NUTSNEWS_FAILOVER_*",
+        "SHARD_COUNT",
+        "SHARD_RUN_INTERVAL_MINUTES",
+        "SHARD_WORKER_PREFIX",
+        "SHARD_WORKER_SUBDOMAIN",
+        "TRANSLATION_BACKLOG_ENABLED"
+      ],
+      "owner": "ramideltoro/nutsnews-worker controller until a separate failover ownership issue moves it",
+      "classification": "legacy_failover_only_retained_in_cloudflare",
+      "destination_or_retention": "Retain in Cloudflare. These are controller/failover duties, not RabbitMQ ingestion runtime secrets."
+    },
+    {
+      "binding_group": "NUTSNEWS_KV",
+      "names": [
+        "NUTSNEWS_KV"
+      ],
+      "owner": "ramideltoro/nutsnews-worker while legacy remains active",
+      "classification": "legacy_failover_only_retained_in_cloudflare",
+      "destination_or_retention": "Retain for legacy dedupe/run-state/public-feed edge snapshot fallback. Uplift services should not assume KV ownership without a later storage decision."
+    }
+  ],
+  "guardrails": [
+    "The Cloudflare Secrets Store, classic Worker secrets, Worker bindings, schedules, routes, deployments, and DNS failover paths were not modified.",
+    "Legacy-only and failover-only secrets are explicitly retained in Cloudflare and not injected into uplift containers.",
+    "Grafana management credentials belong to ramideltoro/nutsnews-infra, not worker app repositories."
+  ]
+}

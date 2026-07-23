@@ -1,7 +1,7 @@
 # Worker-Uplift RabbitMQ Provisioning
 
-This runbook covers tracking issues `ramideltoro/nutsnews-worker#80` and
-`ramideltoro/nutsnews-worker#81`.
+This runbook covers tracking issues `ramideltoro/nutsnews-worker#80`,
+`ramideltoro/nutsnews-worker#81`, and `ramideltoro/nutsnews-worker#82`.
 
 The backend-owned provisioning source is:
 
@@ -79,6 +79,8 @@ written to the root-owned Compose env file. Service identity credentials are
 written to `/etc/nutsnews-rabbitmq/topology.env`, which is root-only and is not
 mounted into the RabbitMQ container. Secret values are not committed, printed in
 Ansible output, passed as process arguments, or uploaded as workflow artifacts.
+The topology bootstrap deletes the default `guest` user, and the network
+security check verifies that anonymous management API requests are denied.
 
 The protected apply path pulls the pinned RabbitMQ image before starting or
 restarting the service. The systemd unit uses the already-pulled image so a host
@@ -131,6 +133,46 @@ non-empty stage queues.
 
 ## Verification
 
+Network posture is part of every protected RabbitMQ apply. The role installs
+`/usr/local/sbin/nutsnews-rabbitmq-network-check` and runs it after the broker,
+topology, permissions, transfer probe, and health checks pass. The check verifies:
+
+- host listeners for AMQP `5672`, management `15672`, and Prometheus `15692` are loopback-only;
+- Docker publishes those ports only on loopback;
+- the RabbitMQ container is attached to a private Docker network for colocated service containers;
+- UFW is active, default-deny incoming, and has no public RabbitMQ allow rules;
+- loopback AMQP, management, and Prometheus endpoints are reachable from the host;
+- RabbitMQ Prometheus metrics are available for local Grafana Alloy scraping;
+- unauthenticated management requests are rejected;
+- the `guest` user is absent;
+- service identity usernames and passwords are distinct from one another and from the break-glass admin credential, without printing secret values;
+- TLS is not required while all broker connections stay inside the host/Docker trust boundary.
+
+Read-only network check:
+
+```bash
+ssh -i ~/.ssh/servercheap_65_75_201_18 rami@65.75.201.18 \
+  'sudo -n /usr/local/sbin/nutsnews-rabbitmq-network-check'
+```
+
+Public exposure scan:
+
+```bash
+for port in 5672 15672 15692; do
+  nc -vz -w5 65.75.201.18 "$port"
+done
+```
+
+Expected result: every RabbitMQ public scan attempt is refused or times out.
+The protected deployment safety gate performs the same external check from the
+GitHub runner and fails post-apply if any RabbitMQ port is open.
+
+TLS posture: AMQP, management, and Prometheus traffic is approved only on
+`127.0.0.1` and the Docker-private RabbitMQ network. If a future service needs
+to cross a host trust boundary, the change must add RabbitMQ TLS listeners,
+certificate rotation, and a read-only certificate-expiry check before opening
+that path.
+
 The role runs a durable probe when RabbitMQ config, Compose, unit, environment,
 broker data ownership, legacy probe state, or probe code changes:
 
@@ -147,6 +189,39 @@ Read-only health command:
 ssh -i ~/.ssh/servercheap_65_75_201_18 rami@65.75.201.18 \
   'sudo -n /usr/local/sbin/nutsnews-rabbitmq-probe health --env /etc/nutsnews-rabbitmq/rabbitmq.env'
 ```
+
+## Management Access
+
+The RabbitMQ management UI is not public. Use an SSH tunnel from an approved
+operator workstation:
+
+```bash
+ssh -N -L 15672:127.0.0.1:15672 -i ~/.ssh/servercheap_65_75_201_18 rami@65.75.201.18
+```
+
+Then open:
+
+```text
+http://127.0.0.1:15672
+```
+
+Use the `RABBITMQ_BREAK_GLASS_ADMIN_USERNAME` and
+`RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD` values from the protected
+`production-backend` environment only for approved operations. Close the tunnel
+when the operation is complete.
+
+Emergency revocation:
+
+```bash
+sudo -n docker exec nutsnews-rabbitmq rabbitmqctl clear_permissions -p nutsnews-worker-uplift <username>
+sudo -n docker exec nutsnews-rabbitmq rabbitmqctl delete_user <username>
+```
+
+After emergency revocation, rotate the affected `production-backend` secret,
+run the protected apply, and confirm the topology permission and network
+security checks pass. For break-glass admin compromise, revoke the admin user
+from a privileged host session, rotate `RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD`,
+and restore the reviewed admin identity through the protected apply path.
 
 Host restart durable probe:
 

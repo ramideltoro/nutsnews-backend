@@ -16,6 +16,7 @@ backend_rabbitmq_config_path: "{{ backend_rabbitmq_config_dir }}/rabbitmq.conf"
 backend_rabbitmq_enabled_plugins_path: "{{ backend_rabbitmq_config_dir }}/enabled_plugins"
 backend_rabbitmq_probe_path: /usr/local/sbin/nutsnews-rabbitmq-probe
 backend_rabbitmq_topology_path: /usr/local/sbin/nutsnews-rabbitmq-topology
+backend_rabbitmq_network_check_path: /usr/local/sbin/nutsnews-rabbitmq-network-check
 backend_rabbitmq_topology_definition_path: "{{ backend_rabbitmq_config_dir }}/worker-uplift-topology.json"
 backend_rabbitmq_topology_env_path: "{{ backend_rabbitmq_config_dir }}/topology.env"
 backend_rabbitmq_probe_state_dir: /var/lib/nutsnews/rabbitmq-probes

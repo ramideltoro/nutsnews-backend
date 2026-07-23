@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import sys
 import urllib.error
 import urllib.request
@@ -35,11 +36,20 @@ REMOTE_SAFETY_COMMANDS: dict[str, str] = {
         "echo healthy; else echo critical; fi; "
         "else echo not_configured; fi"
     ),
+    "rabbitmq_network_security": (
+        "if systemctl is-active nutsnews-rabbitmq >/dev/null 2>&1 "
+        "&& test -x /usr/local/sbin/nutsnews-rabbitmq-network-check; then "
+        "sudo -n /usr/local/sbin/nutsnews-rabbitmq-network-check "
+        "--env /etc/nutsnews-rabbitmq/rabbitmq.env "
+        "--topology-env /etc/nutsnews-rabbitmq/topology.env; "
+        "else echo not_configured; fi"
+    ),
     "restore_verification": (
         "test -s /var/lib/nutsnews/backups/last-restore-verification.json "
         "&& cat /var/lib/nutsnews/backups/last-restore-verification.json || echo not_configured"
     ),
 }
+RABBITMQ_PUBLIC_PORTS = (5672, 15672, 15692)
 
 PROFILES = {"baseline_apply", "cloudflare_dns_apply", "cloudflare_dns_rollback"}
 CRITICAL_IF_NOT_HEALTHY: dict[str, set[str]] = {
@@ -112,6 +122,53 @@ def public_endpoint_health(url: str, expected_body: str, timeout: int) -> dict[s
     }
 
 
+def rabbitmq_network_security(evidence: dict[str, Any]) -> dict[str, Any]:
+    output = maintenance.command_stdout(evidence, "rabbitmq_network_security").strip()
+    if output == "not_configured":
+        return {"name": "rabbitmq_network_security", "status": "not_configured", "summary": "not_configured"}
+    if output.startswith("{"):
+        try:
+            data = json.loads(output)
+        except json.JSONDecodeError:
+            return {"name": "rabbitmq_network_security", "status": "unknown", "summary": "network check json invalid"}
+        status = "healthy" if data.get("status") == "pass" else "critical"
+        failed = data.get("failed_checks") if isinstance(data.get("failed_checks"), list) else []
+        return {
+            "name": "rabbitmq_network_security",
+            "status": status,
+            "summary": "failed_checks=none" if status == "healthy" else f"failed_checks={','.join(str(item) for item in failed) or 'unknown'}",
+        }
+    if output:
+        return {"name": "rabbitmq_network_security", "status": "unknown", "summary": output.splitlines()[-1]}
+    return {"name": "rabbitmq_network_security", "status": "unknown", "summary": "unknown"}
+
+
+def rabbitmq_public_exposure(host: str, timeout: int) -> dict[str, Any]:
+    if not rabbitmq_enabled_for_gate():
+        return {"name": "rabbitmq_public_exposure", "status": "not_configured", "summary": "rabbitmq gate disabled"}
+    open_ports: list[int] = []
+    closed_ports: list[int] = []
+    errors: dict[str, str] = {}
+    connect_timeout = min(max(timeout, 1), 5)
+    for port in RABBITMQ_PUBLIC_PORTS:
+        try:
+            with socket.create_connection((host, port), timeout=connect_timeout):
+                open_ports.append(port)
+        except OSError as exc:
+            closed_ports.append(port)
+            errors[str(port)] = exc.__class__.__name__
+    status = "healthy" if not open_ports else "critical"
+    return {
+        "name": "rabbitmq_public_exposure",
+        "status": status,
+        "summary": f"open={open_ports or 'none'} closed_count={len(closed_ports)}",
+        "checked_ports": list(RABBITMQ_PUBLIC_PORTS),
+        "open_ports": open_ports,
+        "closed_ports": closed_ports,
+        "closed_reasons": errors,
+    }
+
+
 def collect_evidence(args: argparse.Namespace) -> dict[str, Any]:
     evidence = maintenance.collect_live(args.ssh_host, args.ssh_user, args.ssh_key, args.known_hosts, args.timeout)
     for name, command in REMOTE_SAFETY_COMMANDS.items():
@@ -174,6 +231,7 @@ def safety_checks(args: argparse.Namespace, evidence: dict[str, Any]) -> list[di
     else:
         rabbitmq_status = "unknown"
     checks.append({"name": "rabbitmq_health", "status": rabbitmq_status, "summary": f"rabbitmq={rabbitmq_output or 'unknown'}"})
+    checks.append(rabbitmq_network_security(evidence))
 
     restore_output = maintenance.command_stdout(evidence, "restore_verification").strip()
     restore_status = "not_configured"
@@ -194,6 +252,7 @@ def safety_checks(args: argparse.Namespace, evidence: dict[str, Any]) -> list[di
     )
 
     checks.append(public_endpoint_health(args.public_health_url, args.expected_public_health_body, args.timeout))
+    checks.append(rabbitmq_public_exposure(getattr(args, "ssh_host", os.environ.get("NUTSNEWS_BACKEND_HOST", "65.75.201.18")), args.timeout))
     checks.extend(secret_presence_checks(args.required_secret))
     return checks
 
@@ -222,7 +281,7 @@ def rabbitmq_post_apply_blockers(args: argparse.Namespace, checks: list[dict[str
         return []
     by_name = {check["name"]: check for check in checks}
     result: list[dict[str, str]] = []
-    for name in ("docker_health", "rabbitmq_health"):
+    for name in ("docker_health", "rabbitmq_health", "rabbitmq_network_security", "rabbitmq_public_exposure"):
         status = by_name.get(name, {}).get("status", "missing")
         if status != "healthy":
             result.append({"check": name, "status": status})

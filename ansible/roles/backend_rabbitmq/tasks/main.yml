@@ -183,6 +183,15 @@
   register: backend_rabbitmq_topology_file
   when: backend_rabbitmq_topology_enabled | bool
 
+- name: Install RabbitMQ network security check
+  ansible.builtin.copy:
+    src: nutsnews_rabbitmq_network_check.py
+    dest: "{{ backend_rabbitmq_network_check_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  register: backend_rabbitmq_network_check_file
+
 - name: Render RabbitMQ worker topology definition
   ansible.builtin.template:
     src: worker-uplift-topology.json.j2
@@ -435,6 +444,29 @@
     - backend_rabbitmq_runtime_manageable | bool
     - not ansible_check_mode
 
+- name: Verify RabbitMQ network security posture
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_rabbitmq_network_check_path }}"
+      - --container-name
+      - "{{ backend_rabbitmq_container_name }}"
+      - --env
+      - "{{ backend_rabbitmq_env_path }}"
+      - --topology-env
+      - "{{ backend_rabbitmq_topology_env_path }}"
+      - --amqp-port
+      - "{{ backend_rabbitmq_amqp_port }}"
+      - --management-port
+      - "{{ backend_rabbitmq_management_port }}"
+      - --prometheus-port
+      - "{{ backend_rabbitmq_prometheus_port }}"
+  register: backend_rabbitmq_network_security
+  changed_when: false
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - backend_rabbitmq_topology_enabled | bool
+    - not ansible_check_mode
+
 - name: Report RabbitMQ provisioning summary
   ansible.builtin.debug:
     msg:
@@ -454,3 +486,4 @@
       topology_transfer_probe: "{{ backend_rabbitmq_topology_transfer_probe.stdout | default('{}') }}"
       durable_probe_ran: "{{ backend_rabbitmq_run_durable_probe_now | default(false) }}"
       health: "{{ backend_rabbitmq_health.stdout_lines | default([]) }}"
+      network_security: "{{ backend_rabbitmq_network_security.stdout | default('{}') }}"

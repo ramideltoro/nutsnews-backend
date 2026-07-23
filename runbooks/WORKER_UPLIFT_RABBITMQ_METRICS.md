@@ -90,6 +90,17 @@ rabbitmq_detailed_queue_messages{queue=~"nutsnews\\.worker\\..+"}
 rabbitmq_detailed_queue_consumers{queue=~"nutsnews\\.worker\\..+"}
 ```
 
+The #91 private AMQP canary writes low-cardinality textfile metrics into
+`/var/lib/nutsnews/metrics/rabbitmq-canary.prom`. Query these in Grafana Cloud
+with the backend host Prometheus datasource:
+
+```promql
+nutsnews_backend_rabbitmq_canary_success
+nutsnews_backend_rabbitmq_canary_latency_seconds
+nutsnews_backend_rabbitmq_canary_message_age_seconds
+nutsnews_backend_rabbitmq_canary_failure_fixture
+```
+
 Measured active-series and ingestion usage must stay within the #144 approved
 budget and live `grafanacloud_*_usage` / `grafanacloud_*_limits` guardrails.
 

@@ -121,6 +121,8 @@ def topology_counts(definition: dict[str, Any]) -> dict[str, int]:
     for route in routes:
         queue_count += 2 + len(route.get("retry_queues", []))
         retry_count += len(route.get("retry_queues", []))
+    if isinstance(definition.get("canary"), dict) and isinstance(definition["canary"].get("queue"), dict):
+        queue_count += 1
     return {
         "exchanges": len(definition.get("exchanges", [])),
         "routes": len(routes),

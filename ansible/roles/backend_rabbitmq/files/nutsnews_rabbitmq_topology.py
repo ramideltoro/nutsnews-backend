@@ -264,6 +264,19 @@ def expected_queues(definition: dict[str, Any]) -> list[dict[str, Any]]:
                 "arguments": queue_arguments(definition, route, route["terminal_dlq"], "dlq"),
             }
         )
+    canary = definition.get("canary")
+    if isinstance(canary, dict) and isinstance(canary.get("queue"), dict):
+        queue = canary["queue"]
+        queues.append(
+            {
+                "kind": "canary",
+                "stage": "canary",
+                "name": queue["name"],
+                "durable": bool(queue.get("durable", True)),
+                "auto_delete": bool(queue.get("auto_delete", False)),
+                "arguments": normalize_dict(queue.get("arguments", {})),
+            }
+        )
     return queues
 
 
@@ -295,6 +308,16 @@ def expected_bindings(definition: dict[str, Any]) -> list[dict[str, Any]]:
                 "exchange": dlq_exchange,
                 "queue": route["terminal_dlq"]["name"],
                 "routing_key": route["terminal_dlq"]["routing_key"],
+                "arguments": {},
+            }
+        )
+    canary = definition.get("canary")
+    if isinstance(canary, dict) and isinstance(canary.get("queue"), dict):
+        bindings.append(
+            {
+                "exchange": exchange_by_id(definition, canary["exchange_id"])["name"],
+                "queue": canary["queue"]["name"],
+                "routing_key": canary["routing_key"],
                 "arguments": {},
             }
         )
@@ -674,6 +697,9 @@ def permission_matrix(definition: dict[str, Any], users: list[dict[str, Any]]) -
     retry_exchanges = {exchange_by_id(definition, exchange_id)["name"] for exchange_id in RETRY_WRITE_EXCHANGE_IDS}
     main_queues = {route["main_queue"]: route for route in definition["routes"]}
     all_queues = [queue["name"] for queue in expected_queues(definition)]
+    canary = definition.get("canary") if isinstance(definition.get("canary"), dict) else {}
+    canary_exchange = exchange_by_id(definition, canary["exchange_id"])["name"] if canary else ""
+    canary_queue = str((canary.get("queue") or {}).get("name") or "") if canary else ""
 
     app_users = [user for user in users if user.get("kind") in {"producer", "consumer"}]
     if len({user["username"] for user in app_users}) != len(app_users):
@@ -713,8 +739,19 @@ def permission_matrix(definition: dict[str, Any], users: list[dict[str, Any]]) -
                 if not regex_allows(write, exchange):
                     errors.append(f"{user_id} cannot write retry/DLQ exchange {exchange}")
         elif kind == "monitoring_canary":
-            if any(regex_allows(write, exchange) for exchange in exchange_names) or any(regex_allows(read, queue) for queue in all_queues):
-                errors.append(f"{user_id} must not publish or consume")
+            if not canary_exchange or not canary_queue:
+                errors.append(f"{user_id} requires a declared canary exchange and queue")
+                continue
+            if not regex_allows(write, canary_exchange):
+                errors.append(f"{user_id} cannot write the canary exchange")
+            if not regex_allows(read, canary_queue):
+                errors.append(f"{user_id} cannot read the canary queue")
+            for exchange in exchange_names:
+                if exchange != canary_exchange and regex_allows(write, exchange):
+                    errors.append(f"{user_id} can write non-canary exchange {exchange}")
+            for queue in all_queues:
+                if queue != canary_queue and regex_allows(read, queue):
+                    errors.append(f"{user_id} can read non-canary queue {queue}")
         elif kind == "break_glass_admin":
             if permissions != {"configure": ".*", "write": ".*", "read": ".*"}:
                 errors.append("break_glass_admin permissions must remain administrator-style")

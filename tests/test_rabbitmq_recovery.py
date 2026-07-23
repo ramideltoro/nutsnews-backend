@@ -48,7 +48,7 @@ class RabbitMQRecoveryTests(unittest.TestCase):
         )
         self.assertEqual(
             recovery.topology_counts(definition),
-            {"exchanges": 3, "queues": 35, "retry_queues": 21, "routes": 7, "users": 16},
+            {"exchanges": 4, "queues": 36, "retry_queues": 21, "routes": 7, "users": 16},
         )
 
     def test_generated_drill_environment_uses_throwaway_secret_values(self):

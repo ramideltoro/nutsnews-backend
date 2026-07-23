@@ -14,6 +14,7 @@ TASKS = ROOT / "ansible" / "roles" / "backend_rabbitmq" / "tasks" / "main.yml"
 DEFAULTS = ROOT / "ansible" / "roles" / "backend_rabbitmq" / "defaults" / "main.yml"
 PROTECTED_APPLY = ROOT / ".github" / "workflows" / "protected-backend-ansible-apply.yml"
 SMOKE_WORKFLOW = ROOT / ".github" / "workflows" / "backend-rabbitmq-smoke.yml"
+CANARY_WORKFLOW = ROOT / ".github" / "workflows" / "backend-rabbitmq-canary.yml"
 DRIFT_WORKFLOW = ROOT / ".github" / "workflows" / "backend-drift-check.yml"
 CHECKS_WORKFLOW = ROOT / ".github" / "workflows" / "backend-checks.yml"
 DRIFT_SCRIPT = ROOT / "scripts" / "backend_drift_check.py"
@@ -25,6 +26,7 @@ PROVISIONING_RUNBOOK = ROOT / "runbooks" / "WORKER_UPLIFT_RABBITMQ_PROVISIONING.
 DEPLOYMENT_RUNBOOK = ROOT / "runbooks" / "DEPLOYMENT_SAFETY_GATES.md"
 DRIFT_RUNBOOK = ROOT / "runbooks" / "DRIFT_CHECK.md"
 HEALTH_RUNBOOK = ROOT / "runbooks" / "BACKEND_HEALTH_REPORT.md"
+CANARY_RUNBOOK = ROOT / "runbooks" / "WORKER_UPLIFT_RABBITMQ_CANARY.md"
 
 
 RABBITMQ_SECRET_NAMES = {
@@ -61,6 +63,7 @@ def validate() -> list[str]:
     defaults = DEFAULTS.read_text(encoding="utf-8")
     protected_apply = PROTECTED_APPLY.read_text(encoding="utf-8")
     smoke_workflow = SMOKE_WORKFLOW.read_text(encoding="utf-8")
+    canary_workflow = CANARY_WORKFLOW.read_text(encoding="utf-8")
     drift_workflow = DRIFT_WORKFLOW.read_text(encoding="utf-8")
     checks_workflow = CHECKS_WORKFLOW.read_text(encoding="utf-8")
     drift_script = DRIFT_SCRIPT.read_text(encoding="utf-8")
@@ -73,7 +76,11 @@ def validate() -> list[str]:
         (
             '"smoke"',
             '"drift"',
+            '"canary"',
+            '"drill"',
             "worker.uplift.probe.smoke.",
+            "nutsnews-rabbitmq-canary",
+            "confirm_delivery",
             "publish_confirm",
             "consume_manual_ack",
             "retry",
@@ -84,6 +91,7 @@ def validate() -> list[str]:
             '["systemctl", "restart", args.restart_service]',
             "ignored_statuses=(401, 403)",
             "secret_redaction",
+            "nutsnews_backend_rabbitmq_canary_success",
         ),
         errors,
     )
@@ -97,6 +105,8 @@ def validate() -> list[str]:
         (
             "backend_rabbitmq_apply_metadata_path",
             "backend_rabbitmq_smoke_report_path",
+            "backend_rabbitmq_canary_report_path",
+            "backend_rabbitmq_canary_metrics_path",
         ),
         errors,
     )
@@ -110,6 +120,10 @@ def validate() -> list[str]:
             "git_revert_then_protected_check_then_protected_apply",
             "do_not_delete_data_dir_without_review",
             "backend_rabbitmq_smoke_report_path",
+            "Install RabbitMQ private canary service",
+            "Install RabbitMQ private canary timer",
+            "Run RabbitMQ private canary once after topology bootstrap",
+            "backend_rabbitmq_canary_metrics_path",
         ),
         errors,
     )
@@ -152,6 +166,29 @@ def validate() -> list[str]:
             errors.append(f"RabbitMQ smoke workflow contains forbidden free-form input/pattern: {forbidden}")
 
     require_fragments(
+        "RabbitMQ canary workflow",
+        canary_workflow,
+        (
+            "type: choice",
+            "- status",
+            "- canary",
+            "- drill",
+            "confirm_target",
+            "backend.nutsnews.com",
+            "environment: production-backend",
+            "/usr/local/sbin/nutsnews-rabbitmq-probe canary",
+            "/usr/local/sbin/nutsnews-rabbitmq-probe drill",
+            "backend-rabbitmq-canary-report.json",
+            "backend-rabbitmq-canary-report",
+            "17,47 * * * *",
+        ),
+        errors,
+    )
+    for forbidden in ("remote_command", "shell_command", "command_input", "service_name", "ansible_tags", "script_body"):
+        if forbidden in canary_workflow:
+            errors.append(f"RabbitMQ canary workflow contains forbidden free-form input/pattern: {forbidden}")
+
+    require_fragments(
         "Backend drift workflow/script",
         drift_workflow + drift_script,
         (
@@ -180,6 +217,8 @@ def validate() -> list[str]:
             "rabbitmq_drift",
             "rabbitmq_smoke_status",
             "rabbitmq_smoke_last_run",
+            "rabbitmq_canary_status",
+            "rabbitmq_canary_last_run",
             "nutsnews-rabbitmq-probe drift",
         ),
         errors,
@@ -209,13 +248,18 @@ def validate() -> list[str]:
         "runbooks",
         "\n".join(
             path.read_text(encoding="utf-8")
-            for path in (PROVISIONING_RUNBOOK, DEPLOYMENT_RUNBOOK, DRIFT_RUNBOOK, HEALTH_RUNBOOK)
+            for path in (PROVISIONING_RUNBOOK, DEPLOYMENT_RUNBOOK, DRIFT_RUNBOOK, HEALTH_RUNBOOK, CANARY_RUNBOOK)
         ),
         (
             "#84",
+            "#91",
             "Backend RabbitMQ Smoke",
+            "Backend RabbitMQ Canary",
+            "worker.uplift.canary.v1",
+            "rabbitmq-canary.prom",
             "rabbitmq_drift",
             "last-smoke.json",
+            "last-canary.json",
             "apply-metadata.json",
         ),
         errors,

@@ -198,8 +198,16 @@ def main() -> int:
         errors.append("RabbitMQ topology must apply the #79 durable classic queue decision")
     if "application_max_attempts_for_classic_queues" not in json.dumps(topology.get("delivery_behavior", {})):
         errors.append("RabbitMQ topology must record classic-queue delivery limit handling")
-    if len(topology.get("exchanges", [])) != 3:
-        errors.append("RabbitMQ topology must define main, retry, and DLQ exchanges")
+    if len(topology.get("exchanges", [])) != 4:
+        errors.append("RabbitMQ topology must define main, retry, DLQ, and private canary exchanges")
+    canary = topology.get("canary", {})
+    if not isinstance(canary, dict) or canary.get("routing_key") != "worker.uplift.canary.v1":
+        errors.append("RabbitMQ topology must define the isolated worker-uplift canary route")
+    canary_queue = canary.get("queue", {}) if isinstance(canary, dict) else {}
+    if not isinstance(canary_queue, dict) or canary_queue.get("name") != "worker.uplift.canary.v1":
+        errors.append("RabbitMQ topology must define the isolated worker-uplift canary queue")
+    if canary_queue.get("arguments", {}).get("x-max-length") != 10:
+        errors.append("RabbitMQ canary queue must stay tightly bounded")
     if len(topology.get("routes", [])) != 7:
         errors.append("RabbitMQ topology must define seven worker routes")
     if len(topology.get("users", [])) != 16:
@@ -218,6 +226,15 @@ def main() -> int:
         errors.append("RabbitMQ topology DLQ retention must be 14 days")
     if "guest" in topology_template:
         errors.append("RabbitMQ topology definition must not create a guest user")
+
+    for required in (
+        "def action_canary",
+        "def action_drill",
+        "confirm_delivery",
+        "nutsnews_backend_rabbitmq_canary_success",
+    ):
+        if required not in probe:
+            errors.append(f"RabbitMQ probe script missing canary behavior: {required}")
 
     for required in (
         "def live_drift",

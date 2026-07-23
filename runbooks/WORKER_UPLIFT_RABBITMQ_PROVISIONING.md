@@ -2,7 +2,8 @@
 
 This runbook covers tracking issues `ramideltoro/nutsnews-worker#80`,
 `ramideltoro/nutsnews-worker#81`, `ramideltoro/nutsnews-worker#82`, and
-`ramideltoro/nutsnews-worker#83`, and `ramideltoro/nutsnews-worker#84`.
+`ramideltoro/nutsnews-worker#83`, `ramideltoro/nutsnews-worker#84`, and
+`ramideltoro/nutsnews-worker#91`.
 
 The backend-owned provisioning source is:
 
@@ -31,6 +32,8 @@ This provisions RabbitMQ as a persistent Docker Compose service on
 `backend.nutsnews.com` through the protected backend Ansible workflow. It also
 bootstraps the worker-uplift vhost, exchanges, durable classic queues, retry
 queues, DLQs, policies, route-scoped users, and permissions from source control.
+It also creates the isolated `worker.uplift.canary.v1` exchange and queue used
+by the private AMQP canary.
 It does not change the active legacy Cloudflare Worker code, schedules,
 bindings, secrets, or deployment.
 
@@ -158,6 +161,17 @@ routing, and verifies an unroutable retry target leaves the source message
 visible until a confirmed target publish succeeds. The probe refuses to run on
 non-empty stage queues.
 
+The topology grants the monitoring identity access only to the private canary
+route:
+
+```text
+exchange: worker.uplift.canary.v1
+queue: worker.uplift.canary.v1
+```
+
+It cannot configure resources and cannot publish to or consume from production
+worker queues.
+
 ## Verification
 
 Network posture is part of every protected RabbitMQ apply. The role installs
@@ -257,6 +271,15 @@ identity. It cleans the probe queues/exchanges and writes:
 The workflow uploads `backend-rabbitmq-smoke-report.json`. Reports contain probe
 resource names and generated message IDs only; credentials, message bodies,
 article payloads, and broker data are not uploaded.
+
+Use `runbooks/WORKER_UPLIFT_RABBITMQ_CANARY.md` and the fixed
+`Backend RabbitMQ Canary` workflow for the continuous private AMQP canary and
+controlled failure drills. The host timer writes:
+
+```text
+/var/lib/nutsnews/rabbitmq-probes/last-canary.json
+/var/lib/nutsnews/metrics/rabbitmq-canary.prom
+```
 
 ## Recovery
 

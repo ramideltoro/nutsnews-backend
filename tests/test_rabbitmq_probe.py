@@ -259,6 +259,91 @@ class RabbitMQProbeTests(unittest.TestCase):
             self.assertIn("rabbitmq_listeners_network", surfaces)
             self.assertIn("rabbitmq_backup_freshness", surfaces)
 
+    def test_canary_writes_redacted_report_and_metrics(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            env_path = temp / "rabbitmq.env"
+            topology_env = temp / "topology.env"
+            definition = temp / "topology.json"
+            report_path = temp / "last-canary.json"
+            metrics_path = temp / "rabbitmq-canary.prom"
+            env_path.write_text(
+                "RABBITMQ_DEFAULT_USER=admin\n"
+                "RABBITMQ_DEFAULT_PASS=not-a-real-admin-password\n"
+                "RABBITMQ_DEFAULT_VHOST=nutsnews-worker-uplift\n",
+                encoding="utf-8",
+            )
+            topology_env.write_text(
+                "RABBITMQ_MONITORING_USERNAME=monitor\n"
+                "RABBITMQ_MONITORING_PASSWORD=not-a-real-monitor-password\n",
+                encoding="utf-8",
+            )
+            definition.write_text(
+                json.dumps(
+                    {
+                        "exchanges": [{"id": "canary", "name": "worker.uplift.canary.v1"}],
+                        "canary": {
+                            "exchange_id": "canary",
+                            "routing_key": "worker.uplift.canary.v1",
+                            "queue": {"name": "worker.uplift.canary.v1"},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(
+                env=env_path,
+                credentials_env=topology_env,
+                definition=definition,
+                output=report_path,
+                metrics_output=metrics_path,
+                failure_mode="none",
+                amqp_host="127.0.0.1",
+                amqp_port=5672,
+                failure_amqp_port=9,
+                timeout_seconds=1,
+            )
+            with (
+                patch.object(
+                    probe,
+                    "amqp_canary_roundtrip",
+                    return_value={
+                        "expected_failure": False,
+                        "failure_class": "none",
+                        "message_id": "probe-message-id",
+                        "latency_seconds": 0.25,
+                        "message_age_seconds": 0.5,
+                    },
+                ),
+                redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(probe.action_canary(args), 0)
+
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            metrics = metrics_path.read_text(encoding="utf-8")
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["failure_class"], "none")
+            self.assertIn("nutsnews_backend_rabbitmq_canary_success", metrics)
+            self.assertIn('failure_mode="none"', metrics)
+            self.assertNotIn("not-a-real", json.dumps(report) + metrics)
+
+    def test_canary_failure_fixture_returns_expected_failure_metric(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            args = SimpleNamespace(
+                output=temp / "last-canary.json",
+                metrics_output=temp / "rabbitmq-canary.prom",
+                failure_mode="disk-watermark",
+            )
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(probe.action_canary(args), 0)
+
+            report = json.loads(args.output.read_text(encoding="utf-8"))
+            metrics = args.metrics_output.read_text(encoding="utf-8")
+            self.assertEqual(report["status"], "expected_failure")
+            self.assertEqual(report["failure_class"], "disk-watermark")
+            self.assertIn('failure_class="disk-watermark"', metrics)
+
 
 if __name__ == "__main__":
     unittest.main()

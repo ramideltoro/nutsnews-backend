@@ -3,6 +3,7 @@ backend_rabbitmq_enabled: false
 backend_rabbitmq_packages:
   - docker.io
   - docker-compose-v2
+  - python3-pika
 backend_rabbitmq_image: rabbitmq@sha256:c427b73a15d01416346f429042125e663452e2a27e07fb3096fadb08f7033fc7
 backend_rabbitmq_project_name: nutsnews-rabbitmq
 backend_rabbitmq_container_name: nutsnews-rabbitmq
@@ -25,6 +26,10 @@ backend_rabbitmq_recovery_state_dir: /var/lib/nutsnews/rabbitmq-recovery
 backend_rabbitmq_probe_state_path: "{{ backend_rabbitmq_probe_state_dir }}/durable-probe.json"
 backend_rabbitmq_apply_metadata_path: "{{ backend_rabbitmq_probe_state_dir }}/apply-metadata.json"
 backend_rabbitmq_smoke_report_path: "{{ backend_rabbitmq_probe_state_dir }}/last-smoke.json"
+backend_rabbitmq_canary_report_path: "{{ backend_rabbitmq_probe_state_dir }}/last-canary.json"
+backend_rabbitmq_canary_drill_report_path: "{{ backend_rabbitmq_probe_state_dir }}/last-canary-drill.json"
+backend_rabbitmq_canary_metrics_path: /var/lib/nutsnews/metrics/rabbitmq-canary.prom
+backend_rabbitmq_canary_calendar: "*:0/1:15"
 backend_rabbitmq_legacy_probe_state_path: "{{ backend_rabbitmq_data_dir }}/durable-probe.json"
 backend_rabbitmq_vhost: nutsnews-worker-uplift
 backend_rabbitmq_admin_username: ""

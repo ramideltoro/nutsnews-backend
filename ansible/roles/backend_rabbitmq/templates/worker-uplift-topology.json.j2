@@ -56,8 +56,30 @@
       "type": "topic",
       "durable": true,
       "arguments": {}
+    },
+    {
+      "id": "canary",
+      "name": "worker.uplift.canary.v1",
+      "type": "direct",
+      "durable": true,
+      "arguments": {}
     }
   ],
+  "canary": {
+    "exchange_id": "canary",
+    "routing_key": "worker.uplift.canary.v1",
+    "queue": {
+      "name": "worker.uplift.canary.v1",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "classic",
+        "x-max-length": 10,
+        "x-max-length-bytes": 1048576,
+        "x-overflow": "reject-publish"
+      }
+    }
+  },
   "queue_limits": {
     "main": {
       "x-max-length": 2000,
@@ -337,8 +359,8 @@
       "tags": ["monitoring"],
       "permissions": {
         "configure": "^$",
-        "write": "^$",
-        "read": "^$"
+        "write": "^worker\\.uplift\\.canary\\.v1$",
+        "read": "^worker\\.uplift\\.canary\\.v1$"
       }
     },
     {

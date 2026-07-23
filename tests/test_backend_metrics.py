@@ -215,6 +215,7 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertIn("backend_logs_worker_uplift_traces_enabled: false", defaults)
         for service in ("rabbitmq", "scheduler", "fetcher", "canonicalizer", "enrichment", "approval", "translation", "persistence", "publication"):
             self.assertIn(f"service: {service}", defaults)
+        self.assertIn("nutsnews-rabbitmq-canary.timer", load_metrics_module().SERVICES)
         self.assertIn("CONTAINER_TAG={{ source.tag }}", template)
         self.assertIn('source      = "container"', template)
         self.assertIn("stage.json", template)

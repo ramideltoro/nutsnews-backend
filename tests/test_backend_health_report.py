@@ -174,7 +174,12 @@ class BackendHealthReportTests(unittest.TestCase):
                     "{"
                     '"backup":{"status":"healthy","freshness_status":"healthy","snapshot_id":"abc","quota":{"status":"warning"}},'
                     '"verification":{"status":"healthy","snapshot_id":"abc"},'
-                    '"restore_drill":{"status":"critical","snapshot_id":"abc"}'
+                    '"restore_drill":{"status":"critical","snapshot_id":"abc"},'
+                    '"rabbitmq_recovery":{'
+                    '"definition_export":{"status":"healthy","finished_at_utc":"2026-07-17T00:16:22Z"},'
+                    '"clean_rebuild_drill":{"status":"healthy","finished_at_utc":"2026-07-17T00:20:22Z"},'
+                    '"stopped_volume_restore_drill":{"status":"warning","finished_at_utc":"2026-07-17T00:30:22Z"}'
+                    "}"
                     "}\n"
                 ),
             )
@@ -184,6 +189,9 @@ class BackendHealthReportTests(unittest.TestCase):
         self.assertEqual(by_name["backup_verification"]["status"], "healthy")
         self.assertEqual(by_name["backup_restore_drill"]["status"], "critical")
         self.assertEqual(by_name["backup_storage_quota"]["status"], "warning")
+        self.assertEqual(by_name["rabbitmq_definition_export"]["status"], "healthy")
+        self.assertEqual(by_name["rabbitmq_clean_rebuild_drill"]["status"], "healthy")
+        self.assertEqual(by_name["rabbitmq_stopped_volume_restore_drill"]["status"], "warning")
 
     def test_active_caddy_with_failed_endpoint_is_critical(self):
         checks, summary = backend_health_report.classify(fixture_report(backend_health=command("")))

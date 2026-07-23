@@ -15,8 +15,15 @@ from typing import Any
 
 DEFAULT_OUTPUT = Path("/var/lib/nutsnews/metrics/nutsnews.prom")
 BACKUP_STATE_DIR = Path("/var/lib/nutsnews/backups")
+RABBITMQ_RECOVERY_STATE_DIR = Path("/var/lib/nutsnews/rabbitmq-recovery")
 POSTGRES_STATE_DIR = Path("/var/lib/nutsnews/postgres")
 POSTGRES_REPLICATION_HEALTH_PATH = POSTGRES_STATE_DIR / "replication-health.json"
+RABBITMQ_RECOVERY_STATUS_FILES = {
+    "definition_export": "last-definition-export.json",
+    "clean_rebuild_drill": "last-clean-rebuild-drill.json",
+    "stopped_volume_restore_drill": "last-stopped-volume-restore-drill.json",
+    "scheduled_check": "last-scheduled-check.json",
+}
 SERVICES = (
     "ssh",
     "ufw",
@@ -93,6 +100,16 @@ def postgres_status_value(data: dict[str, Any]) -> str:
     return "unknown"
 
 
+def age_seconds(timestamp: str, now: int) -> int | None:
+    if not timestamp:
+        return None
+    try:
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return max(0, now - int(parsed.timestamp()))
+
+
 def collect() -> list[str]:
     now = int(datetime.now(UTC).timestamp())
     lines = [
@@ -164,6 +181,32 @@ def collect() -> list[str]:
             metric("nutsnews_backend_backup_storage_quota_configured", 0 if quota_status == "not_configured" else 1),
         ]
     )
+
+    rabbitmq_recovery = {
+        stage: read_json(RABBITMQ_RECOVERY_STATE_DIR / filename)
+        for stage, filename in RABBITMQ_RECOVERY_STATUS_FILES.items()
+    }
+    lines.extend(
+        [
+            "# HELP nutsnews_backend_rabbitmq_recovery_stage_healthy Whether a RabbitMQ recovery evidence stage is healthy.",
+            "# TYPE nutsnews_backend_rabbitmq_recovery_stage_healthy gauge",
+            "# HELP nutsnews_backend_rabbitmq_recovery_stage_status Status value for a RabbitMQ recovery evidence stage.",
+            "# TYPE nutsnews_backend_rabbitmq_recovery_stage_status gauge",
+        ]
+    )
+    for stage, data in rabbitmq_recovery.items():
+        status, healthy = backup_stage_status(stage, data)
+        lines.append(metric("nutsnews_backend_rabbitmq_recovery_stage_healthy", healthy, {"stage": stage}))
+        lines.append(metric("nutsnews_backend_rabbitmq_recovery_stage_status", 1, {"stage": stage, "status": status}))
+    definition_age = age_seconds(str(rabbitmq_recovery["definition_export"].get("finished_at_utc") or ""), now)
+    if definition_age is not None:
+        lines.extend(
+            [
+                "# HELP nutsnews_backend_rabbitmq_definition_export_age_seconds Age of the last sanitized RabbitMQ definition export.",
+                "# TYPE nutsnews_backend_rabbitmq_definition_export_age_seconds gauge",
+                metric("nutsnews_backend_rabbitmq_definition_export_age_seconds", definition_age),
+            ]
+        )
 
     postgres = read_json(POSTGRES_STATE_DIR / "status.json")
     replication_health = read_json(POSTGRES_REPLICATION_HEALTH_PATH)

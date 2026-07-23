@@ -45,7 +45,12 @@ def evidence(**overrides):
             "{"
             '"backup":{"status":"healthy","freshness_status":"healthy","snapshot_id":"abc"},'
             '"verification":{"status":"healthy","snapshot_id":"abc"},'
-            '"restore_drill":{"status":"healthy","snapshot_id":"abc"}'
+            '"restore_drill":{"status":"healthy","snapshot_id":"abc"},'
+            '"rabbitmq_recovery":{'
+            '"definition_export":{"status":"healthy","finished_at_utc":"2026-07-17T00:16:22Z"},'
+            '"clean_rebuild_drill":{"status":"healthy","finished_at_utc":"2026-07-17T00:20:22Z"},'
+            '"stopped_volume_restore_drill":{"status":"healthy","finished_at_utc":"2026-07-17T00:30:22Z"}'
+            "}"
             "}\n"
         ),
         "metrics_textfile": command("present mtime=1784255100 size=2872 path=/var/lib/nutsnews/metrics/nutsnews.prom\n"),
@@ -97,6 +102,9 @@ class BackendRecoveryWorkflowTests(unittest.TestCase):
         self.assertEqual(by_name["alloy_config"]["status"], "healthy")
         self.assertEqual(by_name["backup_action_surface"]["status"], "healthy")
         self.assertEqual(by_name["backup_freshness"]["status"], "healthy")
+        self.assertEqual(by_name["rabbitmq_definition_export"]["status"], "healthy")
+        self.assertEqual(by_name["rabbitmq_clean_rebuild_drill"]["status"], "healthy")
+        self.assertEqual(by_name["rabbitmq_stopped_volume_restore_drill"]["status"], "healthy")
         self.assertEqual(by_name["metrics_textfile"]["status"], "healthy")
         self.assertEqual(by_name["ops_dashboard_snapshot"]["status"], "healthy")
         self.assertEqual(by_name["recovery_last_run"]["status"], "not_configured")

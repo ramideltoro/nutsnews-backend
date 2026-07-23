@@ -222,6 +222,8 @@ class BackendMetricsTests(unittest.TestCase):
             state_dir.mkdir()
             postgres_dir = Path(tmpdir) / "postgres"
             postgres_dir.mkdir()
+            rabbitmq_dir = Path(tmpdir) / "rabbitmq-recovery"
+            rabbitmq_dir.mkdir()
             (state_dir / "last-backup.json").write_text(
                 json.dumps(
                     {
@@ -249,8 +251,15 @@ class BackendMetricsTests(unittest.TestCase):
                 json.dumps({"replication": {"lag_status": "healthy", "max_lag_seconds": 12, "blockers": []}}),
                 encoding="utf-8",
             )
+            (rabbitmq_dir / "last-definition-export.json").write_text(
+                json.dumps({"status": "healthy", "finished_at_utc": "2026-07-17T00:16:22Z"}),
+                encoding="utf-8",
+            )
+            (rabbitmq_dir / "last-clean-rebuild-drill.json").write_text(json.dumps({"status": "healthy"}), encoding="utf-8")
+            (rabbitmq_dir / "last-stopped-volume-restore-drill.json").write_text(json.dumps({"status": "healthy"}), encoding="utf-8")
             with (
                 mock.patch.object(metrics, "BACKUP_STATE_DIR", state_dir),
+                mock.patch.object(metrics, "RABBITMQ_RECOVERY_STATE_DIR", rabbitmq_dir),
                 mock.patch.object(metrics, "POSTGRES_STATE_DIR", postgres_dir),
                 mock.patch.object(metrics, "POSTGRES_REPLICATION_HEALTH_PATH", postgres_dir / "replication-health.json"),
                 mock.patch.object(metrics, "shell", return_value="0"),
@@ -264,6 +273,8 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertIn('nutsnews_backend_postgres_replication_lag_configured{status="healthy"} 1', output)
         self.assertIn("nutsnews_backend_postgres_replication_blockers 0", output)
         self.assertIn("nutsnews_backend_postgres_replication_max_lag_seconds 12", output)
+        self.assertIn('nutsnews_backend_rabbitmq_recovery_stage_healthy{stage="definition_export"} 1', output)
+        self.assertIn("nutsnews_backend_rabbitmq_definition_export_age_seconds", output)
         self.assertNotIn("password", output.lower())
 
 

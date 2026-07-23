@@ -33,6 +33,11 @@ class BackendBackupTests(unittest.TestCase):
         secrets = next(item for item in matrix["services"] if item["id"] == "runtime_secrets")
         self.assertEqual(secrets["backup_method"], "excluded_from_restic")
         self.assertIn("Secret values", secrets["exclusion_rationale"])
+        rabbitmq = next(item for item in matrix["services"] if item["id"] == "rabbitmq_broker_state")
+        self.assertNotIn("/var/lib/nutsnews/rabbitmq", rabbitmq["data_sources"])
+        self.assertIn("/var/lib/nutsnews/rabbitmq-recovery", rabbitmq["data_sources"])
+        self.assertIn("live_message_store_excluded", rabbitmq["backup_method"])
+        self.assertIn("running-node message-store copies can be inconsistent", rabbitmq["exclusion_rationale"])
 
     def test_existing_backup_paths_only_returns_existing_restic_sources(self):
         runner = load_runner()
@@ -55,10 +60,12 @@ class BackendBackupTests(unittest.TestCase):
         runner = load_runner()
         with tempfile.TemporaryDirectory() as tmpdir:
             args = type("Args", (), {"state_dir": Path(tmpdir)})()
-            status = runner.action_status(args)
+            with mock.patch.object(runner, "RABBITMQ_RECOVERY_STATE_DIR", Path(tmpdir) / "rabbitmq-recovery"):
+                status = runner.action_status(args)
         self.assertEqual(status["backup"]["status"], "not_configured")
         self.assertEqual(status["verification"]["status"], "not_configured")
         self.assertEqual(status["restore_drill"]["status"], "not_configured")
+        self.assertEqual(status["rabbitmq_recovery"]["definition_export"]["status"], "not_configured")
 
     def test_restic_env_prefixes_s3_https_repository_without_mutating_parent_env(self):
         runner = load_runner()

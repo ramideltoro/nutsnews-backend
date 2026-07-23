@@ -196,6 +196,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_worker_uplift_rabbitmq_network_security.py
 
+      - name: Validate worker uplift RabbitMQ recovery
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_rabbitmq_recovery.py
+
       - name: Validate backend database provider switch
         shell: bash
         run: python3 scripts/validate_backend_database_provider_switch.py

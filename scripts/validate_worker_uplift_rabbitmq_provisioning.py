@@ -292,12 +292,20 @@ def main() -> int:
         errors.append("backup matrix must include rabbitmq_broker_state")
     else:
         data_sources = set(rabbitmq_backup.get("data_sources", []))
-        if "/var/lib/nutsnews/rabbitmq" not in data_sources:
-            errors.append("RabbitMQ backup matrix must include persistent data dir")
+        if "/var/lib/nutsnews/rabbitmq" in data_sources:
+            errors.append("RabbitMQ backup matrix must exclude live persistent data dir from normal Restic paths")
+        if "/var/lib/nutsnews/rabbitmq-recovery" not in data_sources:
+            errors.append("RabbitMQ backup matrix must include recovery metadata state dir")
         if "/etc/nutsnews-rabbitmq/rabbitmq.env" in data_sources:
             errors.append("RabbitMQ backup matrix must not include secret env file")
-        if "PostgreSQL" not in rabbitmq_backup.get("backup_method", "") and "postgresql" not in rabbitmq_backup.get("backup_method", ""):
-            errors.append("RabbitMQ backup method must mention PostgreSQL recovery source")
+        backup_method = rabbitmq_backup.get("backup_method", "")
+        restore_method = rabbitmq_backup.get("restore_method", "")
+        if "live_message_store_excluded" not in backup_method:
+            errors.append("RabbitMQ backup method must exclude live message-store snapshots")
+        if "PostgreSQL" not in restore_method and "postgresql" not in restore_method:
+            errors.append("RabbitMQ restore method must mention PostgreSQL recovery source")
+        if "stopped_volume_restore_only_from_quiesced_snapshot" not in restore_method:
+            errors.append("RabbitMQ restore method must constrain message-store restore to quiesced snapshots")
 
     if "python3 scripts/validate_worker_uplift_rabbitmq_provisioning.py" not in checks:
         errors.append("Backend Checks must run RabbitMQ provisioning validator")

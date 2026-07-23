@@ -44,6 +44,7 @@ Provider snapshots are supplemental only. They are useful for fast whole-server 
 | Host baseline config | This repo through Ansible | Back up selected host config for evidence; protected apply remains preferred restore |
 | Ops dashboard snapshots | Generated on host | Back up `status.json` for incident evidence; collectors can regenerate |
 | Backup status metadata | Backup runner | Back up `/var/lib/nutsnews/backups` status JSON |
+| RabbitMQ topology recovery | Backend issue #83 | Back up non-secret config and `/var/lib/nutsnews/rabbitmq-recovery`; live message-store snapshots are excluded from normal Restic jobs |
 | Application uploads or local files | Future backend issue | Must use off-server backups before production use |
 | PostgreSQL data | Backend issues #13 and #113 | Host state is covered by encrypted off-server restic paths; database readiness for primary use requires a backend-produced backup restore proof artifact, not only a Supabase dump restore |
 | Logs | Host log retention plus future off-server policy | Back up `/var/log/nutsnews` only; avoid unbounded raw logs |
@@ -183,6 +184,13 @@ The health report and ops dashboard expose these statuses separately:
 - stale backup;
 - unverified latest snapshot;
 - storage/quota warning.
+
+RabbitMQ recovery evidence is also surfaced through
+`/usr/local/sbin/nutsnews-backup status` under `rabbitmq_recovery`. Definition
+exports and drill status live in `/var/lib/nutsnews/rabbitmq-recovery`.
+Restoring live RabbitMQ queue files is not part of normal Restic backup/restore;
+use the worker-uplift RabbitMQ recovery runbook for the constrained
+stopped/quiesced message-store path.
 
 ## Verification Commands
 

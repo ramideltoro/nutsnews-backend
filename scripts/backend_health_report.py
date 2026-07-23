@@ -398,6 +398,7 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
     backup = backup_status.get("backup", {})
     verification = backup_status.get("verification", {})
     restore_drill = backup_status.get("restore_drill", {})
+    rabbitmq_recovery = backup_status.get("rabbitmq_recovery", {})
     quota = backup.get("quota", {}) if isinstance(backup, dict) else {}
 
     checks.extend(
@@ -424,6 +425,20 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
             },
         ]
     )
+    if isinstance(rabbitmq_recovery, dict):
+        for check_name, section_name in (
+            ("rabbitmq_definition_export", "definition_export"),
+            ("rabbitmq_clean_rebuild_drill", "clean_rebuild_drill"),
+            ("rabbitmq_stopped_volume_restore_drill", "stopped_volume_restore_drill"),
+        ):
+            section = rabbitmq_recovery.get(section_name, {})
+            checks.append(
+                {
+                    "name": check_name,
+                    "status": status_from_backup_section(section if isinstance(section, dict) else {}),
+                    "summary": f"finished_at={section.get('finished_at_utc') if isinstance(section, dict) else None}",
+                }
+            )
 
     cleanup_status_raw = command_stdout(report, "cleanup_status").strip()
     if cleanup_status_raw == "not_configured" or not cleanup_status_raw:

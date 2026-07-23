@@ -109,6 +109,14 @@
     group: root
     mode: "0700"
 
+- name: Ensure RabbitMQ recovery state directory exists
+  ansible.builtin.file:
+    path: "{{ backend_rabbitmq_recovery_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
 - name: Remove legacy probe state from RabbitMQ broker data directory
   ansible.builtin.file:
     path: "{{ backend_rabbitmq_legacy_probe_state_path }}"
@@ -191,6 +199,15 @@
     group: root
     mode: "0755"
   register: backend_rabbitmq_network_check_file
+
+- name: Install RabbitMQ recovery helper
+  ansible.builtin.copy:
+    src: nutsnews_rabbitmq_recovery.py
+    dest: "{{ backend_rabbitmq_recovery_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  register: backend_rabbitmq_recovery_file
 
 - name: Render RabbitMQ worker topology definition
   ansible.builtin.template:
@@ -467,6 +484,19 @@
     - backend_rabbitmq_topology_enabled | bool
     - not ansible_check_mode
 
+- name: Capture RabbitMQ recovery status summary
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_rabbitmq_recovery_path }}"
+      - status
+      - --state-dir
+      - "{{ backend_rabbitmq_recovery_state_dir }}"
+  register: backend_rabbitmq_recovery_status
+  changed_when: false
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - not ansible_check_mode
+
 - name: Report RabbitMQ provisioning summary
   ansible.builtin.debug:
     msg:
@@ -487,3 +517,4 @@
       durable_probe_ran: "{{ backend_rabbitmq_run_durable_probe_now | default(false) }}"
       health: "{{ backend_rabbitmq_health.stdout_lines | default([]) }}"
       network_security: "{{ backend_rabbitmq_network_security.stdout | default('{}') }}"
+      recovery_status: "{{ backend_rabbitmq_recovery_status.stdout | default('{}') }}"

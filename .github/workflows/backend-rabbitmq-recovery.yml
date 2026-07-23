@@ -1,0 +1,128 @@
+name: Backend RabbitMQ Recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Fixed RabbitMQ recovery action.
+        required: true
+        default: status
+        type: choice
+        options:
+          - status
+          - export-definitions
+          - clean-rebuild-drill
+          - stopped-volume-restore-drill
+          - scheduled-check
+      confirm_target:
+        description: For non-status actions, type backend.nutsnews.com.
+        required: false
+        default: ""
+        type: string
+  schedule:
+    - cron: "23 9 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-rabbitmq-recovery
+  cancel-in-progress: false
+
+jobs:
+  rabbitmq-recovery:
+    name: RabbitMQ recovery evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production-backend
+
+    steps:
+      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ACTION: ${{ github.event_name == 'schedule' && 'scheduled-check' || inputs.action }}
+          CONFIRM_TARGET: ${{ inputs.confirm_target }}
+        run: |
+          set -euo pipefail
+
+          case "$ACTION" in
+            status|export-definitions|clean-rebuild-drill|stopped-volume-restore-drill|scheduled-check) ;;
+            *)
+              echo "Unsupported RabbitMQ recovery action: $ACTION" >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ "$EVENT_NAME" != "schedule" && "$ACTION" != "status" && "$CONFIRM_TARGET" != "backend.nutsnews.com" ]]; then
+            echo "RabbitMQ recovery action $ACTION requires confirm_target to be exactly backend.nutsnews.com." >&2
+            exit 1
+          fi
+
+      - name: Prepare SSH material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for secret_name in NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
+            if [[ -z "${!secret_name}" ]]; then
+              echo "Missing required production-backend environment secret: $secret_name" >&2
+              missing=1
+            fi
+          done
+          if [[ "$missing" -ne 0 ]]; then
+            exit "$missing"
+          fi
+
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Run fixed RabbitMQ recovery action
+        shell: bash
+        env:
+          ACTION: ${{ github.event_name == 'schedule' && 'scheduled-check' || inputs.action }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh_base=(
+            ssh
+            -i "$HOME/.ssh/nutsnews_backend"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+          )
+
+          "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "sudo -n /usr/local/sbin/nutsnews-rabbitmq-recovery '$ACTION'" \
+            | tee "$RUNNER_TEMP/backend-rabbitmq-recovery-report.json"
+
+          if [[ "$ACTION" != "status" ]]; then
+            "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+              "sudo -n /usr/local/sbin/nutsnews-rabbitmq-recovery status" \
+              | tee "$RUNNER_TEMP/backend-rabbitmq-recovery-status.json"
+          fi
+
+      - name: Upload RabbitMQ recovery report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-rabbitmq-recovery-report
+          path: |
+            ${{ runner.temp }}/backend-rabbitmq-recovery-report.json
+            ${{ runner.temp }}/backend-rabbitmq-recovery-status.json
+          if-no-files-found: ignore

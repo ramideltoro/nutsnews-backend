@@ -23,7 +23,7 @@ CONFIRM_TARGET = "backend.nutsnews.com"
 VALID_STATUSES = {"healthy", "warning", "critical", "not_configured", "unknown"}
 RABBITMQ_PROBE_PATH = "/usr/local/sbin/nutsnews-rabbitmq-probe"
 RABBITMQ_ENV_PATH = "/etc/nutsnews-rabbitmq/rabbitmq.env"
-RABBITMQ_HOST_RESTART_STATE_PATH = "/var/lib/nutsnews/rabbitmq/host-restart-probe.json"
+RABBITMQ_HOST_RESTART_STATE_PATH = "/var/lib/nutsnews/rabbitmq-probes/host-restart-probe.json"
 RABBITMQ_HOST_RESTART_QUEUE = "worker.uplift.probe.host-restart"
 RABBITMQ_PROBE_TIMEOUT_SECONDS = 180
 

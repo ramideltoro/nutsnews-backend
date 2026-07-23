@@ -76,6 +76,10 @@ def main() -> int:
         errors.append("RabbitMQ defaults must set 20GB disk free limit")
     if "backend_rabbitmq_nofile: 65536" not in defaults:
         errors.append("RabbitMQ defaults must set nofile to 65536")
+    if 'backend_rabbitmq_probe_state_dir: /var/lib/nutsnews/rabbitmq-probes' not in defaults:
+        errors.append("RabbitMQ probe state must live outside the broker data mount")
+    if 'backend_rabbitmq_container_uid: "999"' not in defaults or 'backend_rabbitmq_container_gid: "999"' not in defaults:
+        errors.append("RabbitMQ defaults must declare the approved container UID/GID")
 
     for required in (
         'restart: unless-stopped',
@@ -126,6 +130,15 @@ def main() -> int:
         errors.append("RabbitMQ role must validate Compose config")
     if "Pull pinned RabbitMQ image during protected apply" not in tasks:
         errors.append("RabbitMQ role must pull the pinned image during protected apply")
+    data_tree_task = tasks.split("Repair RabbitMQ persistent data tree ownership", 1)[-1].split("- name:", 1)[0]
+    if "recurse: true" not in data_tree_task or 'mode: "u+rwX"' not in data_tree_task:
+        errors.append("RabbitMQ role must recursively repair broker data ownership and owner write bits before runtime probes")
+    if "backend_rabbitmq_data_tree_permissions is changed" not in tasks:
+        errors.append("RabbitMQ durable probe must run after broker data ownership repairs")
+    if "backend_rabbitmq_legacy_probe_state_file is changed" not in tasks:
+        errors.append("RabbitMQ durable probe must run after removing legacy broker-data probe state")
+    if "Remove legacy probe state from RabbitMQ broker data directory" not in tasks:
+        errors.append("RabbitMQ role must remove legacy root-owned probe state from broker data")
     if "ExecStartPre=/usr/bin/docker compose" in tasks:
         errors.append("RabbitMQ systemd unit must not require registry access during host restart")
     headroom_task = tasks.split("Capture root filesystem free bytes before RabbitMQ bootstrap", 1)[-1].split("- name:", 1)[0]
@@ -164,6 +177,7 @@ def main() -> int:
         "run_rabbitmq_probe_action",
         "rabbitmq_host_reboot_probe",
         "RabbitMQ host-restart probe publish failed",
+        "/var/lib/nutsnews/rabbitmq-probes/host-restart-probe.json",
     ):
         if required not in controlled_maintenance:
             errors.append(f"controlled maintenance reboot path missing RabbitMQ host-restart probe support: {required}")

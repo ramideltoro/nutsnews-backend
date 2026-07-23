@@ -85,6 +85,20 @@ class AnsibleCheckModeGuardTests(unittest.TestCase):
         self.assertIn("not ansible_check_mode", service_start_block)
         self.assertIn("no_log: true", worker_api)
 
+    def test_rabbitmq_repairs_data_tree_before_runtime_probe(self):
+        defaults = read_role_file("ansible/roles/backend_rabbitmq/defaults/main.yml")
+        tasks = read_role_file("ansible/roles/backend_rabbitmq/tasks/main.yml")
+        self.assertIn('backend_rabbitmq_container_uid: "999"', defaults)
+        self.assertIn('backend_rabbitmq_container_gid: "999"', defaults)
+        self.assertIn("backend_rabbitmq_probe_state_dir: /var/lib/nutsnews/rabbitmq-probes", defaults)
+        self.assertIn("Repair RabbitMQ persistent data tree ownership", tasks)
+        self.assertIn("recurse: true", tasks)
+        self.assertIn('mode: "u+rwX"', tasks)
+        self.assertIn("register: backend_rabbitmq_data_tree_permissions", tasks)
+        self.assertIn("backend_rabbitmq_data_tree_permissions is changed", tasks)
+        self.assertIn("Remove legacy probe state from RabbitMQ broker data directory", tasks)
+        self.assertIn("backend_rabbitmq_legacy_probe_state_file is changed", tasks)
+
 
 if __name__ == "__main__":
     unittest.main()

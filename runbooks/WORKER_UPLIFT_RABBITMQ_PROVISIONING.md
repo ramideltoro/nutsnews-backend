@@ -1,11 +1,18 @@
 # Worker-Uplift RabbitMQ Provisioning
 
-This runbook covers tracking issue `ramideltoro/nutsnews-worker#80`.
+This runbook covers tracking issues `ramideltoro/nutsnews-worker#80` and
+`ramideltoro/nutsnews-worker#81`.
 
 The backend-owned provisioning source is:
 
 ```text
 ansible/roles/backend_rabbitmq
+```
+
+The reviewed, non-secret topology definition is rendered from:
+
+```text
+ansible/roles/backend_rabbitmq/templates/worker-uplift-topology.json.j2
 ```
 
 Validate it with:
@@ -17,9 +24,11 @@ python3 scripts/validate_worker_uplift_rabbitmq_provisioning.py
 ## Scope
 
 This provisions RabbitMQ as a persistent Docker Compose service on
-`backend.nutsnews.com` through the protected backend Ansible workflow. It does
-not change the active legacy Cloudflare Worker code, schedules, bindings,
-secrets, or deployment.
+`backend.nutsnews.com` through the protected backend Ansible workflow. It also
+bootstraps the worker-uplift vhost, exchanges, durable classic queues, retry
+queues, DLQs, policies, route-scoped users, and permissions from source control.
+It does not change the active legacy Cloudflare Worker code, schedules,
+bindings, secrets, or deployment.
 
 The queue type, digest, resource limits, and access boundary come from:
 
@@ -59,10 +68,17 @@ Required RabbitMQ Environment names:
 | `RABBITMQ_BREAK_GLASS_ADMIN_USERNAME` | variable |
 | `RABBITMQ_ERLANG_COOKIE` | secret |
 | `RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD` | secret |
+| `RABBITMQ_MONITORING_USERNAME` | variable |
+| `RABBITMQ_MONITORING_PASSWORD` | secret |
+| `RABBITMQ_*_CONSUMER_USERNAME` / `RABBITMQ_*_PUBLISHER_USERNAME` | variables |
+| `RABBITMQ_*_CONSUMER_PASSWORD` / `RABBITMQ_*_PUBLISHER_PASSWORD` | secrets |
 
-Secret values are written only to the root-owned host environment file used by
-Compose. They are not committed, printed in Ansible output, passed as process
-arguments, or uploaded as workflow artifacts.
+The route identity names and secret names are recorded in
+`docs/worker-uplift-runtime-identities.json`. Break-glass admin credentials are
+written to the root-owned Compose env file. Service identity credentials are
+written to `/etc/nutsnews-rabbitmq/topology.env`, which is root-only and is not
+mounted into the RabbitMQ container. Secret values are not committed, printed in
+Ansible output, passed as process arguments, or uploaded as workflow artifacts.
 
 The protected apply path pulls the pinned RabbitMQ image before starting or
 restarting the service. The systemd unit uses the already-pulled image so a host
@@ -73,6 +89,45 @@ repairs this tree to the RabbitMQ container UID/GID before runtime probes, so
 queue files remain writable after restores, partial applies, or ownership drift.
 Root-run probe state lives outside the broker mount in
 `/var/lib/nutsnews/rabbitmq-probes`.
+
+## Topology Bootstrap
+
+The role installs:
+
+```text
+/usr/local/sbin/nutsnews-rabbitmq-topology
+/etc/nutsnews-rabbitmq/worker-uplift-topology.json
+/etc/nutsnews-rabbitmq/topology.env
+```
+
+The bootstrap command is idempotent and non-destructive. It creates missing
+resources, removes the default `guest` user, removes managed users' permissions
+from non-target vhosts, and reports drift instead of deleting or recreating
+queues whose immutable arguments differ.
+
+Read-only drift check:
+
+```bash
+sudo -n /usr/local/sbin/nutsnews-rabbitmq-topology check \
+  --env /etc/nutsnews-rabbitmq/rabbitmq.env \
+  --credentials-env /etc/nutsnews-rabbitmq/topology.env \
+  --definition /etc/nutsnews-rabbitmq/worker-uplift-topology.json
+```
+
+Permission matrix check:
+
+```bash
+sudo -n /usr/local/sbin/nutsnews-rabbitmq-topology permissions \
+  --env /etc/nutsnews-rabbitmq/rabbitmq.env \
+  --credentials-env /etc/nutsnews-rabbitmq/topology.env \
+  --definition /etc/nutsnews-rabbitmq/worker-uplift-topology.json
+```
+
+The protected apply also runs `probe-transfers` while queues are empty. It
+publishes and cleans up probe messages for every route, verifies retry and DLQ
+routing, and verifies an unroutable retry target leaves the source message
+visible until a confirmed target publish succeeds. The probe refuses to run on
+non-empty stage queues.
 
 ## Verification
 
@@ -117,5 +172,5 @@ protected backend workflow in check mode, then apply mode after
 recovery issue explicitly approves data removal.
 
 Broker queue contents are not the only recovery source. If broker state is lost,
-restore or recreate topology, then replay pending work from PostgreSQL
-outbox/reconciliation state.
+restore or recreate topology with the source-controlled bootstrap, then replay
+pending work from PostgreSQL outbox/reconciliation state.

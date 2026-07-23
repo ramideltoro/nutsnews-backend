@@ -15,6 +15,9 @@ backend_rabbitmq_compose_path: "{{ backend_rabbitmq_base_dir }}/compose.yml"
 backend_rabbitmq_config_path: "{{ backend_rabbitmq_config_dir }}/rabbitmq.conf"
 backend_rabbitmq_enabled_plugins_path: "{{ backend_rabbitmq_config_dir }}/enabled_plugins"
 backend_rabbitmq_probe_path: /usr/local/sbin/nutsnews-rabbitmq-probe
+backend_rabbitmq_topology_path: /usr/local/sbin/nutsnews-rabbitmq-topology
+backend_rabbitmq_topology_definition_path: "{{ backend_rabbitmq_config_dir }}/worker-uplift-topology.json"
+backend_rabbitmq_topology_env_path: "{{ backend_rabbitmq_config_dir }}/topology.env"
 backend_rabbitmq_probe_state_dir: /var/lib/nutsnews/rabbitmq-probes
 backend_rabbitmq_probe_state_path: "{{ backend_rabbitmq_probe_state_dir }}/durable-probe.json"
 backend_rabbitmq_legacy_probe_state_path: "{{ backend_rabbitmq_data_dir }}/durable-probe.json"
@@ -39,3 +42,40 @@ backend_rabbitmq_channel_max: 128
 backend_rabbitmq_management_load_definitions: false
 backend_rabbitmq_durable_probe_enabled: true
 backend_rabbitmq_durable_probe_queue: worker.uplift.probe.durable
+backend_rabbitmq_topology_enabled: true
+backend_rabbitmq_topology_transfer_probe_enabled: true
+backend_rabbitmq_topology_rotate_passwords: false
+backend_rabbitmq_topology_environment: {}
+backend_rabbitmq_topology_required_environment_names:
+  - RABBITMQ_BREAK_GLASS_ADMIN_USERNAME
+  - RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD
+  - RABBITMQ_MONITORING_USERNAME
+  - RABBITMQ_MONITORING_PASSWORD
+  - RABBITMQ_SCHEDULER_PUBLISHER_USERNAME
+  - RABBITMQ_SCHEDULER_PUBLISHER_PASSWORD
+  - RABBITMQ_FETCHER_CONSUMER_USERNAME
+  - RABBITMQ_FETCHER_CONSUMER_PASSWORD
+  - RABBITMQ_FETCHER_PUBLISHER_USERNAME
+  - RABBITMQ_FETCHER_PUBLISHER_PASSWORD
+  - RABBITMQ_CANONICALIZER_CONSUMER_USERNAME
+  - RABBITMQ_CANONICALIZER_CONSUMER_PASSWORD
+  - RABBITMQ_CANONICALIZER_PUBLISHER_USERNAME
+  - RABBITMQ_CANONICALIZER_PUBLISHER_PASSWORD
+  - RABBITMQ_ENRICHMENT_CONSUMER_USERNAME
+  - RABBITMQ_ENRICHMENT_CONSUMER_PASSWORD
+  - RABBITMQ_ENRICHMENT_PUBLISHER_USERNAME
+  - RABBITMQ_ENRICHMENT_PUBLISHER_PASSWORD
+  - RABBITMQ_APPROVAL_CONSUMER_USERNAME
+  - RABBITMQ_APPROVAL_CONSUMER_PASSWORD
+  - RABBITMQ_APPROVAL_PUBLISHER_USERNAME
+  - RABBITMQ_APPROVAL_PUBLISHER_PASSWORD
+  - RABBITMQ_TRANSLATION_CONSUMER_USERNAME
+  - RABBITMQ_TRANSLATION_CONSUMER_PASSWORD
+  - RABBITMQ_TRANSLATION_PUBLISHER_USERNAME
+  - RABBITMQ_TRANSLATION_PUBLISHER_PASSWORD
+  - RABBITMQ_PERSISTENCE_CONSUMER_USERNAME
+  - RABBITMQ_PERSISTENCE_CONSUMER_PASSWORD
+  - RABBITMQ_PERSISTENCE_PUBLISHER_USERNAME
+  - RABBITMQ_PERSISTENCE_PUBLISHER_PASSWORD
+  - RABBITMQ_PUBLICATION_CONSUMER_USERNAME
+  - RABBITMQ_PUBLICATION_CONSUMER_PASSWORD

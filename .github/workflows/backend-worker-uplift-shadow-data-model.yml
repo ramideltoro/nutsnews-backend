@@ -1,0 +1,221 @@
+name: Backend Worker-Uplift Shadow Data Model
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Run offline static checks, protected catalog status, or protected role permission proof.
+        required: true
+        default: offline
+        type: choice
+        options:
+          - offline
+          - status
+          - permissions
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-worker-uplift-shadow-data-model
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Worker-uplift shadow data model
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate inputs
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            offline|status|permissions) ;;
+            *) echo "Unsupported mode: $MODE" >&2; exit 1 ;;
+          esac
+
+      - name: Run offline static check
+        if: inputs.mode == 'offline'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/backend_worker_uplift_shadow_model_check.py \
+            --offline \
+            --output "$RUNNER_TEMP/backend-worker-uplift-shadow-data-model.json"
+
+      - name: Validate protected credentials
+        if: inputs.mode != 'offline'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in \
+            NUTSNEWS_BACKEND_SSH_PRIVATE_KEY \
+            NUTSNEWS_BACKEND_KNOWN_HOSTS \
+            NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD \
+            NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD \
+            NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_PASSWORD \
+            NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_PASSWORD \
+            NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_PASSWORD \
+            NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_PASSWORD \
+            NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_PASSWORD \
+            NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_PASSWORD \
+            NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_PASSWORD
+          do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing required production-backend secret: $name" >&2
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Prepare backend tunnel
+        if: inputs.mode != 'offline'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F "$NUTSNEWS_BACKEND_HOST" -f "$HOME/.ssh/known_hosts" > /dev/null
+
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh -fN -L 15432:127.0.0.1:5432 \
+            -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST"
+
+      - name: Build masked database URLs
+        if: inputs.mode != 'offline'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE || 'nutsnews_primary_shadow' }}
+          NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_USERNAME || 'nutsnews_worker_uplift_scheduler' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_USERNAME || 'nutsnews_worker_uplift_fetcher' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_USERNAME || 'nutsnews_worker_uplift_canonicalizer' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_USERNAME || 'nutsnews_worker_uplift_enrichment' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_USERNAME || 'nutsnews_worker_uplift_approval' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_USERNAME || 'nutsnews_worker_uplift_translation' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_USERNAME || 'nutsnews_worker_uplift_persistence' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_USERNAME || 'nutsnews_worker_uplift_publication' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+          from urllib.parse import quote
+
+          database = os.environ["NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE"].strip()
+          if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", database):
+              raise SystemExit("NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE must be a safe PostgreSQL identifier")
+          github_env = Path(os.environ["GITHUB_ENV"])
+
+          def url_for(user: str, password: str) -> str:
+              return f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}@127.0.0.1:15432/{quote(database, safe='')}"
+
+          def export_secret_url(name: str, value: str) -> None:
+              print(f"::add-mask::{value}")
+              with github_env.open("a", encoding="utf-8") as env_file:
+                  env_file.write(f"{name}={value}\n")
+
+          validation_url = url_for("nutsnews_migration_validation", os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD"])
+          export_secret_url("NUTSNEWS_BACKEND_WORKER_UPLIFT_VALIDATION_DB_URL", validation_url)
+
+          for stage in ("scheduler", "fetcher", "canonicalizer", "enrichment", "approval", "translation", "persistence", "publication"):
+              prefix = f"NUTSNEWS_WORKER_UPLIFT_POSTGRES_{stage.upper()}"
+              username = os.environ[f"{prefix}_USERNAME"].strip()
+              password = os.environ[f"{prefix}_PASSWORD"]
+              if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", username):
+                  raise SystemExit(f"{prefix}_USERNAME must be a safe PostgreSQL identifier")
+              url = url_for(username, password)
+              export_secret_url(f"{prefix}_DB_URL", url)
+          PY
+
+      - name: Install PostgreSQL client
+        if: inputs.mode != 'offline'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Run protected shadow model check
+        if: inputs.mode != 'offline'
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          args=(
+            --target-db-url-env NUTSNEWS_BACKEND_WORKER_UPLIFT_VALIDATION_DB_URL
+            --enforce
+            --output "$RUNNER_TEMP/backend-worker-uplift-shadow-data-model.json"
+          )
+          if [[ "$MODE" == "permissions" ]]; then
+            args+=(--permission-checks)
+          fi
+          python3 scripts/backend_worker_uplift_shadow_model_check.py "${args[@]}"
+
+      - name: Summarize safe metadata
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Worker-uplift shadow data model"
+            echo
+            echo "- Mode: \`${{ inputs.mode }}\`"
+            echo "- Report artifact contains safe metadata only."
+            echo "- No database URL, password, token, payload, article body, prompt, or provider response is printed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload shadow model report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-worker-uplift-shadow-data-model
+          path: ${{ runner.temp }}/backend-worker-uplift-shadow-data-model.json
+          if-no-files-found: ignore

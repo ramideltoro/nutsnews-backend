@@ -86,6 +86,59 @@ backend_postgres_validation_password: ""
 backend_postgres_replication_password: ""
 backend_postgres_app_rehearsal_password: ""
 backend_postgres_worker_api_password: ""
+backend_worker_uplift_postgres_enabled: false
+backend_worker_uplift_postgres_database: "{{ backend_postgres_primary_shadow_database }}"
+backend_worker_uplift_postgres_final_schema: worker_uplift_final
+backend_worker_uplift_postgres_views_schema: worker_uplift_views
+backend_worker_uplift_postgres_scheduler_user: nutsnews_worker_uplift_scheduler
+backend_worker_uplift_postgres_fetcher_user: nutsnews_worker_uplift_fetcher
+backend_worker_uplift_postgres_canonicalizer_user: nutsnews_worker_uplift_canonicalizer
+backend_worker_uplift_postgres_enrichment_user: nutsnews_worker_uplift_enrichment
+backend_worker_uplift_postgres_approval_user: nutsnews_worker_uplift_approval
+backend_worker_uplift_postgres_translation_user: nutsnews_worker_uplift_translation
+backend_worker_uplift_postgres_persistence_user: nutsnews_worker_uplift_persistence
+backend_worker_uplift_postgres_publication_user: nutsnews_worker_uplift_publication
+backend_worker_uplift_postgres_scheduler_password: ""
+backend_worker_uplift_postgres_fetcher_password: ""
+backend_worker_uplift_postgres_canonicalizer_password: ""
+backend_worker_uplift_postgres_enrichment_password: ""
+backend_worker_uplift_postgres_approval_password: ""
+backend_worker_uplift_postgres_translation_password: ""
+backend_worker_uplift_postgres_persistence_password: ""
+backend_worker_uplift_postgres_publication_password: ""
+backend_worker_uplift_postgres_stage_roles:
+  - stage: scheduler
+    schema: worker_uplift_scheduler
+    user: "{{ backend_worker_uplift_postgres_scheduler_user }}"
+    password: "{{ backend_worker_uplift_postgres_scheduler_password }}"
+  - stage: fetcher
+    schema: worker_uplift_fetcher
+    user: "{{ backend_worker_uplift_postgres_fetcher_user }}"
+    password: "{{ backend_worker_uplift_postgres_fetcher_password }}"
+  - stage: canonicalizer
+    schema: worker_uplift_canonicalizer
+    user: "{{ backend_worker_uplift_postgres_canonicalizer_user }}"
+    password: "{{ backend_worker_uplift_postgres_canonicalizer_password }}"
+  - stage: enrichment
+    schema: worker_uplift_enrichment
+    user: "{{ backend_worker_uplift_postgres_enrichment_user }}"
+    password: "{{ backend_worker_uplift_postgres_enrichment_password }}"
+  - stage: approval
+    schema: worker_uplift_approval
+    user: "{{ backend_worker_uplift_postgres_approval_user }}"
+    password: "{{ backend_worker_uplift_postgres_approval_password }}"
+  - stage: translation
+    schema: worker_uplift_translation
+    user: "{{ backend_worker_uplift_postgres_translation_user }}"
+    password: "{{ backend_worker_uplift_postgres_translation_password }}"
+  - stage: persistence
+    schema: worker_uplift_persistence
+    user: "{{ backend_worker_uplift_postgres_persistence_user }}"
+    password: "{{ backend_worker_uplift_postgres_persistence_password }}"
+  - stage: publication
+    schema: worker_uplift_publication
+    user: "{{ backend_worker_uplift_postgres_publication_user }}"
+    password: "{{ backend_worker_uplift_postgres_publication_password }}"
 backend_postgres_listen_addresses: localhost
 backend_postgres_log_min_duration_statement: "500"
 backend_postgres_log_autovacuum_min_duration: "10s"

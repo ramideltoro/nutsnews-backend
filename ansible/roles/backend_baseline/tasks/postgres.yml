@@ -191,6 +191,37 @@
   become_user: postgres
   when: backend_postgres_manageable | bool
 
+- name: Validate worker-uplift PostgreSQL stage role identifiers
+  ansible.builtin.assert:
+    that:
+      - backend_worker_uplift_postgres_database is match('^[A-Za-z_][A-Za-z0-9_]*$')
+      - backend_worker_uplift_postgres_final_schema is match('^[A-Za-z_][A-Za-z0-9_]*$')
+      - backend_worker_uplift_postgres_views_schema is match('^[A-Za-z_][A-Za-z0-9_]*$')
+      - item.stage is match('^[a-z][a-z0-9_]*$')
+      - item.schema is match('^[A-Za-z_][A-Za-z0-9_]*$')
+      - item.user is match('^[A-Za-z_][A-Za-z0-9_]*$')
+      - item.password | length > 0
+    fail_msg: Worker-uplift PostgreSQL stage roles must use safe identifiers and configured passwords.
+  loop: "{{ backend_worker_uplift_postgres_stage_roles }}"
+  no_log: true
+  when:
+    - backend_postgres_manageable | bool
+    - backend_worker_uplift_postgres_enabled | bool
+
+- name: Ensure worker-uplift PostgreSQL stage roles exist
+  community.postgresql.postgresql_user:
+    name: "{{ item.user }}"
+    password: "{{ item.password }}"
+    role_attr_flags: LOGIN
+    state: present
+  loop: "{{ backend_worker_uplift_postgres_stage_roles }}"
+  become_user: postgres
+  register: backend_worker_uplift_postgres_stage_user_results
+  no_log: true
+  when:
+    - backend_postgres_manageable | bool
+    - backend_worker_uplift_postgres_enabled | bool
+
 - name: Track whether PostgreSQL role-dependent tasks can run in this check
   ansible.builtin.set_fact:
     backend_postgres_database_manageable: >-
@@ -211,6 +242,10 @@
           or (backend_postgres_replication_user_result is changed)
           or (backend_postgres_app_rehearsal_user_result is changed)
           or (backend_postgres_worker_api_user_result is changed)
+          or (
+            backend_worker_uplift_postgres_stage_user_results is defined
+            and (backend_worker_uplift_postgres_stage_user_results is changed)
+          )
         )
       }}
   when: backend_postgres_manageable | bool
@@ -335,6 +370,21 @@
     - backend_postgres_privilege_roles_manageable | default(false) | bool
     - not ansible_check_mode
 
+- name: Allow worker-uplift stage roles to connect to the future-primary shadow database
+  community.postgresql.postgresql_privs:
+    db: "{{ backend_worker_uplift_postgres_database }}"
+    type: database
+    objs: "{{ backend_worker_uplift_postgres_database }}"
+    privs: CONNECT
+    roles: "{{ backend_worker_uplift_postgres_stage_roles | map(attribute='user') | join(',') }}"
+    state: present
+  become_user: postgres
+  when:
+    - backend_postgres_manageable | bool
+    - backend_worker_uplift_postgres_enabled | bool
+    - backend_postgres_database_dependents_manageable | default(false) | bool
+    - backend_postgres_privilege_roles_manageable | default(false) | bool
+
 - name: Allow read-only role to use the public schema
   community.postgresql.postgresql_privs:
     db: "{{ backend_postgres_database }}"
@@ -362,6 +412,18 @@
     - backend_postgres_manageable | bool
     - backend_postgres_database_dependents_manageable | default(false) | bool
     - backend_postgres_privilege_roles_manageable | default(false) | bool
+
+- name: Install worker-uplift shadow PostgreSQL data model
+  community.postgresql.postgresql_query:
+    db: "{{ backend_worker_uplift_postgres_database }}"
+    query: "{{ lookup('ansible.builtin.template', role_path ~ '/templates/worker-uplift-shadow-data-model.sql.j2') }}"
+  become_user: postgres
+  when:
+    - backend_postgres_manageable | bool
+    - backend_worker_uplift_postgres_enabled | bool
+    - backend_postgres_database_dependents_manageable | default(false) | bool
+    - backend_postgres_privilege_roles_manageable | default(false) | bool
+    - not ansible_check_mode
 
 - name: Allow database API roles to read future-primary shadow app and worker objects
   community.postgresql.postgresql_query:
@@ -543,6 +605,14 @@
         "readonly_role": "{{ backend_postgres_readonly_user }}",
         "replication_role": "{{ backend_postgres_replication_user }}",
         "future_application_role": "{{ backend_postgres_app_user }}",
+        "worker_uplift": {
+          "enabled": {{ backend_worker_uplift_postgres_enabled | bool | to_json }},
+          "database": "{{ backend_worker_uplift_postgres_database }}",
+          "stage_schemas": {{ backend_worker_uplift_postgres_stage_roles | map(attribute='schema') | list | to_json }},
+          "final_schema": "{{ backend_worker_uplift_postgres_final_schema }}",
+          "views_schema": "{{ backend_worker_uplift_postgres_views_schema }}",
+          "direct_public_domain_writes_allowed": false
+        },
         "network_path": "ssh_tunnel_to_loopback_postgresql",
         "public_5432_allowed": false,
         "source_of_truth": "Supabase remains the only production writer until issue 119 is explicitly approved and executed.",

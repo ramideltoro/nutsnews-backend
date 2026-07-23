@@ -52,6 +52,30 @@ class FakeReadOnlyClient:
         return None
 
 
+class FakeUserClient:
+    def __init__(self, user: dict, permissions: dict | None = None) -> None:
+        self.user = user
+        self.permissions = permissions or {}
+        self.calls: list[tuple[str, str, dict | None]] = []
+
+    def request(self, method: str, path: str, payload=None, ignored_statuses=()):
+        del ignored_statuses
+        self.calls.append((method, path, payload))
+        return None
+
+    def get_or_none(self, path: str):
+        self.calls.append(("GET", path, None))
+        if "/api/vhosts/" in path:
+            return {}
+        if "/api/permissions/" in path:
+            return self.permissions
+        if path.endswith("/guest"):
+            return None
+        if "/api/users/" in path:
+            return self.user
+        return None
+
+
 class RabbitMQTopologyTests(unittest.TestCase):
     def test_definition_builds_exact_contract_topology_with_classic_limits(self):
         definition = load_definition()
@@ -109,6 +133,40 @@ class RabbitMQTopologyTests(unittest.TestCase):
         self.assertTrue(drift)
         self.assertTrue(client.calls)
         self.assertEqual({method for method, _ in client.calls}, {"GET"})
+
+    def test_ensure_user_accepts_management_api_list_tags(self):
+        report = {"changed": False, "changes": []}
+        user = {
+            "id": "break_glass_admin",
+            "username": "nutsnews_rabbitmq_admin",
+            "password": "admin-password",
+            "tags": ["administrator"],
+        }
+        client = FakeUserClient({"tags": ["administrator"]})
+
+        topology.ensure_user(client, user, report, rotate_passwords=False)
+
+        self.assertFalse(report["changed"])
+        self.assertNotIn("PUT", {method for method, _, _ in client.calls})
+
+    def test_live_drift_accepts_management_api_list_tags(self):
+        user = {
+            "id": "break_glass_admin",
+            "username": "nutsnews_rabbitmq_admin",
+            "tags": ["administrator"],
+            "permissions": {"configure": ".*", "write": ".*", "read": ".*"},
+        }
+        definition = {"vhost": "nutsnews-worker-uplift", "exchanges": []}
+        client = FakeUserClient({"tags": ["administrator"]}, user["permissions"])
+
+        with (
+            patch.object(topology, "expected_queues", return_value=[]),
+            patch.object(topology, "expected_bindings", return_value=[]),
+            patch.object(topology, "expected_policies", return_value=[]),
+        ):
+            drift = topology.live_drift(client, definition, [user])
+
+        self.assertEqual(drift, [])
 
     def test_transfer_probe_refuses_nonempty_stage_queues(self):
         definition = load_definition()

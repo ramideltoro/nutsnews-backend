@@ -390,6 +390,24 @@ def normalize_dict(value: dict[str, Any] | None) -> dict[str, Any]:
     return {str(key): item for key, item in sorted(value.items())}
 
 
+def normalize_user_tags(value: Any) -> tuple[str, ...]:
+    if value is None or value == "":
+        return ()
+    if isinstance(value, list):
+        return tuple(sorted(str(item).strip() for item in value if str(item).strip()))
+    if isinstance(value, str):
+        return tuple(sorted(item.strip() for item in value.split(",") if item.strip()))
+    return (str(value).strip(),) if str(value).strip() else ()
+
+
+def expected_user_tags(user: dict[str, Any]) -> tuple[str, ...]:
+    return normalize_user_tags(user.get("tags", []))
+
+
+def expected_user_tag_payload(user: dict[str, Any]) -> str:
+    return ",".join(expected_user_tags(user))
+
+
 def ensure_vhost(client: RabbitMQClient, definition: dict[str, Any], report: dict[str, Any]) -> None:
     vhost = definition["vhost"]
     if client.get_or_none(api_path("api", "vhosts", vhost)) is None:
@@ -400,15 +418,15 @@ def ensure_vhost(client: RabbitMQClient, definition: dict[str, Any], report: dic
 
 def ensure_user(client: RabbitMQClient, user: dict[str, Any], report: dict[str, Any], *, rotate_passwords: bool) -> None:
     current = client.get_or_none(api_path("api", "users", user["username"]))
-    expected_tags = ",".join(user.get("tags", []))
-    current_tags = ""
+    expected_tags = expected_user_tags(user)
+    current_tags: tuple[str, ...] = ()
     if isinstance(current, dict):
-        current_tags = str(current.get("tags", ""))
+        current_tags = normalize_user_tags(current.get("tags"))
     if current is None or current_tags != expected_tags or rotate_passwords:
         client.request(
             "PUT",
             api_path("api", "users", user["username"]),
-            payload={"password": user["password"], "tags": expected_tags},
+            payload={"password": user["password"], "tags": expected_user_tag_payload(user)},
         )
         report["changed"] = True
         report["changes"].append(f"upserted_user:{user['id']}")
@@ -636,7 +654,7 @@ def live_drift(
         if current is None:
             drift.append(f"missing_user:{user['id']}")
             continue
-        if str(current.get("tags", "")) != ",".join(user.get("tags", [])):
+        if normalize_user_tags(current.get("tags")) != expected_user_tags(user):
             drift.append(f"user_tags:{user['id']}")
         permissions = client.get_or_none(api_path("api", "permissions", vhost, user["username"]))
         observed = {}

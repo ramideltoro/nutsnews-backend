@@ -138,6 +138,19 @@ cost-protection flags, save status, and duration. The operation must use
 backend PostgreSQL least-privilege read access and must not require Supabase
 service-role access in backend-primary mode.
 
+Local AI dashboards use the read-only app operation `load-admin-local-ai`. A
+tokened POST to `https://backend.nutsnews.com/api/app/db/load-admin-local-ai`
+with `providerMode=backend_postgres_primary` must return one dashboard snapshot
+row containing bounded local AI `usageRunRows` from `public.ai_usage_runs` and
+bounded `recentReviewRows` from `public.article_ai_reviews`. Usage runs must be
+filtered by a validated `since` timestamp plus local-provider or positive local
+call-count criteria; recent reviews must be filtered to local-provider review
+rows. The selected fields must preserve the app contract for runtime status,
+model, fallback OpenAI calls, token totals, local AI review duration, accepted
+and rejected counts, recent review metadata, and review duration. The operation
+must use backend PostgreSQL least-privilege read access and must not require
+Supabase service-role access in backend-primary mode.
+
 ## Authorization Rules
 
 - Browser code must not receive database credentials or service-role style

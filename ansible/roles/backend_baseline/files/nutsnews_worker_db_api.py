@@ -54,6 +54,7 @@ APP_READ_OPERATIONS = {
     "load-admin-article-reviews",
     "load-admin-article-engagement",
     "load-admin-ai-usage",
+    "load-admin-local-ai",
     "load-admin-quota-usage-events",
     "load-admin-article-engagement-source-category-summary",
     "load-admin-article-engagement-article-summary",
@@ -254,6 +255,42 @@ ADMIN_AI_USAGE_RUN_COLUMNS = (
     "review_save_ok",
     "article_save_ok",
     "duration_ms",
+)
+
+ADMIN_LOCAL_AI_USAGE_RUN_COLUMNS = (
+    "id",
+    "run_started_at",
+    "run_completed_at",
+    "run_source",
+    "shard_index",
+    "ai_provider",
+    "local_ai_model",
+    "local_ai_call_count",
+    "local_ai_prompt_tokens",
+    "local_ai_completion_tokens",
+    "local_ai_total_tokens",
+    "local_ai_accepted_count",
+    "local_ai_rejected_count",
+    "local_ai_duration_ms",
+    "openai_call_count",
+    "ai_reviewed_count",
+    "duration_ms",
+)
+
+ADMIN_LOCAL_AI_REVIEW_COLUMNS = (
+    "id",
+    "reviewed_at",
+    "original_url",
+    "source",
+    "title",
+    "decision",
+    "category",
+    "positivity_score",
+    "summary",
+    "reason",
+    "ai_provider",
+    "ai_model",
+    "review_duration_ms",
 )
 
 ADMIN_TABLE_READS = {
@@ -1046,6 +1083,14 @@ def admin_ai_usage_run_columns() -> str:
     return ", ".join(ADMIN_AI_USAGE_RUN_COLUMNS)
 
 
+def admin_local_ai_usage_run_columns() -> str:
+    return ", ".join(ADMIN_LOCAL_AI_USAGE_RUN_COLUMNS)
+
+
+def admin_local_ai_review_columns() -> str:
+    return ", ".join(ADMIN_LOCAL_AI_REVIEW_COLUMNS)
+
+
 def category_clause(body: dict[str, Any], params: list[Any]) -> str:
     category = optional_string(body, "category", maximum=96)
     if category is None or category.lower() == "all":
@@ -1479,6 +1524,57 @@ def load_app_admin_ai_usage(body: dict[str, Any], store: PostgresStore) -> dict[
     }
 
 
+def load_app_admin_local_ai(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
+    since = required_iso_datetime_string(body, "since")
+    run_limit = bounded_int(
+        body,
+        "runLimit",
+        default=5000,
+        minimum=1,
+        maximum=min(store.max_limit, 5000),
+    )
+    review_limit = bounded_int(
+        body,
+        "reviewLimit",
+        default=50,
+        minimum=1,
+        maximum=min(store.max_limit, 50),
+    )
+
+    usage_run_rows = store.fetch_all(
+        f"""
+        select {admin_local_ai_usage_run_columns()}
+        from public.ai_usage_runs
+        where (ai_provider = %s or local_ai_call_count > 0)
+          and run_started_at >= %s::timestamptz
+        order by run_started_at desc nulls last, id desc
+        limit %s
+        """,
+        ("local", since, run_limit),
+    )
+    recent_review_rows = store.fetch_all(
+        f"""
+        select {admin_local_ai_review_columns()}
+        from public.article_ai_reviews
+        where ai_provider = %s
+        order by reviewed_at desc nulls last, id desc
+        limit %s
+        """,
+        ("local", review_limit),
+    )
+
+    return {
+        "rows": [
+            {
+                "usageRunRows": usage_run_rows,
+                "recentReviewRows": recent_review_rows,
+            }
+        ],
+        "rowCount": 1,
+        "generatedAt": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
+
+
 def load_app_admin_production_readiness(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
     recent_article_limit = bounded_int(
         body,
@@ -1755,6 +1851,9 @@ def handle_app_operation(operation: str, body: dict[str, Any], store: PostgresSt
 
     if operation == "load-admin-ai-usage":
         return load_app_admin_ai_usage(body, store)
+
+    if operation == "load-admin-local-ai":
+        return load_app_admin_local_ai(body, store)
 
     if operation in ADMIN_TABLE_READS:
         return load_app_admin_rows(operation, body, store)

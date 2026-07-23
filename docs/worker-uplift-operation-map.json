@@ -1,0 +1,731 @@
+{
+  "version": 1,
+  "tracking_issue": 70,
+  "tracking_repo": "ramideltoro/nutsnews-worker",
+  "implementation_repo": "ramideltoro/nutsnews-backend",
+  "updated_at_utc": "2026-07-23",
+  "guardrail": "This map assigns source-controlled owners only. It does not mutate servers, legacy Cloudflare Workers, DNS failover resources, or Grafana Cloud resources.",
+  "audit_evidence": {
+    "legacy_worker_repo": "ramideltoro/nutsnews-worker",
+    "legacy_worker_commit": "3dfb4d658764b6a94a4e4ee4213814009928b88d",
+    "backend_commit": "92e74cbfe0d7c233808478ac0f0849f632bd60cd",
+    "infra_commit": "240902f2bc4f9cf2982e5ef87e9d579edafb165d",
+    "docs_commit": "0353480544e3d86f941443224cb457f4a327743e",
+    "mode": "read_only_path_and_workflow_audit"
+  },
+  "shared_docs": [
+    "ramideltoro/nutsnews-docs/NUTSNEWS_WORKER_UPLIFT_OPERATION_MAP.md"
+  ],
+  "operation_entries": [
+    {
+      "id": "legacy-worker-shard-deploy",
+      "operation": "Legacy Worker shard deploy and generated Wrangler configs",
+      "source_scope": "legacy_worker",
+      "legacy_sources": [
+        ".github/workflows/worker-pipeline.yml",
+        "scripts/deploy_worker_shards.mjs",
+        "worker/scripts/generate-wrangler-config.mjs",
+        "worker/generated-wrangler/wrangler.shard*.jsonc"
+      ],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          ".github/workflows/protected-backend-ansible-apply.yml",
+          "ansible/playbooks/bootstrap.yml",
+          "docs/worker-uplift-architecture-adr.json"
+        ],
+        "workflow": "Protected Backend Ansible Apply",
+        "status": "approved_owner_for_uplift_runtime_bootstrap"
+      },
+      "classification": "intentional_retirement_for_new_deployments",
+      "copyable_behavior": [
+        "bounded deploy concurrency",
+        "required secret-name preflight",
+        "generated config validation before deploy"
+      ],
+      "current_api_reuse": [],
+      "mutation_boundary": "protected_backend_environment",
+      "approval_required": "production-backend approval plus reviewed PR before apply",
+      "rollback": "Revert the backend runtime PR and rerun protected backend check/apply. Legacy Worker shard deploy remains available only as rollback until cutover retirement.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "legacy-worker-smoke-postdeploy",
+      "operation": "Legacy public smoke, post-deploy verification, and edge snapshot health",
+      "source_scope": "legacy_worker",
+      "legacy_sources": [
+        ".github/workflows/worker-smoke-test.yml",
+        ".github/workflows/edge-feed-snapshot-health.yml",
+        "scripts/worker_smoke_test.mjs",
+        "scripts/post_deploy_verify.sh",
+        "scripts/edge_snapshot_health_check.mjs"
+      ],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          ".github/workflows/backend-synthetic-monitor.yml",
+          ".github/workflows/backend-health-report.yml",
+          "runbooks/BACKEND_SYNTHETIC_MONITORING.md",
+          "runbooks/BACKEND_HEALTH_REPORT.md"
+        ],
+        "workflow": "Backend Synthetic Monitor and Backend Health Report",
+        "status": "retained_behavior_reimplemented_as_backend_owned_smoke_and_health"
+      },
+      "classification": "copyable_behavior",
+      "copyable_behavior": [
+        "public API returns at least one article",
+        "public snapshot health reports ready data",
+        "post-deploy checks save evidence artifacts"
+      ],
+      "current_api_reuse": [
+        "https://www.nutsnews.com/api/articles",
+        "https://backend.nutsnews.com/healthz"
+      ],
+      "mutation_boundary": "read_only",
+      "approval_required": "none for scheduled read-only checks; production-backend approval only when SSH-backed health evidence is required",
+      "rollback": "Disable or revert noisy backend monitor changes through PR; no server rollback because checks are read-only.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "legacy-worker-shadow-smoke",
+      "operation": "Backend PostgreSQL shadow smoke target",
+      "source_scope": "legacy_worker",
+      "legacy_sources": [
+        ".github/workflows/worker-shadow-smoke.yml",
+        "worker/scripts/generate-shadow-smoke-config.mjs",
+        "scripts/assert_worker_shadow_smoke_config.mjs",
+        "scripts/worker_shadow_smoke_route_test.mjs",
+        "scripts/worker_shadow_smoke_live_check.mjs"
+      ],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          "docs/worker-uplift-api-admin-compatibility-contract.json",
+          ".github/workflows/backend-postgres-smoke-tests.yml",
+          ".github/workflows/backend-production-cutover.yml"
+        ],
+        "workflow": "Backend PostgreSQL Smoke Tests and Backend Production Cutover",
+        "status": "current_api_reuse_until_backend_owned_shadow_flow_replaces_legacy_nonproduction_worker"
+      },
+      "classification": "current_api_reuse",
+      "copyable_behavior": [
+        "shadow target must not bind Supabase secrets",
+        "shadow smoke exercises one bounded backend read",
+        "live evidence must be safe JSON without token values"
+      ],
+      "current_api_reuse": [
+        "GET /backend-shadow-smoke",
+        "POST /api/worker/db/load-article-count-for-backpressure"
+      ],
+      "mutation_boundary": "read_only",
+      "approval_required": "non-production approval only for legacy shadow deployment; backend production cutover keeps this read-only until approval",
+      "rollback": "Keep provider mode on supabase_primary and disable backend shadow smoke dispatch; no legacy script is sourced by backend runtime.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "legacy-worker-feed-health",
+      "operation": "Feed health report and feed-fetch outcome recording",
+      "source_scope": "legacy_worker",
+      "legacy_sources": [
+        "scripts/feed_health_report.mjs",
+        "worker/src/index.ts"
+      ],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          "docs/worker-uplift-architecture-adr.json",
+          "docs/worker-uplift-api-admin-compatibility-contract.json",
+          "runbooks/BACKEND_HEALTH_REPORT.md",
+          "runbooks/OPS_DASHBOARD.md"
+        ],
+        "workflow": "Backend Health Report, future fetcher service, and read-only Ops Dashboard",
+        "status": "approved_owner_pending_fetcher_service_bootstrap"
+      },
+      "classification": "copyable_behavior",
+      "copyable_behavior": [
+        "record feed success/failure counts",
+        "surface repeated failed feed evidence",
+        "keep report payload sanitized"
+      ],
+      "current_api_reuse": [
+        "save-feed-health-batch",
+        "save-worker-run"
+      ],
+      "mutation_boundary": "protected_backend_environment",
+      "approval_required": "production-backend approval before deploying the fetcher service that writes feed health",
+      "rollback": "Disable the fetcher service through protected backend apply and replay from scheduler/fetcher outbox when fixed.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "legacy-worker-translation-audit",
+      "operation": "Translation coverage and quality audit",
+      "source_scope": "legacy_worker",
+      "legacy_sources": [
+        "scripts/audit_article_translations.mjs",
+        "reports/translations/nutsnews-issue-282-final-audit.md"
+      ],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          "docs/worker-uplift-architecture-adr.json",
+          "docs/worker-uplift-api-admin-compatibility-contract.json",
+          "runbooks/BACKEND_HEALTH_REPORT.md"
+        ],
+        "workflow": "future translation service quality check and Backend Health Report",
+        "status": "approved_owner_pending_translation_service_bootstrap"
+      },
+      "classification": "copyable_behavior",
+      "copyable_behavior": [
+        "language coverage thresholds",
+        "summary length and obvious-source-language checks",
+        "safe markdown/JSON quality evidence"
+      ],
+      "current_api_reuse": [
+        "load-existing-summary-language-rows",
+        "save-article-summaries-batch",
+        "save-ai-usage-run"
+      ],
+      "mutation_boundary": "protected_backend_environment",
+      "approval_required": "production-backend approval before deploying translation service writes",
+      "rollback": "Pause translation service consumers, keep publication gated on existing translations, and replay translation outbox after fix.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "legacy-worker-backpressure-locks",
+      "operation": "Ingestion backpressure, lock safety, and queue visibility",
+      "source_scope": "legacy_worker",
+      "legacy_sources": [
+        "scripts/assert_worker_backpressure_locks.mjs",
+        "worker/src/index.ts"
+      ],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          "docs/worker-uplift-architecture-adr.json",
+          "docs/worker-uplift-runtime-identities.json",
+          "runbooks/MONITORING_BASELINE.md"
+        ],
+        "workflow": "future RabbitMQ queue guardrails and Backend Health Report",
+        "status": "approved_owner_pending_scheduler_and_broker_bootstrap"
+      },
+      "classification": "copyable_behavior",
+      "copyable_behavior": [
+        "backpressure runs before expensive AI/image work",
+        "locked, deferred, retried, queued, and processed counts remain visible",
+        "locks use holder-checked leases"
+      ],
+      "current_api_reuse": [
+        "load-article-count-for-backpressure"
+      ],
+      "mutation_boundary": "protected_backend_environment",
+      "approval_required": "production-backend approval before enabling RabbitMQ producers or consumers",
+      "rollback": "Drain/pause affected stage services, leave messages durable, and replay from stage outbox after the pressure bug is fixed.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "legacy-worker-database-provider",
+      "operation": "Worker database provider modes and reversible provider switch",
+      "source_scope": "legacy_worker",
+      "legacy_sources": [
+        "docs/WORKER_DATABASE_PROVIDER_MODES.md",
+        "scripts/worker_db_provider_modes_smoke.mjs",
+        ".github/workflows/worker-pipeline.yml"
+      ],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          "docs/backend-database-provider-switch.json",
+          "docs/backend-production-cutover-plan.json",
+          ".github/workflows/backend-database-provider-switch-dry-run.yml",
+          ".github/workflows/backend-production-cutover.yml"
+        ],
+        "workflow": "Backend Database Provider Switch Dry Run and Backend Production Cutover",
+        "status": "current_backend_contract_owner"
+      },
+      "classification": "current_api_reuse",
+      "copyable_behavior": [
+        "supabase_primary is rollback/default mode until cutover",
+        "backend_postgres_shadow keeps writes on Supabase",
+        "backend_postgres_primary requires explicit confirmation"
+      ],
+      "current_api_reuse": [
+        "NUTSNEWS_DATABASE_PROVIDER_MODE",
+        "NUTSNEWS_BACKEND_API_URL",
+        "NUTSNEWS_BACKEND_API_TOKEN",
+        "NUTSNEWS_BACKEND_POSTGRES_PRIMARY_CONFIRMATION"
+      ],
+      "mutation_boundary": "protected_backend_environment",
+      "approval_required": "production-backend approval plus cutover confirmation for backend_postgres_primary",
+      "rollback": "Return provider mode to supabase_primary only inside the documented rollback window with writer-pause and watermark evidence.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "legacy-worker-controller-failover",
+      "operation": "DNS failover controller, failover alerts, and Analytics Engine evidence",
+      "source_scope": "legacy_worker",
+      "legacy_sources": [
+        ".github/workflows/worker-controller-ci.yml",
+        "docs/FAILOVER_ALERTS.md",
+        "docs/FAILOVER_ANALYTICS_ENGINE.md"
+      ],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-infra",
+        "owner_files": [
+          "cloudflare/dns-failover/src/core.mjs",
+          ".github/workflows/cloudflare-dns-failover-apply.yml",
+          "runbooks/CLOUDFLARE_DNS_FAILOVER.md"
+        ],
+        "workflow": "Cloudflare DNS Failover Apply",
+        "status": "separate_failover_owner_not_ingestion"
+      },
+      "classification": "retained_current_owner",
+      "copyable_behavior": [
+        "manual lock remains separate from ingestion",
+        "DNS drift and target-change evidence stay operator-visible",
+        "failover alerts exclude tokens and raw provider responses"
+      ],
+      "current_api_reuse": [
+        "Cloudflare DNS API",
+        "failover status endpoint"
+      ],
+      "mutation_boundary": "protected_infra_environment",
+      "approval_required": "production-vps or equivalent protected infra approval before DNS mutation",
+      "rollback": "Use the infra failover rollback/status workflow; do not classify DNS failover as worker ingestion or source it from uplift services.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false,
+      "failover_separate": true
+    },
+    {
+      "id": "legacy-worker-supabase-backup-restore",
+      "operation": "Legacy Supabase REST backup and restore validation",
+      "source_scope": "legacy_worker",
+      "legacy_sources": [
+        "scripts/supabase_backup.mjs",
+        "scripts/validate_supabase_restore.sh"
+      ],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          ".github/workflows/backend-postgres-backup-restore-proof.yml",
+          "runbooks/BACKUP_RESTORE_BASELINE.md",
+          "docs/backend-postgres-backup-restore-proof.example.json"
+        ],
+        "workflow": "Backend PostgreSQL Backup Restore Proof",
+        "status": "intentional_retirement_after_backend_primary_cutover"
+      },
+      "classification": "intentional_retirement_after_cutover",
+      "copyable_behavior": [
+        "backup evidence excludes connection strings and row payloads",
+        "restore validation is explicit and recorded"
+      ],
+      "current_api_reuse": [
+        "Supabase remains rollback source until backend PostgreSQL cutover"
+      ],
+      "mutation_boundary": "protected_backend_environment",
+      "approval_required": "production-backend approval before restore-proof workflow writes status",
+      "rollback": "Before cutover, Supabase remains primary. After cutover, use backend PostgreSQL restore proof and forward-recovery policy.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "backend-host-deploy",
+      "operation": "Backend host baseline, application runtime, and service bootstrap deploy",
+      "source_scope": "backend",
+      "legacy_sources": [],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          ".github/workflows/protected-backend-ansible-apply.yml",
+          "ansible/playbooks/bootstrap.yml",
+          "runbooks/PROTECTED_BACKEND_APPLY.md"
+        ],
+        "workflow": "Protected Backend Ansible Apply",
+        "status": "current_owner"
+      },
+      "classification": "retained_current_owner",
+      "copyable_behavior": [],
+      "current_api_reuse": [],
+      "mutation_boundary": "protected_backend_environment",
+      "approval_required": "production-backend approval and confirm_apply=backend.nutsnews.com for apply mode",
+      "rollback": "Git revert followed by protected backend check/apply; use documented rollback workflow for release-specific rollback.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "backend-host-restart",
+      "operation": "Backend host service restart and fixed recovery actions",
+      "source_scope": "backend",
+      "legacy_sources": [],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          ".github/workflows/backend-recovery.yml",
+          "scripts/backend_recovery_workflow.py",
+          "runbooks/BACKEND_RECOVERY.md"
+        ],
+        "workflow": "Backend Recovery",
+        "status": "current_owner"
+      },
+      "classification": "retained_current_owner",
+      "copyable_behavior": [],
+      "current_api_reuse": [],
+      "mutation_boundary": "protected_backend_environment",
+      "approval_required": "production-backend approval plus mode=check before mutating mode=apply",
+      "rollback": "Use the narrowest fixed recovery action, then reconcile through PR; broad changes return to protected backend apply.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "backend-service-scale-drain",
+      "operation": "Worker-uplift service scale, pause, drain, and resume",
+      "source_scope": "backend",
+      "legacy_sources": [],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          "docs/worker-uplift-architecture-adr.json",
+          "docs/worker-uplift-runtime-identities.json",
+          "runbooks/DB_MIGRATION_CHANGE_FREEZE.md"
+        ],
+        "workflow": "future backend-controlled worker-uplift service operations",
+        "status": "approved_owner_not_implemented_yet"
+      },
+      "classification": "future_backend_owner",
+      "copyable_behavior": [
+        "pause writers before cutover-sensitive changes",
+        "resume only after health, smoke, and watermark evidence passes"
+      ],
+      "current_api_reuse": [],
+      "mutation_boundary": "protected_backend_environment",
+      "approval_required": "production-backend approval before changing service replica counts, drain state, or writer state",
+      "rollback": "Return to prior service count/pause state through reviewed backend change or fixed protected operation; keep messages durable for replay.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "backend-status-health",
+      "operation": "Backend status, health, drift, and read-only diagnostics",
+      "source_scope": "backend",
+      "legacy_sources": [],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          ".github/workflows/backend-health-report.yml",
+          ".github/workflows/backend-drift-check.yml",
+          "runbooks/BACKEND_HEALTH_REPORT.md",
+          "runbooks/DRIFT_CHECK.md"
+        ],
+        "workflow": "Backend Health Report and Backend Drift Check",
+        "status": "current_owner"
+      },
+      "classification": "retained_current_owner",
+      "copyable_behavior": [],
+      "current_api_reuse": [],
+      "mutation_boundary": "read_only",
+      "approval_required": "none for non-secret public synthetics; production-backend approval for SSH-backed read-only probes",
+      "rollback": "Disable noisy checks through PR; drift findings are repaired through protected backend apply.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "backend-logs",
+      "operation": "Backend logs and telemetry collection",
+      "source_scope": "backend",
+      "legacy_sources": [],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          "ansible/roles/backend_baseline/templates/alloy-config.alloy.j2",
+          "runbooks/MONITORING_BASELINE.md",
+          "docs/backend-grafana-handoff.json"
+        ],
+        "workflow": "Protected Backend Ansible Apply",
+        "status": "current_telemetry_producer_owner"
+      },
+      "classification": "retained_current_owner",
+      "copyable_behavior": [],
+      "current_api_reuse": [
+        "Grafana Cloud Prometheus remote_write",
+        "Grafana Cloud Loki write"
+      ],
+      "mutation_boundary": "protected_backend_environment",
+      "approval_required": "production-backend approval before Alloy config changes; Grafana resources remain infra-owned",
+      "rollback": "Revert Alloy/logging config and rerun protected backend check/apply; do not restore backend Grafana management credentials.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "backend-queue-dlq-inspect-replay",
+      "operation": "RabbitMQ queue and DLQ inspect, replay, purge, and repair",
+      "source_scope": "backend",
+      "legacy_sources": [],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          "docs/worker-uplift-architecture-adr.json",
+          "docs/worker-uplift-runtime-identities.json",
+          "runbooks/MONITORING_BASELINE.md"
+        ],
+        "workflow": "future backend-controlled RabbitMQ operations",
+        "status": "approved_owner_not_implemented_yet"
+      },
+      "classification": "future_backend_owner",
+      "copyable_behavior": [
+        "read-only queue depth/status inspection before mutation",
+        "explicit replay action with bounded batch size and idempotency evidence",
+        "DLQ poison messages require sanitized metadata and operator approval"
+      ],
+      "current_api_reuse": [],
+      "mutation_boundary": "protected_backend_environment",
+      "approval_required": "production-backend approval before replay, purge, or queue topology mutation",
+      "rollback": "Stop consumers, restore topology from backend config, and replay from durable stage outbox/watermarks rather than trusting broker memory as source of truth.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "backend-broker-backup-restore",
+      "operation": "RabbitMQ broker backup, restore, and topology rebuild",
+      "source_scope": "backend",
+      "legacy_sources": [],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          "docs/worker-uplift-architecture-adr.json",
+          "docs/worker-uplift-runtime-identities.json",
+          "runbooks/BACKUP_RESTORE_BASELINE.md"
+        ],
+        "workflow": "future backend-controlled broker recovery workflow",
+        "status": "approved_owner_not_implemented_yet"
+      },
+      "classification": "future_backend_owner",
+      "copyable_behavior": [
+        "topology is rebuilt from source control",
+        "stage outbox is the recovery source for pending messages",
+        "RabbitMQ is transport, not the only authoritative state"
+      ],
+      "current_api_reuse": [],
+      "mutation_boundary": "protected_backend_environment",
+      "approval_required": "production-backend approval before broker recovery or topology mutation",
+      "rollback": "Recreate broker topology from backend-owned config and replay unconfirmed stage outbox rows after consumers are paused.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "backend-reconciliation",
+      "operation": "Worker-uplift reconciliation, watermarks, and duplicate replay proof",
+      "source_scope": "backend",
+      "legacy_sources": [],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          "docs/worker-uplift-architecture-adr.json",
+          "docs/worker-uplift-api-admin-compatibility-contract.json",
+          "docs/backend-production-cutover-plan.json"
+        ],
+        "workflow": "future backend reconciliation workflow and Backend Production Cutover",
+        "status": "approved_owner_not_implemented_yet"
+      },
+      "classification": "future_backend_owner",
+      "copyable_behavior": [
+        "no global ordering assumption",
+        "idempotency by message_id and natural domain keys",
+        "cutover proof requires no lagging watermarks or unverified outbox rows"
+      ],
+      "current_api_reuse": [
+        "save-worker-run",
+        "save-accepted-articles-batch",
+        "save-article-summaries-batch"
+      ],
+      "mutation_boundary": "protected_backend_environment",
+      "approval_required": "production-backend approval before reconciliation mutates stage or domain state",
+      "rollback": "Pause writers, preserve watermarks, and replay only idempotent outbox rows after parity evidence is restored.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "backend-smoke-health",
+      "operation": "Backend application, database, and public surface smoke tests",
+      "source_scope": "backend",
+      "legacy_sources": [],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          ".github/workflows/backend-postgres-smoke-tests.yml",
+          ".github/workflows/backend-synthetic-monitor.yml",
+          "runbooks/DB_MIGRATION_SMOKE_TESTS.md",
+          "runbooks/BACKEND_SYNTHETIC_MONITORING.md"
+        ],
+        "workflow": "Backend PostgreSQL Smoke Tests and Backend Synthetic Monitor",
+        "status": "current_owner"
+      },
+      "classification": "retained_current_owner",
+      "copyable_behavior": [],
+      "current_api_reuse": [
+        "GET /healthz",
+        "POST /api/worker/db/*"
+      ],
+      "mutation_boundary": "read_only",
+      "approval_required": "production-backend approval when protected secrets are needed for backend API smoke",
+      "rollback": "Do not promote cutover when smoke fails; revert the faulty backend change or restore provider mode per cutover plan.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "backend-postgres-backup-restore",
+      "operation": "Backend PostgreSQL backup, restore, failover drill, and proof artifacts",
+      "source_scope": "backend",
+      "legacy_sources": [],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          ".github/workflows/backend-postgres-backup-restore-proof.yml",
+          ".github/workflows/backend-postgres-failover-drill.yml",
+          "runbooks/BACKUP_RESTORE_BASELINE.md",
+          "runbooks/DB_MIGRATION_ROLLBACK_FAILBACK.md"
+        ],
+        "workflow": "Backend PostgreSQL Backup Restore Proof and Backend PostgreSQL Failover Drill",
+        "status": "current_owner"
+      },
+      "classification": "retained_current_owner",
+      "copyable_behavior": [],
+      "current_api_reuse": [],
+      "mutation_boundary": "protected_backend_environment",
+      "approval_required": "production-backend approval before restore-proof or failover-drill mutation",
+      "rollback": "Follow DB rollback/failback only inside the verified rollback window; otherwise use forward recovery from backend PostgreSQL backups.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "backend-cloudflare-routing",
+      "operation": "backend.nutsnews.com DNS and origin routing",
+      "source_scope": "backend",
+      "legacy_sources": [],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          ".github/workflows/backend-cloudflare-routing.yml",
+          "scripts/cloudflare_backend_dns.py",
+          "runbooks/CLOUDFLARE_ROUTING.md"
+        ],
+        "workflow": "Backend Cloudflare Routing",
+        "status": "current_owner_for_backend_origin_record_only"
+      },
+      "classification": "retained_current_owner",
+      "copyable_behavior": [],
+      "current_api_reuse": [
+        "Cloudflare DNS API"
+      ],
+      "mutation_boundary": "protected_backend_environment",
+      "approval_required": "production-backend approval and confirm_apply=backend.nutsnews.com for DNS apply/rollback",
+      "rollback": "Run Backend Cloudflare Routing rollback and verify DNS no longer points backend.nutsnews.com at the backend host.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false,
+      "failover_separate": true
+    },
+    {
+      "id": "backend-credential-readiness",
+      "operation": "Backend runtime credential inventory and readiness",
+      "source_scope": "backend",
+      "legacy_sources": [],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          "docs/backend-credential-inventory.json",
+          ".github/workflows/backend-credential-readiness.yml",
+          "runbooks/CREDENTIAL_BOOTSTRAP.md"
+        ],
+        "workflow": "Backend Credential Readiness",
+        "status": "current_owner"
+      },
+      "classification": "retained_current_owner",
+      "copyable_behavior": [],
+      "current_api_reuse": [],
+      "mutation_boundary": "read_only",
+      "approval_required": "production-backend approval to read Environment secrets for readiness checks",
+      "rollback": "Rotate or remove over-scoped credentials in the GitHub Environment and rerun readiness; never commit secret values.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "infra-grafana-plan-drift",
+      "operation": "Grafana Cloud plan and resource drift",
+      "source_scope": "infra",
+      "legacy_sources": [],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-infra",
+        "owner_files": [
+          ".github/workflows/grafana-cloud-plan.yml",
+          "terraform/grafana-cloud",
+          "terraform/grafana-cloud/tests/validate_grafana_ownership.py"
+        ],
+        "workflow": "Grafana Cloud Plan",
+        "status": "current_owner"
+      },
+      "classification": "retained_current_owner",
+      "copyable_behavior": [],
+      "current_api_reuse": [],
+      "mutation_boundary": "protected_infra_environment",
+      "approval_required": "production-vps approval for protected plan/drift check with provider credentials",
+      "rollback": "Fix drift through infra PR and protected plan/apply; backend must not mutate Grafana resources.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "infra-grafana-apply-verify",
+      "operation": "Grafana Cloud apply, dashboard/alert import, and post-apply verification",
+      "source_scope": "infra",
+      "legacy_sources": [],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-infra",
+        "owner_files": [
+          ".github/workflows/grafana-cloud-apply.yml",
+          "terraform/grafana-cloud/imports.tf",
+          "terraform/grafana-cloud/catalog/backend-observability.json",
+          "terraform/grafana-cloud/scripts/verify_post_apply.py"
+        ],
+        "workflow": "Grafana Cloud Apply",
+        "status": "current_owner"
+      },
+      "classification": "retained_current_owner",
+      "copyable_behavior": [],
+      "current_api_reuse": [],
+      "mutation_boundary": "protected_infra_environment",
+      "approval_required": "production-vps approval and confirm_apply=grafana-cloud",
+      "rollback": "Keep live Grafana resources in place, revert the infra change if needed, and rerun protected infra plan/apply; do not restore backend Grafana mutation credentials.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    },
+    {
+      "id": "backend-grafana-validation-only",
+      "operation": "Backend Grafana catalog compatibility validation",
+      "source_scope": "backend",
+      "legacy_sources": [],
+      "destination": {
+        "owner_repo": "ramideltoro/nutsnews-backend",
+        "owner_files": [
+          ".github/workflows/backend-grafana-metrics.yml",
+          "scripts/provision_grafana_metrics.py",
+          "scripts/validate_backend_grafana_handoff.py",
+          "docs/backend-grafana-handoff.json"
+        ],
+        "workflow": "Backend Grafana Spec Validation",
+        "status": "validation_only_no_resource_mutation"
+      },
+      "classification": "retained_current_owner",
+      "copyable_behavior": [],
+      "current_api_reuse": [],
+      "mutation_boundary": "read_only",
+      "approval_required": "none; workflow has contents:read only and no production-backend environment",
+      "rollback": "If backend catalog validation is wrong, fix the catalog fixture or validator through PR. Grafana resources remain infra-owned.",
+      "runtime_coupling_to_legacy_worker": false,
+      "new_deployment_requires_worker_checkout": false
+    }
+  ]
+}

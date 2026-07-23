@@ -56,6 +56,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backend_grafana_handoff.py
 
+      - name: Validate worker uplift operation map
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_operation_map.py
+
       - name: Validate worker uplift credential readiness
         shell: bash
         run: python3 scripts/validate_worker_uplift_runtime_readiness.py

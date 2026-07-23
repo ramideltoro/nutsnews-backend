@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "repository": "ramideltoro/nutsnews-backend",
+  "tracking_issue": "ramideltoro/nutsnews-worker#142",
+  "updated_at_utc": "2026-07-23",
+  "resource_management_owner": "ramideltoro/nutsnews-infra",
+  "backend_role": "telemetry_producer_collector",
+  "legacy_provisioning_retired": true,
+  "production_backend_management_credentials_removed": [
+    "GRAFANA_URL",
+    "GRAFANA_SERVICE_ACCOUNT_TOKEN"
+  ],
+  "telemetry_write_credentials_retained": [
+    "GRAFANA_CLOUD_PROMETHEUS_URL",
+    "GRAFANA_CLOUD_PROMETHEUS_USERNAME",
+    "GRAFANA_CLOUD_PROMETHEUS_PASSWORD",
+    "GRAFANA_CLOUD_LOKI_URL",
+    "GRAFANA_CLOUD_LOKI_USERNAME",
+    "GRAFANA_CLOUD_LOKI_PASSWORD"
+  ],
+  "infra_replacements": {
+    "module_path": "ramideltoro/nutsnews-infra/terraform/grafana-cloud",
+    "catalog_path": "terraform/grafana-cloud/catalog/backend-observability.json",
+    "post_apply_verification": "terraform/grafana-cloud/scripts/verify_post_apply.py --require-query-data",
+    "folder": {
+      "title": "NutsNews Backend Ops",
+      "uid": "nutsnews-backend-ops",
+      "tofu_address": "grafana_folder.backend_observability",
+      "import_id": "nutsnews-backend-ops"
+    },
+    "dashboards": [
+      {"uid": "nutsnews-backend-host", "title": "NutsNews Backend Host Overview", "tofu_address": "grafana_dashboard.backend_observability[\"nutsnews-backend-host\"]"},
+      {"uid": "nutsnews-backend-docker-runtime", "title": "NutsNews Backend Docker and Runtime", "tofu_address": "grafana_dashboard.backend_observability[\"nutsnews-backend-docker-runtime\"]"},
+      {"uid": "nutsnews-backend-caddy-edge", "title": "NutsNews Backend Caddy and Edge", "tofu_address": "grafana_dashboard.backend_observability[\"nutsnews-backend-caddy-edge\"]"},
+      {"uid": "nutsnews-backend-service-health", "title": "NutsNews Backend Service Health", "tofu_address": "grafana_dashboard.backend_observability[\"nutsnews-backend-service-health\"]"},
+      {"uid": "nutsnews-backend-backups", "title": "NutsNews Backend Backups", "tofu_address": "grafana_dashboard.backend_observability[\"nutsnews-backend-backups\"]"},
+      {"uid": "nutsnews-backend-postgres-failover", "title": "NutsNews Backend PostgreSQL Failover", "tofu_address": "grafana_dashboard.backend_observability[\"nutsnews-backend-postgres-failover\"]"},
+      {"uid": "nutsnews-backend-os-updates", "title": "NutsNews Backend OS Updates", "tofu_address": "grafana_dashboard.backend_observability[\"nutsnews-backend-os-updates\"]"},
+      {"uid": "nutsnews-backend-metrics-quota", "title": "NutsNews Backend Metrics Quota", "tofu_address": "grafana_dashboard.backend_observability[\"nutsnews-backend-metrics-quota\"]"},
+      {"uid": "nutsnews-backend-alert-synthetic", "title": "NutsNews Backend Alert and Synthetic Health", "tofu_address": "grafana_dashboard.backend_observability[\"nutsnews-backend-alert-synthetic\"]"},
+      {"uid": "nutsnews-backend-logs", "title": "NutsNews Backend Logs", "tofu_address": "grafana_dashboard.backend_observability[\"nutsnews-backend-logs\"]"}
+    ],
+    "alert_rule_group": {
+      "name": "NutsNews Backend Guardrails",
+      "folder_uid": "nutsnews-backend-ops",
+      "tofu_address": "grafana_rule_group.backend_guardrails",
+      "import_id": "nutsnews-backend-ops:NutsNews Backend Guardrails"
+    },
+    "alert_uids": [
+      "nutsnews-backend-host-metrics-missing",
+      "nn-backend-endpoint-unhealthy",
+      "nn-backend-failed-units",
+      "nn-backend-backup-unhealthy",
+      "nn-backend-postgres-restore-not-ready",
+      "nn-backend-root-disk-warning",
+      "nn-backend-reboot-required",
+      "nn-backend-journal-logs-missing",
+      "nn-backend-ssh-auth-spike",
+      "nn-backend-fail2ban-ban-events",
+      "nn-backend-log-volume-warning"
+    ],
+    "datasource_dependencies": [
+      {
+        "type": "prometheus",
+        "owner": "ramideltoro/nutsnews-infra",
+        "configured_by": "TF_VAR_prometheus_datasource_uid",
+        "backend_use": "backend host metrics and alert rules"
+      },
+      {
+        "type": "loki",
+        "owner": "ramideltoro/nutsnews-infra",
+        "configured_by": "TF_VAR_loki_datasource_uid",
+        "backend_use": "backend logs dashboard and Loki alert rules"
+      }
+    ]
+  },
+  "backend_paths_retained": {
+    "alloy_configuration": "ansible/roles/backend_baseline/templates/alloy-config.alloy.j2",
+    "telemetry_write_workflow": ".github/workflows/protected-backend-ansible-apply.yml",
+    "catalog_validation_workflow": ".github/workflows/backend-grafana-metrics.yml",
+    "catalog_validation_script": "scripts/provision_grafana_metrics.py --check"
+  },
+  "rollback": "If infra import/apply verification fails, keep live Grafana resources in place, fix the infra import or datasource configuration, and rerun the protected Grafana Cloud plan/apply. Do not restore backend Grafana mutation workflows without a new reviewed ownership issue.",
+  "docs": [
+    "ramideltoro/nutsnews-docs/NUTSNEWS_GRAFANA_CLOUD_OBSERVABILITY.md",
+    "ramideltoro/nutsnews-docs/NUTSNEWS_BACKEND_CREDENTIAL_BOOTSTRAP.md",
+    "runbooks/MONITORING_BASELINE.md",
+    "runbooks/CREDENTIAL_BOOTSTRAP.md"
+  ]
+}

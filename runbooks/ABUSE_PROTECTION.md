@@ -91,23 +91,27 @@ group, or route on IP address, path, user, request ID, or raw message text.
 The #40 implementation is detection/report-only. It does not mutate UFW, Caddy,
 Cloudflare, fail2ban jail behavior, or provider firewall policy.
 
-Detection runs through the existing `Backend Grafana Observability` workflow:
+Detection rule ownership moved to `ramideltoro/nutsnews-infra` during the
+worker-uplift Grafana handoff. The backend repository keeps the historical
+catalog only as a validation fixture through `backend-grafana-metrics.yml --check`;
+it does not own Grafana dashboard, folder, datasource, or alert mutation credentials.
 
 ```bash
-gh workflow run backend-grafana-metrics.yml \
-  --repo ramideltoro/nutsnews-backend \
-  --ref main \
-  -f action=apply \
-  -f confirm_apply=backend.nutsnews.com
+gh workflow run grafana-cloud-plan.yml \
+  --repo ramideltoro/nutsnews-infra \
+  --ref main
 
-gh workflow run backend-grafana-metrics.yml \
-  --repo ramideltoro/nutsnews-backend \
+gh workflow run grafana-cloud-apply.yml \
+  --repo ramideltoro/nutsnews-infra \
   --ref main \
-  -f action=verify
+  -f confirm_apply=grafana-cloud
 ```
 
-The workflow uses the `production-backend` Environment for Grafana credentials.
-It does not need SSH or host mutation for these detection rules.
+The backend workflow can still validate the catalog shape locally:
+
+```bash
+python3 scripts/provision_grafana_metrics.py --check
+```
 
 ## Allowlist Policy
 
@@ -165,9 +169,10 @@ Preferred rollback is a git revert followed by protected apply.
 
 For #40 Grafana-only detection changes, preferred rollback is:
 
-1. Revert the Grafana spec/runbook PR.
-2. Run `Backend Grafana Observability` with `action=apply`.
-3. Run `Backend Grafana Observability` with `action=verify`.
+1. Revert the Grafana catalog/runbook change in the infra repository.
+2. Run the protected infra Grafana Cloud plan/apply.
+3. Confirm the apply workflow's post-apply verification report passed with
+   query-data checks enabled.
 
 Unban one IP:
 

@@ -119,6 +119,11 @@ Synthetic Monitoring now belong to `ramideltoro/nutsnews-infra`; this backend
 repository is the telemetry producer and keeps only Prometheus/Loki write
 credentials.
 
+The backend migration record is `docs/backend-grafana-handoff.json`, validated
+by `scripts/validate_backend_grafana_handoff.py`. It maps the retained folder,
+dashboard UIDs, alert UIDs, datasource dependencies, and rollback path to the
+infra OpenTofu owner.
+
 ## Grafana Alert Guardrails
 
 Backend issue #25 added the backend alert catalog. The live Grafana alert rules

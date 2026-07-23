@@ -52,6 +52,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backend_credential_inventory.py
 
+      - name: Validate worker uplift credential readiness
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_runtime_readiness.py
+
       - name: Validate service baseline inventory
         shell: bash
         run: python3 scripts/validate_service_baseline.py
@@ -159,6 +163,10 @@ jobs:
       - name: Validate backend API compatibility contract
         shell: bash
         run: python3 scripts/validate_backend_api_compatibility_contract.py
+
+      - name: Validate worker uplift API/admin compatibility contract
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_api_admin_contract.py
 
       - name: Validate backend database provider switch
         shell: bash

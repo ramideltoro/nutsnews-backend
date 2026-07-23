@@ -1,0 +1,257 @@
+{
+  "version": 1,
+  "tracking_issue": 66,
+  "tracking_repo": "ramideltoro/nutsnews-worker",
+  "implementation_repo": "ramideltoro/nutsnews-backend",
+  "environment": "production-backend",
+  "captured_at_utc": "2026-07-23T02:40:43Z",
+  "capture_mode": "value_free_name_presence",
+  "value_policy": "No secret values, token fragments, account IDs, Cloudflare store IDs, Cloudflare secret IDs, namespace IDs, passwords, or generated credentials are recorded.",
+  "depends_on": [
+    "docs/worker-uplift-cloudflare-inventory.json",
+    "docs/backend-credential-inventory.json",
+    "docs/worker-uplift-api-admin-compatibility-contract.json"
+  ],
+  "github_environment_evidence": {
+    "repo": "ramideltoro/nutsnews-backend",
+    "environment": "production-backend",
+    "protection": {
+      "required_reviewers": true,
+      "custom_branch_policy": true
+    },
+    "variables_present": [
+      "NUTSNEWS_BACKEND_API_URL",
+      "NUTSNEWS_BACKEND_DOMAIN",
+      "NUTSNEWS_BACKEND_HOST",
+      "NUTSNEWS_BACKEND_WORKER_API_ENABLED",
+      "NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED"
+    ],
+    "secrets_present": [
+      "NUTSNEWS_BACKEND_API_TOKEN",
+      "NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD",
+      "NUTSNEWS_PRODUCTION_SUPABASE_URL",
+      "NUTSNEWS_PRODUCTION_SUPABASE_SERVICE_ROLE_KEY",
+      "OPENAI_API_KEY"
+    ],
+    "environment_change_made": {
+      "name": "NUTSNEWS_BACKEND_API_URL",
+      "type": "variable",
+      "value_classification": "non_secret_endpoint",
+      "updated_at_utc": "2026-07-23T02:40:43Z"
+    }
+  },
+  "readiness_summary": {
+    "ready_now": [
+      "NUTSNEWS_BACKEND_API_URL",
+      "NUTSNEWS_BACKEND_API_TOKEN",
+      "NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD"
+    ],
+    "required_before_service_bootstrap": [
+      "LOCAL_AI_API_KEY"
+    ],
+    "required_before_shadow_validation": [
+      "NUTSNEWS_SHADOW_SMOKE_TOKEN"
+    ],
+    "not_injected_by_design": [
+      "SUPABASE_URL",
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "OPENAI_API_KEY",
+      "SENTRY_DSN",
+      "BETTER_STACK_SOURCE_TOKEN",
+      "BETTER_STACK_INGESTING_HOST",
+      "UPSTASH_REDIS_REST_URL",
+      "UPSTASH_REDIS_REST_TOKEN",
+      "NUTSNEWS_FAILOVER_STATUS_HMAC_SECRET"
+    ]
+  },
+  "entries": [
+    {
+      "name": "NUTSNEWS_BACKEND_API_URL",
+      "source_inventory_name": "NUTSNEWS_BACKEND_API_URL",
+      "classification": "required_non_secret_variable",
+      "readiness": "ready",
+      "owner": "ramideltoro/nutsnews-backend",
+      "location": "production-backend variable",
+      "consumers": [
+        "worker-uplift services that call /api/worker/db/*",
+        "protected backend validation workflows"
+      ],
+      "rotation_or_update_procedure": "Update the production-backend Environment variable and redeploy affected runtimes.",
+      "legacy_revocation_dependency": "none; this is a non-secret endpoint"
+    },
+    {
+      "name": "NUTSNEWS_BACKEND_API_TOKEN",
+      "source_inventory_name": "NUTSNEWS_BACKEND_API_TOKEN",
+      "classification": "existing_backend_equivalent",
+      "readiness": "ready",
+      "owner": "ramideltoro/nutsnews-backend",
+      "location": "production-backend secret",
+      "consumers": [
+        "backend Worker database compatibility API callers",
+        "worker-uplift stage services for final domain reads/writes after approval"
+      ],
+      "rotation_or_update_procedure": "Generate a new bearer token, update the production-backend Environment secret, run protected backend apply so the loopback API accepts it, then redeploy callers.",
+      "legacy_revocation_dependency": "legacy Cloudflare NUTSNEWS_BACKEND_API_TOKEN binding can be removed only after Worker ingestion retirement"
+    },
+    {
+      "name": "NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD",
+      "source_inventory_name": "NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD",
+      "classification": "existing_backend_equivalent",
+      "readiness": "ready",
+      "owner": "ramideltoro/nutsnews-backend",
+      "location": "production-backend secret",
+      "consumers": [
+        "loopback backend Worker database compatibility API"
+      ],
+      "rotation_or_update_procedure": "Rotate the dedicated backend PostgreSQL Worker API role password through protected Ansible apply and restart the loopback API.",
+      "legacy_revocation_dependency": "none; this is backend-owned"
+    },
+    {
+      "name": "LOCAL_AI_API_KEY",
+      "source_inventory_name": "LOCAL_AI_API_KEY",
+      "classification": "required_uplift_runtime_secret",
+      "readiness": "blocked_missing_source_value",
+      "owner": "ramideltoro/nutsnews-backend",
+      "location": "not present in production-backend at capture",
+      "consumers": [
+        "future article approval service Qwen/local AI calls"
+      ],
+      "rotation_or_update_procedure": "Retrieve the original local AI gateway key from the password manager or rotate the local AI gateway key, then store the new value as a production-backend Environment secret before deploying the approval service.",
+      "legacy_revocation_dependency": "legacy Cloudflare LOCAL_AI_API_KEY binding remains until Cloudflare Worker approval path is retired"
+    },
+    {
+      "name": "NUTSNEWS_SHADOW_SMOKE_TOKEN",
+      "source_inventory_name": "NUTSNEWS_SHADOW_SMOKE_TOKEN",
+      "classification": "validation_only",
+      "readiness": "deferred_until_shadow_validation",
+      "owner": "ramideltoro/nutsnews-backend",
+      "location": "not injected into runtime containers",
+      "consumers": [
+        "future protected shadow smoke workflows"
+      ],
+      "rotation_or_update_procedure": "Generate a validation-only token in the protected validation environment when the shadow smoke workflow is implemented.",
+      "legacy_revocation_dependency": "legacy worker non-production shadow smoke token can be retired after new shadow smoke flow replaces it"
+    },
+    {
+      "name": "SUPABASE_URL",
+      "source_inventory_name": "SUPABASE_URL",
+      "classification": "legacy_failover_only_retained_in_cloudflare",
+      "readiness": "retained_not_injected",
+      "owner": "ramideltoro/nutsnews-worker until legacy retirement",
+      "location": "Cloudflare Secrets Store",
+      "consumers": [
+        "legacy rollback/failover only"
+      ],
+      "rotation_or_update_procedure": "Rotate from Supabase project settings only if legacy rollback needs it.",
+      "legacy_revocation_dependency": "explicit legacy Worker retirement decision"
+    },
+    {
+      "name": "SUPABASE_SERVICE_ROLE_KEY",
+      "source_inventory_name": "SUPABASE_SERVICE_ROLE_KEY",
+      "classification": "legacy_failover_only_retained_in_cloudflare",
+      "readiness": "retained_not_injected",
+      "owner": "ramideltoro/nutsnews-worker until legacy retirement",
+      "location": "Cloudflare Secrets Store",
+      "consumers": [
+        "legacy rollback/failover only"
+      ],
+      "rotation_or_update_procedure": "Do not copy into uplift services. Rotate Supabase backend automation equivalents only through production-backend if protected migration workflows need them.",
+      "legacy_revocation_dependency": "explicit legacy Worker retirement decision"
+    },
+    {
+      "name": "OPENAI_API_KEY",
+      "source_inventory_name": "OPENAI_API_KEY",
+      "classification": "legacy_failover_only_retained_in_cloudflare",
+      "readiness": "retained_not_injected",
+      "owner": "ramideltoro/nutsnews-worker for legacy fallback; ramideltoro/nutsnews-backend only for maintenance robot",
+      "location": "Cloudflare Secrets Store for legacy fallback; production-backend maintenance robot secret is not a worker-uplift runtime credential",
+      "consumers": [
+        "legacy Worker OpenAI fallback",
+        "backend maintenance robot outside worker uplift"
+      ],
+      "rotation_or_update_procedure": "Do not reuse the maintenance robot OpenAI key for worker-uplift services. Create a separate approved fallback credential only if a later AI fallback decision requires it.",
+      "legacy_revocation_dependency": "explicit OpenAI fallback retirement or approval decision"
+    },
+    {
+      "name": "SENTRY_DSN",
+      "source_inventory_name": "SENTRY_DSN",
+      "classification": "retirement_candidate",
+      "readiness": "retained_not_injected",
+      "owner": "unassigned pending observability decision",
+      "location": "Cloudflare Secrets Store only",
+      "consumers": [],
+      "rotation_or_update_procedure": "Do not recreate unless a later observability decision selects Sentry.",
+      "legacy_revocation_dependency": "observability consumer audit"
+    },
+    {
+      "name": "BETTER_STACK_SOURCE_TOKEN",
+      "source_inventory_name": "BETTER_STACK_SOURCE_TOKEN",
+      "classification": "legacy_failover_only_retained_in_cloudflare",
+      "readiness": "retained_not_injected",
+      "owner": "ramideltoro/nutsnews-worker for legacy logs; ramideltoro/nutsnews-infra for future observability resources",
+      "location": "Cloudflare Secrets Store",
+      "consumers": [
+        "legacy Worker structured log delivery"
+      ],
+      "rotation_or_update_procedure": "Rotate in Better Stack only while legacy Worker log delivery remains enabled.",
+      "legacy_revocation_dependency": "Grafana/observability migration and legacy Worker retirement"
+    },
+    {
+      "name": "BETTER_STACK_INGESTING_HOST",
+      "source_inventory_name": "BETTER_STACK_INGESTING_HOST",
+      "classification": "retirement_candidate",
+      "readiness": "retained_not_injected",
+      "owner": "ramideltoro/nutsnews-worker for legacy logs; ramideltoro/nutsnews-infra for future observability resources",
+      "location": "Cloudflare Secrets Store",
+      "consumers": [
+        "legacy Worker structured log delivery"
+      ],
+      "rotation_or_update_procedure": "Treat as a non-secret host if retained; do not inject into uplift by default.",
+      "legacy_revocation_dependency": "Grafana/observability migration and legacy Worker retirement"
+    },
+    {
+      "name": "UPSTASH_REDIS_REST_URL",
+      "source_inventory_name": "UPSTASH_REDIS_REST_URL",
+      "classification": "retirement_candidate",
+      "readiness": "retained_not_injected",
+      "owner": "unassigned pending runtime lock decision",
+      "location": "Cloudflare Secrets Store",
+      "consumers": [],
+      "rotation_or_update_procedure": "Do not recreate unless a later runtime locking decision selects Upstash.",
+      "legacy_revocation_dependency": "runtime lock/backpressure decision"
+    },
+    {
+      "name": "UPSTASH_REDIS_REST_TOKEN",
+      "source_inventory_name": "UPSTASH_REDIS_REST_TOKEN",
+      "classification": "retirement_candidate",
+      "readiness": "retained_not_injected",
+      "owner": "unassigned pending runtime lock decision",
+      "location": "Cloudflare Secrets Store",
+      "consumers": [],
+      "rotation_or_update_procedure": "Do not recreate unless a later runtime locking decision selects Upstash.",
+      "legacy_revocation_dependency": "runtime lock/backpressure decision"
+    },
+    {
+      "name": "NUTSNEWS_FAILOVER_STATUS_HMAC_SECRET",
+      "source_inventory_name": "NUTSNEWS_FAILOVER_STATUS_HMAC_SECRET",
+      "classification": "legacy_failover_only_retained_in_cloudflare",
+      "readiness": "retained_not_injected",
+      "owner": "ramideltoro/nutsnews-worker controller until failover ownership moves",
+      "location": "Cloudflare Worker classic secret",
+      "consumers": [
+        "legacy failover controller status signatures"
+      ],
+      "rotation_or_update_procedure": "Rotate only through the failover controller owner boundary.",
+      "legacy_revocation_dependency": "failover controller migration or retirement"
+    }
+  ],
+  "validation": {
+    "local_validator": "python3 scripts/validate_worker_uplift_runtime_readiness.py",
+    "backend_inventory_validator": "python3 scripts/validate_backend_credential_inventory.py",
+    "value_free_live_check": "gh secret list/gh variable list against production-backend, names only",
+    "blocked_items_are_intentional": [
+      "LOCAL_AI_API_KEY must be provided or rotated before article approval service bootstrap",
+      "NUTSNEWS_SHADOW_SMOKE_TOKEN must be generated before protected shadow smoke workflows"
+    ]
+  }
+}

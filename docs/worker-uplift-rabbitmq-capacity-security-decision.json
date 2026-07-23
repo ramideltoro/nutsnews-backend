@@ -22,6 +22,17 @@
     "production_write_enabled": false,
     "statement": "This decision only approves the RabbitMQ capacity, queue-type, resource, and security envelope for later backend bootstrap work."
   },
+  "followup_provisioning_status": {
+    "status": "provisioned_by_later_protected_backend_bootstrap",
+    "tracking_issues": [
+      "ramideltoro/nutsnews-worker#80",
+      "ramideltoro/nutsnews-worker#81",
+      "ramideltoro/nutsnews-worker#82",
+      "ramideltoro/nutsnews-worker#83",
+      "ramideltoro/nutsnews-worker#84"
+    ],
+    "statement": "The current service baseline may show Docker Engine, Docker Compose, and RabbitMQ as deployed only after later protected backend bootstrap/apply work. AMQP, management, and Prometheus listeners remain loopback-only, and this #79 decision remains the capacity/security approval record rather than a provisioning change."
+  },
   "decision": {
     "rabbitmq_release": "4.3.3",
     "rabbitmq_release_series": "4.3",
@@ -280,7 +291,7 @@
   "benchmark_evidence": {
     "mode": "ephemeral_ci_benchmark_plus_source_backed_capacity_model",
     "production_host_benchmark_ran": false,
-    "production_host_reason": "No broker is provisioned by this design issue and the backend host currently has no Docker Engine installed.",
+    "production_host_reason": "No broker was provisioned by this #79 design issue. At the #79 design-capture time, the backend host had no Docker Engine installed; later protected backend bootstrap issues may provision the approved loopback-only broker.",
     "local_attempt": {
       "attempted_at_utc": "2026-07-23T06:58:00Z",
       "status": "blocked_local_docker_daemon_unavailable",

@@ -14,9 +14,13 @@
   "crowdsec_status": "deferred",
   "crowdsec_defer_reasons": [
     "The current attested HTTP/HTTPS surface is limited to Caddy /healthz.",
-    "Docker and the backend app are not deployed yet.",
+    "The backend app is not deployed yet.",
+    "Docker is present only as the protected, loopback-only RabbitMQ substrate; it does not add a public HTTP workload.",
     "CrowdSec HTTP decisions need real backend app access logs and route behavior to avoid false positives.",
     "The VPS should avoid extra agents until there is an application HTTP workload to protect."
+  ],
+  "private_dependency_substrates": [
+    "Docker Engine for loopback-only RabbitMQ"
   ],
   "http_enforcement_status": "deferred_until_backend_app_and_route_logs_exist",
   "enforcement": {

@@ -2,6 +2,12 @@
 
 This runbook covers tracking issue `ramideltoro/nutsnews-worker#79`.
 
+Issue #79 approved the RabbitMQ capacity and security envelope; it did not
+provision the broker by itself. Later protected backend bootstrap issues may
+move Docker Engine, Docker Compose, and RabbitMQ out of the service baseline's
+`not_deployed` list only when the listeners stay loopback-only and this
+decision remains the governing capacity record.
+
 The machine-readable source of truth is:
 
 ```text

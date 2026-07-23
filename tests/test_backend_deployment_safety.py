@@ -41,18 +41,64 @@ class BackendDeploymentSafetyTests(unittest.TestCase):
 
     def test_rabbitmq_is_post_apply_blocker_only_when_enabled(self):
         args = type("Args", (), {"profile": "baseline_apply", "phase": "post"})()
-        checks = [{"name": "docker_health", "status": "not_configured"}, {"name": "rabbitmq_health", "status": "not_configured"}]
+        checks = [
+            {"name": "docker_health", "status": "not_configured"},
+            {"name": "rabbitmq_health", "status": "not_configured"},
+            {"name": "rabbitmq_network_security", "status": "not_configured"},
+            {"name": "rabbitmq_public_exposure", "status": "not_configured"},
+        ]
         with patch.dict(os.environ, {"NUTSNEWS_BACKEND_RABBITMQ_ENABLED": "true"}, clear=True):
             self.assertEqual(
                 safety.rabbitmq_post_apply_blockers(args, checks),
                 [
                     {"check": "docker_health", "status": "not_configured"},
                     {"check": "rabbitmq_health", "status": "not_configured"},
+                    {"check": "rabbitmq_network_security", "status": "not_configured"},
+                    {"check": "rabbitmq_public_exposure", "status": "not_configured"},
                 ],
             )
         pre_args = type("Args", (), {"profile": "baseline_apply", "phase": "pre"})()
         with patch.dict(os.environ, {"NUTSNEWS_BACKEND_RABBITMQ_ENABLED": "true"}, clear=True):
             self.assertEqual(safety.rabbitmq_post_apply_blockers(pre_args, checks), [])
+
+    def test_rabbitmq_network_security_json_is_classified(self):
+        fixture = evidence(rabbitmq_network_security=command('{"status":"pass","failed_checks":[]}\n'))
+        check = safety.rabbitmq_network_security(fixture)
+        self.assertEqual(check["status"], "healthy")
+        self.assertEqual(check["summary"], "failed_checks=none")
+
+        fixture = evidence(rabbitmq_network_security=command('{"status":"fail","failed_checks":["host_listeners"]}\n', returncode=1))
+        check = safety.rabbitmq_network_security(fixture)
+        self.assertEqual(check["status"], "critical")
+        self.assertEqual(check["summary"], "failed_checks=host_listeners")
+
+    def test_rabbitmq_public_exposure_detects_open_ports(self):
+        class FakeConnection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        side_effects = [ConnectionRefusedError(), FakeConnection(), TimeoutError()]
+        with (
+            patch.dict(os.environ, {"NUTSNEWS_BACKEND_RABBITMQ_ENABLED": "true"}, clear=True),
+            patch.object(safety.socket, "create_connection", side_effect=side_effects),
+        ):
+            check = safety.rabbitmq_public_exposure("65.75.201.18", 1)
+        self.assertEqual(check["status"], "critical")
+        self.assertEqual(check["open_ports"], [15672])
+
+    def test_rabbitmq_post_apply_blocks_network_drift_when_enabled(self):
+        args = type("Args", (), {"profile": "baseline_apply", "phase": "post"})()
+        checks = [
+            {"name": "docker_health", "status": "healthy"},
+            {"name": "rabbitmq_health", "status": "healthy"},
+            {"name": "rabbitmq_network_security", "status": "critical"},
+            {"name": "rabbitmq_public_exposure", "status": "healthy"},
+        ]
+        with patch.dict(os.environ, {"NUTSNEWS_BACKEND_RABBITMQ_ENABLED": "true"}, clear=True):
+            self.assertEqual(safety.rabbitmq_post_apply_blockers(args, checks), [{"check": "rabbitmq_network_security", "status": "critical"}])
 
     def test_secret_presence_reports_names_only(self):
         with patch.dict(os.environ, {"ONE_SECRET": "present", "EMPTY_SECRET": ""}, clear=True):

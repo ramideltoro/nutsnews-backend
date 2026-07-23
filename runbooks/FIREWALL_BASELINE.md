@@ -6,6 +6,7 @@ This runbook covers backend issue #3 for `65.75.201.18`.
 
 - `sudo ufw status verbose` shows a clear default-deny incoming policy.
 - Only intended public ports are allowed.
+- RabbitMQ AMQP `5672`, management `15672`, and Prometheus `15692` must remain private and must not appear in UFW public allow rules.
 - IPv6 exposure is intentional and matches the documented policy.
 - A read-only verification command is documented for future audits.
 - SSH access remains available after any firewall reload.
@@ -24,6 +25,7 @@ The firewall tasks:
 - allow TCP `22` for SSH;
 - allow TCP `80` for backend HTTP health and ACME;
 - allow TCP `443` for backend HTTPS health;
+- do not allow RabbitMQ TCP `5672`, `15672`, or `15692` on any public interface;
 - enable UFW and record `ufw status verbose` in workflow logs.
 
 ## Current Public Ports
@@ -61,6 +63,18 @@ ssh -i ~/.ssh/servercheap_65_75_201_18 rami@65.75.201.18 'hostname && whoami'
 ```
 
 Expected result: SSH remains reachable, UFW defaults to deny incoming and allow outgoing, and only intended public ports are allowed.
+
+RabbitMQ public scan:
+
+```bash
+for port in 5672 15672 15692; do
+  nc -vz -w5 65.75.201.18 "$port"
+done
+```
+
+Expected result: every RabbitMQ port is refused or times out from outside the
+host. The protected deployment safety gate also runs this public scan and fails
+post-apply when any RabbitMQ port opens externally.
 
 ## Rollback
 

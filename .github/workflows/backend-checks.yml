@@ -52,6 +52,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backend_credential_inventory.py
 
+      - name: Validate backend Grafana handoff
+        shell: bash
+        run: python3 scripts/validate_backend_grafana_handoff.py
+
       - name: Validate worker uplift credential readiness
         shell: bash
         run: python3 scripts/validate_worker_uplift_runtime_readiness.py

@@ -100,6 +100,8 @@ Grafana Cloud:
 
 Use access-policy tokens scoped to backend metrics/log ingestion. Grafana folders, dashboards, alert rules, contact points, quota guardrails, Synthetic Monitoring, and service-account credentials are managed from `ramideltoro/nutsnews-infra`, not this backend repository.
 
+As of the worker-uplift Grafana handoff on 2026-07-23, `GRAFANA_URL` and `GRAFANA_SERVICE_ACCOUNT_TOKEN` are not backend credentials. They were removed from `production-backend` after the backend workflows stopped consuming them. If Grafana import verification fails, fix the infra OpenTofu import or datasource configuration and rerun the protected infra plan/apply; do not restore backend Grafana mutation credentials without a new reviewed ownership issue.
+
 Supabase:
 
 - `SUPABASE_ACCESS_TOKEN`

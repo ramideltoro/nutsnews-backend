@@ -65,6 +65,26 @@ class BackendControlledMaintenanceTests(unittest.TestCase):
             result = maintenance.run_rabbitmq_probe_action("publish", "host", "user", Path("/key"), Path("/known_hosts"), 15)
         self.assertEqual(result["status"], "fail")
 
+    def test_wait_for_reboot_requires_boot_id_change(self):
+        with (
+            patch.object(maintenance, "run_ssh_command", side_effect=[command("boot-a\n"), command("boot-b\n")]) as run_ssh,
+            patch.object(maintenance.time, "sleep", return_value=None),
+        ):
+            observed, boot_id = maintenance.wait_for_reboot("host", "user", Path("/key"), Path("/known_hosts"), "boot-a", 15, 60)
+        self.assertTrue(observed)
+        self.assertEqual(boot_id, "boot-b")
+        self.assertEqual(run_ssh.call_count, 2)
+
+    def test_wait_for_reboot_times_out_when_boot_id_does_not_change(self):
+        with (
+            patch.object(maintenance, "run_ssh_command", return_value=command("boot-a\n")),
+            patch.object(maintenance.time, "monotonic", side_effect=[0, 0, 2]),
+            patch.object(maintenance.time, "sleep", return_value=None),
+        ):
+            observed, boot_id = maintenance.wait_for_reboot("host", "user", Path("/key"), Path("/known_hosts"), "boot-a", 15, 1)
+        self.assertFalse(observed)
+        self.assertEqual(boot_id, "")
+
     def test_prechecks_classify_live_fixture(self):
         checks = maintenance.classify_prechecks(evidence())
         by_name = {item["name"]: item for item in checks}

@@ -525,17 +525,26 @@ def run_rabbitmq_probe_action(
     }
 
 
-def wait_for_ssh(host: str, user: str, key: Path, known_hosts: Path, timeout: int, wait_seconds: int) -> bool:
+def wait_for_reboot(
+    host: str,
+    user: str,
+    key: Path,
+    known_hosts: Path,
+    previous_boot_id: str,
+    timeout: int,
+    wait_seconds: int,
+) -> tuple[bool, str]:
     deadline = time.monotonic() + wait_seconds
     while time.monotonic() < deadline:
         try:
-            result = run_ssh_command(host, user, key, known_hosts, "hostname", timeout)
-            if result["returncode"] == 0:
-                return True
+            result = run_ssh_command(host, user, key, known_hosts, "cat /proc/sys/kernel/random/boot_id", timeout)
+            boot_id = result["stdout"].strip()
+            if result["returncode"] == 0 and boot_id and boot_id != previous_boot_id:
+                return True, boot_id
         except Exception:
             pass
         time.sleep(10)
-    return False
+    return False, ""
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -623,18 +632,21 @@ def main(argv: list[str] | None = None) -> int:
                 "stderr": result["stderr"][-4000:],
             }
             if args.action == "reboot":
-                if not wait_for_ssh(
+                boot_observed, observed_boot_id = wait_for_reboot(
                     args.ssh_host,
                     args.ssh_user,
                     args.ssh_key,
                     args.known_hosts,
+                    precheck["boot_id"],
                     args.timeout,
                     args.reboot_wait_seconds,
-                ):
+                )
+                if not boot_observed:
                     report["status"] = "fail"
-                    report["action_result"]["status"] = "ssh_reconnect_timeout"
+                    report["action_result"]["status"] = "reboot_boot_id_timeout"
                     exit_code = 1
                 else:
+                    report["action_result"]["observed_boot_id"] = observed_boot_id
                     verify_probe = None
                     if rabbitmq_probe_required:
                         verify_probe = run_rabbitmq_probe_action(

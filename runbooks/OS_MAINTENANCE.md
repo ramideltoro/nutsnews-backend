@@ -42,9 +42,10 @@ The workflow has no arbitrary command input. All actions run under the protected
 
 When the backend RabbitMQ broker is healthy before a controlled reboot, the
 reboot action publishes a durable RabbitMQ probe message, reboots the host, then
-verifies and deletes the probe message after SSH returns. Probe credentials are
-read from the root-only broker environment file and are not passed as workflow
-inputs or command-line secret values.
+waits for SSH to return with a changed boot ID before verifying and deleting
+the probe message. Probe credentials are read from the root-only broker
+environment file and are not passed as workflow inputs or command-line secret
+values.
 
 Deployment safety and recovery paths for this workflow are summarized in
 [DEPLOYMENT_SAFETY_GATES.md](DEPLOYMENT_SAFETY_GATES.md).

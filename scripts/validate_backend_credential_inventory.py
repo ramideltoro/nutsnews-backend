@@ -102,6 +102,24 @@ def main() -> int:
                 if name not in names:
                     errors.append(f"conditional credential {name} is not defined as a secret")
 
+    grafana_group = next((group for group in inventory.get("secret_groups", []) if group.get("id") == "grafana"), {})
+    grafana_secret_names = {
+        secret.get("name")
+        for key in ("secrets", "conditional_secrets")
+        for secret in grafana_group.get(key, [])
+    }
+    forbidden_grafana_management = {"GRAFANA_URL", "GRAFANA_SERVICE_ACCOUNT_TOKEN"}
+    reintroduced = sorted(forbidden_grafana_management & grafana_secret_names)
+    if reintroduced:
+        errors.append(
+            "backend grafana group must not include resource-management credentials: "
+            + ", ".join(reintroduced)
+        )
+    if "telemetry" not in " ".join(grafana_group.get("required_for", [])).lower():
+        errors.append("grafana group must be scoped to backend telemetry production")
+    if "ramideltoro/nutsnews-infra" not in grafana_group.get("ownership", ""):
+        errors.append("grafana group must document nutsnews-infra resource ownership")
+
     actions = inventory.get("manual_provider_actions", [])
     if len(actions) < 5:
         errors.append("manual_provider_actions must document provider/dashboard steps")

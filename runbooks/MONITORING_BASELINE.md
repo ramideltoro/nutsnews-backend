@@ -114,16 +114,17 @@ The managed Grafana folder is `NutsNews Backend Ops` (`nutsnews-backend-ops`).
 The logs dashboard is `NutsNews Backend Logs` (`nutsnews-backend-logs`) and uses
 the Grafana Cloud Logs datasource when available. Live verification on
 2026-07-17 used `grafanacloud-kindcantaloupe2036-logs` (`grafanacloud-logs`).
-If no non-alert-history Loki datasource exists, the provisioner creates a
-managed fallback datasource named `grafanacloud-nutsnews-backend-loki`
-(`grafanacloud-loki`) from the same Loki secret names. The provisioner
-intentionally avoids Grafana's alert-state-history Loki datasource.
+Grafana folders, dashboards, alert rules, contact points, quota guardrails, and
+Synthetic Monitoring now belong to `ramideltoro/nutsnews-infra`; this backend
+repository is the telemetry producer and keeps only Prometheus/Loki write
+credentials.
 
 ## Grafana Alert Guardrails
 
-Backend issue #25 adds repo-managed Grafana alert rules through the same
-`Backend Grafana Observability` workflow. The managed rule group is
-`NutsNews Backend Guardrails` in the `NutsNews Backend Ops` folder.
+Backend issue #25 added the backend alert catalog. The live Grafana alert rules
+are now imported and managed by `ramideltoro/nutsnews-infra` through OpenTofu.
+The managed rule group is `NutsNews Backend Guardrails` in the
+`NutsNews Backend Ops` folder.
 
 Initial rules cover:
 

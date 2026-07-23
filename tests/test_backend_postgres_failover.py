@@ -121,6 +121,14 @@ class BackendPostgresFailoverTests(unittest.TestCase):
             "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD",
             "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD",
             "NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD",
+            "NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD",
+            "NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_PASSWORD",
+            "NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_PASSWORD",
+            "NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_PASSWORD",
+            "NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_PASSWORD",
+            "NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_PASSWORD",
+            "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_PASSWORD",
+            "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_PASSWORD",
         ):
             self.assertIn(secret_name, build_step)
         self.assertIn("NUTSNEWS_BACKEND_WORKER_API_ENABLED", build_step_env)
@@ -138,6 +146,9 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn('"backend_postgres_replication_password"]', build_step)
         self.assertIn('"backend_postgres_app_rehearsal_password"]', build_step)
         self.assertIn('"backend_postgres_worker_api_password"]', build_step)
+        self.assertIn('"backend_worker_uplift_postgres_enabled"] = True', build_step)
+        self.assertIn('"backend_worker_uplift_postgres_database"] = extra_vars["backend_postgres_primary_shadow_database"]', build_step)
+        self.assertIn('extra_vars[f"backend_worker_uplift_postgres_{stage_name}_password"]', build_step)
         self.assertIn('"backend_worker_api_enabled"] = True', build_step)
         self.assertIn('"backend_worker_api_token"] = token', build_step)
         self.assertIn('"backend_worker_api_writes_enabled"] = writes_enabled', build_step)

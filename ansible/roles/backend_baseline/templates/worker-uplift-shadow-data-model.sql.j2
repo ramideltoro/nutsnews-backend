@@ -1,0 +1,441 @@
+DO $worker_uplift_shadow_model$
+DECLARE
+  final_schema constant text := '{{ backend_worker_uplift_postgres_final_schema }}';
+  views_schema constant text := '{{ backend_worker_uplift_postgres_views_schema }}';
+  validation_role constant text := '{{ backend_postgres_validation_user }}';
+  readonly_role constant text := '{{ backend_postgres_readonly_user }}';
+  worker_api_role constant text := '{{ backend_postgres_worker_api_user }}';
+BEGIN
+{% for item in backend_worker_uplift_postgres_stage_roles %}
+  EXECUTE format('CREATE SCHEMA IF NOT EXISTS %I', '{{ item.schema }}');
+  EXECUTE format('REVOKE ALL ON SCHEMA %I FROM PUBLIC', '{{ item.schema }}');
+  EXECUTE format('REVOKE CREATE ON SCHEMA public FROM %I', '{{ item.user }}');
+  EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', '{{ item.schema }}', '{{ item.user }}');
+  EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I, %I', '{{ item.schema }}', validation_role, readonly_role);
+
+  EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.inbox (
+      id bigserial PRIMARY KEY,
+      message_id text NOT NULL,
+      pipeline_run_id text NOT NULL,
+      stage_execution_id text NOT NULL,
+      source_stage text NOT NULL,
+      source_message_id text NOT NULL,
+      entity_kind text NOT NULL,
+      entity_id text NOT NULL,
+      schema_version integer NOT NULL CHECK (schema_version > 0),
+      operation_version integer NOT NULL CHECK (operation_version > 0),
+      idempotency_key text NOT NULL,
+      payload_ref text NOT NULL,
+      payload_digest text NOT NULL,
+      received_at timestamptz NOT NULL DEFAULT now(),
+      processed_at timestamptz,
+      status text NOT NULL DEFAULT 'received' CHECK (status IN ('received', 'processing', 'processed', 'duplicate', 'failed', 'parked')),
+      diagnostic_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(diagnostic_metadata) = 'object'),
+      sanitized_error_code text,
+      sanitized_error_message text CHECK (sanitized_error_message IS NULL OR length(sanitized_error_message) <= 512),
+      redact_after timestamptz NOT NULL DEFAULT (now() + interval '30 days'),
+      UNIQUE (message_id),
+      UNIQUE (idempotency_key),
+      UNIQUE (pipeline_run_id, stage_execution_id, source_message_id)
+    )
+  $ddl$, '{{ item.schema }}');
+
+  EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.outbox (
+      id bigserial PRIMARY KEY,
+      outbox_message_id text NOT NULL,
+      pipeline_run_id text NOT NULL,
+      stage_execution_id text NOT NULL,
+      destination_stage text NOT NULL,
+      routing_key text NOT NULL,
+      entity_kind text NOT NULL,
+      entity_id text NOT NULL,
+      schema_version integer NOT NULL CHECK (schema_version > 0),
+      operation_version integer NOT NULL CHECK (operation_version > 0),
+      idempotency_key text NOT NULL,
+      payload_ref text NOT NULL,
+      payload_digest text NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      published_at timestamptz,
+      confirmed_at timestamptz,
+      status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'published', 'confirmed', 'retrying', 'dead_lettered', 'cancelled')),
+      diagnostic_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(diagnostic_metadata) = 'object'),
+      sanitized_error_code text,
+      sanitized_error_message text CHECK (sanitized_error_message IS NULL OR length(sanitized_error_message) <= 512),
+      redact_after timestamptz NOT NULL DEFAULT (now() + interval '30 days'),
+      UNIQUE (outbox_message_id),
+      UNIQUE (idempotency_key),
+      UNIQUE (pipeline_run_id, stage_execution_id, destination_stage, entity_id, operation_version)
+    )
+  $ddl$, '{{ item.schema }}');
+
+  EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.attempts (
+      id bigserial PRIMARY KEY,
+      source_message_id text NOT NULL,
+      pipeline_run_id text NOT NULL,
+      stage_execution_id text NOT NULL,
+      attempt_number integer NOT NULL CHECK (attempt_number > 0),
+      status text NOT NULL CHECK (status IN ('started', 'succeeded', 'failed', 'retry_scheduled', 'dead_lettered')),
+      started_at timestamptz NOT NULL DEFAULT now(),
+      completed_at timestamptz,
+      duration_ms integer CHECK (duration_ms IS NULL OR duration_ms >= 0),
+      payload_ref text,
+      sanitized_error_code text,
+      sanitized_error_message text CHECK (sanitized_error_message IS NULL OR length(sanitized_error_message) <= 512),
+      diagnostic_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(diagnostic_metadata) = 'object'),
+      model_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(model_metadata) = 'object'),
+      correlation_id text NOT NULL,
+      redact_after timestamptz NOT NULL DEFAULT (now() + interval '30 days'),
+      UNIQUE (source_message_id, attempt_number)
+    )
+  $ddl$, '{{ item.schema }}');
+
+  EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.transition_ledger (
+      id bigserial PRIMARY KEY,
+      inbox_id bigint NOT NULL REFERENCES %I.inbox(id) ON DELETE RESTRICT,
+      outbox_id bigint NOT NULL REFERENCES %I.outbox(id) ON DELETE RESTRICT,
+      attempt_id bigint REFERENCES %I.attempts(id) ON DELETE SET NULL,
+      pipeline_run_id text NOT NULL,
+      transition_status text NOT NULL CHECK (transition_status IN ('committed', 'duplicate', 'compensated')),
+      committed_at timestamptz NOT NULL DEFAULT now(),
+      audit_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(audit_metadata) = 'object'),
+      redact_after timestamptz NOT NULL DEFAULT (now() + interval '90 days'),
+      UNIQUE (inbox_id, outbox_id),
+      UNIQUE (pipeline_run_id, inbox_id, outbox_id)
+    )
+  $ddl$, '{{ item.schema }}', '{{ item.schema }}', '{{ item.schema }}', '{{ item.schema }}');
+
+  EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.reconciliation_watermarks (
+      id bigserial PRIMARY KEY,
+      watermark_name text NOT NULL,
+      cursor_value text NOT NULL,
+      confirmed_message_id text,
+      confirmed_at timestamptz NOT NULL DEFAULT now(),
+      lag_count bigint NOT NULL DEFAULT 0 CHECK (lag_count >= 0),
+      diagnostic_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(diagnostic_metadata) = 'object'),
+      redact_after timestamptz NOT NULL DEFAULT (now() + interval '90 days'),
+      UNIQUE (watermark_name)
+    )
+  $ddl$, '{{ item.schema }}');
+
+  EXECUTE format('CREATE INDEX IF NOT EXISTS %I ON %I.inbox (status, received_at)', '{{ item.schema }}_inbox_status_received_idx', '{{ item.schema }}');
+  EXECUTE format('CREATE INDEX IF NOT EXISTS %I ON %I.outbox (status, created_at)', '{{ item.schema }}_outbox_status_created_idx', '{{ item.schema }}');
+  EXECUTE format('CREATE INDEX IF NOT EXISTS %I ON %I.attempts (status, started_at)', '{{ item.schema }}_attempts_status_started_idx', '{{ item.schema }}');
+  EXECUTE format('CREATE INDEX IF NOT EXISTS %I ON %I.reconciliation_watermarks (confirmed_at)', '{{ item.schema }}_watermarks_confirmed_idx', '{{ item.schema }}');
+{% endfor %}
+
+  EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.feed_schedules (
+      id bigserial PRIMARY KEY,
+      feed_url text NOT NULL,
+      shard_key text NOT NULL,
+      schedule_version integer NOT NULL CHECK (schedule_version > 0),
+      next_fetch_after timestamptz NOT NULL,
+      backpressure_state text NOT NULL DEFAULT 'normal' CHECK (backpressure_state IN ('normal', 'throttled', 'paused')),
+      lease_key text,
+      diagnostic_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(diagnostic_metadata) = 'object'),
+      redact_after timestamptz NOT NULL DEFAULT (now() + interval '30 days'),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (feed_url, shard_key, schedule_version)
+    )
+  $ddl$, 'worker_uplift_scheduler');
+  EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.feed_leases (
+      id bigserial PRIMARY KEY,
+      feed_url text NOT NULL,
+      lease_token text NOT NULL,
+      holder_stage_execution_id text NOT NULL,
+      lease_version integer NOT NULL CHECK (lease_version > 0),
+      acquired_at timestamptz NOT NULL DEFAULT now(),
+      expires_at timestamptz NOT NULL,
+      released_at timestamptz,
+      diagnostic_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(diagnostic_metadata) = 'object'),
+      redact_after timestamptz NOT NULL DEFAULT (now() + interval '30 days'),
+      UNIQUE (feed_url, lease_version),
+      UNIQUE (lease_token)
+    )
+  $ddl$, 'worker_uplift_scheduler');
+  EXECUTE format('CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I.feed_leases (feed_url) WHERE released_at IS NULL', 'worker_uplift_scheduler_active_feed_lease_uidx', 'worker_uplift_scheduler');
+
+  EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.fetch_versions (
+      id bigserial PRIMARY KEY,
+      feed_url text NOT NULL,
+      fetch_version integer NOT NULL CHECK (fetch_version > 0),
+      source_etag text,
+      source_last_modified text,
+      http_status integer CHECK (http_status IS NULL OR http_status BETWEEN 100 AND 599),
+      status text NOT NULL CHECK (status IN ('fetched', 'not_modified', 'failed', 'parse_failed')),
+      payload_ref text,
+      payload_digest text NOT NULL,
+      fetched_at timestamptz NOT NULL DEFAULT now(),
+      sanitized_error_code text,
+      sanitized_error_message text CHECK (sanitized_error_message IS NULL OR length(sanitized_error_message) <= 512),
+      diagnostic_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(diagnostic_metadata) = 'object'),
+      redact_after timestamptz NOT NULL DEFAULT (now() + interval '30 days'),
+      UNIQUE (feed_url, fetch_version),
+      UNIQUE (feed_url, payload_digest)
+    )
+  $ddl$, 'worker_uplift_fetcher');
+  EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.feed_health_projections (
+      id bigserial PRIMARY KEY,
+      feed_url text NOT NULL,
+      status text NOT NULL CHECK (status IN ('healthy', 'warning', 'failed', 'paused')),
+      last_success_at timestamptz,
+      last_failure_at timestamptz,
+      consecutive_failures integer NOT NULL DEFAULT 0 CHECK (consecutive_failures >= 0),
+      projection_version integer NOT NULL CHECK (projection_version > 0),
+      sanitized_error_code text,
+      sanitized_error_message text CHECK (sanitized_error_message IS NULL OR length(sanitized_error_message) <= 512),
+      diagnostic_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(diagnostic_metadata) = 'object'),
+      redact_after timestamptz NOT NULL DEFAULT (now() + interval '30 days'),
+      UNIQUE (feed_url, projection_version)
+    )
+  $ddl$, 'worker_uplift_fetcher');
+
+  EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.article_identities (
+      id bigserial PRIMARY KEY,
+      original_url_hash text NOT NULL,
+      canonical_url_hash text NOT NULL,
+      canonical_url text,
+      original_url_ref text NOT NULL,
+      operation_version integer NOT NULL CHECK (operation_version > 0),
+      identity_status text NOT NULL CHECK (identity_status IN ('candidate', 'canonical', 'duplicate', 'rejected')),
+      diagnostic_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(diagnostic_metadata) = 'object'),
+      redact_after timestamptz NOT NULL DEFAULT (now() + interval '90 days'),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (original_url_hash, operation_version),
+      UNIQUE (canonical_url_hash, operation_version)
+    )
+  $ddl$, 'worker_uplift_canonicalizer');
+  EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.article_aliases (
+      id bigserial PRIMARY KEY,
+      alias_url_hash text NOT NULL,
+      canonical_url_hash text NOT NULL,
+      operation_version integer NOT NULL CHECK (operation_version > 0),
+      alias_ref text NOT NULL,
+      diagnostic_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(diagnostic_metadata) = 'object'),
+      redact_after timestamptz NOT NULL DEFAULT (now() + interval '90 days'),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (alias_url_hash, operation_version)
+    )
+  $ddl$, 'worker_uplift_canonicalizer');
+
+  EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.enrichment_records (
+      id bigserial PRIMARY KEY,
+      article_identity_hash text NOT NULL,
+      enrichment_version integer NOT NULL CHECK (enrichment_version > 0),
+      image_url_ref text,
+      metadata_ref text,
+      status text NOT NULL CHECK (status IN ('enriched', 'partial', 'failed', 'skipped')),
+      diagnostic_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(diagnostic_metadata) = 'object'),
+      redact_after timestamptz NOT NULL DEFAULT (now() + interval '30 days'),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (article_identity_hash, enrichment_version)
+    )
+  $ddl$, 'worker_uplift_enrichment');
+
+  EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.approval_decisions (
+      id bigserial PRIMARY KEY,
+      article_identity_hash text NOT NULL,
+      approval_version integer NOT NULL CHECK (approval_version > 0),
+      decision text NOT NULL CHECK (decision IN ('approved', 'rejected', 'needs_review')),
+      positivity_score numeric(5,2),
+      ai_provider text,
+      ai_model text,
+      prompt_version text,
+      model_version text,
+      model_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(model_metadata) = 'object'),
+      diagnostic_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(diagnostic_metadata) = 'object'),
+      redact_after timestamptz NOT NULL DEFAULT (now() + interval '30 days'),
+      reviewed_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (article_identity_hash, approval_version)
+    )
+  $ddl$, 'worker_uplift_approval');
+
+  EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.translation_records (
+      id bigserial PRIMARY KEY,
+      article_identity_hash text NOT NULL,
+      language_code text NOT NULL,
+      translation_version integer NOT NULL CHECK (translation_version > 0),
+      summary_ref text NOT NULL,
+      quality_status text NOT NULL CHECK (quality_status IN ('pending', 'accepted', 'failed', 'needs_review')),
+      ai_provider text,
+      ai_model text,
+      model_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(model_metadata) = 'object'),
+      diagnostic_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(diagnostic_metadata) = 'object'),
+      redact_after timestamptz NOT NULL DEFAULT (now() + interval '30 days'),
+      translated_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (article_identity_hash, language_code, translation_version)
+    )
+  $ddl$, 'worker_uplift_translation');
+
+  EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.write_requests (
+      id bigserial PRIMARY KEY,
+      article_identity_hash text NOT NULL,
+      request_kind text NOT NULL CHECK (request_kind IN ('article', 'review', 'summary', 'feed_health', 'ai_usage', 'worker_run')),
+      operation_version integer NOT NULL CHECK (operation_version > 0),
+      backend_api_operation text NOT NULL,
+      request_ref text NOT NULL,
+      response_ref text,
+      status text NOT NULL CHECK (status IN ('pending', 'accepted', 'failed', 'retrying')),
+      diagnostic_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(diagnostic_metadata) = 'object'),
+      redact_after timestamptz NOT NULL DEFAULT (now() + interval '90 days'),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (article_identity_hash, request_kind, operation_version)
+    )
+  $ddl$, 'worker_uplift_persistence');
+
+  EXECUTE format($ddl$
+    CREATE SCHEMA IF NOT EXISTS %I
+  $ddl$, final_schema);
+  EXECUTE format('REVOKE ALL ON SCHEMA %I FROM PUBLIC', final_schema);
+  EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.article_shadow_aggregates (
+      id bigserial PRIMARY KEY,
+      article_identity_hash text NOT NULL,
+      canonical_url_hash text NOT NULL,
+      original_url_hash text NOT NULL,
+      aggregate_version integer NOT NULL CHECK (aggregate_version > 0),
+      source_feed_url text,
+      title_ref text,
+      image_url_ref text,
+      category text,
+      positivity_score numeric(5,2),
+      approval_version integer,
+      translation_languages text[] NOT NULL DEFAULT ARRAY[]::text[],
+      publication_status text NOT NULL DEFAULT 'shadow_only' CHECK (publication_status IN ('shadow_only', 'ready', 'blocked', 'published')),
+      payload_ref text NOT NULL,
+      payload_digest text NOT NULL,
+      diagnostic_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(diagnostic_metadata) = 'object'),
+      redact_after timestamptz NOT NULL DEFAULT (now() + interval '90 days'),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (article_identity_hash, aggregate_version),
+      UNIQUE (canonical_url_hash, aggregate_version),
+      UNIQUE (original_url_hash, aggregate_version)
+    )
+  $ddl$, final_schema);
+
+  EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.publication_readiness (
+      id bigserial PRIMARY KEY,
+      article_identity_hash text NOT NULL,
+      readiness_version integer NOT NULL CHECK (readiness_version > 0),
+      approved boolean NOT NULL DEFAULT false,
+      translations_complete boolean NOT NULL DEFAULT false,
+      shadow_aggregate_version integer NOT NULL CHECK (shadow_aggregate_version > 0),
+      status text NOT NULL CHECK (status IN ('ready', 'blocked', 'deferred')),
+      diagnostic_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(diagnostic_metadata) = 'object'),
+      redact_after timestamptz NOT NULL DEFAULT (now() + interval '90 days'),
+      checked_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (article_identity_hash, readiness_version)
+    )
+  $ddl$, 'worker_uplift_publication');
+  EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.publication_decisions (
+      id bigserial PRIMARY KEY,
+      article_identity_hash text NOT NULL,
+      decision_version integer NOT NULL CHECK (decision_version > 0),
+      decision text NOT NULL CHECK (decision IN ('publish', 'block', 'refresh_snapshot')),
+      reason_code text,
+      backend_api_operation text NOT NULL,
+      request_ref text NOT NULL,
+      response_ref text,
+      diagnostic_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(diagnostic_metadata) = 'object'),
+      redact_after timestamptz NOT NULL DEFAULT (now() + interval '90 days'),
+      decided_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (article_identity_hash, decision_version)
+    )
+  $ddl$, 'worker_uplift_publication');
+
+  EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', final_schema, '{{ backend_worker_uplift_postgres_persistence_user }}');
+  EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.article_shadow_aggregates TO %I', final_schema, '{{ backend_worker_uplift_postgres_persistence_user }}');
+  EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', final_schema, '{{ backend_worker_uplift_postgres_persistence_user }}');
+  EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I, %I', final_schema, validation_role, readonly_role);
+  EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO %I, %I', final_schema, validation_role, readonly_role);
+
+{% for item in backend_worker_uplift_postgres_stage_roles %}
+  EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO %I', '{{ item.schema }}', '{{ item.user }}');
+  EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', '{{ item.schema }}', '{{ item.user }}');
+  EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO %I, %I', '{{ item.schema }}', validation_role, readonly_role);
+  EXECUTE format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA public FROM %I', '{{ item.user }}');
+  EXECUTE format('REVOKE USAGE, UPDATE ON ALL SEQUENCES IN SCHEMA public FROM %I', '{{ item.user }}');
+  EXECUTE format('REVOKE ALL ON SCHEMA %I FROM %I', final_schema, '{{ item.user }}');
+{% endfor %}
+  EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', final_schema, '{{ backend_worker_uplift_postgres_persistence_user }}');
+  EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.article_shadow_aggregates TO %I', final_schema, '{{ backend_worker_uplift_postgres_persistence_user }}');
+  EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', final_schema, '{{ backend_worker_uplift_postgres_persistence_user }}');
+
+  EXECUTE format($ddl$
+    CREATE SCHEMA IF NOT EXISTS %I
+  $ddl$, views_schema);
+  EXECUTE format('REVOKE ALL ON SCHEMA %I FROM PUBLIC', views_schema);
+
+  EXECUTE format($ddl$
+    CREATE OR REPLACE VIEW %I.feed_schedule_projection AS
+    SELECT feed_url, shard_key, schedule_version, next_fetch_after, backpressure_state
+    FROM %I.feed_schedules
+  $ddl$, views_schema, 'worker_uplift_scheduler');
+  EXECUTE format($ddl$
+    CREATE OR REPLACE VIEW %I.fetch_version_projection AS
+    SELECT feed_url, fetch_version, status, http_status, fetched_at
+    FROM %I.fetch_versions
+  $ddl$, views_schema, 'worker_uplift_fetcher');
+  EXECUTE format($ddl$
+    CREATE OR REPLACE VIEW %I.canonical_article_projection AS
+    SELECT original_url_hash, canonical_url_hash, operation_version, identity_status
+    FROM %I.article_identities
+  $ddl$, views_schema, 'worker_uplift_canonicalizer');
+  EXECUTE format($ddl$
+    CREATE OR REPLACE VIEW %I.approval_projection AS
+    SELECT article_identity_hash, approval_version, decision, positivity_score, reviewed_at
+    FROM %I.approval_decisions
+  $ddl$, views_schema, 'worker_uplift_approval');
+  EXECUTE format($ddl$
+    CREATE OR REPLACE VIEW %I.translation_coverage_projection AS
+    SELECT article_identity_hash, language_code, translation_version, quality_status, translated_at
+    FROM %I.translation_records
+  $ddl$, views_schema, 'worker_uplift_translation');
+  EXECUTE format($ddl$
+    CREATE OR REPLACE VIEW %I.publication_readiness_projection AS
+    SELECT article_identity_hash, readiness_version, approved, translations_complete, shadow_aggregate_version, status
+    FROM %I.publication_readiness
+  $ddl$, views_schema, 'worker_uplift_publication');
+  EXECUTE format($ddl$
+    CREATE OR REPLACE VIEW %I.final_shadow_article_projection AS
+    SELECT article_identity_hash, canonical_url_hash, original_url_hash, aggregate_version, publication_status, updated_at
+    FROM %I.article_shadow_aggregates
+  $ddl$, views_schema, final_schema);
+
+{% for item in backend_worker_uplift_postgres_stage_roles %}
+  EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', views_schema, '{{ item.user }}');
+  EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO %I', views_schema, '{{ item.user }}');
+{% endfor %}
+  EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I, %I, %I', views_schema, validation_role, readonly_role, worker_api_role);
+  EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO %I, %I, %I', views_schema, validation_role, readonly_role, worker_api_role);
+
+  COMMENT ON SCHEMA worker_uplift_scheduler IS 'Worker-uplift scheduler shadow state: schedules, leases, inbox, outbox, attempts, and reconciliation.';
+  COMMENT ON SCHEMA worker_uplift_fetcher IS 'Worker-uplift fetcher shadow state: fetch versions, feed health projections, inbox, outbox, attempts, and reconciliation.';
+  COMMENT ON SCHEMA worker_uplift_canonicalizer IS 'Worker-uplift canonicalizer shadow state: article identity and alias decisions.';
+  COMMENT ON SCHEMA worker_uplift_enrichment IS 'Worker-uplift enrichment shadow state: article metadata and image enrichment attempts.';
+  COMMENT ON SCHEMA worker_uplift_approval IS 'Worker-uplift approval shadow state: review decisions and sanitized provider metadata.';
+  COMMENT ON SCHEMA worker_uplift_translation IS 'Worker-uplift translation shadow state: language coverage and quality state.';
+  COMMENT ON SCHEMA worker_uplift_persistence IS 'Worker-uplift persistence shadow state: backend Worker DB API write requests.';
+  COMMENT ON SCHEMA worker_uplift_publication IS 'Worker-uplift publication shadow state: publication readiness and snapshot refresh decisions.';
+  EXECUTE format('COMMENT ON SCHEMA %I IS %L', final_schema, 'Worker-uplift final shadow aggregates. Persistence is the only runtime role with direct DML.');
+  EXECUTE format('COMMENT ON SCHEMA %I IS %L', views_schema, 'Worker-uplift downstream read projections. Stage roles read views instead of writing across schemas.');
+END
+$worker_uplift_shadow_model$;

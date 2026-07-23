@@ -26,6 +26,23 @@ class BackendPostgresMigrationAccessPreflightTests(unittest.TestCase):
         for value in ("f", "false", "0", "no", "off", ""):
             self.assertFalse(module.parse_postgres_bool(value))
 
+    def test_worker_uplift_roles_are_part_of_live_preflight(self):
+        module = load_module()
+        expected_roles = {
+            "nutsnews_worker_uplift_scheduler",
+            "nutsnews_worker_uplift_fetcher",
+            "nutsnews_worker_uplift_canonicalizer",
+            "nutsnews_worker_uplift_enrichment",
+            "nutsnews_worker_uplift_approval",
+            "nutsnews_worker_uplift_translation",
+            "nutsnews_worker_uplift_persistence",
+            "nutsnews_worker_uplift_publication",
+        }
+        self.assertTrue(expected_roles.issubset(set(module.ROLE_NAMES)))
+        self.assertTrue(expected_roles.issubset(set(module.PRIMARY_SHADOW_CONNECT_ROLES)))
+        self.assertIn("worker_uplift_final", module.WORKER_UPLIFT_SCHEMAS)
+        self.assertIn("worker_uplift_views", module.WORKER_UPLIFT_SCHEMAS)
+
 
 if __name__ == "__main__":
     unittest.main()

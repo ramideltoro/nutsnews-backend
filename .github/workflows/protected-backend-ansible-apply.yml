@@ -188,6 +188,23 @@ jobs:
           NUTSNEWS_BACKEND_WORKER_API_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_API_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_API_TOKEN }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENABLED: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENABLED || 'true' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_USERNAME || 'nutsnews_worker_uplift_scheduler' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_USERNAME || 'nutsnews_worker_uplift_fetcher' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_USERNAME || 'nutsnews_worker_uplift_canonicalizer' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_USERNAME || 'nutsnews_worker_uplift_enrichment' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_USERNAME || 'nutsnews_worker_uplift_approval' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_USERNAME || 'nutsnews_worker_uplift_translation' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_USERNAME || 'nutsnews_worker_uplift_persistence' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_USERNAME || 'nutsnews_worker_uplift_publication' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_PASSWORD }}
           NUTSNEWS_BACKEND_RABBITMQ_ENABLED: ${{ vars.NUTSNEWS_BACKEND_RABBITMQ_ENABLED || 'true' }}
           NUTSNEWS_BACKEND_WORKER_RUNTIME_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_RUNTIME_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_WORKER_RUNTIME_PRODUCTION_WRITES_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_RUNTIME_PRODUCTION_WRITES_ENABLED || 'false' }}
@@ -256,6 +273,14 @@ jobs:
             --required-secret GRAFANA_CLOUD_LOKI_URL \
             --required-secret GRAFANA_CLOUD_LOKI_USERNAME \
             --required-secret GRAFANA_CLOUD_LOKI_PASSWORD \
+            --required-secret NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD \
+            --required-secret NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_PASSWORD \
+            --required-secret NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_PASSWORD \
+            --required-secret NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_PASSWORD \
+            --required-secret NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_PASSWORD \
+            --required-secret NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_PASSWORD \
+            --required-secret NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_PASSWORD \
+            --required-secret NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_PASSWORD \
             --required-secret RABBITMQ_ERLANG_COOKIE \
             --required-secret RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD \
             --required-secret RABBITMQ_MONITORING_PASSWORD \
@@ -315,6 +340,23 @@ jobs:
           NUTSNEWS_BACKEND_WORKER_API_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_API_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_API_TOKEN }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENABLED: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENABLED || 'true' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_USERNAME || 'nutsnews_worker_uplift_scheduler' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_USERNAME || 'nutsnews_worker_uplift_fetcher' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_USERNAME || 'nutsnews_worker_uplift_canonicalizer' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_USERNAME || 'nutsnews_worker_uplift_enrichment' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_USERNAME || 'nutsnews_worker_uplift_approval' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_USERNAME || 'nutsnews_worker_uplift_translation' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_USERNAME || 'nutsnews_worker_uplift_persistence' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_PASSWORD }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_USERNAME || 'nutsnews_worker_uplift_publication' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_PASSWORD }}
           NUTSNEWS_BACKEND_RABBITMQ_ENABLED: ${{ vars.NUTSNEWS_BACKEND_RABBITMQ_ENABLED || 'true' }}
           NUTSNEWS_BACKEND_WORKER_RUNTIME_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_RUNTIME_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_WORKER_RUNTIME_PRODUCTION_WRITES_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_RUNTIME_PRODUCTION_WRITES_ENABLED || 'false' }}
@@ -458,6 +500,35 @@ jobs:
               extra_vars["backend_postgres_replication_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD"]
               extra_vars["backend_postgres_app_rehearsal_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD"]
               extra_vars["backend_postgres_worker_api_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD"]
+
+          worker_uplift_postgres_enabled = postgres_enabled and (
+              os.environ.get("NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
+          )
+          if worker_uplift_postgres_enabled:
+              stage_names = (
+                  "scheduler",
+                  "fetcher",
+                  "canonicalizer",
+                  "enrichment",
+                  "approval",
+                  "translation",
+                  "persistence",
+                  "publication",
+              )
+              extra_vars["backend_worker_uplift_postgres_enabled"] = True
+              extra_vars["backend_worker_uplift_postgres_database"] = extra_vars["backend_postgres_primary_shadow_database"]
+              for stage_name in stage_names:
+                  env_prefix = f"NUTSNEWS_WORKER_UPLIFT_POSTGRES_{stage_name.upper()}"
+                  username = os.environ.get(f"{env_prefix}_USERNAME", "").strip()
+                  password = os.environ.get(f"{env_prefix}_PASSWORD", "")
+                  if not username:
+                      raise SystemExit(f"Missing required worker-uplift PostgreSQL variable: {env_prefix}_USERNAME")
+                  if not password:
+                      raise SystemExit(f"Missing required worker-uplift PostgreSQL secret: {env_prefix}_PASSWORD")
+                  if not identifier_re.match(username):
+                      raise SystemExit(f"{env_prefix}_USERNAME must be a safe PostgreSQL identifier")
+                  extra_vars[f"backend_worker_uplift_postgres_{stage_name}_user"] = username
+                  extra_vars[f"backend_worker_uplift_postgres_{stage_name}_password"] = password
 
           worker_api_enabled = os.environ.get("NUTSNEWS_BACKEND_WORKER_API_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
           if worker_api_enabled:

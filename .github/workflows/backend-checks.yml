@@ -56,6 +56,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_worker_uplift_runtime_readiness.py
 
+      - name: Validate worker uplift runtime identities
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_runtime_identities.py
+
       - name: Validate service baseline inventory
         shell: bash
         run: python3 scripts/validate_service_baseline.py

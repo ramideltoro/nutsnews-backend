@@ -98,7 +98,7 @@ def main() -> int:
     for name in ("NUTSNEWS_BACKEND_API_URL", "NUTSNEWS_BACKEND_WORKER_API_ENABLED"):
         if name not in variables_present:
             errors.append(f"production-backend variable evidence missing: {name}")
-    for name in ("NUTSNEWS_BACKEND_API_TOKEN", "NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD"):
+    for name in ("NUTSNEWS_BACKEND_API_TOKEN", "NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD", "NUTSNEWS_SHADOW_SMOKE_TOKEN"):
         if name not in secrets_present:
             errors.append(f"production-backend secret evidence missing: {name}")
     if "LOCAL_AI_API_KEY" in secrets_present:
@@ -119,8 +119,10 @@ def main() -> int:
         errors.append("LOCAL_AI_API_KEY must identify the future approval service consumer")
 
     shadow = entries.get("NUTSNEWS_SHADOW_SMOKE_TOKEN", {})
-    if shadow.get("readiness") != "deferred_until_shadow_validation":
-        errors.append("NUTSNEWS_SHADOW_SMOKE_TOKEN must be deferred until shadow validation")
+    if shadow.get("readiness") != "ready":
+        errors.append("NUTSNEWS_SHADOW_SMOKE_TOKEN must be ready after #67 generation")
+    if "production-backend" not in shadow.get("location", ""):
+        errors.append("NUTSNEWS_SHADOW_SMOKE_TOKEN must live in production-backend")
 
     retained = set(readiness.get("readiness_summary", {}).get("not_injected_by_design", []))
     for name in retained:

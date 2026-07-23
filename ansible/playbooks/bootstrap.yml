@@ -30,3 +30,8 @@
     - name: Apply backend baseline
       ansible.builtin.include_role:
         name: backend_baseline
+
+    - name: Apply backend RabbitMQ service
+      ansible.builtin.include_role:
+        name: backend_rabbitmq
+      when: backend_rabbitmq_enabled | default(false) | bool

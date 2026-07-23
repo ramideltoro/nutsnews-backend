@@ -188,6 +188,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_worker_uplift_rabbitmq_capacity_security.py
 
+      - name: Validate worker uplift RabbitMQ provisioning
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_rabbitmq_provisioning.py
+
       - name: Validate backend database provider switch
         shell: bash
         run: python3 scripts/validate_backend_database_provider_switch.py

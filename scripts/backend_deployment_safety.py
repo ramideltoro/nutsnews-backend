@@ -29,6 +29,12 @@ REMOTE_SAFETY_COMMANDS: dict[str, str] = {
         "sudo -n docker info --format '{{.ServerVersion}}' 2>/dev/null || docker info --format '{{.ServerVersion}}' 2>/dev/null || true; "
         "else echo not_configured; fi"
     ),
+    "rabbitmq_health": (
+        "if systemctl is-active nutsnews-rabbitmq >/dev/null 2>&1; then "
+        "if sudo -n docker exec nutsnews-rabbitmq rabbitmq-diagnostics -q ping >/dev/null 2>&1; then "
+        "echo healthy; else echo critical; fi; "
+        "else echo not_configured; fi"
+    ),
     "restore_verification": (
         "test -s /var/lib/nutsnews/backups/last-restore-verification.json "
         "&& cat /var/lib/nutsnews/backups/last-restore-verification.json || echo not_configured"
@@ -156,6 +162,19 @@ def safety_checks(args: argparse.Namespace, evidence: dict[str, Any]) -> list[di
         docker_status = "unknown"
     checks.append({"name": "docker_health", "status": docker_status, "summary": docker_output or "unknown"})
 
+    rabbitmq_output = maintenance.command_stdout(evidence, "rabbitmq_health").strip()
+    if rabbitmq_output == "healthy":
+        rabbitmq_status = "healthy"
+    elif rabbitmq_output == "not_configured":
+        rabbitmq_status = "not_configured"
+    elif rabbitmq_output == "critical":
+        rabbitmq_status = "critical"
+    elif rabbitmq_output:
+        rabbitmq_status = "unknown"
+    else:
+        rabbitmq_status = "unknown"
+    checks.append({"name": "rabbitmq_health", "status": rabbitmq_status, "summary": f"rabbitmq={rabbitmq_output or 'unknown'}"})
+
     restore_output = maintenance.command_stdout(evidence, "restore_verification").strip()
     restore_status = "not_configured"
     if restore_output.startswith("{"):
@@ -194,9 +213,26 @@ def blockers(profile: str, checks: list[dict[str, Any]]) -> list[dict[str, str]]
     return result
 
 
+def rabbitmq_enabled_for_gate() -> bool:
+    return os.environ.get("NUTSNEWS_BACKEND_RABBITMQ_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+
+
+def rabbitmq_post_apply_blockers(args: argparse.Namespace, checks: list[dict[str, Any]]) -> list[dict[str, str]]:
+    if args.profile != "baseline_apply" or args.phase != "post" or not rabbitmq_enabled_for_gate():
+        return []
+    by_name = {check["name"]: check for check in checks}
+    result: list[dict[str, str]] = []
+    for name in ("docker_health", "rabbitmq_health"):
+        status = by_name.get(name, {}).get("status", "missing")
+        if status != "healthy":
+            result.append({"check": name, "status": status})
+    return result
+
+
 def report(args: argparse.Namespace, evidence: dict[str, Any]) -> dict[str, Any]:
     checks = safety_checks(args, evidence)
     gate_blockers = blockers(args.profile, checks)
+    gate_blockers.extend(rabbitmq_post_apply_blockers(args, checks))
     enforced = args.enforce
     return {
         "version": 1,

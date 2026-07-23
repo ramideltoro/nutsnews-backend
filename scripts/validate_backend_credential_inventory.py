@@ -58,6 +58,7 @@ def main() -> int:
         "backend_apply",
         "cloudflare",
         "grafana",
+        "rabbitmq",
         "supabase",
         "restic",
         "reporting_email",

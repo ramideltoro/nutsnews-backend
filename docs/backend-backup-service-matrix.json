@@ -97,9 +97,25 @@
       "exclusion_rationale": ""
     },
     {
+      "id": "rabbitmq_broker_state",
+      "title": "RabbitMQ broker persistent state and non-secret config",
+      "current_state": "configured",
+      "criticality": "critical",
+      "data_sources": [
+        "/var/lib/nutsnews/rabbitmq",
+        "/etc/nutsnews-rabbitmq/rabbitmq.conf",
+        "/etc/nutsnews-rabbitmq/enabled_plugins",
+        "/opt/nutsnews-rabbitmq/compose.yml"
+      ],
+      "backup_method": "restic_paths_plus_postgresql_outbox_reconciliation_for_message_recovery",
+      "restore_method": "restore_broker_state_or_rebuild_topology_then_replay_postgresql_outbox",
+      "verification_method": "rabbitmq_durable_probe_and_topology_reconciliation",
+      "exclusion_rationale": "Root-only RabbitMQ environment files contain secret values and are excluded; restore secret values from production-backend Environment secrets."
+    },
+    {
       "id": "docker_volumes",
       "title": "Docker named volumes",
-      "current_state": "not_configured",
+      "current_state": "configured",
       "criticality": "future_critical",
       "data_sources": [
         "/var/lib/docker/volumes"

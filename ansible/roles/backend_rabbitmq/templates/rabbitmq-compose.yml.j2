@@ -1,0 +1,40 @@
+name: {{ backend_rabbitmq_project_name }}
+
+services:
+  rabbitmq:
+    image: "{{ backend_rabbitmq_image }}"
+    container_name: "{{ backend_rabbitmq_container_name }}"
+    hostname: "{{ backend_rabbitmq_hostname }}"
+    restart: unless-stopped
+    env_file:
+      - "{{ backend_rabbitmq_env_path }}"
+    ports:
+      - "{{ backend_rabbitmq_bind_address }}:{{ backend_rabbitmq_amqp_port }}:5672"
+      - "{{ backend_rabbitmq_bind_address }}:{{ backend_rabbitmq_management_port }}:15672"
+      - "{{ backend_rabbitmq_bind_address }}:{{ backend_rabbitmq_prometheus_port }}:15692"
+    volumes:
+      - "{{ backend_rabbitmq_data_dir }}:/var/lib/rabbitmq"
+      - "{{ backend_rabbitmq_config_path }}:/etc/rabbitmq/rabbitmq.conf:ro"
+      - "{{ backend_rabbitmq_enabled_plugins_path }}:/etc/rabbitmq/enabled_plugins:ro"
+    mem_limit: "{{ backend_rabbitmq_memory_limit }}"
+    pids_limit: {{ backend_rabbitmq_pids_limit }}
+    ulimits:
+      nofile:
+        soft: {{ backend_rabbitmq_nofile }}
+        hard: {{ backend_rabbitmq_nofile }}
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping && rabbitmq-diagnostics -q check_running"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    stop_grace_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    labels:
+      com.nutsnews.service: "rabbitmq"
+      com.nutsnews.owner: "ramideltoro/nutsnews-backend"
+      com.nutsnews.tracking_issue: "80"

@@ -1,0 +1,37 @@
+---
+backend_rabbitmq_enabled: false
+backend_rabbitmq_packages:
+  - docker.io
+  - docker-compose-v2
+backend_rabbitmq_image: rabbitmq@sha256:c427b73a15d01416346f429042125e663452e2a27e07fb3096fadb08f7033fc7
+backend_rabbitmq_project_name: nutsnews-rabbitmq
+backend_rabbitmq_container_name: nutsnews-rabbitmq
+backend_rabbitmq_hostname: nutsnews-rabbitmq
+backend_rabbitmq_base_dir: /opt/nutsnews-rabbitmq
+backend_rabbitmq_config_dir: /etc/nutsnews-rabbitmq
+backend_rabbitmq_data_dir: /var/lib/nutsnews/rabbitmq
+backend_rabbitmq_env_path: "{{ backend_rabbitmq_config_dir }}/rabbitmq.env"
+backend_rabbitmq_compose_path: "{{ backend_rabbitmq_base_dir }}/compose.yml"
+backend_rabbitmq_config_path: "{{ backend_rabbitmq_config_dir }}/rabbitmq.conf"
+backend_rabbitmq_enabled_plugins_path: "{{ backend_rabbitmq_config_dir }}/enabled_plugins"
+backend_rabbitmq_probe_path: /usr/local/sbin/nutsnews-rabbitmq-probe
+backend_rabbitmq_probe_state_path: "{{ backend_rabbitmq_data_dir }}/durable-probe.json"
+backend_rabbitmq_vhost: nutsnews-worker-uplift
+backend_rabbitmq_admin_username: ""
+backend_rabbitmq_admin_password: ""
+backend_rabbitmq_erlang_cookie: ""
+backend_rabbitmq_bind_address: 127.0.0.1
+backend_rabbitmq_amqp_port: "5672"
+backend_rabbitmq_management_port: "15672"
+backend_rabbitmq_prometheus_port: "15692"
+backend_rabbitmq_memory_limit: 1g
+backend_rabbitmq_memory_high_watermark: 512MiB
+backend_rabbitmq_disk_free_limit: 20GB
+backend_rabbitmq_minimum_root_free_bytes: 53687091200
+backend_rabbitmq_nofile: 65536
+backend_rabbitmq_pids_limit: 2048
+backend_rabbitmq_heartbeat_seconds: 30
+backend_rabbitmq_channel_max: 128
+backend_rabbitmq_management_load_definitions: false
+backend_rabbitmq_durable_probe_enabled: true
+backend_rabbitmq_durable_probe_queue: worker.uplift.probe.durable

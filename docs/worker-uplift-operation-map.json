@@ -345,6 +345,7 @@
         "owner_files": [
           ".github/workflows/protected-backend-ansible-apply.yml",
           "ansible/playbooks/bootstrap.yml",
+          "ansible/roles/backend_rabbitmq",
           "runbooks/PROTECTED_BACKEND_APPLY.md"
         ],
         "workflow": "Protected Backend Ansible Apply",
@@ -503,6 +504,7 @@
           "docs/worker-uplift-architecture-adr.json",
           "docs/worker-uplift-runtime-identities.json",
           "docs/worker-uplift-rabbitmq-capacity-security-decision.json",
+          "runbooks/WORKER_UPLIFT_RABBITMQ_PROVISIONING.md",
           "runbooks/WORKER_UPLIFT_RABBITMQ_CAPACITY_SECURITY.md",
           "runbooks/BACKUP_RESTORE_BASELINE.md"
         ],

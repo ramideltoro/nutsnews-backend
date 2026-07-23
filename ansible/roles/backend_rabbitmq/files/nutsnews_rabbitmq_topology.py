@@ -390,6 +390,16 @@ def normalize_dict(value: dict[str, Any] | None) -> dict[str, Any]:
     return {str(key): item for key, item in sorted(value.items())}
 
 
+def normalize_tags(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return sorted(tag.strip() for tag in value.split(",") if tag.strip())
+    if isinstance(value, list):
+        return sorted(str(tag).strip() for tag in value if str(tag).strip())
+    return [str(value).strip()] if str(value).strip() else []
+
+
 def ensure_vhost(client: RabbitMQClient, definition: dict[str, Any], report: dict[str, Any]) -> None:
     vhost = definition["vhost"]
     if client.get_or_none(api_path("api", "vhosts", vhost)) is None:
@@ -401,10 +411,10 @@ def ensure_vhost(client: RabbitMQClient, definition: dict[str, Any], report: dic
 def ensure_user(client: RabbitMQClient, user: dict[str, Any], report: dict[str, Any], *, rotate_passwords: bool) -> None:
     current = client.get_or_none(api_path("api", "users", user["username"]))
     expected_tags = ",".join(user.get("tags", []))
-    current_tags = ""
+    current_tags: list[str] = []
     if isinstance(current, dict):
-        current_tags = str(current.get("tags", ""))
-    if current is None or current_tags != expected_tags or rotate_passwords:
+        current_tags = normalize_tags(current.get("tags", ""))
+    if current is None or current_tags != normalize_tags(user.get("tags", [])) or rotate_passwords:
         client.request(
             "PUT",
             api_path("api", "users", user["username"]),
@@ -636,7 +646,7 @@ def live_drift(
         if current is None:
             drift.append(f"missing_user:{user['id']}")
             continue
-        if str(current.get("tags", "")) != ",".join(user.get("tags", [])):
+        if normalize_tags(current.get("tags", "")) != normalize_tags(user.get("tags", [])):
             drift.append(f"user_tags:{user['id']}")
         permissions = client.get_or_none(api_path("api", "permissions", vhost, user["username"]))
         observed = {}

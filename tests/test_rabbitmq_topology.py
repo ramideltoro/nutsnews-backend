@@ -98,6 +98,12 @@ class RabbitMQTopologyTests(unittest.TestCase):
         self.assertFalse(topology.regex_allows(scheduler["permissions"]["write"], "nutsnews.worker.retry.v1"))
         self.assertFalse(topology.regex_allows(scheduler["permissions"]["read"], "nutsnews.worker.fetch.v1"))
 
+    def test_user_tag_normalization_accepts_api_string_or_list_shape(self):
+        self.assertEqual(topology.normalize_tags("administrator,monitoring"), ["administrator", "monitoring"])
+        self.assertEqual(topology.normalize_tags(["monitoring", "administrator"]), ["administrator", "monitoring"])
+        self.assertEqual(topology.normalize_tags(""), [])
+        self.assertEqual(topology.normalize_tags([]), [])
+
     def test_live_drift_check_is_read_only(self):
         definition = load_definition()
         users = topology.user_records(definition, credential_env())

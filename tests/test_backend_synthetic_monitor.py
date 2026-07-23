@@ -64,7 +64,7 @@ class BackendSyntheticMonitorTests(unittest.TestCase):
             def getcode(self):
                 return 200
 
-            def read(self, _limit):
+            def read(self, _limit=-1):
                 return b'{"rows":[]}'
 
         def fake_urlopen(request, timeout):
@@ -92,6 +92,42 @@ class BackendSyntheticMonitorTests(unittest.TestCase):
         self.assertEqual(result["row_count"], 0)
         self.assertNotIn("secret-admin-token", json.dumps(result))
 
+    def test_admin_operation_reads_full_success_json_response(self):
+        filler = "x" * 40000
+        payload = json.dumps({"rows": [{"filler": filler}]})
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def getcode(self):
+                return 200
+
+            def read(self, _limit=-1):
+                if _limit not in (-1, None):
+                    return payload[:_limit].encode()
+                return payload.encode()
+
+        operation = backend_synthetic_monitor.AdminBackendOperation(
+            name="load-admin-ai-usage",
+            body={"providerMode": "backend_postgres_primary", "limit": 1},
+        )
+        with mock.patch.object(backend_synthetic_monitor.urllib.request, "urlopen", return_value=FakeResponse()):
+            result = backend_synthetic_monitor.run_admin_backend_operation(
+                operation,
+                "https://backend.nutsnews.com/api/app/db",
+                "secret-admin-token",
+                None,
+                "2026-07-17T01:00:00Z",
+            )
+
+        self.assertEqual(result["status"], "healthy")
+        self.assertEqual(result["row_count"], 1)
+        self.assertNotIn(filler, json.dumps(result))
+
     def test_admin_article_reviews_requires_healthy_version_report(self):
         class FakeResponse:
             def __enter__(self):
@@ -103,7 +139,7 @@ class BackendSyntheticMonitorTests(unittest.TestCase):
             def getcode(self):
                 return 200
 
-            def read(self, _limit):
+            def read(self, _limit=-1):
                 return json.dumps(
                     {
                         "rows": [

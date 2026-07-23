@@ -191,6 +191,18 @@ hydration metrics. The operation must use backend PostgreSQL least-privilege
 read access and must not require Supabase service-role access in
 backend-primary mode.
 
+RSS feed health dashboards use the read-only app operation
+`load-admin-rss-feed-health`. A tokened POST to
+`https://backend.nutsnews.com/api/app/db/load-admin-rss-feed-health` with
+`providerMode=backend_postgres_primary` must return one dashboard snapshot row
+containing bounded `rssFeedRows` from `public.rss_feeds` and bounded
+`feedHealthRows` from `public.feed_health`. The selected fields must preserve
+the app contract for feed identity, active/source flags, freshness, HTTP status,
+failure messages, latest batch counters, total success/failure counters,
+accepted/rejected counts, image coverage, and updated timestamps. The operation
+must use backend PostgreSQL least-privilege read access and must not require
+Supabase service-role access in backend-primary mode.
+
 ## Authorization Rules
 
 - Browser code must not receive database credentials or service-role style

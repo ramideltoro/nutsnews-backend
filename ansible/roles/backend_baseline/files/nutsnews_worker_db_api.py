@@ -58,6 +58,7 @@ APP_READ_OPERATIONS = {
     "load-admin-translation-quality",
     "load-admin-guardrails",
     "load-admin-worker-shards",
+    "load-admin-rss-feed-health",
     "load-admin-quota-usage-events",
     "load-admin-article-engagement-source-category-summary",
     "load-admin-article-engagement-article-summary",
@@ -391,6 +392,38 @@ ADMIN_WORKER_SHARDS_RUN_COLUMNS = (
     "cost_protection_limit_reached",
     "spike_warning_triggered",
     "duration_ms",
+)
+
+ADMIN_RSS_FEED_HEALTH_RSS_FEED_COLUMNS = (
+    "source",
+    "url",
+    "is_positive_source",
+    "is_active",
+)
+
+ADMIN_RSS_FEED_HEALTH_FEED_HEALTH_COLUMNS = (
+    "id",
+    "source",
+    "feed_url",
+    "last_checked_at",
+    "last_success_at",
+    "last_failure_at",
+    "last_status",
+    "last_error_message",
+    "last_article_count",
+    "last_image_count",
+    "last_accepted_count",
+    "last_rejected_count",
+    "consecutive_failure_count",
+    "total_fetch_count",
+    "total_success_count",
+    "total_failure_count",
+    "total_article_count",
+    "total_image_count",
+    "total_accepted_count",
+    "total_rejected_count",
+    "created_at",
+    "updated_at",
 )
 
 ADMIN_TABLE_READS = {
@@ -1215,6 +1248,14 @@ def admin_worker_shards_run_columns() -> str:
     return ", ".join(ADMIN_WORKER_SHARDS_RUN_COLUMNS)
 
 
+def admin_rss_feed_health_rss_feed_columns() -> str:
+    return ", ".join(ADMIN_RSS_FEED_HEALTH_RSS_FEED_COLUMNS)
+
+
+def admin_rss_feed_health_feed_health_columns() -> str:
+    return ", ".join(ADMIN_RSS_FEED_HEALTH_FEED_HEALTH_COLUMNS)
+
+
 def category_clause(body: dict[str, Any], params: list[Any]) -> str:
     category = optional_string(body, "category", maximum=96)
     if category is None or category.lower() == "all":
@@ -1928,6 +1969,48 @@ def load_app_admin_worker_shards(body: dict[str, Any], store: PostgresStore) -> 
     }
 
 
+def load_app_admin_rss_feed_health(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
+    limit = bounded_int(
+        body,
+        "limit",
+        default=10000,
+        minimum=1,
+        maximum=min(store.max_limit, 10000),
+    )
+    if "staleAfterHours" in body:
+        bounded_int(body, "staleAfterHours", default=24, minimum=1, maximum=24 * 30)
+
+    rss_feed_rows = store.fetch_all(
+        f"""
+        select {admin_rss_feed_health_rss_feed_columns()}
+        from public.rss_feeds
+        order by id asc
+        limit %s
+        """,
+        (limit,),
+    )
+    feed_health_rows = store.fetch_all(
+        f"""
+        select {admin_rss_feed_health_feed_health_columns()}
+        from public.feed_health
+        order by total_accepted_count desc nulls last, id desc
+        limit %s
+        """,
+        (limit,),
+    )
+
+    return {
+        "rows": [
+            {
+                "rssFeedRows": rss_feed_rows,
+                "feedHealthRows": feed_health_rows,
+            }
+        ],
+        "rowCount": 1,
+        "generatedAt": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
+
+
 def load_app_admin_production_readiness(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
     recent_article_limit = bounded_int(
         body,
@@ -2216,6 +2299,9 @@ def handle_app_operation(operation: str, body: dict[str, Any], store: PostgresSt
 
     if operation == "load-admin-worker-shards":
         return load_app_admin_worker_shards(body, store)
+
+    if operation == "load-admin-rss-feed-health":
+        return load_app_admin_rss_feed_health(body, store)
 
     if operation in ADMIN_TABLE_READS:
         return load_app_admin_rows(operation, body, store)

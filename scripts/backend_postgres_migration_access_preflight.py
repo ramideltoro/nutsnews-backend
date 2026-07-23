@@ -25,14 +25,6 @@ ROLE_NAMES = [
     "anon",
     "authenticated",
     "service_role",
-    "nutsnews_worker_uplift_scheduler",
-    "nutsnews_worker_uplift_fetcher",
-    "nutsnews_worker_uplift_canonicalizer",
-    "nutsnews_worker_uplift_enrichment",
-    "nutsnews_worker_uplift_approval",
-    "nutsnews_worker_uplift_translation",
-    "nutsnews_worker_uplift_persistence",
-    "nutsnews_worker_uplift_publication",
 ]
 PRIMARY_SHADOW_CONNECT_ROLES = [
     "nutsnews_app",
@@ -40,26 +32,18 @@ PRIMARY_SHADOW_CONNECT_ROLES = [
     "nutsnews_migration_validation",
     "nutsnews_migration_replication",
     "nutsnews_worker_api",
-    "nutsnews_worker_uplift_scheduler",
-    "nutsnews_worker_uplift_fetcher",
-    "nutsnews_worker_uplift_canonicalizer",
-    "nutsnews_worker_uplift_enrichment",
-    "nutsnews_worker_uplift_approval",
-    "nutsnews_worker_uplift_translation",
-    "nutsnews_worker_uplift_persistence",
-    "nutsnews_worker_uplift_publication",
 ]
-WORKER_UPLIFT_STAGE_ROLES = [
-    ("scheduler", "nutsnews_worker_uplift_scheduler", "worker_uplift_scheduler"),
-    ("fetcher", "nutsnews_worker_uplift_fetcher", "worker_uplift_fetcher"),
-    ("canonicalizer", "nutsnews_worker_uplift_canonicalizer", "worker_uplift_canonicalizer"),
-    ("enrichment", "nutsnews_worker_uplift_enrichment", "worker_uplift_enrichment"),
-    ("approval", "nutsnews_worker_uplift_approval", "worker_uplift_approval"),
-    ("translation", "nutsnews_worker_uplift_translation", "worker_uplift_translation"),
-    ("persistence", "nutsnews_worker_uplift_persistence", "worker_uplift_persistence"),
-    ("publication", "nutsnews_worker_uplift_publication", "worker_uplift_publication"),
+WORKER_UPLIFT_STAGE_SCHEMAS = [
+    ("scheduler", "worker_uplift_scheduler"),
+    ("fetcher", "worker_uplift_fetcher"),
+    ("canonicalizer", "worker_uplift_canonicalizer"),
+    ("enrichment", "worker_uplift_enrichment"),
+    ("approval", "worker_uplift_approval"),
+    ("translation", "worker_uplift_translation"),
+    ("persistence", "worker_uplift_persistence"),
+    ("publication", "worker_uplift_publication"),
 ]
-WORKER_UPLIFT_SCHEMAS = [schema for _stage, _role, schema in WORKER_UPLIFT_STAGE_ROLES] + [
+WORKER_UPLIFT_SCHEMAS = [schema for _stage, schema in WORKER_UPLIFT_STAGE_SCHEMAS] + [
     "worker_uplift_final",
     "worker_uplift_views",
 ]
@@ -159,10 +143,44 @@ def main() -> int:
         if not any(blocker.endswith("_missing") for blocker in blockers):
             role_csv = ",".join(ROLE_NAMES)
             connect_role_csv = ",".join(PRIMARY_SHADOW_CONNECT_ROLES)
-            worker_role_csv = ",".join(role for _stage, role, _schema in WORKER_UPLIFT_STAGE_ROLES)
+            non_worker_role_csv = ",".join(sorted(set(ROLE_NAMES + PRIMARY_SHADOW_CONNECT_ROLES + ["postgres"])))
             worker_schema_csv = ",".join(WORKER_UPLIFT_SCHEMAS)
-            worker_role_schema_values = ",".join(
-                f"('{stage}','{role}','{schema}')" for stage, role, schema in WORKER_UPLIFT_STAGE_ROLES
+            worker_stage_schema_values = ",".join(
+                f"('{stage}','{schema}')" for stage, schema in WORKER_UPLIFT_STAGE_SCHEMAS
+            )
+            worker_stage_role_cte = (
+                f"with expected(stage, schema_name) as (values {worker_stage_schema_values}), "
+                f"non_worker_roles(role_name) as (select unnest(string_to_array('{non_worker_role_csv}', ','))), "
+                "schema_usage as ("
+                "select n.nspname as schema_name, acl.grantee as role_oid "
+                "from pg_namespace n "
+                "cross join lateral aclexplode(coalesce(n.nspacl, '{}'::aclitem[])) acl "
+                "where acl.privilege_type = 'USAGE' and acl.grantee <> n.nspowner"
+                "), "
+                "table_insert as ("
+                "select n.nspname as schema_name, c.relname as table_name, acl.grantee as role_oid "
+                "from pg_class c "
+                "join pg_namespace n on n.oid = c.relnamespace "
+                "cross join lateral aclexplode(coalesce(c.relacl, '{}'::aclitem[])) acl "
+                "where c.relkind in ('r','p') "
+                "and acl.privilege_type = 'INSERT' "
+                "and acl.grantee <> c.relowner"
+                "), "
+                "stage_roles as ("
+                "select distinct e.stage, e.schema_name, r.rolname "
+                "from expected e "
+                "join schema_usage su on su.schema_name = e.schema_name "
+                "join table_insert inbox on inbox.schema_name = e.schema_name "
+                "and inbox.table_name = 'inbox' "
+                "and inbox.role_oid = su.role_oid "
+                "join table_insert outbox on outbox.schema_name = e.schema_name "
+                "and outbox.table_name = 'outbox' "
+                "and outbox.role_oid = su.role_oid "
+                "join pg_roles r on r.oid = su.role_oid "
+                "where r.rolcanlogin "
+                "and not r.rolsuper "
+                "and not exists (select 1 from non_worker_roles excluded where excluded.role_name = r.rolname)"
+                ") "
             )
             command = (
                 "set -eu; "
@@ -174,9 +192,11 @@ def main() -> int:
                 f"select 'primary_shadow_connect=' || r.rolname || ':' || case when exists(select 1 from pg_database where datname = '{args.primary_shadow_database}') then has_database_privilege(r.rolname, '{args.primary_shadow_database}', 'CONNECT')::text else 'f' end from pg_roles r where r.rolname = any(string_to_array('{connect_role_csv}', ',')) order by r.rolname;\n"
                 f"\\connect {args.primary_shadow_database}\n"
                 f"select 'worker_uplift_schema=' || n.nspname from pg_namespace n where n.nspname = any(string_to_array('{worker_schema_csv}', ',')) order by n.nspname;\n"
-                f"with expected(stage, role_name, schema_name) as (values {worker_role_schema_values}) select 'worker_uplift_own_grant=' || e.stage || ':' || e.role_name || ':' || e.schema_name || ':usage=' || has_schema_privilege(e.role_name, e.schema_name, 'USAGE')::text || ':inbox_insert=' || case when to_regclass(e.schema_name || '.inbox') is null then 'missing_table' else has_table_privilege(e.role_name, e.schema_name || '.inbox', 'INSERT')::text end || ':outbox_insert=' || case when to_regclass(e.schema_name || '.outbox') is null then 'missing_table' else has_table_privilege(e.role_name, e.schema_name || '.outbox', 'INSERT')::text end from expected e order by e.stage;\n"
-                f"select 'worker_uplift_public_write=' || r.rolname || ':insert=' || case when to_regclass('public.articles') is null then 'missing_table' else has_table_privilege(r.rolname, 'public.articles', 'INSERT')::text end || ':update=' || case when to_regclass('public.articles') is null then 'missing_table' else has_table_privilege(r.rolname, 'public.articles', 'UPDATE')::text end || ':delete=' || case when to_regclass('public.articles') is null then 'missing_table' else has_table_privilege(r.rolname, 'public.articles', 'DELETE')::text end from pg_roles r where r.rolname = any(string_to_array('{worker_role_csv}', ',')) order by r.rolname;\n"
-                f"select 'worker_uplift_final_grant=' || r.rolname || ':insert=' || case when to_regclass('worker_uplift_final.article_shadow_aggregates') is null then 'missing_table' else has_table_privilege(r.rolname, 'worker_uplift_final.article_shadow_aggregates', 'INSERT')::text end || ':update=' || case when to_regclass('worker_uplift_final.article_shadow_aggregates') is null then 'missing_table' else has_table_privilege(r.rolname, 'worker_uplift_final.article_shadow_aggregates', 'UPDATE')::text end from pg_roles r where r.rolname = any(string_to_array('{worker_role_csv}', ',')) order by r.rolname;\n"
+                f"{worker_stage_role_cte}select 'worker_uplift_stage_role=' || stage || ':' || schema_name || ':' || rolname from stage_roles order by stage, rolname;\n"
+                f"{worker_stage_role_cte}select 'worker_uplift_stage_connect=' || stage || ':' || rolname || ':' || has_database_privilege(rolname, '{args.primary_shadow_database}', 'CONNECT')::text from stage_roles order by stage, rolname;\n"
+                f"{worker_stage_role_cte}select 'worker_uplift_own_grant=' || stage || ':' || rolname || ':' || schema_name || ':usage=true:inbox_insert=true:outbox_insert=true' from stage_roles order by stage, rolname;\n"
+                f"{worker_stage_role_cte}select 'worker_uplift_public_write=' || rolname || ':insert=' || case when to_regclass('public.articles') is null then 'missing_table' else has_table_privilege(rolname, 'public.articles', 'INSERT')::text end || ':update=' || case when to_regclass('public.articles') is null then 'missing_table' else has_table_privilege(rolname, 'public.articles', 'UPDATE')::text end || ':delete=' || case when to_regclass('public.articles') is null then 'missing_table' else has_table_privilege(rolname, 'public.articles', 'DELETE')::text end from stage_roles order by rolname;\n"
+                f"{worker_stage_role_cte}select 'worker_uplift_final_grant=' || stage || ':' || rolname || ':insert=' || case when to_regclass('worker_uplift_final.article_shadow_aggregates') is null then 'missing_table' else has_table_privilege(rolname, 'worker_uplift_final.article_shadow_aggregates', 'INSERT')::text end || ':update=' || case when to_regclass('worker_uplift_final.article_shadow_aggregates') is null then 'missing_table' else has_table_privilege(rolname, 'worker_uplift_final.article_shadow_aggregates', 'UPDATE')::text end from stage_roles order by stage, rolname;\n"
                 "SQL"
             )
             code, stdout, _stderr = run_ssh(args.host, args.user, args.ssh_key, args.known_hosts, command)
@@ -214,15 +234,31 @@ def main() -> int:
                         role_name, allowed = line.split("=", 1)[1].split(":", 1)
                         connect_grants[role_name] = parse_postgres_bool(allowed)
                 missing_connect_grants = sorted(role for role in PRIMARY_SHADOW_CONNECT_ROLES if not connect_grants.get(role))
-                worker_roles = {role for _stage, role, _schema in WORKER_UPLIFT_STAGE_ROLES}
-                present_worker_roles = sorted(set(roles) & worker_roles)
-                missing_worker_roles = sorted(worker_roles - set(roles))
                 worker_schemas = sorted(
                     line.split("=", 1)[1].strip()
                     for line in stdout.splitlines()
                     if line.startswith("worker_uplift_schema=")
                 )
                 missing_worker_schemas = sorted(set(WORKER_UPLIFT_SCHEMAS) - set(worker_schemas))
+                stage_roles: dict[str, list[tuple[str, str]]] = {stage: [] for stage, _schema in WORKER_UPLIFT_STAGE_SCHEMAS}
+                for line in stdout.splitlines():
+                    if not line.startswith("worker_uplift_stage_role="):
+                        continue
+                    stage, schema_name, role_name = line.split("=", 1)[1].split(":", 2)
+                    stage_roles.setdefault(stage, []).append((schema_name, role_name))
+                stage_role_failures = [
+                    f"{stage}:role_count={len(role_rows)}"
+                    for stage, role_rows in sorted(stage_roles.items())
+                    if len(role_rows) != 1
+                ]
+                discovered_stage_roles = sorted({role_name for role_rows in stage_roles.values() for _schema, role_name in role_rows})
+                stage_connect_failures: list[str] = []
+                for line in stdout.splitlines():
+                    if not line.startswith("worker_uplift_stage_connect="):
+                        continue
+                    stage, role_name, allowed = line.split("=", 1)[1].split(":", 2)
+                    if not parse_postgres_bool(allowed):
+                        stage_connect_failures.append(f"{stage}:{role_name}")
                 own_grant_failures: list[str] = []
                 for line in stdout.splitlines():
                     if not line.startswith("worker_uplift_own_grant="):
@@ -258,15 +294,15 @@ def main() -> int:
                     if not line.startswith("worker_uplift_final_grant="):
                         continue
                     payload = line.split("=", 1)[1]
-                    role_name, insert_value, update_value = payload.split(":")
+                    stage, role_name, insert_value, update_value = payload.split(":")
                     insert_allowed = insert_value.split("=", 1)[1]
                     update_allowed = update_value.split("=", 1)[1]
                     allowed = parse_postgres_bool(insert_allowed) and parse_postgres_bool(update_allowed)
-                    if role_name == "nutsnews_worker_uplift_persistence":
+                    if stage == "persistence":
                         if not allowed:
-                            final_grant_failures.append(f"{role_name}:missing_persistence_dml")
+                            final_grant_failures.append(f"{stage}:{role_name}:missing_persistence_dml")
                     elif allowed:
-                        final_grant_failures.append(f"{role_name}:unexpected_final_dml")
+                        final_grant_failures.append(f"{stage}:{role_name}:unexpected_final_dml")
                 checks.append(
                     {
                         "name": "ssh_loopback_postgres",
@@ -305,9 +341,11 @@ def main() -> int:
                 checks.append(
                     {
                         "name": "worker_uplift_stage_roles",
-                        "status": "pass" if not missing_worker_roles else "fail",
-                        "present_count": len(present_worker_roles),
-                        "missing_roles": missing_worker_roles,
+                        "status": "pass" if not stage_role_failures and not stage_connect_failures else "fail",
+                        "present_count": len(discovered_stage_roles),
+                        "discovered_role_count": len(discovered_stage_roles),
+                        "stage_role_failures": stage_role_failures,
+                        "connect_failures": stage_connect_failures,
                     }
                 )
                 checks.append(
@@ -353,7 +391,7 @@ def main() -> int:
                     blockers.append("primary_shadow_owner_mismatch")
                 if missing_connect_grants:
                     blockers.append("primary_shadow_connect_grants_missing")
-                if missing_worker_roles:
+                if stage_role_failures or stage_connect_failures:
                     blockers.append("worker_uplift_stage_roles_missing")
                 if missing_worker_schemas:
                     blockers.append("worker_uplift_schemas_missing")

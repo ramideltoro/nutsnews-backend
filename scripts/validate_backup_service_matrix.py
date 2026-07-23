@@ -83,6 +83,35 @@ def main() -> int:
     if missing_services:
         errors.append(f"missing required services: {', '.join(missing_services)}")
 
+    services = {service.get("id"): service for service in matrix.get("services", []) if service.get("id")}
+    rabbitmq = services.get("rabbitmq_broker_state")
+    if not rabbitmq:
+        errors.append("rabbitmq_broker_state service is required")
+    else:
+        data_sources = set(rabbitmq.get("data_sources", []))
+        if "/var/lib/nutsnews/rabbitmq" in data_sources:
+            errors.append("rabbitmq_broker_state must exclude live /var/lib/nutsnews/rabbitmq from normal Restic paths")
+        if "/var/lib/nutsnews/rabbitmq-recovery" not in data_sources:
+            errors.append("rabbitmq_broker_state must include /var/lib/nutsnews/rabbitmq-recovery recovery metadata")
+        for secret_path in ("/etc/nutsnews-rabbitmq/rabbitmq.env", "/etc/nutsnews-rabbitmq/topology.env"):
+            if secret_path in data_sources:
+                errors.append(f"rabbitmq_broker_state must exclude secret env file {secret_path}")
+        backup_method = str(rabbitmq.get("backup_method", ""))
+        restore_method = str(rabbitmq.get("restore_method", ""))
+        verification_method = str(rabbitmq.get("verification_method", ""))
+        rationale = str(rabbitmq.get("exclusion_rationale", ""))
+        if "live_message_store_excluded" not in backup_method:
+            errors.append("rabbitmq_broker_state backup_method must record live_message_store_excluded")
+        if "postgresql" not in restore_method.lower() or "outbox" not in restore_method.lower():
+            errors.append("rabbitmq_broker_state restore_method must use PostgreSQL outbox/reconciliation as source of truth")
+        if "stopped_volume_restore_only_from_quiesced_snapshot" not in restore_method:
+            errors.append("rabbitmq_broker_state restore_method must constrain message-store restores to quiesced snapshots")
+        for required in ("definition_export", "clean_rebuild_drill", "stopped_volume_restore_drill"):
+            if required not in verification_method:
+                errors.append(f"rabbitmq_broker_state verification_method missing {required}")
+        if "running-node message-store copies can be inconsistent" not in rationale:
+            errors.append("rabbitmq_broker_state exclusion_rationale must document RabbitMQ live-copy risk")
+
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)

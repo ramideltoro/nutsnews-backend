@@ -1,7 +1,8 @@
 # Worker-Uplift RabbitMQ Provisioning
 
 This runbook covers tracking issues `ramideltoro/nutsnews-worker#80`,
-`ramideltoro/nutsnews-worker#81`, and `ramideltoro/nutsnews-worker#82`.
+`ramideltoro/nutsnews-worker#81`, `ramideltoro/nutsnews-worker#82`, and
+`ramideltoro/nutsnews-worker#83`.
 
 The backend-owned provisioning source is:
 
@@ -19,6 +20,7 @@ Validate it with:
 
 ```bash
 python3 scripts/validate_worker_uplift_rabbitmq_provisioning.py
+python3 scripts/validate_worker_uplift_rabbitmq_recovery.py
 ```
 
 ## Scope
@@ -91,6 +93,11 @@ repairs this tree to the RabbitMQ container UID/GID before runtime probes, so
 queue files remain writable after restores, partial applies, or ownership drift.
 Root-run probe state lives outside the broker mount in
 `/var/lib/nutsnews/rabbitmq-probes`.
+
+Recovery evidence lives outside the broker mount in
+`/var/lib/nutsnews/rabbitmq-recovery`. Normal live message-store snapshots are
+excluded from Restic; see `Backend RabbitMQ Recovery` and
+`runbooks/WORKER_UPLIFT_RABBITMQ_RECOVERY.md`.
 
 ## Topology Bootstrap
 
@@ -189,6 +196,26 @@ Read-only health command:
 ssh -i ~/.ssh/servercheap_65_75_201_18 rami@65.75.201.18 \
   'sudo -n /usr/local/sbin/nutsnews-rabbitmq-probe health --env /etc/nutsnews-rabbitmq/rabbitmq.env'
 ```
+
+## Recovery
+
+The role installs:
+
+```text
+/usr/local/sbin/nutsnews-rabbitmq-recovery
+```
+
+Use the fixed `Backend RabbitMQ Recovery` workflow for definition export,
+clean-broker rebuild drill, stopped-volume restore drill, and weekly scheduled
+recovery checks. Status is reported in the protected apply summary, the backup
+status command, the recurring health report, textfile metrics, and the ops
+dashboard.
+
+Normal rebuild uses pinned image/config, topology bootstrap, credential
+provisioning, and PostgreSQL outbox/reconciliation replay. Normal Restic jobs
+include `/var/lib/nutsnews/rabbitmq-recovery`, and live message-store snapshots are excluded. A message-store restore is supported only from a stopped/quiesced
+snapshot with the same node name, same data directory layout, and same Erlang
+cookie.
 
 ## Management Access
 

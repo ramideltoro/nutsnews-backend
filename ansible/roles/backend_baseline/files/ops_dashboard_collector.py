@@ -29,6 +29,13 @@ EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 SERVICES = ("ssh", "ufw", "fail2ban", "caddy", "docker", "postgresql", "alloy", "nutsnews-backup.timer")
 POSTGRES_STATE_DIR = Path("/var/lib/nutsnews/postgres")
 POSTGRES_REPLICATION_HEALTH_PATH = POSTGRES_STATE_DIR / "replication-health.json"
+RABBITMQ_RECOVERY_STATE_DIR = Path("/var/lib/nutsnews/rabbitmq-recovery")
+RABBITMQ_RECOVERY_STATUS_FILES = {
+    "definition_export": "last-definition-export.json",
+    "clean_rebuild_drill": "last-clean-rebuild-drill.json",
+    "stopped_volume_restore_drill": "last-stopped-volume-restore-drill.json",
+    "scheduled_check": "last-scheduled-check.json",
+}
 
 
 def utc_now() -> str:
@@ -249,6 +256,10 @@ def collect() -> dict[str, Any]:
         "verification": read_json(backup_dir / "last-verification.json"),
         "restore_drill": read_json(backup_dir / "last-restore-verification.json"),
     }
+    rabbitmq_recovery = {
+        stage: read_json(RABBITMQ_RECOVERY_STATE_DIR / filename)
+        for stage, filename in RABBITMQ_RECOVERY_STATUS_FILES.items()
+    }
     postgres = read_json(POSTGRES_STATE_DIR / "status.json")
     replication_health = read_json(POSTGRES_REPLICATION_HEALTH_PATH)
     if isinstance(replication_health.get("replication"), dict):
@@ -303,6 +314,7 @@ def collect() -> dict[str, Any]:
             "timers": [line for line in timers.splitlines() if line.strip()][:20],
         },
         "backup": backup,
+        "rabbitmq_recovery": rabbitmq_recovery,
         "postgres": postgres,
         "network": {
             "public_tcp_listeners": listeners,

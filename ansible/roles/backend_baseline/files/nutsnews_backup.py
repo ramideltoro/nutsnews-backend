@@ -18,10 +18,17 @@ from typing import Any
 
 DEFAULT_MATRIX_PATH = Path("/etc/nutsnews-backup/service-matrix.json")
 DEFAULT_STATE_DIR = Path("/var/lib/nutsnews/backups")
+RABBITMQ_RECOVERY_STATE_DIR = Path("/var/lib/nutsnews/rabbitmq-recovery")
 STATUS_FILES = {
     "backup": "last-backup.json",
     "verification": "last-verification.json",
     "restore_drill": "last-restore-verification.json",
+}
+RABBITMQ_RECOVERY_STATUS_FILES = {
+    "definition_export": "last-definition-export.json",
+    "clean_rebuild_drill": "last-clean-rebuild-drill.json",
+    "stopped_volume_restore_drill": "last-stopped-volume-restore-drill.json",
+    "scheduled_check": "last-scheduled-check.json",
 }
 RESTORE_DRILL_CANDIDATES = (
     "/etc/hostname",
@@ -430,6 +437,10 @@ def action_status(args: argparse.Namespace) -> dict[str, Any]:
     backup = read_status_file(args.state_dir / STATUS_FILES["backup"])
     verification = read_status_file(args.state_dir / STATUS_FILES["verification"])
     restore_drill = read_status_file(args.state_dir / STATUS_FILES["restore_drill"])
+    rabbitmq_recovery = {
+        name: read_status_file(RABBITMQ_RECOVERY_STATE_DIR / filename)
+        for name, filename in RABBITMQ_RECOVERY_STATUS_FILES.items()
+    }
     return {
         "schema_version": 1,
         "action": "status",
@@ -437,6 +448,7 @@ def action_status(args: argparse.Namespace) -> dict[str, Any]:
         "backup": backup,
         "verification": verification,
         "restore_drill": restore_drill,
+        "rabbitmq_recovery": rabbitmq_recovery,
         "secret_redaction": "status files contain secret names only; restic credentials are never written",
     }
 

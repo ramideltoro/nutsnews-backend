@@ -24,11 +24,12 @@
       - /
   register: backend_rabbitmq_root_df
   changed_when: false
+  check_mode: false
 
 - name: Require root filesystem headroom for RabbitMQ
   ansible.builtin.assert:
     that:
-      - (backend_rabbitmq_root_df.stdout_lines[-1] | trim | int) >= backend_rabbitmq_minimum_root_free_bytes | int
+      - (backend_rabbitmq_root_df.stdout_lines | last | trim | int) >= backend_rabbitmq_minimum_root_free_bytes | int
     fail_msg: "RabbitMQ bootstrap requires at least {{ backend_rabbitmq_minimum_root_free_bytes }} bytes free on /."
 
 - name: Install Docker and Compose packages for RabbitMQ

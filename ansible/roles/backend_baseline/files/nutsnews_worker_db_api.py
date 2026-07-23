@@ -53,6 +53,7 @@ APP_READ_OPERATIONS = {
     "load-admin-production-readiness",
     "load-admin-article-reviews",
     "load-admin-article-engagement",
+    "load-admin-ai-usage",
     "load-admin-quota-usage-events",
     "load-admin-article-engagement-source-category-summary",
     "load-admin-article-engagement-article-summary",
@@ -191,6 +192,68 @@ ADMIN_ARTICLE_ENGAGEMENT_ARTICLE_COLUMNS = (
     "first_event_date",
     "latest_event_date",
     "last_updated_at",
+)
+
+ADMIN_AI_USAGE_RUN_COLUMNS = (
+    "id",
+    "created_at",
+    "run_started_at",
+    "run_completed_at",
+    "run_source",
+    "request_id",
+    "shard_index",
+    "feeds_per_shard",
+    "max_ai_reviews",
+    "feed_count",
+    "fetched_count",
+    "candidate_count",
+    "already_reviewed_count",
+    "unreviewed_count",
+    "eligible_for_ai_count",
+    "ai_reviewed_count",
+    "openai_model",
+    "openai_call_count",
+    "openai_prompt_tokens",
+    "openai_completion_tokens",
+    "openai_total_tokens",
+    "estimated_openai_cost_usd",
+    "openai_review_count",
+    "openai_review_prompt_tokens",
+    "openai_review_completion_tokens",
+    "openai_review_total_tokens",
+    "estimated_openai_review_cost_usd",
+    "openai_translation_count",
+    "openai_translation_prompt_tokens",
+    "openai_translation_completion_tokens",
+    "openai_translation_total_tokens",
+    "estimated_openai_translation_cost_usd",
+    "local_ai_model",
+    "local_ai_call_count",
+    "local_ai_prompt_tokens",
+    "local_ai_completion_tokens",
+    "local_ai_total_tokens",
+    "local_ai_accepted_count",
+    "local_ai_rejected_count",
+    "local_ai_review_count",
+    "local_ai_review_prompt_tokens",
+    "local_ai_review_completion_tokens",
+    "local_ai_review_total_tokens",
+    "local_ai_translation_count",
+    "local_ai_translation_prompt_tokens",
+    "local_ai_translation_completion_tokens",
+    "local_ai_translation_total_tokens",
+    "estimated_local_ai_savings_usd",
+    "openai_accepted_count",
+    "openai_rejected_count",
+    "published_accepted_count",
+    "total_rejected_count",
+    "no_thumbnail_rejected_count",
+    "locally_rejected_count",
+    "cost_protection_limit_reached",
+    "spike_warning_triggered",
+    "review_save_ok",
+    "article_save_ok",
+    "duration_ms",
 )
 
 ADMIN_TABLE_READS = {
@@ -452,6 +515,15 @@ def required_string(body: dict[str, Any], key: str, *, maximum: int = 500) -> st
     value = optional_string(body, key, maximum=maximum)
     if value is None:
         raise ApiError(400, f"{key} must be a non-empty string")
+    return value
+
+
+def required_iso_datetime_string(body: dict[str, Any], key: str, *, maximum: int = 64) -> str:
+    value = required_string(body, key, maximum=maximum)
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ApiError(400, f"{key} must be an ISO timestamp") from exc
     return value
 
 
@@ -970,6 +1042,10 @@ def admin_article_engagement_article_columns() -> str:
     return ", ".join(ADMIN_ARTICLE_ENGAGEMENT_ARTICLE_COLUMNS)
 
 
+def admin_ai_usage_run_columns() -> str:
+    return ", ".join(ADMIN_AI_USAGE_RUN_COLUMNS)
+
+
 def category_clause(body: dict[str, Any], params: list[Any]) -> str:
     category = optional_string(body, "category", maximum=96)
     if category is None or category.lower() == "all":
@@ -1371,6 +1447,38 @@ def load_app_admin_article_engagement(body: dict[str, Any], store: PostgresStore
     }
 
 
+def load_app_admin_ai_usage(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
+    since = required_iso_datetime_string(body, "since")
+    limit = bounded_int(
+        body,
+        "limit",
+        default=5000,
+        minimum=1,
+        maximum=min(store.max_limit, 5000),
+    )
+
+    usage_run_rows = store.fetch_all(
+        f"""
+        select {admin_ai_usage_run_columns()}
+        from public.ai_usage_runs
+        where run_started_at >= %s::timestamptz
+        order by run_started_at desc nulls last, id desc
+        limit %s
+        """,
+        (since, limit),
+    )
+
+    return {
+        "rows": [
+            {
+                "usageRunRows": usage_run_rows,
+            }
+        ],
+        "rowCount": 1,
+        "generatedAt": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
+
+
 def load_app_admin_production_readiness(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
     recent_article_limit = bounded_int(
         body,
@@ -1644,6 +1752,9 @@ def handle_app_operation(operation: str, body: dict[str, Any], store: PostgresSt
 
     if operation == "load-admin-article-engagement":
         return load_app_admin_article_engagement(body, store)
+
+    if operation == "load-admin-ai-usage":
+        return load_app_admin_ai_usage(body, store)
 
     if operation in ADMIN_TABLE_READS:
         return load_app_admin_rows(operation, body, store)

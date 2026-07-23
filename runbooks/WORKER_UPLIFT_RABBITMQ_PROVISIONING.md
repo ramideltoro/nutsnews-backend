@@ -2,7 +2,7 @@
 
 This runbook covers tracking issues `ramideltoro/nutsnews-worker#80`,
 `ramideltoro/nutsnews-worker#81`, `ramideltoro/nutsnews-worker#82`, and
-`ramideltoro/nutsnews-worker#83`.
+`ramideltoro/nutsnews-worker#83`, and `ramideltoro/nutsnews-worker#84`.
 
 The backend-owned provisioning source is:
 
@@ -21,6 +21,7 @@ Validate it with:
 ```bash
 python3 scripts/validate_worker_uplift_rabbitmq_provisioning.py
 python3 scripts/validate_worker_uplift_rabbitmq_recovery.py
+python3 scripts/validate_worker_uplift_rabbitmq_operations.py
 ```
 
 ## Scope
@@ -61,6 +62,14 @@ gh workflow run protected-backend-ansible-apply.yml \
 
 Apply mode requires `production-backend` approval.
 
+The protected apply runs RabbitMQ credential readiness by secret name before
+Ansible builds runtime vars. It uploads
+`backend-rabbitmq-credential-readiness.json` with the deployment safety reports.
+Check mode remains non-mutating. Apply mode requires the explicit
+`confirm_apply=backend.nutsnews.com` value, writes
+`/var/lib/nutsnews/rabbitmq-probes/apply-metadata.json`, and records rollback
+metadata for a git revert followed by protected check/apply.
+
 Required RabbitMQ Environment names:
 
 | Name | Type |
@@ -93,6 +102,16 @@ repairs this tree to the RabbitMQ container UID/GID before runtime probes, so
 queue files remain writable after restores, partial applies, or ownership drift.
 Root-run probe state lives outside the broker mount in
 `/var/lib/nutsnews/rabbitmq-probes`.
+
+Protected apply metadata is stored at:
+
+```text
+/var/lib/nutsnews/rabbitmq-probes/apply-metadata.json
+```
+
+It contains the pinned image reference, non-secret managed file checksums,
+managed paths, and rollback metadata. It must not contain credential values or
+message contents.
 
 Recovery evidence lives outside the broker mount in
 `/var/lib/nutsnews/rabbitmq-recovery`. Normal live message-store snapshots are
@@ -196,6 +215,47 @@ Read-only health command:
 ssh -i ~/.ssh/servercheap_65_75_201_18 rami@65.75.201.18 \
   'sudo -n /usr/local/sbin/nutsnews-rabbitmq-probe health --env /etc/nutsnews-rabbitmq/rabbitmq.env'
 ```
+
+## Protected Drift And Smoke
+
+The `Backend Drift Check` workflow is read-only. It now includes `rabbitmq_drift`
+from:
+
+```bash
+sudo -n /usr/local/sbin/nutsnews-rabbitmq-probe drift \
+  --env /etc/nutsnews-rabbitmq/rabbitmq.env \
+  --credentials-env /etc/nutsnews-rabbitmq/topology.env \
+  --definition /etc/nutsnews-rabbitmq/worker-uplift-topology.json \
+  --metadata /var/lib/nutsnews/rabbitmq-probes/apply-metadata.json
+```
+
+That drift report checks the pinned image digest, Compose/config/topology
+checksums, topology drift, policies, user/permission metadata, listeners/network
+posture, health, and backup/RabbitMQ recovery freshness.
+
+Use the fixed `Backend RabbitMQ Smoke` workflow for isolated broker smoke:
+
+```bash
+gh workflow run backend-rabbitmq-smoke.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f action=smoke \
+  -f confirm_target=backend.nutsnews.com
+```
+
+The smoke action requires `production-backend` approval and confirmation. It
+creates only `worker.uplift.probe.smoke.*` resources, verifies publish route
+confirmation, consume/manual ack, retry, DLQ, persistence across a fixed
+`nutsnews-rabbitmq.service` restart, and permission denial for the monitoring
+identity. It cleans the probe queues/exchanges and writes:
+
+```text
+/var/lib/nutsnews/rabbitmq-probes/last-smoke.json
+```
+
+The workflow uploads `backend-rabbitmq-smoke-report.json`. Reports contain probe
+resource names and generated message IDs only; credentials, message bodies,
+article payloads, and broker data are not uploaded.
 
 ## Recovery
 

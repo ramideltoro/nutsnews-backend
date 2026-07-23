@@ -11,11 +11,13 @@ Backend-changing workflows are:
 - `Backend Controlled Maintenance` when `action` is `security-upgrade` or `reboot`
 - `Backend Backup Maintenance` when `action` is `backup`, `verify`, or `restore-drill`
 - `Backend Recovery` when `mode` is `apply` and the selected action is mutating
+- `Backend RabbitMQ Smoke` when `action` is `smoke`
 
 Read-only workflows such as `Backend Drift Check`, `Backend Health Report`, and
 `Backend Credential Readiness` do not mutate the host or providers. `Backend
 Recovery` is read-only only when `mode=check`, `action=diagnostics`, or
-`action=backup-status`.
+`action=backup-status`. `Backend RabbitMQ Smoke` is read-only only when
+`action=status`.
 
 ## Gate Model
 
@@ -36,6 +38,7 @@ Critical pre/post surfaces include:
 - pending reboot state;
 - Caddy service and Caddy config validation;
 - Docker health when Docker is configured;
+- RabbitMQ health, network security, public exposure, and `rabbitmq_drift` after broker provisioning;
 - backend local health and public HTTPS health;
 - backup freshness and restore verification state;
 - active critical alert state;
@@ -51,6 +54,11 @@ fails closed when the workflow is enforcing the gate.
 Check mode runs the deployment gate as a non-blocking dry run. Apply mode runs
 the same gate as an enforced preflight before Ansible and an enforced postcheck
 after Ansible.
+
+For RabbitMQ, protected apply also runs credential readiness by name, writes
+`/var/lib/nutsnews/rabbitmq-probes/apply-metadata.json`, and the postcheck
+blocks on RabbitMQ health, network posture, public exposure, and
+`rabbitmq_drift`.
 
 Rollback path:
 
@@ -153,14 +161,41 @@ Recovery path:
 4. Verify the postchecks and the health report `recovery_last_run` state.
 5. Reconcile any break-glass manual change through this repository.
 
+### Backend RabbitMQ Smoke
+
+The RabbitMQ smoke workflow has only fixed actions:
+
+- `status`: read-only health check;
+- `smoke`: isolated broker probe that creates only
+  `worker.uplift.probe.smoke.*` resources, restarts
+  `nutsnews-rabbitmq.service`, verifies the durable probe message, and cleans up.
+
+The mutating `smoke` action requires `confirm_target=backend.nutsnews.com` and
+`production-backend` approval. It uploads
+`backend-rabbitmq-smoke-report.json` and writes
+`/var/lib/nutsnews/rabbitmq-probes/last-smoke.json` on the host. It does not
+accept free-form commands, service names, queue names, message payloads, or
+Ansible tags.
+
+Recovery path:
+
+1. Run `action=status` and `Backend Drift Check`.
+2. If smoke is needed, run `action=smoke` only after approval.
+3. If smoke fails, preserve `last-smoke.json`, inspect `rabbitmq_drift`, and fix
+   through a reviewed PR plus protected check/apply.
+4. Use break-glass SSH mutation only if the protected workflow cannot restore
+   broker health, then reconcile the state back into this repository.
+
 ## Current Expected Non-Configured Surfaces
 
-Until the related issues land, Docker, the backend app, and active-alert state
-may be reported as `not_configured`. Backup freshness and restore verification
-become healthy only after the backup workflow has run `backup`, `verify`, and
-`restore-drill`. Profiles only block on the surfaces that are critical for the
-specific workflow action, so foundational work can still deploy missing safety
-components through the protected path.
+Until the related issues land, the backend app and active-alert state may be
+reported as `not_configured`. Backup freshness and restore verification become
+healthy only after the backup workflow has run `backup`, `verify`, and
+`restore-drill`. RabbitMQ smoke remains `not_configured` until the fixed
+`Backend RabbitMQ Smoke` workflow writes `last-smoke.json`. Profiles only block
+on the surfaces that are critical for the specific workflow action, so
+foundational work can still deploy missing safety components through the
+protected path.
 
 ## Validation
 
@@ -168,6 +203,7 @@ Run locally:
 
 ```bash
 python3 scripts/validate_recovery_workflows.py
+python3 scripts/validate_worker_uplift_rabbitmq_operations.py
 python3 -m unittest discover -s tests
 git diff --check
 actionlint .github/workflows/*.yml
@@ -180,4 +216,5 @@ Live validation should use:
 - Cloudflare routing check mode;
 - controlled maintenance `precheck`;
 - backend recovery `mode=check`;
+- backend RabbitMQ smoke `action=status`;
 - read-only SSH verification after any approved mutation.

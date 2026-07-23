@@ -1,0 +1,150 @@
+name: Backend RabbitMQ Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Fixed RabbitMQ smoke action.
+        required: true
+        default: status
+        type: choice
+        options:
+          - status
+          - smoke
+      confirm_target:
+        description: For smoke, type backend.nutsnews.com.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-rabbitmq-smoke
+  cancel-in-progress: false
+
+jobs:
+  rabbitmq-smoke:
+    name: RabbitMQ smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production-backend
+
+    steps:
+      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          CONFIRM_TARGET: ${{ inputs.confirm_target }}
+        run: |
+          set -euo pipefail
+
+          case "$ACTION" in
+            status|smoke) ;;
+            *)
+              echo "Unsupported RabbitMQ smoke action: $ACTION" >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ "$ACTION" == "smoke" && "$CONFIRM_TARGET" != "backend.nutsnews.com" ]]; then
+            echo "RabbitMQ smoke requires confirm_target to be exactly backend.nutsnews.com." >&2
+            exit 1
+          fi
+
+      - name: Prepare SSH material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for secret_name in NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
+            if [[ -z "${!secret_name}" ]]; then
+              echo "Missing required production-backend environment secret: $secret_name" >&2
+              missing=1
+            fi
+          done
+          if [[ "$missing" -ne 0 ]]; then
+            exit "$missing"
+          fi
+
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Run fixed RabbitMQ smoke action
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh_base=(
+            ssh
+            -i "$HOME/.ssh/nutsnews_backend"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+          )
+
+          if [[ "$ACTION" == "status" ]]; then
+            fixed_action="sudo -n /usr/local/sbin/nutsnews-rabbitmq-probe health --env /etc/nutsnews-rabbitmq/rabbitmq.env"
+          else
+            fixed_action="sudo -n /usr/local/sbin/nutsnews-rabbitmq-probe smoke --env /etc/nutsnews-rabbitmq/rabbitmq.env --credentials-env /etc/nutsnews-rabbitmq/topology.env --output /var/lib/nutsnews/rabbitmq-probes/last-smoke.json"
+          fi
+
+          "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "$fixed_action" \
+            | tee "$RUNNER_TEMP/backend-rabbitmq-smoke-report.json"
+
+      - name: Summarize RabbitMQ smoke report
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f "$RUNNER_TEMP/backend-rabbitmq-smoke-report.json" ]]; then
+            echo "No RabbitMQ smoke report was generated." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          python3 - "$RUNNER_TEMP/backend-rabbitmq-smoke-report.json" "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          lines = [
+              "# Backend RabbitMQ Smoke",
+              "",
+              f"- Action: `{report.get('action', 'status')}`",
+              f"- Status: `{report.get('status', 'unknown')}`",
+          ]
+          checks = report.get("checks")
+          if isinstance(checks, list):
+              lines.extend(["", "| Check | Status | Summary |", "| --- | --- | --- |"])
+              for check in checks:
+                  lines.append(f"| `{check.get('name', 'unknown')}` | `{check.get('status', 'unknown')}` | {check.get('summary', '')} |")
+          Path(sys.argv[2]).write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+      - name: Upload RabbitMQ smoke report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-rabbitmq-smoke-report
+          path: ${{ runner.temp }}/backend-rabbitmq-smoke-report.json
+          if-no-files-found: ignore

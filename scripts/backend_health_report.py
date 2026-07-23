@@ -57,7 +57,7 @@ REMOTE_COMMANDS: dict[str, str] = {
     "upgradable_count": "apt list --upgradable 2>/dev/null | tail -n +2 | wc -l",
     "failed_units": "systemctl --failed --no-legend --no-pager || true",
     "service_states": (
-        "for unit in ssh ufw fail2ban docker caddy postgresql alloy sysstat nutsnews-backup.timer; do "
+        "for unit in ssh ufw fail2ban docker caddy postgresql alloy sysstat nutsnews-backup.timer nutsnews-rabbitmq; do "
         "state=$(systemctl is-active \"$unit\" 2>/dev/null || true); "
         "if [ -z \"$state\" ]; then state=unavailable; fi; "
         "printf '%s=%s\\n' \"$unit\" \"$state\"; "
@@ -77,6 +77,23 @@ REMOTE_COMMANDS: dict[str, str] = {
     "backup_status": (
         "if test -x /usr/local/sbin/nutsnews-backup; then "
         "/usr/local/sbin/nutsnews-backup status 2>/dev/null || sudo -n /usr/local/sbin/nutsnews-backup status 2>/dev/null || true; "
+        "else echo not_configured; fi"
+    ),
+    "rabbitmq_drift": (
+        "if systemctl is-active nutsnews-rabbitmq >/dev/null 2>&1 "
+        "&& test -x /usr/local/sbin/nutsnews-rabbitmq-probe; then "
+        "sudo -n /usr/local/sbin/nutsnews-rabbitmq-probe drift "
+        "--env /etc/nutsnews-rabbitmq/rabbitmq.env "
+        "--credentials-env /etc/nutsnews-rabbitmq/topology.env "
+        "--definition /etc/nutsnews-rabbitmq/worker-uplift-topology.json "
+        "--metadata /var/lib/nutsnews/rabbitmq-probes/apply-metadata.json 2>/dev/null || true; "
+        "else echo not_configured; fi"
+    ),
+    "rabbitmq_smoke_status": (
+        "if test -r /var/lib/nutsnews/rabbitmq-probes/last-smoke.json; then "
+        "cat /var/lib/nutsnews/rabbitmq-probes/last-smoke.json; "
+        "elif sudo -n test -r /var/lib/nutsnews/rabbitmq-probes/last-smoke.json 2>/dev/null; then "
+        "sudo -n cat /var/lib/nutsnews/rabbitmq-probes/last-smoke.json; "
         "else echo not_configured; fi"
     ),
     "cleanup_status": (
@@ -439,6 +456,40 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
                     "summary": f"finished_at={section.get('finished_at_utc') if isinstance(section, dict) else None}",
                 }
             )
+
+    rabbitmq_drift_raw = command_stdout(report, "rabbitmq_drift").strip()
+    if rabbitmq_drift_raw == "not_configured" or not rabbitmq_drift_raw:
+        checks.append({"name": "rabbitmq_drift", "status": "not_configured", "summary": "rabbitmq_drift=not_configured"})
+    else:
+        rabbitmq_drift = parse_json_object(rabbitmq_drift_raw)
+        if rabbitmq_drift.get("status") == "pass":
+            checks.append({"name": "rabbitmq_drift", "status": "healthy", "summary": "high_priority_unexpected=none"})
+        elif rabbitmq_drift.get("status") == "fail":
+            summary = rabbitmq_drift.get("summary") if isinstance(rabbitmq_drift.get("summary"), dict) else {}
+            blockers = summary.get("high_priority_unexpected") if isinstance(summary, dict) else []
+            checks.append(
+                {
+                    "name": "rabbitmq_drift",
+                    "status": "critical",
+                    "summary": f"high_priority_unexpected={','.join(str(item) for item in blockers) or 'unknown'}",
+                }
+            )
+        else:
+            checks.append({"name": "rabbitmq_drift", "status": "unknown", "summary": "rabbitmq_drift=invalid_json"})
+
+    rabbitmq_smoke_raw = command_stdout(report, "rabbitmq_smoke_status").strip()
+    if rabbitmq_smoke_raw == "not_configured" or not rabbitmq_smoke_raw:
+        checks.append({"name": "rabbitmq_smoke_last_run", "status": "not_configured", "summary": "rabbitmq_smoke_last_run=not_configured"})
+    else:
+        rabbitmq_smoke = parse_json_object(rabbitmq_smoke_raw)
+        smoke_status = str(rabbitmq_smoke.get("status") or "unknown")
+        checks.append(
+            {
+                "name": "rabbitmq_smoke_last_run",
+                "status": "healthy" if smoke_status == "pass" else "critical" if smoke_status == "fail" else "unknown",
+                "summary": f"finished_at={rabbitmq_smoke.get('finished_at_utc', 'unknown')} status={smoke_status}",
+            }
+        )
 
     cleanup_status_raw = command_stdout(report, "cleanup_status").strip()
     if cleanup_status_raw == "not_configured" or not cleanup_status_raw:

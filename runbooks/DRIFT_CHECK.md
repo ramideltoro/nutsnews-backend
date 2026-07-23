@@ -24,7 +24,23 @@ It checks:
 - Docker, Caddy, backend service, PostgreSQL, and Redis/Valkey presence;
 - swap and reboot-required state;
 - UFW status when readable;
-- managed file presence for repo-owned baseline files.
+- managed file presence for repo-owned baseline files;
+- `rabbitmq_drift` when the backend-owned RabbitMQ broker is provisioned.
+
+RabbitMQ drift is collected through:
+
+```bash
+sudo -n /usr/local/sbin/nutsnews-rabbitmq-probe drift \
+  --env /etc/nutsnews-rabbitmq/rabbitmq.env \
+  --credentials-env /etc/nutsnews-rabbitmq/topology.env \
+  --definition /etc/nutsnews-rabbitmq/worker-uplift-topology.json \
+  --metadata /var/lib/nutsnews/rabbitmq-probes/apply-metadata.json
+```
+
+The RabbitMQ report checks image digest, Compose/config/topology checksums,
+topology, policies, user/permission metadata, listeners/network posture, health,
+and backup freshness. It is read-only and does not publish messages, restart the
+broker, or alter queue state.
 
 ## Classification
 
@@ -36,6 +52,7 @@ Each surface is classified as:
 - `unknown`.
 
 Unexpected public TCP exposure or failed systemd units are high priority and make the workflow fail.
+RabbitMQ high-priority drift also makes the workflow fail.
 
 Missing repo-managed files are expected until the protected backend apply path succeeds. They are reported with `acceptable_until: #10 protected apply succeeds`.
 
@@ -48,6 +65,10 @@ The workflow writes:
 - a GitHub Step Summary;
 - `backend-drift-report.json` as an artifact;
 - the same JSON in the workflow log for quick inspection.
+
+RabbitMQ smoke evidence is separate. It is written by the protected
+`Backend RabbitMQ Smoke` workflow to
+`/var/lib/nutsnews/rabbitmq-probes/last-smoke.json`.
 
 ## Rollback
 

@@ -1,5 +1,5 @@
 {
-  "observed_at_utc": "2026-07-17T03:20:00Z",
+  "observed_at_utc": "2026-07-23T12:05:00Z",
   "host": "backend",
   "ipv4": "65.75.201.18",
   "kernel": "7.0.0-28-generic",
@@ -76,13 +76,25 @@
       "port": 9085,
       "address": "127.0.0.1",
       "purpose": "loopback-only Adminer PHP-FPM pool"
+    },
+    {
+      "port": 5672,
+      "address": "127.0.0.1",
+      "purpose": "loopback-only RabbitMQ AMQP"
+    },
+    {
+      "port": 15672,
+      "address": "127.0.0.1",
+      "purpose": "loopback-only RabbitMQ management"
+    },
+    {
+      "port": 15692,
+      "address": "127.0.0.1",
+      "purpose": "loopback-only RabbitMQ Prometheus"
     }
   ],
   "not_deployed": [
     "backend app",
-    "Docker Engine",
-    "Docker Compose",
-    "RabbitMQ broker",
     "Redis or Valkey",
     "search service"
   ],
@@ -99,6 +111,7 @@
     "ops dashboard",
     "private PostgreSQL failover target",
     "loopback-only Adminer database dashboard",
+    "backend-owned RabbitMQ broker",
     "staging Supabase restore drill workflow",
     "protected apply workflow"
   ],
@@ -113,6 +126,7 @@
     "service-aware backup installation",
     "PostgreSQL failover target installation",
     "database dashboard installation",
+    "RabbitMQ broker provisioning and drift reporting",
     "public HTTP/HTTPS firewall enablement"
   ]
 }

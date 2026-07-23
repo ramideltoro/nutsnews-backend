@@ -26,6 +26,7 @@ ALLOWED_NUTSNEWS_NON_APP_UNITS = {
     "nutsnews-metrics-textfile.timer",
     "nutsnews-ops-dashboard-collect.service",
     "nutsnews-ops-dashboard-collect.timer",
+    "nutsnews-rabbitmq.service",
     "nutsnews-restore-drill.service",
     "nutsnews-restore-drill.timer",
 }
@@ -58,7 +59,17 @@ REMOTE_COMMANDS: dict[str, str] = {
     "swap": "swapon --show=NAME --noheadings 2>/dev/null || true",
     "reboot_required": "test -e /var/run/reboot-required && echo yes || echo no",
     "ufw_status": "ufw status verbose 2>&1 || true",
-    "managed_files": "for path in /etc/ssh/sshd_config.d/00-nutsnews-hardening.conf /etc/fail2ban/jail.d/nutsnews-sshd.local /etc/sysctl.d/99-nutsnews-backend-swap.conf /etc/systemd/journald.conf.d/99-nutsnews-backend.conf /etc/logrotate.d/nutsnews-backend /usr/local/sbin/nutsnews-backend-smoke /usr/local/sbin/nutsnews-backup /usr/local/bin/nutsnews-metrics-textfile /etc/nutsnews-backup/service-matrix.json /etc/nutsnews-backup/restic.env /etc/alloy/config.alloy /etc/alloy/nutsnews-prometheus.env /etc/systemd/system/alloy.service.d/10-nutsnews-prometheus.conf /etc/systemd/system/nutsnews-backup.service /etc/systemd/system/nutsnews-backup.timer /etc/systemd/system/nutsnews-backup-verify.service /etc/systemd/system/nutsnews-backup-verify.timer /etc/systemd/system/nutsnews-restore-drill.service /etc/systemd/system/nutsnews-restore-drill.timer /etc/systemd/system/nutsnews-metrics-textfile.service /etc/systemd/system/nutsnews-metrics-textfile.timer; do stat -c '%a %U %G %n' \"$path\" 2>/dev/null || { sudo -n test -e \"$path\" 2>/dev/null && echo \"present_root_only $path\" || echo \"missing $path\"; }; done",
+    "managed_files": "for path in /etc/ssh/sshd_config.d/00-nutsnews-hardening.conf /etc/fail2ban/jail.d/nutsnews-sshd.local /etc/sysctl.d/99-nutsnews-backend-swap.conf /etc/systemd/journald.conf.d/99-nutsnews-backend.conf /etc/logrotate.d/nutsnews-backend /usr/local/sbin/nutsnews-backend-smoke /usr/local/sbin/nutsnews-backup /usr/local/bin/nutsnews-metrics-textfile /etc/nutsnews-backup/service-matrix.json /etc/nutsnews-backup/restic.env /etc/alloy/config.alloy /etc/alloy/nutsnews-prometheus.env /etc/systemd/system/alloy.service.d/10-nutsnews-prometheus.conf /etc/systemd/system/nutsnews-backup.service /etc/systemd/system/nutsnews-backup.timer /etc/systemd/system/nutsnews-backup-verify.service /etc/systemd/system/nutsnews-backup-verify.timer /etc/systemd/system/nutsnews-restore-drill.service /etc/systemd/system/nutsnews-restore-drill.timer /etc/systemd/system/nutsnews-metrics-textfile.service /etc/systemd/system/nutsnews-metrics-textfile.timer /etc/systemd/system/nutsnews-rabbitmq.service /opt/nutsnews-rabbitmq/compose.yml /etc/nutsnews-rabbitmq/rabbitmq.conf /etc/nutsnews-rabbitmq/enabled_plugins /etc/nutsnews-rabbitmq/worker-uplift-topology.json /etc/nutsnews-rabbitmq/rabbitmq.env /etc/nutsnews-rabbitmq/topology.env /usr/local/sbin/nutsnews-rabbitmq-probe /usr/local/sbin/nutsnews-rabbitmq-topology /usr/local/sbin/nutsnews-rabbitmq-network-check /usr/local/sbin/nutsnews-rabbitmq-recovery /var/lib/nutsnews/rabbitmq-probes/apply-metadata.json; do stat -c '%a %U %G %n' \"$path\" 2>/dev/null || { sudo -n test -e \"$path\" 2>/dev/null && echo \"present_root_only $path\" || echo \"missing $path\"; }; done",
+    "rabbitmq_drift": (
+        "if systemctl is-active nutsnews-rabbitmq >/dev/null 2>&1 "
+        "&& test -x /usr/local/sbin/nutsnews-rabbitmq-probe; then "
+        "sudo -n /usr/local/sbin/nutsnews-rabbitmq-probe drift "
+        "--env /etc/nutsnews-rabbitmq/rabbitmq.env "
+        "--credentials-env /etc/nutsnews-rabbitmq/topology.env "
+        "--definition /etc/nutsnews-rabbitmq/worker-uplift-topology.json "
+        "--metadata /var/lib/nutsnews/rabbitmq-probes/apply-metadata.json; "
+        "else echo not_configured; fi"
+    ),
 }
 
 
@@ -229,6 +240,7 @@ def classify(evidence: dict[str, Any], baseline: dict[str, Any]) -> tuple[list[d
 
     checks.extend(classify_not_deployed(evidence, baseline))
     checks.extend(classify_managed_files(evidence))
+    checks.append(classify_rabbitmq_drift(evidence))
 
     summary = {
         "total": len(checks),
@@ -250,8 +262,10 @@ def classify_not_deployed(evidence: dict[str, Any], baseline: dict[str, Any]) ->
     not_deployed = set(baseline.get("not_deployed", []))
     service_map = {
         "Docker Engine": ("docker_present", "docker_active"),
+        "Docker Compose": ("docker_present", "docker_active"),
         "Caddy": ("caddy_present", "caddy_active"),
         "PostgreSQL": (None, "postgres_active"),
+        "RabbitMQ broker": (None, "rabbitmq_drift"),
         "Redis or Valkey": (None, "redis_active"),
     }
     for label, (present_command, active_command) in service_map.items():
@@ -297,6 +311,52 @@ def classify_not_deployed(evidence: dict[str, Any], baseline: dict[str, Any]) ->
             }
         )
     return checks
+
+
+def classify_rabbitmq_drift(evidence: dict[str, Any]) -> dict[str, Any]:
+    output = command_stdout(evidence, "rabbitmq_drift").strip()
+    if output == "not_configured":
+        return {
+            "surface": "rabbitmq_drift",
+            "status": "missing",
+            "severity": "low",
+            "expected": "RabbitMQ drift check present after broker provisioning",
+            "observed": "not_configured",
+        }
+    data = parse_json_object(output)
+    if data is None:
+        return {
+            "surface": "rabbitmq_drift",
+            "status": "unknown",
+            "severity": "medium",
+            "expected": "valid RabbitMQ drift JSON",
+            "observed": output.splitlines()[-1] if output else "empty",
+        }
+    summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+    blockers = summary.get("high_priority_unexpected") if isinstance(summary, dict) else []
+    status = "expected" if data.get("status") == "pass" else "unexpected"
+    return {
+        "surface": "rabbitmq_drift",
+        "status": status,
+        "severity": "high" if status == "unexpected" else "info",
+        "expected": "pass",
+        "observed": data.get("status", "unknown"),
+        "details": {
+            "high_priority_unexpected": blockers if isinstance(blockers, list) else [],
+            "total": summary.get("total") if isinstance(summary, dict) else None,
+        },
+    }
+
+
+def parse_json_object(value: str) -> dict[str, Any] | None:
+    value = value.strip()
+    if not value.startswith("{"):
+        return None
+    try:
+        data = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def classify_managed_files(evidence: dict[str, Any]) -> list[dict[str, Any]]:

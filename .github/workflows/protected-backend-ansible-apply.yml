@@ -108,6 +108,32 @@ jobs:
           ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
           ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
 
+      - name: Check RabbitMQ credential readiness
+        shell: bash
+        env:
+          RABBITMQ_ERLANG_COOKIE: ${{ secrets.RABBITMQ_ERLANG_COOKIE }}
+          RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD: ${{ secrets.RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD }}
+          RABBITMQ_MONITORING_PASSWORD: ${{ secrets.RABBITMQ_MONITORING_PASSWORD }}
+          RABBITMQ_SCHEDULER_PUBLISHER_PASSWORD: ${{ secrets.RABBITMQ_SCHEDULER_PUBLISHER_PASSWORD }}
+          RABBITMQ_FETCHER_CONSUMER_PASSWORD: ${{ secrets.RABBITMQ_FETCHER_CONSUMER_PASSWORD }}
+          RABBITMQ_FETCHER_PUBLISHER_PASSWORD: ${{ secrets.RABBITMQ_FETCHER_PUBLISHER_PASSWORD }}
+          RABBITMQ_CANONICALIZER_CONSUMER_PASSWORD: ${{ secrets.RABBITMQ_CANONICALIZER_CONSUMER_PASSWORD }}
+          RABBITMQ_CANONICALIZER_PUBLISHER_PASSWORD: ${{ secrets.RABBITMQ_CANONICALIZER_PUBLISHER_PASSWORD }}
+          RABBITMQ_ENRICHMENT_CONSUMER_PASSWORD: ${{ secrets.RABBITMQ_ENRICHMENT_CONSUMER_PASSWORD }}
+          RABBITMQ_ENRICHMENT_PUBLISHER_PASSWORD: ${{ secrets.RABBITMQ_ENRICHMENT_PUBLISHER_PASSWORD }}
+          RABBITMQ_APPROVAL_CONSUMER_PASSWORD: ${{ secrets.RABBITMQ_APPROVAL_CONSUMER_PASSWORD }}
+          RABBITMQ_APPROVAL_PUBLISHER_PASSWORD: ${{ secrets.RABBITMQ_APPROVAL_PUBLISHER_PASSWORD }}
+          RABBITMQ_TRANSLATION_CONSUMER_PASSWORD: ${{ secrets.RABBITMQ_TRANSLATION_CONSUMER_PASSWORD }}
+          RABBITMQ_TRANSLATION_PUBLISHER_PASSWORD: ${{ secrets.RABBITMQ_TRANSLATION_PUBLISHER_PASSWORD }}
+          RABBITMQ_PERSISTENCE_CONSUMER_PASSWORD: ${{ secrets.RABBITMQ_PERSISTENCE_CONSUMER_PASSWORD }}
+          RABBITMQ_PERSISTENCE_PUBLISHER_PASSWORD: ${{ secrets.RABBITMQ_PERSISTENCE_PUBLISHER_PASSWORD }}
+          RABBITMQ_PUBLICATION_CONSUMER_PASSWORD: ${{ secrets.RABBITMQ_PUBLICATION_CONSUMER_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          python3 scripts/check_backend_credential_readiness.py --group rabbitmq --json \
+            | tee "$RUNNER_TEMP/backend-rabbitmq-credential-readiness.json"
+
       - name: Reset fixed backup one-shot failure state
         if: inputs.run_mode == 'apply'
         shell: bash
@@ -600,4 +626,5 @@ jobs:
             ${{ runner.temp }}/backend-deployment-safety-pre.md
             ${{ runner.temp }}/backend-deployment-safety-post.json
             ${{ runner.temp }}/backend-deployment-safety-post.md
+            ${{ runner.temp }}/backend-rabbitmq-credential-readiness.json
           if-no-files-found: ignore

@@ -48,6 +48,7 @@ def evidence(**overrides):
         "redis_active": {"stdout": "inactive\n"},
         "backend_units": {"stdout": ""},
         "managed_files": {"stdout": "missing /etc/ssh/sshd_config.d/00-nutsnews-hardening.conf\n"},
+        "rabbitmq_drift": {"stdout": "not_configured\n"},
     }
     commands.update(overrides)
     return {"commands": commands}
@@ -92,6 +93,29 @@ class BackendDriftCheckTests(unittest.TestCase):
         self.assertEqual(managed["status"], "expected")
         self.assertEqual(managed["observed"], "present_root_only")
         self.assertEqual(summary["unexpected"], 0)
+
+    def test_rabbitmq_drift_failure_is_high_priority(self):
+        fixture = evidence(
+            rabbitmq_drift={
+                "stdout": '{"status":"fail","summary":{"high_priority_unexpected":["rabbitmq_image_digest"],"total":4}}\n'
+            }
+        )
+        checks, summary = backend_drift_check.classify(fixture, BASELINE)
+        self.assertIn("rabbitmq_drift", summary["high_priority_unexpected"])
+        rabbitmq_check = next(item for item in checks if item["surface"] == "rabbitmq_drift")
+        self.assertEqual(rabbitmq_check["status"], "unexpected")
+        self.assertEqual(rabbitmq_check["details"]["high_priority_unexpected"], ["rabbitmq_image_digest"])
+
+    def test_rabbitmq_drift_pass_is_expected(self):
+        fixture = evidence(
+            rabbitmq_drift={
+                "stdout": '{"status":"pass","summary":{"high_priority_unexpected":[],"total":8}}\n'
+            }
+        )
+        checks, summary = backend_drift_check.classify(fixture, BASELINE)
+        rabbitmq_check = next(item for item in checks if item["surface"] == "rabbitmq_drift")
+        self.assertEqual(rabbitmq_check["status"], "expected")
+        self.assertNotIn("rabbitmq_drift", summary["high_priority_unexpected"])
 
     def test_ops_dashboard_units_do_not_count_as_backend_app_deployed(self):
         fixture = evidence(

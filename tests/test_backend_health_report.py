@@ -41,6 +41,8 @@ def fixture_report(**overrides):
         "backend_health": command("ok\n"),
         "backup_tools": command("restic=missing\nrclone=missing\npg_dump=missing\ndocker=missing\ncaddy=missing\nalloy=missing\n"),
         "backup_status": command("not_configured\n"),
+        "rabbitmq_drift": command("not_configured\n"),
+        "rabbitmq_smoke_status": command("not_configured\n"),
         "cleanup_status": command("not_configured\n"),
         "recovery_status": command("not_configured\n"),
         "postgres_status": command("not_configured\n"),
@@ -192,6 +194,23 @@ class BackendHealthReportTests(unittest.TestCase):
         self.assertEqual(by_name["rabbitmq_definition_export"]["status"], "healthy")
         self.assertEqual(by_name["rabbitmq_clean_rebuild_drill"]["status"], "healthy")
         self.assertEqual(by_name["rabbitmq_stopped_volume_restore_drill"]["status"], "warning")
+
+    def test_rabbitmq_drift_and_smoke_are_exposed_when_present(self):
+        checks, _ = backend_health_report.classify(
+            fixture_report(
+                rabbitmq_drift=command(
+                    '{"status":"fail","summary":{"high_priority_unexpected":["rabbitmq_config_checksum:compose"]}}\n'
+                ),
+                rabbitmq_smoke_status=command(
+                    '{"status":"pass","finished_at_utc":"2026-07-23T13:00:00Z","checks":[]}\n'
+                ),
+            )
+        )
+        by_name = {item["name"]: item for item in checks}
+        self.assertEqual(by_name["rabbitmq_drift"]["status"], "critical")
+        self.assertIn("rabbitmq_config_checksum:compose", by_name["rabbitmq_drift"]["summary"])
+        self.assertEqual(by_name["rabbitmq_smoke_last_run"]["status"], "healthy")
+        self.assertIn("2026-07-23T13:00:00Z", by_name["rabbitmq_smoke_last_run"]["summary"])
 
     def test_active_caddy_with_failed_endpoint_is_critical(self):
         checks, summary = backend_health_report.classify(fixture_report(backend_health=command("")))

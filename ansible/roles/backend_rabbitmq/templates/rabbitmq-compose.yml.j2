@@ -30,11 +30,12 @@ services:
       start_period: 30s
     stop_grace_period: 60s
     logging:
-      driver: json-file
+      driver: journald
       options:
-        max-size: "10m"
-        max-file: "5"
+        tag: "nutsnews-worker-uplift-rabbitmq"
+        labels: "com.nutsnews.service,com.nutsnews.version,com.nutsnews.queue"
     labels:
       com.nutsnews.service: "rabbitmq"
+      com.nutsnews.version: "broker"
       com.nutsnews.owner: "ramideltoro/nutsnews-backend"
       com.nutsnews.tracking_issue: "80"

@@ -290,8 +290,54 @@ loki.source.journal "{{ source.unit | regex_replace('[^A-Za-z0-9_]', '_') }}" {
 }
 
 {% endfor %}
+loki.relabel "worker_uplift_container_context" {
+  forward_to = []
+
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "severity"
+  }
+}
+
+{% for source in backend_logs_worker_uplift_container_sources %}
+loki.source.journal "container_{{ source.tag | regex_replace('[^A-Za-z0-9_]', '_') }}" {
+  max_age       = "{{ backend_logs_journal_max_age }}"
+  matches       = "CONTAINER_TAG={{ source.tag }}"
+  relabel_rules = loki.relabel.worker_uplift_container_context.rules
+  labels        = {
+    environment = "{{ backend_metrics_environment_label }}",
+    host        = "{{ backend_metrics_instance_label }}",
+    source      = "container",
+    service     = "{{ source.service }}",
+    version     = "{{ source.version }}",
+{% if source.queue is defined %}
+    queue       = "{{ source.queue }}",
+{% endif %}
+  }
+  forward_to = [loki.process.backend_logs.receiver]
+}
+
+{% endfor %}
 loki.process "backend_logs" {
   forward_to = [loki.write.grafana_cloud_loki.receiver]
+
+  stage.json {
+    expressions = {
+      level           = "level",
+      correlation_id  = "correlationId",
+      causation_id    = "causationId",
+      message_id      = "messageId",
+      idempotency_key = "idempotencyKey",
+      traceparent     = "traceparent",
+      tracestate      = "tracestate",
+    }
+    drop_malformed = false
+  }
+
+  stage.drop {
+    expression          = "(?i)\"(?:level|severity)\"[[:space:]]*:[[:space:]]*\"(?:debug|trace)\""
+    drop_counter_reason = "debug_trace_log_level"
+  }
 
   stage.drop {
     expression          = "(?i)(BEGIN (RSA|DSA|EC|OPENSSH|PRIVATE) KEY|PRIVATE KEY-----)"
@@ -335,8 +381,19 @@ loki.process "backend_logs" {
     }
   }
 
+  stage.structured_metadata {
+    values = {
+      correlation_id  = "",
+      causation_id    = "",
+      message_id      = "",
+      idempotency_key = "",
+      traceparent     = "",
+      tracestate      = "",
+    }
+  }
+
   stage.label_keep {
-    values = ["environment", "host", "source", "service", "unit", "severity", "filename", "job"]
+    values = ["environment", "host", "source", "service", "unit", "severity", "filename", "job", "version", "queue", "outcome"]
   }
 }
 {% endif %}

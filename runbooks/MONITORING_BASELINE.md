@@ -94,21 +94,29 @@ Collected sources:
 - `/var/log/auth.log` and `/var/log/fail2ban.log` when readable through the
   host `adm` group;
 - `/var/log/caddy/access.log`, `/var/log/caddy/error.log`, and
-  `/var/log/nutsnews/*.log` when those files exist.
+  `/var/log/nutsnews/*.log` when those files exist;
+- RabbitMQ and worker-uplift service container stdout/stderr through Docker's
+  `journald` log driver and bounded `CONTAINER_TAG` matches.
 
 Alloy runs as the package-managed `alloy` user and is added only to
 `systemd-journal` and `adm` for read access. It is not given Docker socket
-access. Docker/Compose container logs remain intentionally excluded until the
-backend app has containers and a reviewed least-privilege container log path.
+access. Generic Docker/Compose container logs remain intentionally excluded;
+the only reviewed container-log path is the worker-uplift journald tag allowlist
+documented in [WORKER_UPLIFT_LOGS_TRACES.md](WORKER_UPLIFT_LOGS_TRACES.md).
 
 Before logs are shipped, Alloy drops private-key markers and oversized lines,
 redacts authorization headers, cookies, token/password/API-key style values,
-query strings, and email addresses, truncates long lines, and keeps only stable
-labels:
+query strings, and email addresses, drops production JSON `debug`/`trace`
+entries, truncates long lines, and keeps only stable labels:
 
 ```text
 environment, host, source, service, unit, severity, filename, job
 ```
+
+Worker-uplift container logs can also use the approved bounded `version`,
+`queue`, and `outcome` stream labels. Correlation IDs, traceparent, message IDs,
+idempotency keys, article/feed identifiers, prompts, and model responses remain
+structured metadata or payload-prohibited fields, not stream labels.
 
 The managed Grafana folder is `NutsNews Backend Ops` (`nutsnews-backend-ops`).
 The logs dashboard is `NutsNews Backend Logs` (`nutsnews-backend-logs`) and uses

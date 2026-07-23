@@ -151,6 +151,20 @@ and rejected counts, recent review metadata, and review duration. The operation
 must use backend PostgreSQL least-privilege read access and must not require
 Supabase service-role access in backend-primary mode.
 
+Translation quality dashboards use the read-only app operation
+`load-admin-translation-quality`. A tokened POST to
+`https://backend.nutsnews.com/api/app/db/load-admin-translation-quality` with
+`providerMode=backend_postgres_primary` must return one dashboard snapshot row
+containing bounded `articleRows` from `public.public_feed_snapshot` and bounded
+`summaryRows` from `public.article_summaries`. Article rows must be ordered by
+snapshot rank and summary lookups must be limited to the sampled article URLs
+and validated target translation language codes. The selected fields must
+preserve the app contract for public feed article identity, canonical title and
+summary, category, publication timing, translated title/summary, provider,
+model, updated timestamp, language coverage, and issue summarization. The
+operation must use backend PostgreSQL least-privilege read access and must not
+require Supabase service-role access in backend-primary mode.
+
 ## Authorization Rules
 
 - Browser code must not receive database credentials or service-role style

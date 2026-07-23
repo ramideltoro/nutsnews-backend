@@ -556,6 +556,45 @@ def run_json_check(report: dict[str, Any], surface: str, command: list[str], tim
     return data
 
 
+def inspect_expected_rabbitmq_image(container_name: str, expected_image: str, timeout: int) -> tuple[bool, dict[str, Any]]:
+    observed: dict[str, Any] = {
+        "container_image": "",
+        "container_image_id": "",
+        "image_repo_digests": [],
+        "match_source": "",
+    }
+    container_result = completed_process(["docker", "inspect", container_name, "--format", "{{.Config.Image}} {{.Image}}"], timeout)
+    observed["container_inspect_returncode"] = container_result["returncode"]
+    if container_result["returncode"] != 0:
+        observed["container_inspect_stderr_tail"] = str(container_result["stderr"])[-500:]
+        return False, observed
+
+    parts = str(container_result["stdout"]).strip().split()
+    container_image = parts[0] if parts else ""
+    container_image_id = parts[1] if len(parts) > 1 else ""
+    observed["container_image"] = container_image
+    observed["container_image_id"] = container_image_id
+    if container_image == expected_image:
+        observed["match_source"] = "container_config_image"
+        return True, observed
+
+    if not container_image_id:
+        return False, observed
+
+    image_result = completed_process(["docker", "image", "inspect", container_image_id, "--format", "{{range .RepoDigests}}{{.}} {{end}}"], timeout)
+    observed["image_inspect_returncode"] = image_result["returncode"]
+    if image_result["returncode"] != 0:
+        observed["image_inspect_stderr_tail"] = str(image_result["stderr"])[-500:]
+        return False, observed
+
+    repo_digests = str(image_result["stdout"]).strip().split()
+    observed["image_repo_digests"] = repo_digests
+    if expected_image in repo_digests:
+        observed["match_source"] = "image_repo_digest"
+        return True, observed
+    return False, observed
+
+
 def action_drift(args: argparse.Namespace) -> int:
     username, password, _ = rabbitmq_credentials(args.env)
     report: dict[str, Any] = {
@@ -574,10 +613,8 @@ def action_drift(args: argparse.Namespace) -> int:
         add_drift_check(report, "rabbitmq_apply_metadata", "expected", "info", str(args.metadata), "present")
         expected_image = str(metadata.get("image") or "")
         if expected_image:
-            image_result = completed_process(["docker", "inspect", args.container_name, "--format", "{{.Config.Image}} {{range .RepoDigests}}{{.}}{{end}}"], args.timeout_seconds)
-            image_output = str(image_result["stdout"]).strip()
-            image_ok = image_result["returncode"] == 0 and expected_image in image_output
-            add_drift_check(report, "rabbitmq_image_digest", "expected" if image_ok else "unexpected", "high", expected_image, image_output or image_result)
+            image_ok, image_observed = inspect_expected_rabbitmq_image(args.container_name, expected_image, args.timeout_seconds)
+            add_drift_check(report, "rabbitmq_image_digest", "expected" if image_ok else "unexpected", "high", expected_image, image_observed)
         paths = metadata.get("paths", {})
         checksums = metadata.get("checksums", {})
         if isinstance(paths, dict) and isinstance(checksums, dict):

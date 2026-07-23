@@ -203,6 +203,19 @@ accepted/rejected counts, image coverage, and updated timestamps. The operation
 must use backend PostgreSQL least-privilege read access and must not require
 Supabase service-role access in backend-primary mode.
 
+Feed management dashboards use the read-only app operation
+`load-admin-feed-management`. A tokened POST to
+`https://backend.nutsnews.com/api/app/db/load-admin-feed-management` with
+`providerMode=backend_postgres_primary` must return one dashboard snapshot row
+containing bounded `feedQualityRows` from `public.feed_quality_scores`. The
+selected fields must preserve the app contract for feed management rows, active
+and positive-source status, source trust tier, publisher allowlist status,
+recommended trust tier, recommendation reason, feed health freshness, latest and
+total counters, uniqueness metrics, rate percentages, quality score, quality
+grade, quality reason, and updated timestamps. The operation must use backend
+PostgreSQL least-privilege read access and must not require Supabase
+service-role access in backend-primary mode.
+
 ## Authorization Rules
 
 - Browser code must not receive database credentials or service-role style

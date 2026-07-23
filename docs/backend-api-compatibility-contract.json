@@ -73,7 +73,8 @@
         "load-admin-translation-quality",
         "load-admin-guardrails",
         "load-admin-worker-shards",
-        "load-admin-rss-feed-health"
+        "load-admin-rss-feed-health",
+        "load-admin-feed-management"
       ],
       "validated_by": "backend_postgres_smoke_tests admin"
     },
@@ -174,6 +175,7 @@
         "load-admin-guardrails snapshot row 1",
         "load-admin-worker-shards snapshot row 1",
         "load-admin-rss-feed-health snapshot row 1",
+        "load-admin-feed-management snapshot row 1",
         "backend_postgres_shadow write rejected 409",
         "backend_postgres_primary guarded write skipped when writes are enabled"
       ],

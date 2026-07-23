@@ -59,6 +59,7 @@ APP_READ_OPERATIONS = {
     "load-admin-guardrails",
     "load-admin-worker-shards",
     "load-admin-rss-feed-health",
+    "load-admin-feed-management",
     "load-admin-quota-usage-events",
     "load-admin-article-engagement-source-category-summary",
     "load-admin-article-engagement-article-summary",
@@ -423,6 +424,47 @@ ADMIN_RSS_FEED_HEALTH_FEED_HEALTH_COLUMNS = (
     "total_accepted_count",
     "total_rejected_count",
     "created_at",
+    "updated_at",
+)
+
+ADMIN_FEED_MANAGEMENT_FEED_QUALITY_COLUMNS = (
+    "feed_id",
+    "source",
+    "feed_url",
+    "is_active",
+    "is_positive_source",
+    "source_trust_tier",
+    "publisher_allowlist_status",
+    "recommended_trust_tier",
+    "tier_recommendation_reason",
+    "feed_health_id",
+    "last_checked_at",
+    "last_success_at",
+    "last_failure_at",
+    "last_status",
+    "last_error_message",
+    "last_article_count",
+    "last_image_count",
+    "last_accepted_count",
+    "last_rejected_count",
+    "consecutive_failure_count",
+    "total_fetch_count",
+    "total_success_count",
+    "total_failure_count",
+    "total_article_count",
+    "total_image_count",
+    "total_accepted_count",
+    "total_rejected_count",
+    "unique_reviewed_url_count",
+    "unique_published_url_count",
+    "success_rate_pct",
+    "thumbnail_rate_pct",
+    "accepted_rate_pct",
+    "failure_rate_pct",
+    "duplicate_rate_pct",
+    "quality_score",
+    "quality_grade",
+    "quality_reason",
     "updated_at",
 )
 
@@ -1256,6 +1298,10 @@ def admin_rss_feed_health_feed_health_columns() -> str:
     return ", ".join(ADMIN_RSS_FEED_HEALTH_FEED_HEALTH_COLUMNS)
 
 
+def admin_feed_management_feed_quality_columns() -> str:
+    return ", ".join(ADMIN_FEED_MANAGEMENT_FEED_QUALITY_COLUMNS)
+
+
 def category_clause(body: dict[str, Any], params: list[Any]) -> str:
     category = optional_string(body, "category", maximum=96)
     if category is None or category.lower() == "all":
@@ -2011,6 +2057,38 @@ def load_app_admin_rss_feed_health(body: dict[str, Any], store: PostgresStore) -
     }
 
 
+def load_app_admin_feed_management(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
+    limit = bounded_int(
+        body,
+        "limit",
+        default=10000,
+        minimum=1,
+        maximum=min(store.max_limit, 10000),
+    )
+
+    feed_quality_rows = store.fetch_all(
+        f"""
+        select {admin_feed_management_feed_quality_columns()}
+        from public.feed_quality_scores
+        order by quality_score asc nulls first,
+                 total_accepted_count desc nulls last,
+                 source asc
+        limit %s
+        """,
+        (limit,),
+    )
+
+    return {
+        "rows": [
+            {
+                "feedQualityRows": feed_quality_rows,
+            }
+        ],
+        "rowCount": 1,
+        "generatedAt": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
+
+
 def load_app_admin_production_readiness(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
     recent_article_limit = bounded_int(
         body,
@@ -2302,6 +2380,9 @@ def handle_app_operation(operation: str, body: dict[str, Any], store: PostgresSt
 
     if operation == "load-admin-rss-feed-health":
         return load_app_admin_rss_feed_health(body, store)
+
+    if operation == "load-admin-feed-management":
+        return load_app_admin_feed_management(body, store)
 
     if operation in ADMIN_TABLE_READS:
         return load_app_admin_rows(operation, body, store)

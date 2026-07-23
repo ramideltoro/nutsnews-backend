@@ -67,6 +67,8 @@ jobs:
           NUTSNEWS_REPORT_SMTP_PORT: ${{ vars.NUTSNEWS_REPORT_SMTP_PORT || '587' }}
           NUTSNEWS_REPORT_SMTP_STARTTLS: ${{ vars.NUTSNEWS_REPORT_SMTP_STARTTLS || 'true' }}
           NUTSNEWS_REPORT_SUBJECT_PREFIX: ${{ vars.NUTSNEWS_REPORT_SUBJECT_PREFIX || '[NutsNews backend]' }}
+          NUTSNEWS_BACKEND_API_URL: ${{ vars.NUTSNEWS_BACKEND_API_URL || 'https://backend.nutsnews.com/api/app/db' }}
+          NUTSNEWS_BACKEND_API_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_API_TOKEN }}
           SEND_EMAIL_INPUT: ${{ github.event_name == 'schedule' && 'true' || inputs.send_email }}
         run: |
           set -euo pipefail

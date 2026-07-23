@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run off-box public synthetic checks from GitHub Actions."""
+"""Run off-box public and protected synthetic checks from GitHub Actions."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
@@ -29,6 +29,7 @@ except ModuleNotFoundError:  # pragma: no cover - script-path execution
 TOKEN_RE = re.compile(r"(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+|[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})")
 EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 URL_SECRET_RE = re.compile(r"([a-z][a-z0-9+.-]*://[^:/\s]+:)([^@\s]+)(@)", re.IGNORECASE)
+DEFAULT_ADMIN_BACKEND_API_URL = "https://backend.nutsnews.com/api/app/db"
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,13 @@ class SyntheticCheck:
     follow_redirects: bool = True
     expected_location_prefix: str | None = None
     timeout: int = 10
+
+
+@dataclass(frozen=True)
+class AdminBackendOperation:
+    name: str
+    body: dict[str, Any]
+    timeout: int = 15
 
 
 @dataclass(frozen=True)
@@ -108,6 +116,107 @@ def public_checks() -> list[SyntheticCheck]:
             failure_class="auth_provider_status",
         ),
     ]
+
+
+def admin_backend_operations() -> list[AdminBackendOperation]:
+    since = (datetime.now(UTC) - timedelta(days=30)).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return [
+        AdminBackendOperation(
+            name="load-admin-production-readiness",
+            body={
+                "providerMode": "backend_postgres_primary",
+                "recentArticleLimit": 100,
+                "translationSampleLimit": 60,
+                "defaultLanguageCode": "en",
+                "targetLanguageCodes": ["fr", "ja", "de-CH", "de", "el"],
+                "articleGrowthWindowsHours": [24, 24 * 7],
+            },
+        ),
+        AdminBackendOperation(
+            name="load-admin-article-reviews",
+            body={
+                "providerMode": "backend_postgres_primary",
+                "filters": {
+                    "decision": "all",
+                    "source": "",
+                    "category": "",
+                    "minScore": None,
+                    "maxScore": None,
+                    "page": 0,
+                    "sort": "newest",
+                },
+                "pageSize": 5,
+                "recentPublishedArticleLimit": 3,
+                "aiDecisionVersionReportLimit": 3,
+                "maxOptionRows": 100,
+            },
+        ),
+        AdminBackendOperation(
+            name="load-admin-article-engagement",
+            body={"providerMode": "backend_postgres_primary", "sourceCategoryLimit": 10, "articleLimit": 5},
+        ),
+        AdminBackendOperation(
+            name="load-admin-ai-usage",
+            body={"providerMode": "backend_postgres_primary", "since": since, "limit": 20},
+        ),
+        AdminBackendOperation(
+            name="load-admin-local-ai",
+            body={"providerMode": "backend_postgres_primary", "since": since, "runLimit": 20, "reviewLimit": 10},
+        ),
+        AdminBackendOperation(
+            name="load-admin-translation-quality",
+            body={
+                "providerMode": "backend_postgres_primary",
+                "auditLimit": 10,
+                "summaryLookupLimit": 100,
+                "targetLanguageCodes": ["fr", "ja", "de-CH", "de", "el"],
+            },
+        ),
+        AdminBackendOperation(
+            name="load-admin-guardrails",
+            body={
+                "providerMode": "backend_postgres_primary",
+                "since": since,
+                "limit": 20,
+                "countTables": ["articles", "article_summaries", "rss_feeds"],
+            },
+        ),
+        AdminBackendOperation(
+            name="load-admin-worker-shards",
+            body={
+                "providerMode": "backend_postgres_primary",
+                "limit": 20,
+                "shardCount": 25,
+                "staleAfterMinutes": 180,
+                "slowRunMs": 15000,
+                "dailyWindowDays": 7,
+            },
+        ),
+        AdminBackendOperation(
+            name="load-admin-rss-feed-health",
+            body={"providerMode": "backend_postgres_primary", "limit": 20, "staleAfterHours": 24},
+        ),
+        AdminBackendOperation(
+            name="load-admin-feed-management",
+            body={"providerMode": "backend_postgres_primary", "limit": 20},
+        ),
+        AdminBackendOperation(
+            name="load-admin-audit-log",
+            body={"providerMode": "backend_postgres_primary", "limit": 20},
+        ),
+        AdminBackendOperation(
+            name="load-admin-runtime-feature-flags",
+            body={"providerMode": "backend_postgres_primary", "limit": 20},
+        ),
+    ]
+
+
+def normalize_admin_backend_base_url(value: str | None) -> str:
+    base_url = (value or DEFAULT_ADMIN_BACKEND_API_URL).strip() or DEFAULT_ADMIN_BACKEND_API_URL
+    base_url = base_url.rstrip("/")
+    if "/api/app/db" not in base_url:
+        base_url = f"{base_url}/api/app/db"
+    return base_url
 
 
 def load_previous(path: Path | None) -> dict[str, str]:
@@ -215,8 +324,119 @@ def run_check(check: SyntheticCheck, previous_success: str | None, generated_at:
         "duration_ms": duration_ms,
         "last_success_at": last_success_at,
         "expected_statuses": list(check.expected_statuses),
+        "method": "GET",
+        "check_type": "public_http",
         "source": "github_actions",
     }
+
+
+def missing_admin_backend_token_check(base_url: str, previous_success: str | None) -> dict[str, Any]:
+    return {
+        "name": "admin_backend_operations_config",
+        "url": redact(base_url),
+        "status": "critical",
+        "failure_class": "admin_backend_configuration",
+        "failure_detail": "missing NUTSNEWS_BACKEND_API_TOKEN; protected admin backend operation checks are required",
+        "http_status": None,
+        "duration_ms": 0,
+        "last_success_at": previous_success,
+        "expected_statuses": ["2xx"],
+        "method": "POST",
+        "check_type": "admin_backend_operation",
+        "source": "github_actions",
+    }
+
+
+def run_admin_backend_operation(
+    operation: AdminBackendOperation,
+    base_url: str,
+    token: str,
+    previous_success: str | None,
+    generated_at: str,
+) -> dict[str, Any]:
+    url = f"{base_url.rstrip('/')}/{operation.name}"
+    encoded = json.dumps(operation.body, separators=(",", ":")).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=encoded,
+        method="POST",
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "User-Agent": "NutsNewsBackendSynthetic/1.0 (+https://github.com/ramideltoro/nutsnews-backend)",
+            "X-NutsNews-Db-Client": "backend-synthetic-monitor",
+        },
+    )
+    started = time.monotonic()
+    http_status: int | None = None
+    raw_body = ""
+    error_class = ""
+    error_detail = ""
+    rows: Any = None
+    try:
+        with urllib.request.urlopen(request, timeout=operation.timeout) as response:
+            http_status = response.getcode()
+            raw_body = response.read(32768).decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        http_status = exc.code
+        exc.read(32768)
+    except Exception as exc:  # pragma: no cover - defensive network edge cases
+        error_class = classify_error(exc)
+        error_detail = f"operation={operation.name} route={redact(url)} request_failed={redact(str(exc))}"
+    duration_ms = int((time.monotonic() - started) * 1000)
+
+    if error_class:
+        ok = False
+        failure_class = error_class
+        failure_detail = error_detail
+    elif http_status is None or http_status < 200 or http_status >= 300:
+        ok = False
+        failure_class = "admin_backend_http"
+        failure_detail = f"operation={operation.name} route={redact(url)} expected_status=2xx observed_status={http_status}"
+    else:
+        try:
+            parsed: Any = json.loads(raw_body or "{}")
+        except json.JSONDecodeError:
+            parsed = None
+        if not isinstance(parsed, dict):
+            ok = False
+            failure_class = "admin_backend_invalid_json"
+            failure_detail = f"operation={operation.name} route={redact(url)} invalid_json=true"
+        else:
+            rows = parsed.get("rows")
+            if isinstance(rows, list):
+                ok = True
+                failure_class = ""
+                failure_detail = ""
+            else:
+                ok = False
+                failure_class = "admin_backend_invalid_shape"
+                failure_detail = f"operation={operation.name} route={redact(url)} rows_shape=false"
+
+    return {
+        "name": operation.name,
+        "url": redact(url),
+        "status": "healthy" if ok else "critical",
+        "failure_class": failure_class or None,
+        "failure_detail": failure_detail or None,
+        "http_status": http_status,
+        "duration_ms": duration_ms,
+        "last_success_at": generated_at if ok else previous_success,
+        "expected_statuses": ["2xx"],
+        "method": "POST",
+        "check_type": "admin_backend_operation",
+        "row_count": len(rows) if isinstance(rows, list) else None,
+        "source": "github_actions",
+    }
+
+
+def run_admin_backend_operations(previous: dict[str, str], generated_at: str) -> list[dict[str, Any]]:
+    base_url = normalize_admin_backend_base_url(os.environ.get("NUTSNEWS_BACKEND_API_URL"))
+    token = os.environ.get("NUTSNEWS_BACKEND_API_TOKEN", "").strip()
+    if not token:
+        return [missing_admin_backend_token_check(base_url, previous.get("admin_backend_operations_config"))]
+    return [run_admin_backend_operation(operation, base_url, token, previous.get(operation.name), generated_at) for operation in admin_backend_operations()]
 
 
 def smtp_config_from_env() -> SmtpConfig | None:
@@ -314,7 +534,7 @@ def write_summary(path: Path | None, report: dict[str, Any]) -> None:
         f"- last sent: `{alert_summary.get('last_sent_at') or 'none'}`",
         f"- last error: `{alert_summary.get('last_error') or 'none'}`",
         "",
-        "| Endpoint | Status | HTTP | Failure class | Last success |",
+        "| Check | Status | HTTP | Failure class | Last success |",
         "| --- | --- | ---: | --- | --- |",
     ]
     for check in report["checks"]:
@@ -339,7 +559,10 @@ def main() -> int:
     previous_report = load_previous_report(args.previous_state)
     previous = load_previous(args.previous_state)
     checks = [run_check(check, previous.get(check.name), generated_at) for check in public_checks()]
+    checks.extend(run_admin_backend_operations(previous, generated_at))
     critical = sum(1 for check in checks if check["status"] == "critical")
+    admin_backend_checks = [check for check in checks if check.get("check_type") == "admin_backend_operation"]
+    admin_backend_critical = sum(1 for check in admin_backend_checks if check["status"] == "critical")
     alerting = backend_alert_state.evaluate_alerts(
         previous_report,
         current_alerts_from_checks(checks),
@@ -360,6 +583,13 @@ def main() -> int:
         },
         "status": "critical" if critical else "healthy",
         "summary": {"total": len(checks), "healthy": len(checks) - critical, "critical": critical},
+        "admin_backend_operations": {
+            "required": True,
+            "base_url": redact(normalize_admin_backend_base_url(os.environ.get("NUTSNEWS_BACKEND_API_URL"))),
+            "total": len(admin_backend_checks),
+            "healthy": len(admin_backend_checks) - admin_backend_critical,
+            "critical": admin_backend_critical,
+        },
         "checks": checks,
         "alerting": {"summary": alerting["summary"], "notifications": alerting["notifications"], "suppressed": alerting["suppressed"]},
         "alert_state": alerting["state"],

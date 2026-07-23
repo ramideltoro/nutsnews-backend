@@ -63,7 +63,7 @@ Use [runbooks/CLOUD_INIT_PROVIDER_BOOTSTRAP.md](runbooks/CLOUD_INIT_PROVIDER_BOO
 Use [runbooks/BACKUP_RESTORE_BASELINE.md](runbooks/BACKUP_RESTORE_BASELINE.md) before adding any stateful backend workload.
 Use [runbooks/MONITORING_BASELINE.md](runbooks/MONITORING_BASELINE.md) before applying or verifying monitoring and log retention.
 Use [runbooks/BACKEND_HEALTH_REPORT.md](runbooks/BACKEND_HEALTH_REPORT.md) for the recurring read-only backend health report workflow.
-Use [runbooks/BACKEND_SYNTHETIC_MONITORING.md](runbooks/BACKEND_SYNTHETIC_MONITORING.md) for off-box public endpoint synthetic monitoring.
+Use [runbooks/BACKEND_SYNTHETIC_MONITORING.md](runbooks/BACKEND_SYNTHETIC_MONITORING.md) for off-box public endpoint and protected admin backend operation synthetic monitoring.
 Use [runbooks/BACKEND_CLEANUP_MAINTENANCE.md](runbooks/BACKEND_CLEANUP_MAINTENANCE.md) before running cleanup report, dry-run, or apply actions.
 Use [runbooks/BACKEND_RECOVERY.md](runbooks/BACKEND_RECOVERY.md) before running fixed-purpose recovery checks or approved recovery actions.
 Use [runbooks/BACKEND_OPENAI_MAINTENANCE_ROBOT.md](runbooks/BACKEND_OPENAI_MAINTENANCE_ROBOT.md) before changing the daily OpenAI maintenance issue robot.

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,6 +20,108 @@ class BackendSyntheticMonitorTests(unittest.TestCase):
         self.assertIn("backend_healthz", names)
         self.assertIn("supabase_platform_status", names)
         self.assertTrue(all(check.url.startswith("https://") for check in checks))
+
+    def test_admin_backend_operations_are_required_read_only_posts(self):
+        operations = backend_synthetic_monitor.admin_backend_operations()
+        expected = {
+            "load-admin-production-readiness",
+            "load-admin-article-reviews",
+            "load-admin-article-engagement",
+            "load-admin-ai-usage",
+            "load-admin-local-ai",
+            "load-admin-translation-quality",
+            "load-admin-guardrails",
+            "load-admin-worker-shards",
+            "load-admin-rss-feed-health",
+            "load-admin-feed-management",
+            "load-admin-audit-log",
+            "load-admin-runtime-feature-flags",
+        }
+        self.assertEqual({operation.name for operation in operations}, expected)
+        self.assertTrue(all(operation.name.startswith("load-admin-") for operation in operations))
+        self.assertTrue(all(operation.body.get("providerMode") == "backend_postgres_primary" for operation in operations))
+        self.assertNotIn("record-quota-usage-event", {operation.name for operation in operations})
+
+    def test_missing_admin_backend_token_is_critical(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            checks = backend_synthetic_monitor.run_admin_backend_operations({}, "2026-07-17T01:00:00Z")
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0]["name"], "admin_backend_operations_config")
+        self.assertEqual(checks[0]["status"], "critical")
+        self.assertEqual(checks[0]["failure_class"], "admin_backend_configuration")
+        self.assertIn("NUTSNEWS_BACKEND_API_TOKEN", checks[0]["failure_detail"])
+
+    def test_admin_operation_posts_token_but_redacts_report(self):
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def getcode(self):
+                return 200
+
+            def read(self, _limit):
+                return b'{"rows":[]}'
+
+        def fake_urlopen(request, timeout):
+            captured["authorization"] = request.get_header("Authorization")
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+        operation = backend_synthetic_monitor.AdminBackendOperation(
+            name="load-admin-ai-usage",
+            body={"providerMode": "backend_postgres_primary", "limit": 1},
+            timeout=7,
+        )
+        with mock.patch.object(backend_synthetic_monitor.urllib.request, "urlopen", side_effect=fake_urlopen):
+            result = backend_synthetic_monitor.run_admin_backend_operation(
+                operation,
+                "https://backend.nutsnews.com/api/app/db",
+                "secret-admin-token",
+                None,
+                "2026-07-17T01:00:00Z",
+            )
+
+        self.assertEqual(captured["authorization"], "Bearer secret-admin-token")
+        self.assertEqual(captured["timeout"], 7)
+        self.assertEqual(result["status"], "healthy")
+        self.assertEqual(result["row_count"], 0)
+        self.assertNotIn("secret-admin-token", json.dumps(result))
+
+    def test_admin_operation_http_failure_names_operation_route_and_redacts_body(self):
+        operation = backend_synthetic_monitor.AdminBackendOperation(
+            name="load-admin-ai-usage",
+            body={"providerMode": "backend_postgres_primary", "limit": 1},
+        )
+        route = "https://backend.nutsnews.com/api/app/db/load-admin-ai-usage"
+        error = backend_synthetic_monitor.urllib.error.HTTPError(
+            route,
+            503,
+            "Service Unavailable",
+            {},
+            io.BytesIO(b'{"rows":[{"secret":"sensitive row data"}]}'),
+        )
+        with mock.patch.object(backend_synthetic_monitor.urllib.request, "urlopen", side_effect=error):
+            result = backend_synthetic_monitor.run_admin_backend_operation(
+                operation,
+                "https://backend.nutsnews.com/api/app/db",
+                "secret-admin-token",
+                "2026-07-17T00:00:00Z",
+                "2026-07-17T01:00:00Z",
+            )
+
+        self.assertEqual(result["status"], "critical")
+        self.assertEqual(result["failure_class"], "admin_backend_http")
+        self.assertIn("load-admin-ai-usage", result["failure_detail"])
+        self.assertIn(route, result["failure_detail"])
+        self.assertIn("observed_status=503", result["failure_detail"])
+        self.assertEqual(result["last_success_at"], "2026-07-17T00:00:00Z")
+        self.assertNotIn("sensitive row data", json.dumps(result))
+        self.assertNotIn("secret-admin-token", json.dumps(result))
 
     def test_previous_state_preserves_last_success_for_failures(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -78,7 +182,7 @@ class BackendSyntheticMonitorTests(unittest.TestCase):
                 },
             )
             text = path.read_text(encoding="utf-8")
-        self.assertIn("\n| Endpoint | Status | HTTP | Failure class | Last success |\n", text)
+        self.assertIn("\n| Check | Status | HTTP | Failure class | Last success |\n", text)
         self.assertIn("- suppressed: `1`", text)
         self.assertNotIn("\\n", text)
 
@@ -91,6 +195,12 @@ class BackendSyntheticMonitorTests(unittest.TestCase):
         }
         config = backend_synthetic_monitor.SmtpConfig("smtp.example.com", 587, True, "user", "pass", "from@example.com", ["to@example.com"])
         self.assertEqual(backend_synthetic_monitor.send_failure_email(config, report), {"status": "skipped", "detail": "no unsuppressed notifications; suppressed=0"})
+
+    def test_workflow_wires_admin_backend_token_to_scheduled_monitor(self):
+        workflow = Path(".github/workflows/backend-synthetic-monitor.yml").read_text(encoding="utf-8")
+        self.assertIn("NUTSNEWS_BACKEND_API_URL: ${{ vars.NUTSNEWS_BACKEND_API_URL || 'https://backend.nutsnews.com/api/app/db' }}", workflow)
+        self.assertIn("NUTSNEWS_BACKEND_API_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_API_TOKEN }}", workflow)
+        self.assertNotIn("--skip-admin-backend", workflow)
 
 
 if __name__ == "__main__":

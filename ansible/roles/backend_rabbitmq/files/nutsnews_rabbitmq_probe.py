@@ -1188,8 +1188,22 @@ def action_drill(args: argparse.Namespace) -> int:
         restart = completed_process(["systemctl", "restart", args.restart_service], args.restart_timeout_seconds)
         restart_ok = int(restart["returncode"]) == 0
         report["steps"].append({"name": "restart", "status": "pass" if restart_ok else "fail", "returncode": restart["returncode"]})
-        after = build_canary_report(args, "none") if restart_ok else {"status": "not_run"}
-        report["steps"].append({"name": "after_restart_canary", "status": after["status"]})
+        after: dict[str, Any] = {"status": "not_run"}
+        attempts: list[dict[str, Any]] = []
+        if restart_ok:
+            for attempt in range(1, args.restart_readiness_attempts + 1):
+                after = build_canary_report(args, "none")
+                attempts.append(
+                    {
+                        "attempt": attempt,
+                        "status": after["status"],
+                        "failure_class": after.get("failure_class", "none"),
+                    }
+                )
+                if after["status"] == "pass":
+                    break
+                time.sleep(args.restart_readiness_interval_seconds)
+        report["steps"].append({"name": "after_restart_canary", "status": after["status"], "attempts": attempts})
         if before["status"] != "pass" or not restart_ok or after["status"] != "pass":
             report["status"] = "fail"
     else:
@@ -1229,6 +1243,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--drill", choices=CANARY_DRILLS, default="consumer-loss")
     parser.add_argument("--timeout-seconds", type=int, default=90)
     parser.add_argument("--restart-timeout-seconds", type=int, default=180)
+    parser.add_argument("--restart-readiness-attempts", type=int, default=12)
+    parser.add_argument("--restart-readiness-interval-seconds", type=int, default=5)
     parser.add_argument("--retry-ttl-ms", type=int, default=1000)
     parser.add_argument("--skip-restart", action="store_true")
     parser.add_argument("--delete-queue", action="store_true")

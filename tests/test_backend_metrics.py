@@ -18,6 +18,10 @@ METRICS_TASKS = Path("ansible/roles/backend_baseline/tasks/metrics.yml")
 NEW_RELIC_METRICS = Path("ansible/roles/backend_baseline/files/nutsnews_newrelic_job_metrics.py")
 NEW_RELIC_METRICS_TASKS = Path("ansible/roles/backend_baseline/tasks/newrelic_metrics.yml")
 PROTECTED_APPLY_WORKFLOW = Path(".github/workflows/protected-backend-ansible-apply.yml")
+RABBITMQ_COMPOSE = Path("ansible/roles/backend_rabbitmq/templates/rabbitmq-compose.yml.j2")
+WORKER_COMPOSE = Path("ansible/roles/backend_worker_runtime/templates/worker-uplift-compose.yml.j2")
+WORKER_LOGS_CHECK = Path("scripts/backend_worker_uplift_logs_check.py")
+WORKER_LOGS_WORKFLOW = Path(".github/workflows/backend-worker-uplift-logs-check.yml")
 
 
 def load_metrics_module():
@@ -31,6 +35,15 @@ def load_metrics_module():
 
 def load_newrelic_metrics_module():
     spec = importlib.util.spec_from_file_location("nutsnews_newrelic_job_metrics", NEW_RELIC_METRICS)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_worker_logs_check_module():
+    spec = importlib.util.spec_from_file_location("backend_worker_uplift_logs_check", WORKER_LOGS_CHECK)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -191,6 +204,60 @@ class BackendMetricsTests(unittest.TestCase):
         for name in ("GRAFANA_CLOUD_LOKI_URL", "GRAFANA_CLOUD_LOKI_USERNAME", "GRAFANA_CLOUD_LOKI_PASSWORD"):
             self.assertIn(name, workflow)
         self.assertIn('"backend_logs_enabled"] = True', workflow)
+
+    def test_worker_uplift_container_logs_are_journald_and_bounded(self):
+        defaults = Path("ansible/roles/backend_baseline/defaults/main.yml").read_text(encoding="utf-8")
+        template = ALLOY_TEMPLATE.read_text(encoding="utf-8")
+        rabbitmq_compose = RABBITMQ_COMPOSE.read_text(encoding="utf-8")
+        worker_compose = WORKER_COMPOSE.read_text(encoding="utf-8")
+
+        self.assertIn("backend_logs_line_drop_max_size: 8KiB", defaults)
+        self.assertIn("backend_logs_worker_uplift_traces_enabled: false", defaults)
+        for service in ("rabbitmq", "scheduler", "fetcher", "canonicalizer", "enrichment", "approval", "translation", "persistence", "publication"):
+            self.assertIn(f"service: {service}", defaults)
+        self.assertIn("CONTAINER_TAG={{ source.tag }}", template)
+        self.assertIn('source      = "container"', template)
+        self.assertIn("stage.json", template)
+        self.assertIn("stage.structured_metadata", template)
+        self.assertIn("correlationId", template)
+        self.assertIn("idempotencyKey", template)
+        self.assertIn("traceparent", template)
+        self.assertIn('drop_counter_reason = "debug_trace_log_level"', template)
+        label_keep = template.split("stage.label_keep", 1)[1].split("}", 1)[0]
+        for allowed in ("version", "queue", "outcome"):
+            self.assertIn(f'"{allowed}"', label_keep)
+        for forbidden in ("message_id", "idempotency", "trace_id", "correlation_id", "token", "secret", "prompt", "model_output"):
+            self.assertNotIn(f'"{forbidden}"', label_keep)
+        self.assertNotIn("loki.source.docker", template)
+        self.assertNotIn("/var/run/docker.sock", template)
+        self.assertNotIn("otelcol.receiver.otlp", template)
+        self.assertIn("driver: journald", rabbitmq_compose)
+        self.assertIn('tag: "nutsnews-worker-uplift-rabbitmq"', rabbitmq_compose)
+        self.assertIn("driver: journald", worker_compose)
+        self.assertIn('tag: "nutsnews-worker-uplift-{{ service.name }}"', worker_compose)
+
+    def test_worker_uplift_logs_check_workflow_is_read_only_and_safe(self):
+        workflow = WORKER_LOGS_WORKFLOW.read_text(encoding="utf-8")
+        script = WORKER_LOGS_CHECK.read_text(encoding="utf-8")
+
+        self.assertIn("Backend Worker-Uplift Logs Check", workflow)
+        self.assertIn("environment: production-backend", workflow)
+        self.assertIn("require_loki_data", workflow)
+        self.assertIn("GRAFANA_CLOUD_LOKI_URL", workflow)
+        self.assertIn("scripts/backend_worker_uplift_logs_check.py", workflow)
+        self.assertIn("safe_metadata_only", script)
+        self.assertIn("loki_rabbitmq_query", script)
+        self.assertIn("trace_export_deferred", script)
+        self.assertIn("credential_error", script)
+        self.assertNotIn("docker logs", script)
+        self.assertNotIn("journalctl -o cat", script)
+
+    def test_worker_uplift_loki_query_url_is_derived_from_push_endpoint(self):
+        logs_check = load_worker_logs_check_module()
+        self.assertEqual(
+            logs_check.derive_loki_query_range_url("https://logs.example.net/loki/api/v1/push"),
+            "https://logs.example.net/loki/api/v1/query_range",
+        )
 
     def test_new_relic_job_metrics_are_host_managed_and_secret_safe(self):
         defaults = Path("ansible/roles/backend_baseline/defaults/main.yml").read_text(encoding="utf-8")

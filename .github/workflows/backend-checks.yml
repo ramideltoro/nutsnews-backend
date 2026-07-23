@@ -216,6 +216,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_worker_uplift_rabbitmq_metrics.py
 
+      - name: Validate worker uplift logs and deferred traces
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_logs_traces.py
+
       - name: Validate backend database provider switch
         shell: bash
         run: python3 scripts/validate_backend_database_provider_switch.py

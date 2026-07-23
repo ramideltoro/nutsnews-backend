@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts import backend_controlled_maintenance as maintenance
 
@@ -25,6 +26,8 @@ def evidence(**overrides):
         "ufw_state": command("active\n"),
         "fail2ban_state": command("active\n"),
         "docker_state": command("inactive\n"),
+        "rabbitmq_state": command("inactive\n"),
+        "rabbitmq_health": command("not_configured\n"),
         "caddy_state": command("active\n"),
         "backend_units": command("nutsnews-ops-dashboard-collect.service loaded inactive dead collector\n"),
         "backend_endpoint": command("ok\n"),
@@ -48,14 +51,42 @@ class BackendControlledMaintenanceTests(unittest.TestCase):
             self.assertNotIn("$INPUT", command_text)
         self.assertEqual(set(maintenance.MAINTENANCE_COMMANDS), {"security-upgrade", "reboot"})
 
+    def test_rabbitmq_probe_commands_are_fixed(self):
+        publish = maintenance.rabbitmq_probe_command("publish")
+        verify = maintenance.rabbitmq_probe_command("verify")
+        self.assertIn("nutsnews-rabbitmq-probe publish", publish)
+        self.assertIn("nutsnews-rabbitmq-probe verify", verify)
+        self.assertIn("--delete-queue", verify)
+        self.assertIn("sudo -n", publish)
+        self.assertNotIn("$INPUT", publish + verify)
+
+    def test_rabbitmq_probe_not_configured_fails_when_required(self):
+        with patch.object(maintenance, "run_ssh_command", return_value=command("not_configured\n")):
+            result = maintenance.run_rabbitmq_probe_action("publish", "host", "user", Path("/key"), Path("/known_hosts"), 15)
+        self.assertEqual(result["status"], "fail")
+
     def test_prechecks_classify_live_fixture(self):
         checks = maintenance.classify_prechecks(evidence())
         by_name = {item["name"]: item for item in checks}
         self.assertEqual(by_name["failed_systemd_units"]["status"], "healthy")
         self.assertEqual(by_name["kernel_alignment"]["status"], "healthy")
         self.assertEqual(by_name["service_docker"]["status"], "not_configured")
+        self.assertEqual(by_name["service_rabbitmq"]["status"], "not_configured")
+        self.assertEqual(by_name["rabbitmq_health"]["status"], "not_configured")
         self.assertEqual(by_name["backend_app_health"]["status"], "not_configured")
         self.assertEqual(by_name["package_updates_visible"]["status"], "warning")
+
+    def test_rabbitmq_health_json_is_classified(self):
+        checks = maintenance.classify_prechecks(
+            evidence(
+                rabbitmq_state=command("active\n"),
+                rabbitmq_health=command('{"rabbitmq_version":"4.3.3","status":"healthy"}\n'),
+            )
+        )
+        by_name = {item["name"]: item for item in checks}
+        self.assertEqual(by_name["service_rabbitmq"]["status"], "healthy")
+        self.assertEqual(by_name["rabbitmq_health"]["status"], "healthy")
+        self.assertIn("version=4.3.3", by_name["rabbitmq_health"]["summary"])
 
     def test_reboot_blocks_without_backup_freshness(self):
         checks = maintenance.classify_prechecks(evidence(backup_state=command("not_configured\n")))

@@ -40,6 +40,12 @@ The workflow has no arbitrary command input. All actions run under the protected
 `production-backend` Environment approval gate and upload a sanitized
 `backend-controlled-maintenance-report` artifact.
 
+When the backend RabbitMQ broker is healthy before a controlled reboot, the
+reboot action publishes a durable RabbitMQ probe message, reboots the host, then
+verifies and deletes the probe message after SSH returns. Probe credentials are
+read from the root-only broker environment file and are not passed as workflow
+inputs or command-line secret values.
+
 Deployment safety and recovery paths for this workflow are summarized in
 [DEPLOYMENT_SAFETY_GATES.md](DEPLOYMENT_SAFETY_GATES.md).
 
@@ -49,6 +55,7 @@ Prechecks include:
 - failed systemd units;
 - running kernel and latest installed kernel;
 - Docker, Caddy, SSH, UFW, and fail2ban states;
+- RabbitMQ service state and loopback management health when configured;
 - backend health endpoint state;
 - root disk and inode pressure;
 - active alert state;

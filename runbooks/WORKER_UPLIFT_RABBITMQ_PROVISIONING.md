@@ -89,16 +89,17 @@ ssh -i ~/.ssh/servercheap_65_75_201_18 rami@65.75.201.18 \
 
 Host restart durable probe:
 
+Use the repo-managed `Backend Controlled Maintenance` workflow with
+`action=reboot` and `confirm_target=backend.nutsnews.com`. When RabbitMQ is
+healthy before reboot, the workflow publishes a durable probe message, reboots
+the host, verifies and deletes the probe after SSH returns, and records the
+result in the `backend-controlled-maintenance-report` artifact.
+
+Manual read-only verification after an approved host restart:
+
 ```bash
 ssh -i ~/.ssh/servercheap_65_75_201_18 rami@65.75.201.18 \
-  'sudo -n /usr/local/sbin/nutsnews-rabbitmq-probe publish --env /etc/nutsnews-rabbitmq/rabbitmq.env --state /var/lib/nutsnews/rabbitmq/host-restart-probe.json'
-```
-
-After an approved host restart:
-
-```bash
-ssh -i ~/.ssh/servercheap_65_75_201_18 rami@65.75.201.18 \
-  'sudo -n /usr/local/sbin/nutsnews-rabbitmq-probe verify --env /etc/nutsnews-rabbitmq/rabbitmq.env --state /var/lib/nutsnews/rabbitmq/host-restart-probe.json --delete-queue'
+  'systemctl is-active docker.service nutsnews-rabbitmq.service'
 ```
 
 ## Rollback

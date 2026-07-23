@@ -153,6 +153,29 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertNotIn("loki.source.docker", template)
         self.assertNotIn("/var/run/docker.sock", template)
 
+    def test_alloy_rabbitmq_metrics_are_bounded_and_private(self):
+        defaults = Path("ansible/roles/backend_baseline/defaults/main.yml").read_text(encoding="utf-8")
+        template = ALLOY_TEMPLATE.read_text(encoding="utf-8")
+
+        self.assertIn("backend_metrics_rabbitmq_enabled: false", defaults)
+        self.assertIn("backend_metrics_rabbitmq_target: 127.0.0.1:15692", defaults)
+        self.assertIn("backend_metrics_rabbitmq_sample_limit: 1200", defaults)
+        self.assertIn("queue_coarse_metrics", defaults)
+        self.assertIn("queue_consumer_count", defaults)
+        self.assertIn("queue_delivery_metrics", defaults)
+        self.assertIn('prometheus.exporter.self "alloy"', template)
+        self.assertIn('prometheus.scrape "rabbitmq_aggregate"', template)
+        self.assertIn('prometheus.scrape "rabbitmq_detailed"', template)
+        self.assertIn('metrics_path    = "/metrics/detailed"', template)
+        self.assertIn('source_labels = ["queue"]', template)
+        self.assertIn("backend_metrics_rabbitmq_queue_regex", template)
+        self.assertIn("sample_limit", template)
+        self.assertIn("label_limit", template)
+        self.assertIn("labeldrop", template)
+        self.assertIn("labelkeep", template)
+        self.assertIn("service_namespace", template)
+        self.assertNotIn("request_id", template)
+
     def test_alloy_log_access_is_least_privilege(self):
         task = METRICS_TASKS.read_text(encoding="utf-8")
         self.assertIn("Allow Alloy to read journal and adm-owned log files", task)

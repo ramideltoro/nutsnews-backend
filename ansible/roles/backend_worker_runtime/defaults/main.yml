@@ -1,0 +1,59 @@
+---
+backend_worker_runtime_enabled: false
+backend_worker_runtime_project_name: nutsnews-worker-uplift
+backend_worker_runtime_base_dir: /opt/nutsnews-worker-uplift
+backend_worker_runtime_config_dir: /etc/nutsnews-worker-uplift
+backend_worker_runtime_state_dir: /var/lib/nutsnews/worker-uplift-runtime
+backend_worker_runtime_report_dir: "{{ backend_worker_runtime_state_dir }}/reports"
+backend_worker_runtime_manifest_path: "{{ backend_worker_runtime_config_dir }}/services.json"
+backend_worker_runtime_compose_path: "{{ backend_worker_runtime_base_dir }}/compose.yml"
+backend_worker_runtime_manager_path: /usr/local/sbin/nutsnews-worker-runtime
+backend_worker_runtime_default_mode: shadow
+backend_worker_runtime_production_writes_enabled: false
+backend_worker_runtime_cutover_state: shadow
+backend_worker_runtime_contract_version: "0.3.1"
+backend_worker_runtime_runtime_version: "1"
+backend_worker_runtime_max_replicas_per_service: 3
+backend_worker_runtime_default_replicas: 1
+backend_worker_runtime_default_restart_policy: unless-stopped
+backend_worker_runtime_default_cpu_limit: "0.50"
+backend_worker_runtime_default_memory_limit: 256m
+backend_worker_runtime_default_pids_limit: 256
+backend_worker_runtime_allowed_image_repositories:
+  - ghcr.io/ramideltoro/nutsnews-worker-uplift/
+  - ghcr.io/ramideltoro/nutsnews-backend/worker-uplift/
+backend_worker_runtime_allowed_source_repositories:
+  - ramideltoro/nutsnews-backend
+  - ramideltoro/nutsnews-worker-services
+backend_worker_runtime_allowed_stages:
+  - scheduler
+  - fetcher
+  - canonicalizer
+  - enrichment
+  - approval
+  - translation
+  - persistence
+  - publication
+backend_worker_runtime_allowed_actions:
+  - check
+  - deploy
+  - promote
+  - restart
+  - scale
+  - rollback
+  - status
+  - logs
+  - queue-inspect
+  - dlq-inspect
+  - dlq-replay
+  - drain
+  - reconciliation
+  - smoke
+backend_worker_runtime_services: []
+backend_worker_runtime_secret_values: {}
+backend_worker_runtime_rabbitmq_vhost: "{{ backend_rabbitmq_vhost | default('nutsnews-worker-uplift') }}"
+backend_worker_runtime_rabbitmq_env_path: "{{ backend_rabbitmq_env_path | default('/etc/nutsnews-rabbitmq/rabbitmq.env') }}"
+backend_worker_runtime_rabbitmq_topology_env_path: "{{ backend_rabbitmq_topology_env_path | default('/etc/nutsnews-rabbitmq/topology.env') }}"
+backend_worker_runtime_rabbitmq_topology_definition_path: "{{ backend_rabbitmq_topology_definition_path | default('/etc/nutsnews-rabbitmq/worker-uplift-topology.json') }}"
+backend_worker_runtime_backend_api_url: "https://backend.nutsnews.com"
+backend_worker_runtime_backend_api_writes_enabled: false

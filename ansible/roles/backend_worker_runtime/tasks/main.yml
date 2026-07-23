@@ -1,0 +1,143 @@
+---
+- name: Validate worker runtime framework settings
+  ansible.builtin.assert:
+    that:
+      - backend_worker_runtime_default_mode == 'shadow'
+      - not (backend_worker_runtime_production_writes_enabled | bool)
+      - backend_worker_runtime_services is iterable
+      - backend_worker_runtime_allowed_image_repositories | length > 0
+      - backend_worker_runtime_allowed_actions | difference(['check', 'deploy', 'promote', 'restart', 'scale', 'rollback', 'status', 'logs', 'queue-inspect', 'dlq-inspect', 'dlq-replay', 'drain', 'reconciliation', 'smoke']) | length == 0
+    fail_msg: "Worker-uplift runtime must remain shadow/default-disabled with a fixed operation set."
+
+- name: Ensure worker runtime config directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ backend_worker_runtime_config_dir }}"
+      mode: "0750"
+    - path: "{{ backend_worker_runtime_config_dir }}/services"
+      mode: "0700"
+    - path: "{{ backend_worker_runtime_base_dir }}"
+      mode: "0750"
+    - path: "{{ backend_worker_runtime_state_dir }}"
+      mode: "0750"
+    - path: "{{ backend_worker_runtime_report_dir }}"
+      mode: "0750"
+
+- name: Install worker runtime manager
+  ansible.builtin.copy:
+    src: nutsnews_worker_runtime.py
+    dest: "{{ backend_worker_runtime_manager_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Render worker runtime manifest
+  ansible.builtin.template:
+    src: worker-uplift-services.json.j2
+    dest: "{{ backend_worker_runtime_manifest_path }}"
+    owner: root
+    group: root
+    mode: "0640"
+
+- name: Render worker runtime Compose definition
+  ansible.builtin.template:
+    src: worker-uplift-compose.yml.j2
+    dest: "{{ backend_worker_runtime_compose_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: backend_worker_runtime_services | length > 0
+
+- name: Render worker runtime service environments
+  ansible.builtin.copy:
+    dest: "{{ backend_worker_runtime_config_dir }}/services/{{ item.name }}.env"
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      NUTSNEWS_RUNTIME_MODE={{ item.runtime_mode | default('shadow') }}
+      NUTSNEWS_SERVICE_NAME={{ item.name }}
+      NUTSNEWS_SERVICE_STAGE={{ item.stage }}
+      NUTSNEWS_CONTRACT_VERSION={{ item.contract_version | default(backend_worker_runtime_contract_version) }}
+      NUTSNEWS_BACKEND_API_URL={{ backend_worker_runtime_backend_api_url }}
+      NUTSNEWS_BACKEND_API_WRITES_ENABLED={{ backend_worker_runtime_backend_api_writes_enabled | bool | ternary('true', 'false') }}
+      RABBITMQ_VHOST={{ backend_worker_runtime_rabbitmq_vhost }}
+      {% for key, value in item.env | default({}) | dictsort %}
+      {{ key }}={{ value }}
+      {% endfor %}
+      {% for secret in item.secret_files | default([]) %}
+      {{ secret.env_key }}={{ secret.path }}
+      {% endfor %}
+  no_log: true
+  loop: "{{ backend_worker_runtime_services }}"
+  when: backend_worker_runtime_services | length > 0
+
+- name: Ensure worker runtime secret directories exist
+  ansible.builtin.file:
+    path: "{{ item.1.host_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  no_log: true
+  loop: "{{ query('subelements', backend_worker_runtime_services, 'secret_files', {'skip_missing': True}) }}"
+  when:
+    - backend_worker_runtime_services | length > 0
+    - item.1.host_path is defined
+
+- name: Render worker runtime secret files
+  ansible.builtin.copy:
+    dest: "{{ item.1.host_path }}"
+    owner: root
+    group: root
+    mode: "0400"
+    content: "{{ backend_worker_runtime_secret_values[item.1.name] }}"
+  no_log: true
+  loop: "{{ query('subelements', backend_worker_runtime_services, 'secret_files', {'skip_missing': True}) }}"
+  when:
+    - backend_worker_runtime_services | length > 0
+    - item.1.name in backend_worker_runtime_secret_values
+
+- name: Validate worker runtime manifest with fixed manager
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_worker_runtime_manager_path }}"
+      - check
+      - --manifest
+      - "{{ backend_worker_runtime_manifest_path }}"
+      - --compose
+      - "{{ backend_worker_runtime_compose_path }}"
+      - --project
+      - "{{ backend_worker_runtime_project_name }}"
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Validate worker runtime Compose definition
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ backend_worker_runtime_compose_path }}"
+      - config
+  changed_when: false
+  when:
+    - backend_worker_runtime_services | length > 0
+    - not ansible_check_mode
+
+- name: Report worker runtime summary
+  ansible.builtin.debug:
+    msg:
+      enabled: "{{ backend_worker_runtime_enabled }}"
+      mode: "{{ backend_worker_runtime_default_mode }}"
+      production_writes_enabled: "{{ backend_worker_runtime_production_writes_enabled }}"
+      service_count: "{{ backend_worker_runtime_services | length }}"
+      manager_path: "{{ backend_worker_runtime_manager_path }}"
+      manifest_path: "{{ backend_worker_runtime_manifest_path }}"
+      compose_path: "{{ backend_worker_runtime_compose_path }}"
+      grafana_resource_owner: ramideltoro/nutsnews-infra

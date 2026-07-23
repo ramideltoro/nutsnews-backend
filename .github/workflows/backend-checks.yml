@@ -204,6 +204,14 @@ jobs:
         shell: bash
         run: python3 scripts/validate_worker_uplift_rabbitmq_operations.py
 
+      - name: Validate worker uplift service runtime
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_service_runtime.py
+
+      - name: Validate worker uplift RabbitMQ metrics
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_rabbitmq_metrics.py
+
       - name: Validate backend database provider switch
         shell: bash
         run: python3 scripts/validate_backend_database_provider_switch.py

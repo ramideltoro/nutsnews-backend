@@ -1,0 +1,40 @@
+# Managed by ramideltoro/nutsnews-backend.
+name: {{ backend_worker_runtime_project_name }}
+
+services:
+{% for service in backend_worker_runtime_services %}
+  {{ service.name }}:
+    image: "{{ service.image }}"
+    pull_policy: always
+    restart: "{{ service.restart_policy | default(backend_worker_runtime_default_restart_policy) }}"
+    env_file:
+      - "{{ backend_worker_runtime_config_dir }}/services/{{ service.name }}.env"
+{% if service.secret_files | default([]) | length > 0 %}
+    volumes:
+{% for secret in service.secret_files %}
+      - "{{ secret.host_path }}:{{ secret.path }}:ro"
+{% endfor %}
+{% endif %}
+    networks:
+      - worker-uplift
+{% if service.depends_on | default([]) | length > 0 %}
+    depends_on:
+{% for dependency in service.depends_on %}
+      - {{ dependency }}
+{% endfor %}
+{% endif %}
+    mem_limit: "{{ service.resources.memory | default(backend_worker_runtime_default_memory_limit) }}"
+    cpus: "{{ service.resources.cpus | default(backend_worker_runtime_default_cpu_limit) }}"
+    pids_limit: {{ service.resources.pids | default(backend_worker_runtime_default_pids_limit) | int }}
+    healthcheck:
+      test: {{ service.healthcheck.test | default(["CMD", "/app/healthcheck"]) | to_json }}
+      interval: "{{ service.healthcheck.interval | default('30s') }}"
+      timeout: "{{ service.healthcheck.timeout | default('10s') }}"
+      retries: {{ service.healthcheck.retries | default(3) | int }}
+      start_period: "{{ service.healthcheck.start_period | default('30s') }}"
+{% endfor %}
+
+networks:
+  worker-uplift:
+    name: nutsnews-worker-uplift
+    external: true

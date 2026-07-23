@@ -406,11 +406,13 @@ def mutation_blockers(action: str, checks: list[dict[str, Any]]) -> list[dict[st
             "service_caddy",
             "reverse_proxy_health",
             "backup_freshness",
-            "active_alerts",
         ):
             check = by_name.get(name, {})
             if check.get("status") != "healthy":
                 blockers.append({"check": name, "status": str(check.get("status", "missing"))})
+        active_alerts = by_name.get("active_alerts", {})
+        if active_alerts.get("status") not in {"healthy", "not_configured"}:
+            blockers.append({"check": "active_alerts", "status": str(active_alerts.get("status", "missing"))})
 
     return blockers
 

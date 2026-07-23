@@ -207,6 +207,7 @@
         "owner_repo": "ramideltoro/nutsnews-backend",
         "owner_files": [
           "docs/worker-uplift-architecture-adr.json",
+          "docs/worker-uplift-rabbitmq-capacity-security-decision.json",
           "docs/worker-uplift-runtime-identities.json",
           "runbooks/MONITORING_BASELINE.md"
         ],
@@ -471,6 +472,8 @@
         "owner_files": [
           "docs/worker-uplift-architecture-adr.json",
           "docs/worker-uplift-runtime-identities.json",
+          "docs/worker-uplift-rabbitmq-capacity-security-decision.json",
+          "runbooks/WORKER_UPLIFT_RABBITMQ_CAPACITY_SECURITY.md",
           "runbooks/MONITORING_BASELINE.md"
         ],
         "workflow": "future backend-controlled RabbitMQ operations",
@@ -499,6 +502,8 @@
         "owner_files": [
           "docs/worker-uplift-architecture-adr.json",
           "docs/worker-uplift-runtime-identities.json",
+          "docs/worker-uplift-rabbitmq-capacity-security-decision.json",
+          "runbooks/WORKER_UPLIFT_RABBITMQ_CAPACITY_SECURITY.md",
           "runbooks/BACKUP_RESTORE_BASELINE.md"
         ],
         "workflow": "future backend-controlled broker recovery workflow",

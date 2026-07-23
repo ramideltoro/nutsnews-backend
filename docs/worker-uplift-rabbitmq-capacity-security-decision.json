@@ -1,0 +1,423 @@
+{
+  "version": 1,
+  "tracking_issue": 79,
+  "tracking_repo": "ramideltoro/nutsnews-worker",
+  "implementation_repo": "ramideltoro/nutsnews-backend",
+  "decision_date_utc": "2026-07-23",
+  "status": "approved_for_bootstrap_not_provisioned",
+  "depends_on": [
+    "ramideltoro/nutsnews-worker#69",
+    "ramideltoro/nutsnews-worker#70",
+    "ramideltoro/nutsnews-worker#78",
+    "docs/worker-uplift-architecture-adr.json",
+    "docs/worker-uplift-operation-map.json",
+    "docs/worker-uplift-runtime-identities.json",
+    "runbooks/FIREWALL_BASELINE.md",
+    "runbooks/MONITORING_BASELINE.md",
+    "runbooks/BACKUP_RESTORE_BASELINE.md"
+  ],
+  "guardrail": {
+    "broker_provisioned_by_this_issue": false,
+    "legacy_path_changed_by_this_issue": false,
+    "production_write_enabled": false,
+    "statement": "This decision only approves the RabbitMQ capacity, queue-type, resource, and security envelope for later backend bootstrap work."
+  },
+  "decision": {
+    "rabbitmq_release": "4.3.3",
+    "rabbitmq_release_series": "4.3",
+    "release_support": {
+      "release_date": "2026-07-20",
+      "community_support_end": "2026-11-30",
+      "commercial_support_end": "2028-04-30",
+      "erlang_otp_minimum": "27.0",
+      "erlang_otp_maximum": "27.x",
+      "erlang_28_policy": "Do not select Erlang/OTP 28 for an upgraded 4.3 cluster unless a later release note review approves it; RabbitMQ 4.3 docs mark Erlang 28 as only partially supported."
+    },
+    "image": {
+      "repository": "docker.io/library/rabbitmq",
+      "tag": "4.3.3-management-alpine",
+      "oci_index_digest": "sha256:8fc5bf62ea0b8b2b058994727441904a2d3d0844a301e8ab7cab3f695f2c0b89",
+      "linux_amd64_manifest_digest": "sha256:c427b73a15d01416346f429042125e663452e2a27e07fb3096fadb08f7033fc7",
+      "required_reference": "rabbitmq@sha256:c427b73a15d01416346f429042125e663452e2a27e07fb3096fadb08f7033fc7",
+      "digest_captured_at_utc": "2026-07-23T06:56:30Z",
+      "mutable_tag_allowed": false
+    },
+    "selected_queue_type": "durable_classic",
+    "single_node_ha_statement": "The initial single RabbitMQ node provides durable local transport only; it is not broker high availability and it is not quorum replication.",
+    "retry_dlq_strategy": {
+      "selected": "application_confirmed_retry_dlq_transfer",
+      "publisher_confirms_required": true,
+      "consumer_ack_rule": "Commit stage state and confirm downstream retry, DLQ, or next-stage publish before acking the source delivery.",
+      "confirm_failure_behavior": "If retry, DLQ, or next-stage publish is nacked or times out, do not ack the source delivery; let RabbitMQ redeliver and rely on stage inbox/outbox idempotency.",
+      "quorum_at_least_once_dlx_selected": false,
+      "quorum_dlx_caveats_for_future_review": [
+        "quorum at-least-once dead lettering requires quorum queues and internal publisher confirms",
+        "dead-letter target availability and duplicate target routing must be monitored before source messages are acked",
+        "queue length overflow must use reject-publish or reject-publish-dlx, not drop-head",
+        "retaining source messages until internal confirm increases memory, disk, and CPU pressure",
+        "the stream feature flag and RabbitMQ release notes must be checked before enabling quorum at-least-once dead lettering"
+      ]
+    },
+    "upgrade_path": {
+      "initial_install": "Install the pinned 4.3.3 linux/amd64 image only through a later reviewed backend PR and protected apply.",
+      "patch_upgrade": "Move from one 4.3.x patch to another by updating the pinned digest, running the RabbitMQ benchmark workflow, exporting definitions, confirming no resource alarms, and applying through protected backend check/apply.",
+      "minor_upgrade": "RabbitMQ 4.3.x can be upgraded only from 4.2.x. For any future 4.4+ path, review target release notes, version upgradability, Erlang compatibility, and stable feature flags before changing the digest.",
+      "feature_flags": "Before every upgrade, confirm all stable feature flags for the current release are enabled; after upgrade, enable newly stable feature flags only after health checks pass."
+    }
+  },
+  "measured_host_headroom": {
+    "captured_at_utc": "2026-07-23T06:51:19Z",
+    "capture_mode": "read_only_ssh_no_secret_values_no_server_mutation",
+    "host": "backend.nutsnews.com",
+    "ipv4": "65.75.201.18",
+    "kernel": "Linux backend 7.0.0-28-generic #28-Ubuntu SMP PREEMPT_DYNAMIC Sun Jun 21 01:01:36 UTC 2026 x86_64",
+    "cpu": {
+      "vcpus": 4,
+      "model": "Intel Xeon Processor (Cascadelake)",
+      "virtualization": "KVM",
+      "smt": false,
+      "load_average_1m_5m_15m": [
+        0.1,
+        0.14,
+        0.16
+      ],
+      "headroom_summary": "Low observed load relative to 4 vCPU; reserve RabbitMQ for bounded worker transport and keep Qwen/local AI off this host unless a later issue measures it."
+    },
+    "memory": {
+      "total_bytes": 10422894592,
+      "available_bytes": 9549557760,
+      "swap_total_bytes": 2147479552,
+      "swap_used_bytes": 0,
+      "headroom_summary": "About 8.89 GiB available at capture. Initial RabbitMQ is capped to 1 GiB with a 512 MiB broker memory watermark."
+    },
+    "disk": {
+      "filesystem": "ext4",
+      "root_total_bytes": 82085269504,
+      "root_used_bytes": 6892470272,
+      "root_available_bytes": 75176022016,
+      "root_used_percent": 9,
+      "device": "/dev/sda1",
+      "device_model": "QEMU HARDDISK",
+      "rotational": true,
+      "headroom_summary": "About 70.02 GiB available at capture. Initial RabbitMQ disk alarm is 20 GiB free to protect PostgreSQL, backups, logs, and host recovery room."
+    },
+    "io": {
+      "tool": "iostat -dx 1 2",
+      "historical_sda_writes_per_second": 4.88,
+      "historical_sda_write_kib_per_second": 70.76,
+      "historical_sda_write_await_ms": 4.08,
+      "historical_sda_util_percent": 0.31,
+      "live_one_second_sda_util_percent": 0.0,
+      "headroom_summary": "Observed disk pressure was low, but the disk is rotational. Queue caps keep broker backlog bounded and PostgreSQL remains the recovery source."
+    },
+    "file_descriptors": {
+      "host_file_nr_allocated": 1708,
+      "host_file_nr_max": 9223372036854775807,
+      "login_shell_nofile": 1024,
+      "repo_managed_service_nofile_range": "524288-1048576",
+      "rabbitmq_container_nofile": 65536,
+      "headroom_summary": "Use explicit container nofile limits; do not inherit the interactive shell limit."
+    },
+    "docker": {
+      "backend_host_status": "not_installed",
+      "local_benchmark_attempt_status": "blocked_local_docker_daemon_unavailable",
+      "headroom_summary": "Docker/Compose must be installed only by a later protected backend apply. This issue does not install Docker or RabbitMQ on the backend host."
+    },
+    "postgresql": {
+      "service": "postgresql@18-main.service",
+      "status": "active_running",
+      "memory_current_bytes_approx": 52700000,
+      "tasks_current": 10,
+      "n_restarts": 0,
+      "limit_nofile": 524288,
+      "read_only_sql_status": "not_available_to_ssh_user_without_privileged_database_access",
+      "headroom_summary": "PostgreSQL is active and lightweight at capture; broker limits preserve database, backup, and restore headroom."
+    },
+    "qwen_or_local_ai": {
+      "service_status": "not_found",
+      "docker_container_status": "not_applicable_docker_not_installed",
+      "headroom_summary": "No Qwen, Ollama, AI, or LLM service was observed. Approval-stage local AI deployment remains a later capacity decision."
+    },
+    "backup": {
+      "timers_observed": [
+        "nutsnews-backup.timer",
+        "nutsnews-backup-verify.timer",
+        "nutsnews-restore-drill.timer"
+      ],
+      "latest_timer_window_utc": "backup around 03:17 UTC, verify around 04:17 UTC, restore drill weekly around 05:17 UTC",
+      "status_files_readable": false,
+      "headroom_summary": "RabbitMQ disk cap and disk alarm leave room for backup activity; broker messages are not treated as backup-only recovery state."
+    },
+    "firewall_and_listeners": {
+      "public_tcp_ports_observed": [
+        22,
+        80,
+        443
+      ],
+      "public_udp_ports_observed": [
+        443
+      ],
+      "private_listeners_observed": [
+        "127.0.0.1:5432",
+        "127.0.0.1:12345",
+        "127.0.0.1:8093",
+        "127.0.0.1:8081",
+        "127.0.0.1:8082",
+        "127.0.0.1:2019",
+        "127.0.0.1:18003",
+        "127.0.0.1:9085"
+      ],
+      "headroom_summary": "RabbitMQ AMQP, management, and Prometheus listeners must remain private-only and must not add public ports."
+    },
+    "observed_service_headroom": {
+      "largest_process_rss_bytes_approx": {
+        "alloy": 481013760,
+        "journald": 92975104,
+        "fail2ban": 50647040,
+        "caddy": 46780416,
+        "newrelic_infra": 44208128
+      },
+      "headroom_summary": "Existing services leave enough RAM for a 1 GiB-capped broker, but RabbitMQ must be paused or scaled down before expensive host maintenance if alarms fire."
+    }
+  },
+  "workload_estimate": {
+    "stages": [
+      "scheduler",
+      "fetcher",
+      "canonicalizer",
+      "enrichment",
+      "approval",
+      "translation",
+      "persistence",
+      "publication"
+    ],
+    "routes": [
+      "scheduler_to_fetcher",
+      "fetcher_to_canonicalizer",
+      "canonicalizer_to_enrichment",
+      "enrichment_to_approval",
+      "approval_to_translation",
+      "translation_to_persistence",
+      "persistence_to_publication"
+    ],
+    "queue_count": {
+      "main_queues": 7,
+      "retry_queues": 21,
+      "dlq_queues": 7,
+      "total_queues": 35,
+      "retry_tiers_per_route": 3
+    },
+    "message_shape": {
+      "expected_p95_body_bytes": 8192,
+      "hard_max_body_bytes": 65536,
+      "payload_policy": "bounded_id_only_message",
+      "forbidden_payload_content": [
+        "article_body",
+        "full_prompt",
+        "secret",
+        "credential",
+        "bearer_token",
+        "raw_provider_response"
+      ]
+    }
+  },
+  "hard_limits": {
+    "broker_memory": {
+      "container_memory_limit_bytes": 1073741824,
+      "vm_memory_high_watermark_absolute_bytes": 536870912,
+      "publisher_block_on_memory_alarm": true
+    },
+    "broker_disk": {
+      "disk_free_limit_absolute_bytes": 21474836480,
+      "publisher_block_on_disk_alarm": true,
+      "minimum_root_free_bytes_before_bootstrap": 53687091200
+    },
+    "file_descriptors": {
+      "nofile_soft": 65536,
+      "nofile_hard": 65536
+    },
+    "queues": {
+      "type": "classic",
+      "durable": true,
+      "overflow": "reject-publish",
+      "drop_head_allowed": false,
+      "main": {
+        "count": 7,
+        "x_max_length": 2000,
+        "x_max_length_bytes": 268435456
+      },
+      "retry": {
+        "count": 21,
+        "x_max_length": 1000,
+        "x_max_length_bytes": 134217728,
+        "ttl_tiers_ms": [
+          300000,
+          1800000,
+          7200000
+        ],
+        "retention_policy": "retry queues hold delayed work only until the next bounded attempt; exhausted messages move to the route DLQ through application-confirmed transfer"
+      },
+      "dlq": {
+        "count": 7,
+        "x_max_length": 2000,
+        "x_max_length_bytes": 268435456,
+        "retention_days": 14,
+        "replay_policy": "manual approved replay in bounded batches after sanitized failure metadata is reviewed"
+      },
+      "total_hard_message_cap": 49000,
+      "total_hard_body_bytes_cap": 6576668672
+    },
+    "connections_channels_and_flow": {
+      "heartbeat_seconds": 30,
+      "app_connection_limit": 24,
+      "app_channel_limit": 128,
+      "prefetch_per_consumer": 10,
+      "publisher_confirm_inflight_per_channel": 128,
+      "publisher_confirm_timeout_ms": 5000,
+      "consumer_shutdown_drain_timeout_ms": 30000
+    }
+  },
+  "benchmark_evidence": {
+    "mode": "ephemeral_ci_benchmark_plus_source_backed_capacity_model",
+    "production_host_benchmark_ran": false,
+    "production_host_reason": "No broker is provisioned by this design issue and the backend host currently has no Docker Engine installed.",
+    "local_attempt": {
+      "attempted_at_utc": "2026-07-23T06:58:00Z",
+      "status": "blocked_local_docker_daemon_unavailable",
+      "evidence": "Local Docker CLI could not connect to a daemon. No local or production broker was started."
+    },
+    "benchmark_script": "scripts/worker_uplift_rabbitmq_capacity_benchmark.py",
+    "benchmark_workflow": ".github/workflows/backend-checks.yml#rabbitmq_benchmark",
+    "scenario": {
+      "rabbitmq_image": "rabbitmq@sha256:c427b73a15d01416346f429042125e663452e2a27e07fb3096fadb08f7033fc7",
+      "queue_types": [
+        "classic",
+        "quorum_single_replica"
+      ],
+      "routes": 7,
+      "retry_tiers_per_route": 3,
+      "queues_per_type": 35,
+      "messages_per_queue": 50,
+      "message_body_bytes": 1024,
+      "durable_messages": true,
+      "publisher_confirms": true,
+      "manual_ack_drain": true
+    },
+    "comparison": [
+      {
+        "queue_type": "durable_classic",
+        "selected": true,
+        "expected_single_node_behavior": "Lower single-node overhead for the bounded transport role; durability depends on the single broker disk and publisher confirms.",
+        "ha_statement": "No broker high availability on one node."
+      },
+      {
+        "queue_type": "single_replica_quorum",
+        "selected": false,
+        "expected_single_node_behavior": "Runs Raft/quorum machinery without tolerating node loss because the group size is one.",
+        "ha_statement": "No broker high availability on one node."
+      }
+    ],
+    "benchmark_acceptance": "The CI benchmark must complete before any later RabbitMQ bootstrap PR is applied. A performance regression does not by itself choose quorum on one node; it opens a new capacity decision."
+  },
+  "network_security": {
+    "planned_public_amqp_management_or_prometheus_listeners": [],
+    "amqp": {
+      "port": 5672,
+      "binding": "private Docker network only; optional loopback host binding for protected maintenance must be reviewed separately",
+      "public_access_allowed": false
+    },
+    "management": {
+      "port": 15672,
+      "binding": "127.0.0.1 only or private maintenance network only",
+      "access_path": "SSH tunnel or protected backend workflow; never proxied by Caddy to the public internet",
+      "public_access_allowed": false
+    },
+    "prometheus": {
+      "port": 15692,
+      "binding": "127.0.0.1 only for backend Alloy scrape",
+      "public_access_allowed": false
+    },
+    "tls_trust_boundary": "Same-host worker services may use the private Docker network without public TLS. Any off-host AMQP, management, or scrape path requires TLS plus a private network or SSH tunnel before approval.",
+    "credentials": {
+      "vhost": "nutsnews-worker-uplift",
+      "default_guest_user_policy": "delete or disable for the worker vhost during bootstrap",
+      "identity_source": "docs/worker-uplift-runtime-identities.json",
+      "service_identity_policy": "least-privilege route-scoped publisher and consumer users; no worker service receives break-glass admin credentials",
+      "monitoring_identity_policy": "monitoring tag only, no configure/write/read permissions on queues"
+    },
+    "audit_logs": "Ship RabbitMQ auth, connection, channel, alarm, topology, and operator-action logs through backend Alloy with low-cardinality labels and no message payload logging."
+  },
+  "monitoring_and_maintenance": {
+    "metrics": [
+      "rabbitmq_up",
+      "rabbitmq_node_mem_used",
+      "rabbitmq_node_disk_free",
+      "rabbitmq_node_fd_used",
+      "rabbitmq_queue_messages_ready",
+      "rabbitmq_queue_messages_unacked",
+      "rabbitmq_queue_message_bytes_ready",
+      "rabbitmq_channel_messages_unconfirmed",
+      "worker_runtime_message_started_total",
+      "worker_runtime_message_completed_total",
+      "worker_runtime_message_retry_total",
+      "worker_runtime_message_dlq_total",
+      "worker_runtime_processing_duration_seconds",
+      "worker_runtime_dependency_duration_seconds",
+      "worker_runtime_health"
+    ],
+    "alert_thresholds": {
+      "memory_alarm": "critical when RabbitMQ memory alarm is active for 5 minutes",
+      "disk_alarm": "critical when RabbitMQ disk alarm is active for 5 minutes or root free bytes approaches 20 GiB",
+      "queue_age": "warning when any main queue age exceeds 15 minutes; critical at 30 minutes",
+      "dlq_growth": "warning on any new DLQ message; critical when a route DLQ grows for two consecutive checks",
+      "publisher_confirms": "warning on confirm timeout or nack rate above 1 percent over 10 minutes",
+      "consumer_lag": "warning when messages_ready plus messages_unacked exceeds 50 percent of the route cap"
+    },
+    "maintenance": "RabbitMQ topology, credential rotation, replay, purge, and service scaling must use reviewed protected backend changes or future fixed workflows behind production-backend approval.",
+    "definition_backup": "Export broker definitions after topology changes for fast rebuild evidence. Do not treat broker queue contents as the only backup."
+  },
+  "recovery_model": {
+    "authoritative_recovery_source": "backend PostgreSQL stage inbox, outbox, attempt, reconciliation, and watermark tables",
+    "broker_backup_role": "topology and operator evidence only; broker messages alone are not the disaster-recovery source",
+    "rpo": "Confirmed PostgreSQL stage/outbox state has zero intentional data loss. Unconfirmed broker deliveries are replayed or reconciled from PostgreSQL after broker loss.",
+    "rto": "Target 30 minutes to rebuild a single-node broker topology after the host and Docker runtime are available, then replay pending outbox rows before resuming producers.",
+    "broker_loss_procedure": [
+      "Pause scheduler and worker producers.",
+      "Recreate RabbitMQ vhost, exchanges, policies, queues, users, and permissions from backend source control.",
+      "Start consumers in drain-safe mode.",
+      "Replay pending stage outbox rows with publisher confirms.",
+      "Run reconciliation watermarks and shadow parity checks before production-write resume."
+    ]
+  },
+  "managed_or_three_node_migration_trigger": {
+    "decision": "Stay single-node for initial shadow deployment; move to managed RabbitMQ or a reviewed three-node design when workload or recovery evidence exceeds the single-host envelope.",
+    "triggers": [
+      "Any requirement for broker availability through loss of the backend VPS.",
+      "Sustained RabbitMQ memory use above 60 percent of its 1 GiB cap after concurrency tuning.",
+      "RabbitMQ disk or memory alarms recur more than twice in one week under normal workload.",
+      "Any main queue exceeds 50 percent of its cap or 15 minutes of age for two consecutive observation windows.",
+      "DLQ replay volume or recovery drills cannot meet the 30 minute broker rebuild target.",
+      "Worker throughput requires more than 24 app connections, 128 channels, or 128 in-flight confirms per channel.",
+      "Backlog or latency requires queue replication, live broker upgrade tolerance, or off-host maintenance."
+    ]
+  },
+  "source_references": [
+    "https://www.rabbitmq.com/release-information",
+    "https://www.rabbitmq.com/docs/download",
+    "https://www.rabbitmq.com/docs/which-erlang",
+    "https://hub.docker.com/_/rabbitmq",
+    "https://www.rabbitmq.com/docs/upgrade",
+    "https://www.rabbitmq.com/docs/quorum-queues",
+    "https://www.rabbitmq.com/docs/dlx",
+    "https://www.rabbitmq.com/docs/alarms",
+    "https://www.rabbitmq.com/docs/maxlength",
+    "https://www.rabbitmq.com/docs/access-control",
+    "https://www.rabbitmq.com/docs/management",
+    "https://www.rabbitmq.com/docs/monitoring"
+  ],
+  "validation": {
+    "local_validator": "python3 scripts/validate_worker_uplift_rabbitmq_capacity_security.py",
+    "benchmark": "python3 scripts/worker_uplift_rabbitmq_capacity_benchmark.py --messages-per-queue 50 --message-bytes 1024 --output rabbitmq-capacity-benchmark.json",
+    "ci_workflow": "Backend Checks / Benchmark RabbitMQ queue types"
+  }
+}

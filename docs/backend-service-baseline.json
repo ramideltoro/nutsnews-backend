@@ -82,6 +82,7 @@
     "backend app",
     "Docker Engine",
     "Docker Compose",
+    "RabbitMQ broker",
     "Redis or Valkey",
     "search service"
   ],

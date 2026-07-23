@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate, provision, and verify NutsNews backend Grafana observability dashboards."""
+"""Validate the legacy NutsNews backend Grafana observability catalog."""
 
 from __future__ import annotations
 
@@ -480,53 +480,18 @@ def main() -> int:
         "status": "validated",
     }
 
-    if args.check and not (args.apply or args.verify):
-        print(json.dumps(report, indent=2, sort_keys=True))
-        if args.output:
-            args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        return 0
-
-    url = os.environ.get("GRAFANA_URL", "").strip()
-    token = os.environ.get("GRAFANA_SERVICE_ACCOUNT_TOKEN", "").strip()
-    if not url or not token:
-        print("GRAFANA_URL and GRAFANA_SERVICE_ACCOUNT_TOKEN are required for apply/verify", file=sys.stderr)
-        return 1
-
-    if args.wait_seconds:
-        time.sleep(args.wait_seconds)
-
-    client = GrafanaClient(url, token)
-    report["grafana_health"] = client.request("GET", "/api/health")
-    datasource_uids: dict[str, str] = {}
-    report["datasources"] = {}
-    for datasource_type in sorted(datasource_types(spec)):
-        datasource = choose_datasource(client, datasource_type, args.apply)
-        datasource_uids[datasource_type] = datasource["uid"]
-        report["datasources"][datasource_type] = {"uid": datasource["uid"], "name": datasource.get("name"), "type": datasource.get("type")}
-    report["folder_result"] = ensure_folder(client, spec["folder"], args.apply)
-    report["dashboards"] = upsert_dashboards(client, spec, datasource_uids, args.apply)
-    report["alerts"] = upsert_alert_rules(client, spec, datasource_uids, args.apply)
-
-    if args.verify:
-        report["alerts"] = verify_alert_rules(client, spec)
-        report["verification"] = [
-            verify_prometheus_query(client, datasource_uids["prometheus"], 'up{job="nutsnews-backend-host"}'),
-            verify_prometheus_query(client, datasource_uids["prometheus"], 'nutsnews_backend_backup_stage_healthy{job="nutsnews-backend-host",stage="backup"}'),
-            verify_prometheus_query(client, datasource_uids["prometheus"], 'nutsnews_backend_public_endpoint_healthy{job="nutsnews-backend-host"}'),
-            verify_loki_query_range(client, datasource_uids["loki"], '{host="backend.nutsnews.com",source="journal"}'),
-        ]
-        if any(item["result_count"] < 1 for item in report["verification"]) or any(item["status"] != "present" for item in report["alerts"]):
-            report["status"] = "missing_observability_data"
-        else:
-            report["status"] = "verified"
-    elif args.apply:
-        report["status"] = "applied"
+    if args.apply or args.verify:
+        print(
+            "Grafana resource apply/verify moved to ramideltoro/nutsnews-infra "
+            "OpenTofu. Use this backend script in --check mode only.",
+            file=sys.stderr,
+        )
+        return 2
 
     print(json.dumps(report, indent=2, sort_keys=True))
     if args.output:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return 0 if report["status"] != "missing_observability_data" else 2
+    return 0
 
 
 if __name__ == "__main__":

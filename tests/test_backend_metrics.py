@@ -51,6 +51,13 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertTrue(all(panel.get("datasource") == "loki" for panel in logs_dashboard["panels"]))
         self.assertTrue(any(alert.get("datasource") == "loki" for alert in spec["alerts"]))
 
+    def test_backend_grafana_cli_apply_is_retired(self):
+        with mock.patch("sys.argv", ["provision_grafana_metrics.py", "--apply"]):
+            with mock.patch("sys.stderr") as stderr:
+                self.assertEqual(provision_grafana_metrics.main(), 2)
+        stderr_text = "".join(call.args[0] for call in stderr.write.call_args_list if call.args)
+        self.assertIn("ramideltoro/nutsnews-infra", stderr_text)
+
     def test_grafana_dashboard_spec_rejects_high_cardinality_log_labels(self):
         spec = {
             "folder": {"uid": "test", "title": "Test"},

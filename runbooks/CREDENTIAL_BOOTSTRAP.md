@@ -91,8 +91,6 @@ Use a scoped API token limited to the `nutsnews.com` zone. The token needs DNS e
 
 Grafana Cloud:
 
-- `GRAFANA_URL`
-- `GRAFANA_SERVICE_ACCOUNT_TOKEN`
 - `GRAFANA_CLOUD_PROMETHEUS_URL`
 - `GRAFANA_CLOUD_PROMETHEUS_USERNAME`
 - `GRAFANA_CLOUD_PROMETHEUS_PASSWORD`
@@ -100,7 +98,7 @@ Grafana Cloud:
 - `GRAFANA_CLOUD_LOKI_USERNAME`
 - `GRAFANA_CLOUD_LOKI_PASSWORD`
 
-Use service account or access-policy tokens scoped to dashboard/alert provisioning and metrics/log ingestion.
+Use access-policy tokens scoped to backend metrics/log ingestion. Grafana folders, dashboards, alert rules, contact points, quota guardrails, Synthetic Monitoring, and service-account credentials are managed from `ramideltoro/nutsnews-infra`, not this backend repository.
 
 Supabase:
 

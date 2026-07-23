@@ -162,6 +162,11 @@ jobs:
           NUTSNEWS_BACKEND_WORKER_API_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_API_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_API_TOKEN }}
+          NUTSNEWS_BACKEND_RABBITMQ_ENABLED: ${{ vars.NUTSNEWS_BACKEND_RABBITMQ_ENABLED || 'true' }}
+          RABBITMQ_VHOST: ${{ vars.RABBITMQ_VHOST || 'nutsnews-worker-uplift' }}
+          RABBITMQ_BREAK_GLASS_ADMIN_USERNAME: ${{ vars.RABBITMQ_BREAK_GLASS_ADMIN_USERNAME || 'nutsnews_rabbitmq_admin' }}
+          RABBITMQ_ERLANG_COOKIE: ${{ secrets.RABBITMQ_ERLANG_COOKIE }}
+          RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD: ${{ secrets.RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD }}
         run: |
           set -euo pipefail
 
@@ -193,6 +198,8 @@ jobs:
             --required-secret GRAFANA_CLOUD_LOKI_URL \
             --required-secret GRAFANA_CLOUD_LOKI_USERNAME \
             --required-secret GRAFANA_CLOUD_LOKI_PASSWORD \
+            --required-secret RABBITMQ_ERLANG_COOKIE \
+            --required-secret RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD \
             --output "$RUNNER_TEMP/backend-deployment-safety-pre.json" \
             --summary "$RUNNER_TEMP/backend-deployment-safety-pre.md"
 
@@ -235,6 +242,11 @@ jobs:
           NUTSNEWS_BACKEND_WORKER_API_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_API_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_API_TOKEN }}
+          NUTSNEWS_BACKEND_RABBITMQ_ENABLED: ${{ vars.NUTSNEWS_BACKEND_RABBITMQ_ENABLED || 'true' }}
+          RABBITMQ_VHOST: ${{ vars.RABBITMQ_VHOST || 'nutsnews-worker-uplift' }}
+          RABBITMQ_BREAK_GLASS_ADMIN_USERNAME: ${{ vars.RABBITMQ_BREAK_GLASS_ADMIN_USERNAME || 'nutsnews_rabbitmq_admin' }}
+          RABBITMQ_ERLANG_COOKIE: ${{ secrets.RABBITMQ_ERLANG_COOKIE }}
+          RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD: ${{ secrets.RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD }}
         run: |
           set -euo pipefail
 
@@ -366,6 +378,25 @@ jobs:
                   extra_vars["backend_worker_api_db_user"] = "nutsnews_worker_api"
                   extra_vars["backend_worker_api_db_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD"]
 
+          rabbitmq_enabled = os.environ.get("NUTSNEWS_BACKEND_RABBITMQ_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
+          if rabbitmq_enabled:
+              rabbitmq_values = {
+                  "RABBITMQ_VHOST": os.environ.get("RABBITMQ_VHOST", "").strip(),
+                  "RABBITMQ_BREAK_GLASS_ADMIN_USERNAME": os.environ.get("RABBITMQ_BREAK_GLASS_ADMIN_USERNAME", "").strip(),
+                  "RABBITMQ_ERLANG_COOKIE": os.environ.get("RABBITMQ_ERLANG_COOKIE", ""),
+                  "RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD": os.environ.get("RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD", ""),
+              }
+              missing = [name for name, value in rabbitmq_values.items() if not value]
+              if missing:
+                  raise SystemExit(f"Missing required RabbitMQ environment names: {', '.join(missing)}")
+              if any("\n" in value or "\r" in value for value in rabbitmq_values.values()):
+                  raise SystemExit("RabbitMQ environment values must be single-line values")
+              extra_vars["backend_rabbitmq_enabled"] = True
+              extra_vars["backend_rabbitmq_vhost"] = rabbitmq_values["RABBITMQ_VHOST"]
+              extra_vars["backend_rabbitmq_admin_username"] = rabbitmq_values["RABBITMQ_BREAK_GLASS_ADMIN_USERNAME"]
+              extra_vars["backend_rabbitmq_erlang_cookie"] = rabbitmq_values["RABBITMQ_ERLANG_COOKIE"]
+              extra_vars["backend_rabbitmq_admin_password"] = rabbitmq_values["RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD"]
+
           path = Path(os.environ["RUNNER_TEMP"]) / "backend-extra-vars.json"
           path.write_text(json.dumps(extra_vars), encoding="utf-8")
           path.chmod(0o600)
@@ -410,6 +441,9 @@ jobs:
           GRAFANA_CLOUD_LOKI_URL: ${{ secrets.GRAFANA_CLOUD_LOKI_URL }}
           GRAFANA_CLOUD_LOKI_USERNAME: ${{ secrets.GRAFANA_CLOUD_LOKI_USERNAME }}
           GRAFANA_CLOUD_LOKI_PASSWORD: ${{ secrets.GRAFANA_CLOUD_LOKI_PASSWORD }}
+          NUTSNEWS_BACKEND_RABBITMQ_ENABLED: ${{ vars.NUTSNEWS_BACKEND_RABBITMQ_ENABLED || 'true' }}
+          RABBITMQ_ERLANG_COOKIE: ${{ secrets.RABBITMQ_ERLANG_COOKIE }}
+          RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD: ${{ secrets.RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD }}
         run: |
           set -euo pipefail
 
@@ -434,6 +468,8 @@ jobs:
             --required-secret GRAFANA_CLOUD_LOKI_URL \
             --required-secret GRAFANA_CLOUD_LOKI_USERNAME \
             --required-secret GRAFANA_CLOUD_LOKI_PASSWORD \
+            --required-secret RABBITMQ_ERLANG_COOKIE \
+            --required-secret RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD \
             --output "$RUNNER_TEMP/backend-deployment-safety-post.json" \
             --summary "$RUNNER_TEMP/backend-deployment-safety-post.md"
 

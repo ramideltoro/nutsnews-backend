@@ -1,0 +1,16 @@
+# Managed by ramideltoro/nutsnews-backend.
+listeners.tcp.default = 5672
+
+management.tcp.port = 15672
+prometheus.tcp.port = 15692
+
+vm_memory_high_watermark.absolute = {{ backend_rabbitmq_memory_high_watermark }}
+disk_free_limit.absolute = {{ backend_rabbitmq_disk_free_limit }}
+
+heartbeat = {{ backend_rabbitmq_heartbeat_seconds }}
+channel_max = {{ backend_rabbitmq_channel_max }}
+default_queue_type = classic
+
+collect_statistics_interval = 5000
+log.console = true
+log.console.level = info

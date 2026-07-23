@@ -22,6 +22,7 @@ REQUIRED_SERVICES = {
     "ops_dashboard_state",
     "backup_status_metadata",
     "docker_volumes",
+    "rabbitmq_broker_state",
     "postgresql_data",
     "runtime_secrets",
 }

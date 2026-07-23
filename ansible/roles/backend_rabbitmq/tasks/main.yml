@@ -1,0 +1,312 @@
+---
+- name: Validate RabbitMQ bootstrap settings
+  ansible.builtin.assert:
+    that:
+      - backend_rabbitmq_image is match('^rabbitmq@sha256:[0-9a-f]{64}$')
+      - backend_rabbitmq_vhost | length > 0
+      - backend_rabbitmq_admin_username | length > 0
+      - backend_rabbitmq_admin_password | length > 0
+      - backend_rabbitmq_erlang_cookie | length >= 20
+      - backend_rabbitmq_bind_address == '127.0.0.1'
+      - backend_rabbitmq_amqp_port | string == '5672'
+      - backend_rabbitmq_management_port | string == '15672'
+      - backend_rabbitmq_prometheus_port | string == '15692'
+      - backend_rabbitmq_nofile | int == 65536
+    fail_msg: "RabbitMQ provisioning requires pinned image, protected credentials, loopback listeners, and approved limits."
+  no_log: true
+
+- name: Capture root filesystem free bytes before RabbitMQ bootstrap
+  ansible.builtin.command:
+    argv:
+      - df
+      - -B1
+      - --output=avail
+      - /
+  register: backend_rabbitmq_root_df
+  changed_when: false
+
+- name: Require root filesystem headroom for RabbitMQ
+  ansible.builtin.assert:
+    that:
+      - (backend_rabbitmq_root_df.stdout_lines[-1] | trim | int) >= backend_rabbitmq_minimum_root_free_bytes | int
+    fail_msg: "RabbitMQ bootstrap requires at least {{ backend_rabbitmq_minimum_root_free_bytes }} bytes free on /."
+
+- name: Install Docker and Compose packages for RabbitMQ
+  ansible.builtin.apt:
+    name: "{{ backend_rabbitmq_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: "{{ backend_apt_cache_valid_time | default(3600) }}"
+  register: backend_rabbitmq_package_result
+
+- name: Track whether RabbitMQ runtime can be managed in this run
+  ansible.builtin.set_fact:
+    backend_rabbitmq_runtime_manageable: "{{ (not ansible_check_mode) or not (backend_rabbitmq_package_result is changed) }}"
+
+- name: Ensure Docker service is enabled and started for RabbitMQ
+  ansible.builtin.systemd:
+    name: docker.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - not ansible_check_mode
+
+- name: Ensure RabbitMQ config directory exists
+  ansible.builtin.file:
+    path: "{{ backend_rabbitmq_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Ensure RabbitMQ compose directory exists
+  ansible.builtin.file:
+    path: "{{ backend_rabbitmq_base_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Ensure RabbitMQ persistent data directory exists
+  ansible.builtin.file:
+    path: "{{ backend_rabbitmq_data_dir }}"
+    state: directory
+    owner: "999"
+    group: "999"
+    mode: "0750"
+
+- name: Render RabbitMQ root-only environment
+  ansible.builtin.copy:
+    dest: "{{ backend_rabbitmq_env_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      RABBITMQ_DEFAULT_USER={{ backend_rabbitmq_admin_username }}
+      RABBITMQ_DEFAULT_PASS={{ backend_rabbitmq_admin_password }}
+      RABBITMQ_DEFAULT_VHOST={{ backend_rabbitmq_vhost }}
+      RABBITMQ_ERLANG_COOKIE={{ backend_rabbitmq_erlang_cookie }}
+  no_log: true
+  register: backend_rabbitmq_env_file
+  notify: Restart RabbitMQ
+
+- name: Render RabbitMQ config
+  ansible.builtin.template:
+    src: rabbitmq.conf.j2
+    dest: "{{ backend_rabbitmq_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: backend_rabbitmq_config_file
+  notify: Restart RabbitMQ
+
+- name: Render RabbitMQ enabled plugins
+  ansible.builtin.template:
+    src: enabled_plugins.j2
+    dest: "{{ backend_rabbitmq_enabled_plugins_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: backend_rabbitmq_plugins_file
+  notify: Restart RabbitMQ
+
+- name: Install RabbitMQ durable probe
+  ansible.builtin.copy:
+    src: nutsnews_rabbitmq_probe.py
+    dest: "{{ backend_rabbitmq_probe_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  register: backend_rabbitmq_probe_file
+
+- name: Render RabbitMQ Compose definition
+  ansible.builtin.template:
+    src: rabbitmq-compose.yml.j2
+    dest: "{{ backend_rabbitmq_compose_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: backend_rabbitmq_compose_file
+  notify: Restart RabbitMQ
+
+- name: Install RabbitMQ systemd unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nutsnews-rabbitmq.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=NutsNews RabbitMQ broker
+      Wants=network-online.target
+      Requires=docker.service
+      After=network-online.target docker.service
+
+      [Service]
+      Type=oneshot
+      WorkingDirectory={{ backend_rabbitmq_base_dir }}
+      RemainAfterExit=yes
+      ExecStart=/usr/bin/docker compose -f {{ backend_rabbitmq_compose_path }} up -d --remove-orphans
+      ExecReload=/usr/bin/docker compose -f {{ backend_rabbitmq_compose_path }} up -d --remove-orphans
+      ExecStop=/usr/bin/docker compose -f {{ backend_rabbitmq_compose_path }} down
+      TimeoutStartSec=300
+      TimeoutStopSec=120
+
+      [Install]
+      WantedBy=multi-user.target
+  register: backend_rabbitmq_unit_file
+  notify:
+    - Reload systemd
+    - Restart RabbitMQ
+
+- name: Validate RabbitMQ Compose definition
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ backend_rabbitmq_compose_path }}"
+      - config
+  changed_when: false
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - not ansible_check_mode
+
+- name: Pull pinned RabbitMQ image during protected apply
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ backend_rabbitmq_compose_path }}"
+      - pull
+  changed_when: false
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - not ansible_check_mode
+
+- name: Flush RabbitMQ handlers before health probe
+  ansible.builtin.meta: flush_handlers
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - not ansible_check_mode
+
+- name: Ensure RabbitMQ service is enabled and started
+  ansible.builtin.systemd:
+    name: nutsnews-rabbitmq.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - not ansible_check_mode
+
+- name: Wait for RabbitMQ diagnostics to pass
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ backend_rabbitmq_container_name }}"
+      - rabbitmq-diagnostics
+      - -q
+      - ping
+  register: backend_rabbitmq_ping
+  retries: 12
+  delay: 5
+  until: backend_rabbitmq_ping.rc == 0
+  changed_when: false
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - not ansible_check_mode
+
+- name: Track whether RabbitMQ durable probe should restart the container
+  ansible.builtin.set_fact:
+    backend_rabbitmq_run_durable_probe_now: >-
+      {{
+        backend_rabbitmq_durable_probe_enabled | bool and
+        (
+          backend_rabbitmq_env_file is changed or
+          backend_rabbitmq_config_file is changed or
+          backend_rabbitmq_plugins_file is changed or
+          backend_rabbitmq_compose_file is changed or
+          backend_rabbitmq_unit_file is changed or
+          backend_rabbitmq_probe_file is changed
+        )
+      }}
+
+- name: Publish RabbitMQ durable restart probe message
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_rabbitmq_probe_path }}"
+      - publish
+      - --env
+      - "{{ backend_rabbitmq_env_path }}"
+      - --queue
+      - "{{ backend_rabbitmq_durable_probe_queue }}"
+      - --state
+      - "{{ backend_rabbitmq_probe_state_path }}"
+  register: backend_rabbitmq_probe_publish
+  changed_when: true
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - backend_rabbitmq_run_durable_probe_now | bool
+    - not ansible_check_mode
+
+- name: Restart RabbitMQ for durable probe
+  ansible.builtin.systemd:
+    name: nutsnews-rabbitmq.service
+    state: restarted
+    daemon_reload: true
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - backend_rabbitmq_run_durable_probe_now | bool
+    - not ansible_check_mode
+
+- name: Verify RabbitMQ durable probe message after restart
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_rabbitmq_probe_path }}"
+      - verify
+      - --env
+      - "{{ backend_rabbitmq_env_path }}"
+      - --queue
+      - "{{ backend_rabbitmq_durable_probe_queue }}"
+      - --state
+      - "{{ backend_rabbitmq_probe_state_path }}"
+      - --delete-queue
+  register: backend_rabbitmq_probe_verify
+  changed_when: true
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - backend_rabbitmq_run_durable_probe_now | bool
+    - not ansible_check_mode
+
+- name: Capture RabbitMQ read-only health summary
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_rabbitmq_probe_path }}"
+      - health
+      - --env
+      - "{{ backend_rabbitmq_env_path }}"
+  register: backend_rabbitmq_health
+  changed_when: false
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - not ansible_check_mode
+
+- name: Report RabbitMQ provisioning summary
+  ansible.builtin.debug:
+    msg:
+      enabled: "{{ backend_rabbitmq_enabled }}"
+      image: "{{ backend_rabbitmq_image }}"
+      vhost: "{{ backend_rabbitmq_vhost }}"
+      compose_path: "{{ backend_rabbitmq_compose_path }}"
+      data_dir: "{{ backend_rabbitmq_data_dir }}"
+      amqp: "{{ backend_rabbitmq_bind_address }}:{{ backend_rabbitmq_amqp_port }}"
+      management: "{{ backend_rabbitmq_bind_address }}:{{ backend_rabbitmq_management_port }}"
+      prometheus: "{{ backend_rabbitmq_bind_address }}:{{ backend_rabbitmq_prometheus_port }}"
+      runtime_manageable: "{{ backend_rabbitmq_runtime_manageable }}"
+      durable_probe_ran: "{{ backend_rabbitmq_run_durable_probe_now | default(false) }}"
+      health: "{{ backend_rabbitmq_health.stdout_lines | default([]) }}"

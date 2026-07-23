@@ -39,6 +39,21 @@ class BackendDeploymentSafetyTests(unittest.TestCase):
         checks.append({"name": "backup_freshness", "status": "not_configured"})
         self.assertEqual(safety.blockers("baseline_apply", checks), [])
 
+    def test_rabbitmq_is_post_apply_blocker_only_when_enabled(self):
+        args = type("Args", (), {"profile": "baseline_apply", "phase": "post"})()
+        checks = [{"name": "docker_health", "status": "not_configured"}, {"name": "rabbitmq_health", "status": "not_configured"}]
+        with patch.dict(os.environ, {"NUTSNEWS_BACKEND_RABBITMQ_ENABLED": "true"}, clear=True):
+            self.assertEqual(
+                safety.rabbitmq_post_apply_blockers(args, checks),
+                [
+                    {"check": "docker_health", "status": "not_configured"},
+                    {"check": "rabbitmq_health", "status": "not_configured"},
+                ],
+            )
+        pre_args = type("Args", (), {"profile": "baseline_apply", "phase": "pre"})()
+        with patch.dict(os.environ, {"NUTSNEWS_BACKEND_RABBITMQ_ENABLED": "true"}, clear=True):
+            self.assertEqual(safety.rabbitmq_post_apply_blockers(pre_args, checks), [])
+
     def test_secret_presence_reports_names_only(self):
         with patch.dict(os.environ, {"ONE_SECRET": "present", "EMPTY_SECRET": ""}, clear=True):
             [check] = safety.secret_presence_checks(["ONE_SECRET", "EMPTY_SECRET", "MISSING_SECRET"])

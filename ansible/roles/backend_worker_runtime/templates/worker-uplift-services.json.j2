@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "tracking_issue": 85,
+  "tracking_repo": "ramideltoro/nutsnews-worker",
+  "implementation_repo": "ramideltoro/nutsnews-backend",
+  "generated_by": "backend_worker_runtime",
+  "mode": "{{ backend_worker_runtime_default_mode }}",
+  "production_writes_enabled": {{ backend_worker_runtime_production_writes_enabled | bool | to_json }},
+  "cutover_state": "{{ backend_worker_runtime_cutover_state }}",
+  "contract_version": "{{ backend_worker_runtime_contract_version }}",
+  "runtime_version": "{{ backend_worker_runtime_runtime_version }}",
+  "allowed_image_repositories": {{ backend_worker_runtime_allowed_image_repositories | to_json }},
+  "allowed_source_repositories": {{ backend_worker_runtime_allowed_source_repositories | to_json }},
+  "allowed_stages": {{ backend_worker_runtime_allowed_stages | to_json }},
+  "allowed_actions": {{ backend_worker_runtime_allowed_actions | to_json }},
+  "max_replicas_per_service": {{ backend_worker_runtime_max_replicas_per_service | int }},
+  "rabbitmq": {
+    "vhost": "{{ backend_worker_runtime_rabbitmq_vhost }}",
+    "topology_definition": "{{ backend_worker_runtime_rabbitmq_topology_definition_path }}"
+  },
+  "backend_api": {
+    "url": "{{ backend_worker_runtime_backend_api_url }}",
+    "writes_enabled": {{ backend_worker_runtime_backend_api_writes_enabled | bool | to_json }},
+    "production_write_guard": "backend-api-protected-cutover-state-required"
+  },
+  "grafana_resource_owner": "ramideltoro/nutsnews-infra",
+  "legacy_worker_checkout_required": false,
+  "services": {{ backend_worker_runtime_services | to_json }}
+}

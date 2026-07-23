@@ -124,6 +124,22 @@ by `scripts/validate_backend_grafana_handoff.py`. It maps the retained folder,
 dashboard UIDs, alert UIDs, datasource dependencies, and rollback path to the
 infra OpenTofu owner.
 
+## RabbitMQ Metrics
+
+Worker-uplift RabbitMQ metrics are tracked in
+[WORKER_UPLIFT_RABBITMQ_METRICS.md](WORKER_UPLIFT_RABBITMQ_METRICS.md) for
+`ramideltoro/nutsnews-worker#87`.
+
+Backend Alloy scrapes RabbitMQ only from the private loopback listener
+`127.0.0.1:15692`. The aggregate `/metrics` endpoint covers broker/node
+resource, connection/channel, alarm, uptime, and scrape-health metrics. The
+bounded `/metrics/detailed` endpoint covers declared worker-uplift queue depth,
+unacked work, consumers, and delivery/ack/redelivery rates for the 7 main
+queues, 21 retry queues, and 7 terminal DLQs.
+
+The backend remains the telemetry producer only. Grafana resources, quota
+guardrails, dashboards, and alerts remain managed by `ramideltoro/nutsnews-infra`.
+
 ## Grafana Alert Guardrails
 
 Backend issue #25 added the backend alert catalog. The live Grafana alert rules

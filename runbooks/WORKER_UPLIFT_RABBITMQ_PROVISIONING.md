@@ -22,6 +22,7 @@ Validate it with:
 python3 scripts/validate_worker_uplift_rabbitmq_provisioning.py
 python3 scripts/validate_worker_uplift_rabbitmq_recovery.py
 python3 scripts/validate_worker_uplift_rabbitmq_operations.py
+python3 scripts/validate_worker_uplift_rabbitmq_metrics.py
 ```
 
 ## Scope

@@ -1,0 +1,82 @@
+name: Backend RabbitMQ Metrics Check
+
+on:
+  workflow_dispatch:
+    inputs:
+      require_grafana_data:
+        description: Require fresh RabbitMQ data in Grafana Cloud Prometheus.
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-rabbitmq-metrics-check
+  cancel-in-progress: false
+
+jobs:
+  metrics-check:
+    name: RabbitMQ metrics check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Prepare SSH material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Run fixed RabbitMQ metrics check
+        shell: bash
+        env:
+          REQUIRE_GRAFANA_DATA: ${{ inputs.require_grafana_data }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          GRAFANA_CLOUD_PROMETHEUS_URL: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_URL }}
+          GRAFANA_CLOUD_PROMETHEUS_USERNAME: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_USERNAME }}
+          GRAFANA_CLOUD_PROMETHEUS_PASSWORD: ${{ secrets.GRAFANA_CLOUD_PROMETHEUS_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            --ssh-host "$NUTSNEWS_BACKEND_HOST"
+            --ssh-user "${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+            --ssh-key "$HOME/.ssh/nutsnews_backend"
+            --known-hosts "$HOME/.ssh/known_hosts"
+            --grafana-prometheus-url "$GRAFANA_CLOUD_PROMETHEUS_URL"
+            --grafana-prometheus-username "$GRAFANA_CLOUD_PROMETHEUS_USERNAME"
+            --grafana-prometheus-password "$GRAFANA_CLOUD_PROMETHEUS_PASSWORD"
+            --output "$RUNNER_TEMP/backend-rabbitmq-metrics-check.json"
+          )
+          if [[ "$REQUIRE_GRAFANA_DATA" == "true" ]]; then
+            args+=(--require-grafana-data)
+          fi
+
+          python3 scripts/backend_rabbitmq_metrics_check.py "${args[@]}"
+
+      - name: Upload RabbitMQ metrics report
+        if: always()
+        uses: actions/upload-artifact@1eb3cb2b3e0f29609092a73eb033bb759a334595  # v5.0.0
+        with:
+          name: backend-rabbitmq-metrics-check
+          path: ${{ runner.temp }}/backend-rabbitmq-metrics-check.json
+          if-no-files-found: warn

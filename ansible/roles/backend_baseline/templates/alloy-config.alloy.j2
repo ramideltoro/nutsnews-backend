@@ -60,6 +60,16 @@ prometheus.scrape "host" {
   forward_to      = [prometheus.relabel.backend.receiver]
 }
 
+{% if backend_metrics_alloy_self_enabled | bool %}
+prometheus.exporter.self "alloy" {}
+
+prometheus.scrape "alloy_self" {
+  targets         = prometheus.exporter.self.alloy.targets
+  scrape_interval = "{{ backend_metrics_alloy_self_scrape_interval }}"
+  forward_to      = [prometheus.relabel.backend.receiver]
+}
+
+{% endif %}
 prometheus.relabel "backend" {
   forward_to = [prometheus.remote_write.grafana_cloud.receiver]
 
@@ -79,6 +89,145 @@ prometheus.relabel "backend" {
   }
 }
 
+{% if backend_metrics_rabbitmq_enabled | bool %}
+prometheus.scrape "rabbitmq_aggregate" {
+  targets = [
+    {
+      "__address__"       = "{{ backend_metrics_rabbitmq_target }}",
+      rabbitmq_endpoint   = "aggregate",
+      service_namespace   = "{{ backend_metrics_rabbitmq_service_namespace }}",
+    },
+  ]
+  metrics_path    = "/metrics"
+  scrape_interval = "{{ backend_metrics_rabbitmq_scrape_interval }}"
+  scrape_timeout  = "{{ backend_metrics_rabbitmq_scrape_timeout }}"
+  sample_limit    = {{ backend_metrics_rabbitmq_sample_limit }}
+  label_limit     = {{ backend_metrics_rabbitmq_label_limit }}
+  forward_to      = [prometheus.relabel.rabbitmq_aggregate.receiver]
+}
+
+prometheus.relabel "rabbitmq_aggregate" {
+  forward_to     = [prometheus.remote_write.grafana_cloud.receiver]
+  max_cache_size = 0
+  cache_ttl      = "{{ backend_metrics_rabbitmq_relabel_cache_ttl }}"
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "{{ backend_metrics_rabbitmq_aggregate_metric_regex }}"
+    action        = "keep"
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "nutsnews-rabbitmq"
+  }
+
+  rule {
+    target_label = "instance"
+    replacement  = "{{ backend_metrics_instance_label }}"
+  }
+
+  rule {
+    target_label = "host"
+    replacement  = "{{ backend_metrics_instance_label }}"
+  }
+
+  rule {
+    target_label = "environment"
+    replacement  = "{{ backend_metrics_environment_label }}"
+  }
+
+  rule {
+    target_label = "service_namespace"
+    replacement  = "{{ backend_metrics_rabbitmq_service_namespace }}"
+  }
+
+  rule {
+    regex  = "^(article|article_id|feed|feed_id|message|message_id|idempotency|trace_id|span_id|correlation_id|causation_id|payload|url|path|user|ip|token|secret|connection|channel)$"
+    action = "labeldrop"
+  }
+
+  rule {
+    regex  = "^(__name__|job|instance|environment|host|service_namespace|rabbitmq_endpoint|node|cluster)$"
+    action = "labelkeep"
+  }
+}
+
+prometheus.scrape "rabbitmq_detailed" {
+  targets = [
+    {
+      "__address__"       = "{{ backend_metrics_rabbitmq_target }}",
+      rabbitmq_endpoint   = "detailed",
+      service_namespace   = "{{ backend_metrics_rabbitmq_service_namespace }}",
+    },
+  ]
+  metrics_path    = "/metrics/detailed"
+  params          = {
+    "vhost"  = ["{{ backend_metrics_rabbitmq_vhost }}"],
+    "queue"  = ["{{ backend_metrics_rabbitmq_queue_regex }}"],
+    "family" = {{ backend_metrics_rabbitmq_detailed_families | to_json }},
+  }
+  scrape_interval = "{{ backend_metrics_rabbitmq_scrape_interval }}"
+  scrape_timeout  = "{{ backend_metrics_rabbitmq_scrape_timeout }}"
+  sample_limit    = {{ backend_metrics_rabbitmq_sample_limit }}
+  label_limit     = {{ backend_metrics_rabbitmq_label_limit }}
+  forward_to      = [prometheus.relabel.rabbitmq_detailed.receiver]
+}
+
+prometheus.relabel "rabbitmq_detailed" {
+  forward_to     = [prometheus.remote_write.grafana_cloud.receiver]
+  max_cache_size = 0
+  cache_ttl      = "{{ backend_metrics_rabbitmq_relabel_cache_ttl }}"
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "{{ backend_metrics_rabbitmq_detailed_metric_regex }}"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["queue"]
+    regex         = "{{ backend_metrics_rabbitmq_queue_regex }}"
+    action        = "keep"
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "nutsnews-rabbitmq-queues"
+  }
+
+  rule {
+    target_label = "instance"
+    replacement  = "{{ backend_metrics_instance_label }}"
+  }
+
+  rule {
+    target_label = "host"
+    replacement  = "{{ backend_metrics_instance_label }}"
+  }
+
+  rule {
+    target_label = "environment"
+    replacement  = "{{ backend_metrics_environment_label }}"
+  }
+
+  rule {
+    target_label = "service_namespace"
+    replacement  = "{{ backend_metrics_rabbitmq_service_namespace }}"
+  }
+
+  rule {
+    regex  = "^(article|article_id|feed|feed_id|message|message_id|idempotency|trace_id|span_id|correlation_id|causation_id|payload|url|path|user|ip|token|secret|connection|channel)$"
+    action = "labeldrop"
+  }
+
+  rule {
+    regex  = "^(__name__|job|instance|environment|host|service_namespace|rabbitmq_endpoint|node|cluster|vhost|queue)$"
+    action = "labelkeep"
+  }
+}
+
+{% endif %}
 {% if backend_logs_enabled | bool %}
 loki.write "grafana_cloud_loki" {
   max_streams = {{ backend_logs_loki_max_streams }}

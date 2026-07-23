@@ -1,0 +1,199 @@
+name: Backend Worker Runtime Operations
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Fixed worker-runtime operation to run.
+        required: true
+        default: status
+        type: choice
+        options:
+          - check
+          - status
+          - logs
+          - queue-inspect
+          - dlq-inspect
+          - deploy
+          - promote
+          - restart
+          - scale
+          - rollback
+          - dlq-replay
+          - drain
+          - reconciliation
+          - smoke
+      service_name:
+        description: Worker service name for service-scoped actions. Leave blank for status/check.
+        required: false
+        default: ""
+        type: string
+      replicas:
+        description: Replica count for scale. Must stay within the source-controlled manifest limit.
+        required: false
+        default: ""
+        type: string
+      tail:
+        description: Number of log lines for logs action.
+        required: false
+        default: "200"
+        type: string
+      queue_kind:
+        description: Queue class for queue-inspect.
+        required: true
+        default: main
+        type: choice
+        options:
+          - main
+          - retry
+          - dlq
+      dry_run:
+        description: Keep gated service-specific actions in dry-run mode.
+        required: true
+        default: true
+        type: boolean
+      confirm_target:
+        description: For mutating actions only, type backend.nutsnews.com.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-worker-runtime-operations
+  cancel-in-progress: false
+
+jobs:
+  worker-runtime:
+    name: Worker runtime operation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          SERVICE_NAME: ${{ inputs.service_name }}
+          REPLICAS: ${{ inputs.replicas }}
+          TAIL: ${{ inputs.tail }}
+          CONFIRM_TARGET: ${{ inputs.confirm_target }}
+        run: |
+          set -euo pipefail
+
+          case "$ACTION" in
+            check|status|logs|queue-inspect|dlq-inspect|deploy|promote|restart|scale|rollback|dlq-replay|drain|reconciliation|smoke) ;;
+            *)
+              echo "Unsupported action: $ACTION" >&2
+              exit 1
+              ;;
+          esac
+
+          case "$ACTION" in
+            logs|queue-inspect|dlq-inspect|deploy|promote|restart|scale|rollback|dlq-replay|drain|reconciliation|smoke)
+              if [[ ! "$SERVICE_NAME" =~ ^[a-z][a-z0-9-]{2,48}$ ]]; then
+                echo "service_name must match ^[a-z][a-z0-9-]{2,48}$ for service-scoped actions." >&2
+                exit 1
+              fi
+              ;;
+          esac
+
+          case "$ACTION" in
+            deploy|promote|restart|scale|rollback|dlq-replay|drain|reconciliation|smoke)
+              if [[ "$CONFIRM_TARGET" != "backend.nutsnews.com" ]]; then
+                echo "Mutating action requires confirm_target to be exactly backend.nutsnews.com." >&2
+                exit 1
+              fi
+              ;;
+          esac
+
+          if [[ -n "$REPLICAS" && ! "$REPLICAS" =~ ^[0-9]+$ ]]; then
+            echo "replicas must be an integer when provided." >&2
+            exit 1
+          fi
+          if [[ ! "$TAIL" =~ ^[0-9]+$ || "$TAIL" -gt 1000 ]]; then
+            echo "tail must be an integer between 0 and 1000." >&2
+            exit 1
+          fi
+
+      - name: Prepare SSH material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Run fixed worker runtime operation
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          SERVICE_NAME: ${{ inputs.service_name }}
+          REPLICAS: ${{ inputs.replicas }}
+          TAIL: ${{ inputs.tail }}
+          QUEUE_KIND: ${{ inputs.queue_kind }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          CONFIRM_TARGET: ${{ inputs.confirm_target }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          report="/var/lib/nutsnews/worker-uplift-runtime/reports/last-${ACTION}.json"
+          remote_args=(
+            sudo -n /usr/local/sbin/nutsnews-worker-runtime "$ACTION"
+            --manifest /etc/nutsnews-worker-uplift/services.json
+            --compose /opt/nutsnews-worker-uplift/compose.yml
+            --project nutsnews-worker-uplift
+            --queue-kind "$QUEUE_KIND"
+            --tail "$TAIL"
+            --report "$report"
+          )
+
+          if [[ -n "$SERVICE_NAME" ]]; then
+            remote_args+=(--service-name "$SERVICE_NAME")
+          fi
+          if [[ -n "$REPLICAS" ]]; then
+            remote_args+=(--replicas "$REPLICAS")
+          fi
+          if [[ "$DRY_RUN" == "true" ]]; then
+            remote_args+=(--dry-run)
+          fi
+          if [[ "$CONFIRM_TARGET" == "backend.nutsnews.com" ]]; then
+            remote_args+=(--confirm-action)
+          fi
+
+          printf '%q ' "${remote_args[@]}" > "$RUNNER_TEMP/worker-runtime-command.txt"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "$(cat "$RUNNER_TEMP/worker-runtime-command.txt")" \
+            | tee "$RUNNER_TEMP/backend-worker-runtime-report.json"
+
+      - name: Upload worker runtime report
+        if: always()
+        uses: actions/upload-artifact@1eb3cb2b3e0f29609092a73eb033bb759a334595  # v5.0.0
+        with:
+          name: backend-worker-runtime-report
+          path: ${{ runner.temp }}/backend-worker-runtime-report.json
+          if-no-files-found: warn

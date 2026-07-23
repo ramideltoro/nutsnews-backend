@@ -57,6 +57,7 @@ APP_READ_OPERATIONS = {
     "load-admin-local-ai",
     "load-admin-translation-quality",
     "load-admin-guardrails",
+    "load-admin-worker-shards",
     "load-admin-quota-usage-events",
     "load-admin-article-engagement-source-category-summary",
     "load-admin-article-engagement-article-summary",
@@ -357,6 +358,40 @@ ADMIN_GUARDRAILS_COUNT_TABLES = {
     ),
     "rss_feeds": ("public.rss_feeds", "feedCount", "feed_count"),
 }
+
+ADMIN_WORKER_SHARDS_RUN_COLUMNS = (
+    "id",
+    "created_at",
+    "run_started_at",
+    "run_completed_at",
+    "run_source",
+    "request_id",
+    "shard_index",
+    "feeds_per_shard",
+    "max_ai_reviews",
+    "success",
+    "error_name",
+    "error_message",
+    "feed_count",
+    "fetched_count",
+    "candidate_count",
+    "already_reviewed_count",
+    "unreviewed_count",
+    "eligible_for_ai_count",
+    "ai_reviewed_count",
+    "accepted_count",
+    "rejected_count",
+    "no_thumbnail_rejected_count",
+    "locally_rejected_count",
+    "image_hydration_lookup_count",
+    "image_hydration_found_count",
+    "review_save_ok",
+    "article_save_ok",
+    "ai_usage_save_ok",
+    "cost_protection_limit_reached",
+    "spike_warning_triggered",
+    "duration_ms",
+)
 
 ADMIN_TABLE_READS = {
     "load-admin-quota-usage-events": (
@@ -1176,6 +1211,10 @@ def admin_guardrails_quota_usage_event_columns() -> str:
     return ", ".join(ADMIN_GUARDRAILS_QUOTA_USAGE_EVENT_COLUMNS)
 
 
+def admin_worker_shards_run_columns() -> str:
+    return ", ".join(ADMIN_WORKER_SHARDS_RUN_COLUMNS)
+
+
 def category_clause(body: dict[str, Any], params: list[Any]) -> str:
     category = optional_string(body, "category", maximum=96)
     if category is None or category.lower() == "all":
@@ -1851,6 +1890,44 @@ def load_app_admin_guardrails(body: dict[str, Any], store: PostgresStore) -> dic
     }
 
 
+def load_app_admin_worker_shards(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
+    limit = bounded_int(
+        body,
+        "limit",
+        default=500,
+        minimum=1,
+        maximum=min(store.max_limit, 500),
+    )
+    if "shardCount" in body:
+        bounded_int(body, "shardCount", default=25, minimum=1, maximum=1000)
+    if "staleAfterMinutes" in body:
+        bounded_int(body, "staleAfterMinutes", default=180, minimum=1, maximum=24 * 60)
+    if "slowRunMs" in body:
+        bounded_int(body, "slowRunMs", default=15000, minimum=1, maximum=60 * 60 * 1000)
+    if "dailyWindowDays" in body:
+        bounded_int(body, "dailyWindowDays", default=7, minimum=1, maximum=90)
+
+    worker_run_rows = store.fetch_all(
+        f"""
+        select {admin_worker_shards_run_columns()}
+        from public.worker_runs
+        order by run_started_at desc nulls last, id desc
+        limit %s
+        """,
+        (limit,),
+    )
+
+    return {
+        "rows": [
+            {
+                "workerRunRows": worker_run_rows,
+            }
+        ],
+        "rowCount": 1,
+        "generatedAt": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
+
+
 def load_app_admin_production_readiness(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
     recent_article_limit = bounded_int(
         body,
@@ -2136,6 +2213,9 @@ def handle_app_operation(operation: str, body: dict[str, Any], store: PostgresSt
 
     if operation == "load-admin-guardrails":
         return load_app_admin_guardrails(body, store)
+
+    if operation == "load-admin-worker-shards":
+        return load_app_admin_worker_shards(body, store)
 
     if operation in ADMIN_TABLE_READS:
         return load_app_admin_rows(operation, body, store)

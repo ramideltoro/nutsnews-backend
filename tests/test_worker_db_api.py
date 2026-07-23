@@ -550,6 +550,52 @@ class GuardrailsStore(FakeStore):
         return super().fetch_one(query, params)
 
 
+class WorkerShardsStore(FakeStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.worker_rows = [
+            {
+                "id": 301,
+                "created_at": "2026-07-22T09:59:00Z",
+                "run_started_at": "2026-07-22T10:00:00Z",
+                "run_completed_at": "2026-07-22T10:02:00Z",
+                "run_source": "scheduled",
+                "request_id": "req-worker-shards",
+                "shard_index": 2,
+                "feeds_per_shard": 12,
+                "max_ai_reviews": 40,
+                "success": True,
+                "error_name": None,
+                "error_message": None,
+                "feed_count": 12,
+                "fetched_count": 100,
+                "candidate_count": 55,
+                "already_reviewed_count": 10,
+                "unreviewed_count": 45,
+                "eligible_for_ai_count": 30,
+                "ai_reviewed_count": 20,
+                "accepted_count": 9,
+                "rejected_count": 4,
+                "no_thumbnail_rejected_count": 1,
+                "locally_rejected_count": 3,
+                "image_hydration_lookup_count": 8,
+                "image_hydration_found_count": 6,
+                "review_save_ok": True,
+                "article_save_ok": True,
+                "ai_usage_save_ok": True,
+                "cost_protection_limit_reached": False,
+                "spike_warning_triggered": True,
+                "duration_ms": 120000,
+            }
+        ]
+
+    def fetch_all(self, query: str, params: tuple = ()) -> list[dict]:
+        self.fetches.append((query, params))
+        if "from public.worker_runs" in query:
+            return self.worker_rows[: params[0]]
+        return super().fetch_all(query, params)
+
+
 class WorkerDbApiTests(unittest.TestCase):
     def test_shadow_feed_read_uses_bounded_select(self) -> None:
         store = FakeStore()
@@ -1274,6 +1320,57 @@ class WorkerDbApiTests(unittest.TestCase):
         self.assertEqual(400, error.exception.status)
         self.assertEqual([], store.fetches)
         self.assertEqual([], store.executes)
+
+    def test_app_admin_worker_shards_returns_dashboard_snapshot(self) -> None:
+        store = WorkerShardsStore()
+
+        result = worker_db_api.handle_app_operation(
+            "load-admin-worker-shards",
+            {
+                "providerMode": "backend_postgres_primary",
+                "limit": 2,
+                "shardCount": 25,
+                "staleAfterMinutes": 180,
+                "slowRunMs": 15000,
+                "dailyWindowDays": 7,
+            },
+            store,
+        )
+
+        self.assertEqual(1, result["rowCount"])
+        self.assertIn("generatedAt", result)
+        row = result["rows"][0]
+        self.assertEqual(store.worker_rows, row["workerRunRows"])
+        self.assertEqual([], store.executes)
+
+        query, params = store.fetches[0]
+        self.assertIn("from public.worker_runs", query)
+        self.assertIn("id", query)
+        self.assertIn("created_at", query)
+        self.assertIn("run_started_at", query)
+        self.assertIn("run_completed_at", query)
+        self.assertIn("request_id", query)
+        self.assertIn("shard_index", query)
+        self.assertIn("feeds_per_shard", query)
+        self.assertIn("max_ai_reviews", query)
+        self.assertIn("success", query)
+        self.assertIn("error_name", query)
+        self.assertIn("error_message", query)
+        self.assertIn("already_reviewed_count", query)
+        self.assertIn("unreviewed_count", query)
+        self.assertIn("eligible_for_ai_count", query)
+        self.assertIn("no_thumbnail_rejected_count", query)
+        self.assertIn("locally_rejected_count", query)
+        self.assertIn("image_hydration_lookup_count", query)
+        self.assertIn("image_hydration_found_count", query)
+        self.assertIn("review_save_ok", query)
+        self.assertIn("article_save_ok", query)
+        self.assertIn("ai_usage_save_ok", query)
+        self.assertIn("cost_protection_limit_reached", query)
+        self.assertIn("spike_warning_triggered", query)
+        self.assertIn("duration_ms", query)
+        self.assertIn("order by run_started_at desc nulls last, id desc", query)
+        self.assertEqual((2,), params)
 
     def test_app_shadow_write_is_rejected_before_database_call(self) -> None:
         store = FakeStore()

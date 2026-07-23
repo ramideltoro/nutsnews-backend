@@ -57,7 +57,7 @@ REMOTE_COMMANDS: dict[str, str] = {
     "upgradable_count": "apt list --upgradable 2>/dev/null | tail -n +2 | wc -l",
     "failed_units": "systemctl --failed --no-legend --no-pager || true",
     "service_states": (
-        "for unit in ssh ufw fail2ban docker caddy postgresql alloy sysstat nutsnews-backup.timer nutsnews-rabbitmq; do "
+        "for unit in ssh ufw fail2ban docker caddy postgresql alloy sysstat nutsnews-backup.timer nutsnews-rabbitmq nutsnews-rabbitmq-canary.timer; do "
         "state=$(systemctl is-active \"$unit\" 2>/dev/null || true); "
         "if [ -z \"$state\" ]; then state=unavailable; fi; "
         "printf '%s=%s\\n' \"$unit\" \"$state\"; "
@@ -94,6 +94,13 @@ REMOTE_COMMANDS: dict[str, str] = {
         "cat /var/lib/nutsnews/rabbitmq-probes/last-smoke.json; "
         "elif sudo -n test -r /var/lib/nutsnews/rabbitmq-probes/last-smoke.json 2>/dev/null; then "
         "sudo -n cat /var/lib/nutsnews/rabbitmq-probes/last-smoke.json; "
+        "else echo not_configured; fi"
+    ),
+    "rabbitmq_canary_status": (
+        "if test -r /var/lib/nutsnews/rabbitmq-probes/last-canary.json; then "
+        "cat /var/lib/nutsnews/rabbitmq-probes/last-canary.json; "
+        "elif sudo -n test -r /var/lib/nutsnews/rabbitmq-probes/last-canary.json 2>/dev/null; then "
+        "sudo -n cat /var/lib/nutsnews/rabbitmq-probes/last-canary.json; "
         "else echo not_configured; fi"
     ),
     "cleanup_status": (
@@ -372,7 +379,7 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
     )
 
     services = parse_key_values(command_stdout(report, "service_states"))
-    for service in ("ssh", "ufw", "fail2ban", "docker", "caddy", "postgresql", "alloy", "sysstat", "nutsnews-backup.timer"):
+    for service in ("ssh", "ufw", "fail2ban", "docker", "caddy", "postgresql", "alloy", "sysstat", "nutsnews-backup.timer", "nutsnews-rabbitmq-canary.timer"):
         state = services.get(service, "unavailable")
         expected_missing = service in {"docker", "postgresql", "alloy", "nutsnews-backup.timer"}
         if state == "active":
@@ -488,6 +495,23 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
                 "name": "rabbitmq_smoke_last_run",
                 "status": "healthy" if smoke_status == "pass" else "critical" if smoke_status == "fail" else "unknown",
                 "summary": f"finished_at={rabbitmq_smoke.get('finished_at_utc', 'unknown')} status={smoke_status}",
+            }
+        )
+
+    rabbitmq_canary_raw = command_stdout(report, "rabbitmq_canary_status").strip()
+    if rabbitmq_canary_raw == "not_configured" or not rabbitmq_canary_raw:
+        checks.append({"name": "rabbitmq_canary_last_run", "status": "not_configured", "summary": "rabbitmq_canary_last_run=not_configured"})
+    else:
+        rabbitmq_canary = parse_json_object(rabbitmq_canary_raw)
+        canary_status = str(rabbitmq_canary.get("status") or "unknown")
+        checks.append(
+            {
+                "name": "rabbitmq_canary_last_run",
+                "status": "healthy" if canary_status == "pass" else "warning" if canary_status == "expected_failure" else "critical" if canary_status == "fail" else "unknown",
+                "summary": (
+                    f"finished_at={rabbitmq_canary.get('finished_at_utc', 'unknown')} "
+                    f"status={canary_status} failure_class={rabbitmq_canary.get('failure_class', 'none')}"
+                ),
             }
         )
 

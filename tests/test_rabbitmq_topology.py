@@ -62,8 +62,8 @@ class RabbitMQTopologyTests(unittest.TestCase):
         self.assertEqual(definition["source"]["contracts_commit"], "396d94dba76e3773ede50783463419501853b107")
         self.assertEqual(definition["queue_type"], "classic")
         self.assertEqual(len(definition["routes"]), 7)
-        self.assertEqual(len(queues), 35)
-        self.assertEqual(len(bindings), 35)
+        self.assertEqual(len(queues), 36)
+        self.assertEqual(len(bindings), 36)
         self.assertEqual(len(policies), 3)
 
         fetch_main = next(queue for queue in queues if queue["name"] == "nutsnews.worker.fetch.v1")
@@ -81,6 +81,11 @@ class RabbitMQTopologyTests(unittest.TestCase):
         fetch_dlq = next(queue for queue in queues if queue["name"] == "nutsnews.worker.fetch.v1.dlq")
         self.assertEqual(fetch_dlq["arguments"]["x-message-ttl"], 1209600000)
 
+        canary_queue = next(queue for queue in queues if queue["name"] == "worker.uplift.canary.v1")
+        self.assertEqual(canary_queue["kind"], "canary")
+        self.assertEqual(canary_queue["arguments"]["x-max-length"], 10)
+        self.assertEqual(canary_queue["arguments"]["x-overflow"], "reject-publish")
+
     def test_permission_matrix_allows_only_declared_route_access(self):
         definition = load_definition()
         users = topology.user_records(definition, credential_env())
@@ -97,6 +102,12 @@ class RabbitMQTopologyTests(unittest.TestCase):
         self.assertTrue(topology.regex_allows(scheduler["permissions"]["write"], "nutsnews.worker.v1"))
         self.assertFalse(topology.regex_allows(scheduler["permissions"]["write"], "nutsnews.worker.retry.v1"))
         self.assertFalse(topology.regex_allows(scheduler["permissions"]["read"], "nutsnews.worker.fetch.v1"))
+
+        canary = next(user for user in users if user["id"] == "monitoring_canary")
+        self.assertTrue(topology.regex_allows(canary["permissions"]["write"], "worker.uplift.canary.v1"))
+        self.assertTrue(topology.regex_allows(canary["permissions"]["read"], "worker.uplift.canary.v1"))
+        self.assertFalse(topology.regex_allows(canary["permissions"]["write"], "nutsnews.worker.v1"))
+        self.assertFalse(topology.regex_allows(canary["permissions"]["read"], "nutsnews.worker.fetch.v1"))
 
     def test_user_tag_normalization_accepts_api_string_or_list_shape(self):
         self.assertEqual(topology.normalize_tags("administrator,monitoring"), ["administrator", "monitoring"])

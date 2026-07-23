@@ -12,12 +12,15 @@ Backend-changing workflows are:
 - `Backend Backup Maintenance` when `action` is `backup`, `verify`, or `restore-drill`
 - `Backend Recovery` when `mode` is `apply` and the selected action is mutating
 - `Backend RabbitMQ Smoke` when `action` is `smoke`
+- `Backend RabbitMQ Canary` when `action` is `canary` or `drill`
 
 Read-only workflows such as `Backend Drift Check`, `Backend Health Report`, and
 `Backend Credential Readiness` do not mutate the host or providers. `Backend
 Recovery` is read-only only when `mode=check`, `action=diagnostics`, or
 `action=backup-status`. `Backend RabbitMQ Smoke` is read-only only when
-`action=status`.
+`action=status`. `Backend RabbitMQ Canary` is read-only only when
+`action=status`; scheduled and manual canary runs publish and ack a private
+probe message on the isolated canary route.
 
 ## Gate Model
 
@@ -58,7 +61,8 @@ after Ansible.
 For RabbitMQ, protected apply also runs credential readiness by name, writes
 `/var/lib/nutsnews/rabbitmq-probes/apply-metadata.json`, and the postcheck
 blocks on RabbitMQ health, network posture, public exposure, and
-`rabbitmq_drift`.
+`rabbitmq_drift`. It also installs `nutsnews-rabbitmq-canary.timer` and runs the
+private AMQP canary once after topology bootstrap.
 
 Rollback path:
 

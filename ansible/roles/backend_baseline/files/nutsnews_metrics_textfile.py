@@ -37,6 +37,7 @@ SERVICES = (
     "nutsnews-backup-verify.timer",
     "nutsnews-restore-drill.timer",
     "nutsnews-ops-dashboard-collect.timer",
+    "nutsnews-rabbitmq-canary.timer",
 )
 STATUS_VALUE = {
     "healthy": 1,

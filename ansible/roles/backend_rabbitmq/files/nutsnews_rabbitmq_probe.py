@@ -30,11 +30,43 @@ DEFAULT_TOPOLOGY_ENV = Path("/etc/nutsnews-rabbitmq/topology.env")
 DEFAULT_TOPOLOGY_DEFINITION = Path("/etc/nutsnews-rabbitmq/worker-uplift-topology.json")
 DEFAULT_METADATA_PATH = Path("/var/lib/nutsnews/rabbitmq-probes/apply-metadata.json")
 DEFAULT_SMOKE_REPORT_PATH = Path("/var/lib/nutsnews/rabbitmq-probes/last-smoke.json")
+DEFAULT_CANARY_REPORT_PATH = Path("/var/lib/nutsnews/rabbitmq-probes/last-canary.json")
+DEFAULT_CANARY_DRILL_REPORT_PATH = Path("/var/lib/nutsnews/rabbitmq-probes/last-canary-drill.json")
+DEFAULT_CANARY_METRICS_PATH = Path("/var/lib/nutsnews/metrics/rabbitmq-canary.prom")
 DEFAULT_TOPOLOGY_PATH = Path("/usr/local/sbin/nutsnews-rabbitmq-topology")
 DEFAULT_NETWORK_CHECK_PATH = Path("/usr/local/sbin/nutsnews-rabbitmq-network-check")
 DEFAULT_BACKUP_PATH = Path("/usr/local/sbin/nutsnews-backup")
 DEFAULT_RABBITMQ_SERVICE = "nutsnews-rabbitmq.service"
 DEFAULT_RABBITMQ_CONTAINER = "nutsnews-rabbitmq"
+DEFAULT_AMQP_HOST = "127.0.0.1"
+DEFAULT_AMQP_PORT = 5672
+CANARY_FAILURE_MODES = (
+    "none",
+    "broker-down",
+    "consumer-loss",
+    "disk-watermark",
+    "full-queue",
+    "grafana-connectivity-loss",
+    "invalid-credentials",
+    "network-interruption",
+    "poison-message",
+    "unroutable",
+)
+CANARY_DRILLS = (
+    "restart",
+    "consumer-loss",
+    "network-interruption",
+    "disk-watermark",
+    "invalid-credentials",
+    "unroutable",
+    "full-queue",
+    "poison-message",
+    "grafana-connectivity-loss",
+)
+
+
+class CanaryError(RuntimeError):
+    """A canary failure that is safe to report without secrets."""
 
 
 def utc_now() -> str:
@@ -110,6 +142,269 @@ def rabbitmq_credentials(env_path: Path) -> tuple[str, str, str]:
     if missing:
         raise SystemExit(f"missing required RabbitMQ environment names: {', '.join(missing)}")
     return username, password, vhost
+
+
+def canary_credentials(env_path: Path) -> tuple[str, str]:
+    values = parse_env(env_path)
+    username = values.get("RABBITMQ_MONITORING_USERNAME", "")
+    password = values.get("RABBITMQ_MONITORING_PASSWORD", "")
+    missing = [name for name, value in (("RABBITMQ_MONITORING_USERNAME", username), ("RABBITMQ_MONITORING_PASSWORD", password)) if not value]
+    if missing:
+        raise SystemExit(f"missing RabbitMQ canary credential names: {', '.join(missing)}")
+    return username, password
+
+
+def load_canary_definition(path: Path) -> dict[str, Any]:
+    definition = load_json_file(path)
+    if not definition:
+        raise SystemExit(f"RabbitMQ topology definition is missing or invalid: {path}")
+    canary = definition.get("canary")
+    exchanges = {exchange["id"]: exchange for exchange in definition.get("exchanges", []) if isinstance(exchange, dict) and "id" in exchange}
+    if not isinstance(canary, dict):
+        raise SystemExit("RabbitMQ topology definition missing canary route")
+    exchange = exchanges.get(str(canary.get("exchange_id") or ""))
+    queue = canary.get("queue")
+    if not isinstance(exchange, dict) or not isinstance(queue, dict):
+        raise SystemExit("RabbitMQ canary route must declare exchange and queue")
+    return {
+        "exchange": str(exchange["name"]),
+        "routing_key": str(canary["routing_key"]),
+        "queue": str(queue["name"]),
+    }
+
+
+def prom_label(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
+def prom_metric(name: str, value: int | float, labels: dict[str, str] | None = None) -> str:
+    if labels:
+        rendered = ",".join(f'{key}="{prom_label(raw)}"' for key, raw in sorted(labels.items()))
+        return f"{name}{{{rendered}}} {value}"
+    return f"{name} {value}"
+
+
+def timestamp_seconds(value: str) -> int:
+    return int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp())
+
+
+def write_json_report(path: Path, report: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.chmod(0o640)
+
+
+def write_canary_metrics(path: Path, report: dict[str, Any]) -> None:
+    status = str(report.get("status") or "unknown")
+    failure_mode = str(report.get("failure_mode") or "none")
+    failure_class = str(report.get("failure_class") or failure_mode)
+    success = 1 if status == "pass" else 0
+    expected_fixture = 1 if status == "expected_failure" else 0
+    cleanup_success = 1 if report.get("cleanup_status") in {None, "pass"} else 0
+    latency = report.get("latency_seconds")
+    age = report.get("message_age_seconds")
+    finished = str(report.get("finished_at_utc") or utc_now())
+    lines = [
+        "# HELP nutsnews_backend_rabbitmq_canary_success Whether the latest private AMQP canary completed successfully.",
+        "# TYPE nutsnews_backend_rabbitmq_canary_success gauge",
+        prom_metric("nutsnews_backend_rabbitmq_canary_success", success, {"failure_mode": failure_mode}),
+        "# HELP nutsnews_backend_rabbitmq_canary_status Latest private AMQP canary status as a low-cardinality label.",
+        "# TYPE nutsnews_backend_rabbitmq_canary_status gauge",
+    ]
+    for candidate in ("pass", "fail", "expected_failure"):
+        lines.append(prom_metric("nutsnews_backend_rabbitmq_canary_status", 1 if status == candidate else 0, {"status": candidate}))
+    lines.extend(
+        [
+            "# HELP nutsnews_backend_rabbitmq_canary_failure_fixture Whether the latest run deliberately emitted a failure fixture.",
+            "# TYPE nutsnews_backend_rabbitmq_canary_failure_fixture gauge",
+            prom_metric("nutsnews_backend_rabbitmq_canary_failure_fixture", expected_fixture, {"failure_class": failure_class}),
+            "# HELP nutsnews_backend_rabbitmq_canary_cleanup_success Whether canary cleanup completed.",
+            "# TYPE nutsnews_backend_rabbitmq_canary_cleanup_success gauge",
+            prom_metric("nutsnews_backend_rabbitmq_canary_cleanup_success", cleanup_success),
+            "# HELP nutsnews_backend_rabbitmq_canary_last_run_timestamp_seconds Unix timestamp of the latest canary run.",
+            "# TYPE nutsnews_backend_rabbitmq_canary_last_run_timestamp_seconds gauge",
+            prom_metric("nutsnews_backend_rabbitmq_canary_last_run_timestamp_seconds", timestamp_seconds(finished)),
+        ]
+    )
+    if isinstance(latency, (int, float)):
+        lines.extend(
+            [
+                "# HELP nutsnews_backend_rabbitmq_canary_latency_seconds End-to-end private AMQP publish-confirm to manual-ack latency.",
+                "# TYPE nutsnews_backend_rabbitmq_canary_latency_seconds gauge",
+                prom_metric("nutsnews_backend_rabbitmq_canary_latency_seconds", round(float(latency), 6), {"failure_mode": failure_mode}),
+            ]
+        )
+    if isinstance(age, (int, float)):
+        lines.extend(
+            [
+                "# HELP nutsnews_backend_rabbitmq_canary_message_age_seconds Age of the canary message at consume time.",
+                "# TYPE nutsnews_backend_rabbitmq_canary_message_age_seconds gauge",
+                prom_metric("nutsnews_backend_rabbitmq_canary_message_age_seconds", round(float(age), 6), {"failure_mode": failure_mode}),
+            ]
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    path.chmod(0o644)
+
+
+def import_pika():
+    try:
+        import pika  # type: ignore[import-not-found]
+    except ImportError as exc:  # pragma: no cover - depends on host package
+        raise CanaryError("python3-pika is required for the private AMQP canary") from exc
+    return pika
+
+
+def amqp_connection_parameters(args: argparse.Namespace, username: str, password: str, vhost: str):
+    pika = import_pika()
+    return pika.ConnectionParameters(
+        host=args.amqp_host,
+        port=args.amqp_port,
+        virtual_host=vhost,
+        credentials=pika.PlainCredentials(username, password),
+        heartbeat=30,
+        blocked_connection_timeout=args.timeout_seconds,
+        connection_attempts=1,
+        socket_timeout=args.timeout_seconds,
+    )
+
+
+def canary_payload(message_id: str) -> dict[str, Any]:
+    return {
+        "probe": "nutsnews-rabbitmq-canary",
+        "schema_version": 1,
+        "message_id": message_id,
+        "published_at_utc": utc_now(),
+    }
+
+
+def validate_canary_payload(body: bytes, expected_message_id: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CanaryError("canary payload was not valid JSON") from exc
+    if payload.get("probe") != "nutsnews-rabbitmq-canary":
+        raise CanaryError("canary payload had unexpected probe marker")
+    if payload.get("message_id") != expected_message_id:
+        raise CanaryError("canary payload message id mismatch")
+    return payload
+
+
+def drain_canary_queue(channel: Any, queue: str, max_messages: int = 25) -> int:
+    drained = 0
+    for _ in range(max_messages):
+        method, _properties, _body = channel.basic_get(queue=queue, auto_ack=False)
+        if method is None:
+            break
+        channel.basic_ack(method.delivery_tag)
+        drained += 1
+    return drained
+
+
+def amqp_canary_roundtrip(
+    args: argparse.Namespace,
+    *,
+    username: str,
+    password: str,
+    vhost: str,
+    route: dict[str, str],
+    failure_mode: str,
+) -> dict[str, Any]:
+    pika = import_pika()
+    connection = pika.BlockingConnection(amqp_connection_parameters(args, username, password, vhost))
+    channel = connection.channel()
+    channel.confirm_delivery()
+    cleanup_drained = 0
+    message_id = str(uuid.uuid4())
+    payload = canary_payload(message_id)
+    started = time.monotonic()
+    try:
+        if failure_mode == "unroutable":
+            try:
+                channel.basic_publish(
+                    exchange=route["exchange"],
+                    routing_key=f"{route['routing_key']}.unroutable",
+                    body=json.dumps(payload, sort_keys=True).encode("utf-8"),
+                    properties=pika.BasicProperties(content_type="application/json", delivery_mode=2, message_id=message_id),
+                    mandatory=True,
+                )
+            except (pika.exceptions.UnroutableError, pika.exceptions.NackError):
+                return {"expected_failure": True, "failure_class": "unroutable", "message_id": message_id, "latency_seconds": time.monotonic() - started}
+            raise CanaryError("unroutable canary publish unexpectedly routed")
+
+        body = json.dumps(payload, sort_keys=True).encode("utf-8")
+        if failure_mode == "poison-message":
+            body = b'{"probe":"nutsnews-rabbitmq-canary","poison":true}'
+
+        publish_count = 1
+        if failure_mode == "full-queue":
+            publish_count = 11
+
+        publish_error = ""
+        for index in range(publish_count):
+            current_id = message_id if index == 0 else str(uuid.uuid4())
+            try:
+                channel.basic_publish(
+                    exchange=route["exchange"],
+                    routing_key=route["routing_key"],
+                    body=body if index == 0 else json.dumps(canary_payload(current_id), sort_keys=True).encode("utf-8"),
+                    properties=pika.BasicProperties(content_type="application/json", delivery_mode=2, message_id=current_id),
+                    mandatory=True,
+                )
+            except (pika.exceptions.UnroutableError, pika.exceptions.NackError) as exc:
+                publish_error = exc.__class__.__name__
+                break
+
+        if failure_mode == "full-queue":
+            cleanup_drained = drain_canary_queue(channel, route["queue"])
+            if publish_error:
+                return {
+                    "expected_failure": True,
+                    "failure_class": "full-queue",
+                    "message_id": message_id,
+                    "cleanup_drained": cleanup_drained,
+                    "latency_seconds": time.monotonic() - started,
+                }
+            raise CanaryError("full-queue canary did not observe publisher backpressure")
+
+        if failure_mode == "consumer-loss":
+            cleanup_drained = drain_canary_queue(channel, route["queue"], max_messages=1)
+            return {
+                "expected_failure": True,
+                "failure_class": "consumer-loss",
+                "message_id": message_id,
+                "cleanup_drained": cleanup_drained,
+                "latency_seconds": time.monotonic() - started,
+            }
+
+        method, _properties, body = channel.basic_get(queue=route["queue"], auto_ack=False)
+        if method is None:
+            raise CanaryError("canary message was not available for manual ack")
+        if failure_mode == "poison-message":
+            try:
+                validate_canary_payload(body, message_id)
+            except CanaryError:
+                channel.basic_ack(method.delivery_tag)
+                return {"expected_failure": True, "failure_class": "poison-message", "message_id": message_id, "latency_seconds": time.monotonic() - started}
+            raise CanaryError("poison-message canary payload unexpectedly validated")
+
+        observed = validate_canary_payload(body, message_id)
+        channel.basic_ack(method.delivery_tag)
+        finished = time.monotonic()
+        published_at = datetime.fromisoformat(str(observed["published_at_utc"]).replace("Z", "+00:00")).timestamp()
+        return {
+            "expected_failure": False,
+            "failure_class": "none",
+            "message_id": message_id,
+            "latency_seconds": finished - started,
+            "message_age_seconds": max(0.0, time.time() - published_at),
+            "cleanup_drained": cleanup_drained,
+        }
+    finally:
+        try:
+            connection.close()
+        except Exception:
+            pass
 
 
 def require_probe_queue_name(queue: str) -> None:
@@ -777,9 +1072,142 @@ def action_verify(args: argparse.Namespace) -> int:
     return 0
 
 
+def canary_fixture_report(args: argparse.Namespace, failure_mode: str) -> dict[str, Any] | None:
+    if failure_mode not in {"disk-watermark", "grafana-connectivity-loss"}:
+        return None
+    return {
+        "status": "expected_failure",
+        "failure_class": failure_mode,
+        "failure_fixture_only": True,
+        "latency_seconds": 0.0,
+        "message_age_seconds": 0.0,
+        "summary": (
+            "disk watermark fixture emitted without changing broker disk state"
+            if failure_mode == "disk-watermark"
+            else "Grafana connectivity fixture emitted without blocking Alloy remote write"
+        ),
+    }
+
+
+def build_canary_report(args: argparse.Namespace, failure_mode: str) -> dict[str, Any]:
+    if failure_mode not in CANARY_FAILURE_MODES:
+        raise SystemExit(f"unsupported RabbitMQ canary failure mode: {failure_mode}")
+
+    started_at = utc_now()
+    report: dict[str, Any] = {
+        "schema_version": 1,
+        "action": "canary",
+        "status": "pass",
+        "failure_mode": failure_mode,
+        "failure_class": "none",
+        "started_at_utc": started_at,
+        "checks": [],
+        "secret_redaction": "AMQP credentials and message body are never emitted; only generated ids, low-cardinality status, and timings are reported",
+    }
+
+    fixture = canary_fixture_report(args, failure_mode)
+    if fixture is not None:
+        report.update(fixture)
+        report["checks"].append({"name": failure_mode, "status": "expected", "summary": fixture["summary"]})
+        report["cleanup_status"] = "pass"
+        report["finished_at_utc"] = utc_now()
+        return report
+
+    username, password = canary_credentials(args.credentials_env)
+    _admin_username, _admin_password, vhost = rabbitmq_credentials(args.env)
+    route = load_canary_definition(args.definition)
+    effective_password = password
+    effective_port = args.amqp_port
+    if failure_mode == "invalid-credentials":
+        effective_password = f"{password}-invalid"
+    elif failure_mode in {"broker-down", "network-interruption"}:
+        effective_port = args.failure_amqp_port
+
+    canary_args = argparse.Namespace(**vars(args))
+    canary_args.amqp_port = effective_port
+
+    try:
+        result = amqp_canary_roundtrip(
+            canary_args,
+            username=username,
+            password=effective_password,
+            vhost=vhost,
+            route=route,
+            failure_mode=failure_mode,
+        )
+        report["message_id"] = result.get("message_id")
+        report["latency_seconds"] = result.get("latency_seconds")
+        report["message_age_seconds"] = result.get("message_age_seconds")
+        report["cleanup_drained"] = result.get("cleanup_drained", 0)
+        if result.get("expected_failure"):
+            report["status"] = "expected_failure"
+            report["failure_class"] = str(result.get("failure_class") or failure_mode)
+            report["checks"].append({"name": failure_mode, "status": "expected", "summary": "deliberate canary failure fixture was observed"})
+        else:
+            report["checks"].append({"name": "amqp_roundtrip", "status": "healthy", "summary": "publish confirm, consume, validate, and manual ack succeeded"})
+    except Exception as exc:
+        if failure_mode in {"invalid-credentials", "broker-down", "network-interruption"}:
+            report["status"] = "expected_failure"
+            report["failure_class"] = failure_mode
+            report["checks"].append({"name": failure_mode, "status": "expected", "summary": exc.__class__.__name__})
+        else:
+            report["status"] = "fail"
+            report["failure_class"] = failure_mode
+            report["checks"].append({"name": "amqp_roundtrip", "status": "critical", "summary": str(exc)})
+
+    report["cleanup_status"] = "pass"
+    report["finished_at_utc"] = utc_now()
+    return report
+
+
+def action_canary(args: argparse.Namespace) -> int:
+    report = build_canary_report(args, args.failure_mode)
+    write_json_report(args.output or DEFAULT_CANARY_REPORT_PATH, report)
+    write_canary_metrics(args.metrics_output or DEFAULT_CANARY_METRICS_PATH, report)
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if report["status"] in {"pass", "expected_failure"} else 1
+
+
+def action_drill(args: argparse.Namespace) -> int:
+    if args.drill not in CANARY_DRILLS:
+        raise SystemExit(f"unsupported RabbitMQ canary drill: {args.drill}")
+
+    report: dict[str, Any] = {
+        "schema_version": 1,
+        "action": "drill",
+        "drill": args.drill,
+        "status": "pass",
+        "started_at_utc": utc_now(),
+        "steps": [],
+        "secret_redaction": "fixed drill actions only; credentials and payloads are not emitted",
+    }
+
+    if args.drill == "restart":
+        before = build_canary_report(args, "none")
+        report["steps"].append({"name": "before_restart_canary", "status": before["status"]})
+        restart = completed_process(["systemctl", "restart", args.restart_service], args.restart_timeout_seconds)
+        restart_ok = int(restart["returncode"]) == 0
+        report["steps"].append({"name": "restart", "status": "pass" if restart_ok else "fail", "returncode": restart["returncode"]})
+        after = build_canary_report(args, "none") if restart_ok else {"status": "not_run"}
+        report["steps"].append({"name": "after_restart_canary", "status": after["status"]})
+        if before["status"] != "pass" or not restart_ok or after["status"] != "pass":
+            report["status"] = "fail"
+    else:
+        canary = build_canary_report(args, args.drill)
+        report["steps"].append({"name": f"{args.drill}_fixture", "status": canary["status"], "failure_class": canary.get("failure_class")})
+        if canary["status"] != "expected_failure":
+            report["status"] = "fail"
+        write_canary_metrics(args.metrics_output or DEFAULT_CANARY_METRICS_PATH, canary)
+
+    report["finished_at_utc"] = utc_now()
+    write_json_report(args.output or DEFAULT_CANARY_DRILL_REPORT_PATH, report)
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if report["status"] == "pass" else 1
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("health", "publish", "verify", "smoke", "drift"))
+    parser.add_argument("action", choices=("health", "publish", "verify", "smoke", "drift", "canary", "drill"))
     parser.add_argument("--env", type=Path, required=True)
     parser.add_argument("--credentials-env", type=Path, default=DEFAULT_TOPOLOGY_ENV)
     parser.add_argument("--definition", type=Path, default=DEFAULT_TOPOLOGY_DEFINITION)
@@ -792,7 +1220,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--queue", default="worker.uplift.probe.durable")
     parser.add_argument("--state", type=Path, default=Path("/var/lib/nutsnews/rabbitmq/durable-probe.json"))
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--metrics-output", type=Path, default=DEFAULT_CANARY_METRICS_PATH)
     parser.add_argument("--management-url", default=DEFAULT_MANAGEMENT_URL)
+    parser.add_argument("--amqp-host", default=DEFAULT_AMQP_HOST)
+    parser.add_argument("--amqp-port", type=int, default=DEFAULT_AMQP_PORT)
+    parser.add_argument("--failure-amqp-port", type=int, default=9)
+    parser.add_argument("--failure-mode", choices=CANARY_FAILURE_MODES, default="none")
+    parser.add_argument("--drill", choices=CANARY_DRILLS, default="consumer-loss")
     parser.add_argument("--timeout-seconds", type=int, default=90)
     parser.add_argument("--restart-timeout-seconds", type=int, default=180)
     parser.add_argument("--retry-ttl-ms", type=int, default=1000)
@@ -810,6 +1244,10 @@ def main() -> int:
             return action_smoke(args)
         if args.action == "drift":
             return action_drift(args)
+        if args.action == "canary":
+            return action_canary(args)
+        if args.action == "drill":
+            return action_drill(args)
         if args.action == "publish":
             return action_publish(args)
         return action_verify(args)

@@ -280,7 +280,8 @@
         },
         "reports": {
           "drift": "sudo -n {{ backend_rabbitmq_probe_path }} drift --env {{ backend_rabbitmq_env_path }} --credentials-env {{ backend_rabbitmq_topology_env_path }} --definition {{ backend_rabbitmq_topology_definition_path }} --metadata {{ backend_rabbitmq_apply_metadata_path }}",
-          "smoke": "sudo -n {{ backend_rabbitmq_probe_path }} smoke --env {{ backend_rabbitmq_env_path }} --credentials-env {{ backend_rabbitmq_topology_env_path }} --output {{ backend_rabbitmq_smoke_report_path }}"
+          "smoke": "sudo -n {{ backend_rabbitmq_probe_path }} smoke --env {{ backend_rabbitmq_env_path }} --credentials-env {{ backend_rabbitmq_topology_env_path }} --output {{ backend_rabbitmq_smoke_report_path }}",
+          "canary": "sudo -n {{ backend_rabbitmq_probe_path }} canary --env {{ backend_rabbitmq_env_path }} --credentials-env {{ backend_rabbitmq_topology_env_path }} --definition {{ backend_rabbitmq_topology_definition_path }} --output {{ backend_rabbitmq_canary_report_path }} --metrics-output {{ backend_rabbitmq_canary_metrics_path }}"
         }
       }
   register: backend_rabbitmq_apply_metadata_file
@@ -315,6 +316,48 @@
   notify:
     - Reload systemd
     - Restart RabbitMQ
+
+- name: Install RabbitMQ private canary service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nutsnews-rabbitmq-canary.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      [Unit]
+      Description=NutsNews worker-uplift private RabbitMQ canary
+      Requires=nutsnews-rabbitmq.service
+      After=nutsnews-rabbitmq.service
+
+      [Service]
+      Type=oneshot
+      ExecStart={{ backend_rabbitmq_probe_path }} canary --env {{ backend_rabbitmq_env_path }} --credentials-env {{ backend_rabbitmq_topology_env_path }} --definition {{ backend_rabbitmq_topology_definition_path }} --output {{ backend_rabbitmq_canary_report_path }} --metrics-output {{ backend_rabbitmq_canary_metrics_path }}
+  register: backend_rabbitmq_canary_service_file
+  when: backend_rabbitmq_topology_enabled | bool
+  notify: Reload systemd
+
+- name: Install RabbitMQ private canary timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nutsnews-rabbitmq-canary.timer
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      [Unit]
+      Description=Run NutsNews worker-uplift private RabbitMQ canary
+
+      [Timer]
+      OnCalendar={{ backend_rabbitmq_canary_calendar }}
+      Persistent=true
+      Unit=nutsnews-rabbitmq-canary.service
+
+      [Install]
+      WantedBy=timers.target
+  register: backend_rabbitmq_canary_timer_file
+  when: backend_rabbitmq_topology_enabled | bool
+  notify: Reload systemd
 
 - name: Validate RabbitMQ Compose definition
   ansible.builtin.command:
@@ -439,6 +482,39 @@
     - backend_rabbitmq_runtime_manageable | bool
     - backend_rabbitmq_topology_enabled | bool
     - backend_rabbitmq_topology_transfer_probe_enabled | bool
+    - not ansible_check_mode
+
+- name: Run RabbitMQ private canary once after topology bootstrap
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_rabbitmq_probe_path }}"
+      - canary
+      - --env
+      - "{{ backend_rabbitmq_env_path }}"
+      - --credentials-env
+      - "{{ backend_rabbitmq_topology_env_path }}"
+      - --definition
+      - "{{ backend_rabbitmq_topology_definition_path }}"
+      - --output
+      - "{{ backend_rabbitmq_canary_report_path }}"
+      - --metrics-output
+      - "{{ backend_rabbitmq_canary_metrics_path }}"
+  register: backend_rabbitmq_canary_once
+  changed_when: false
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - backend_rabbitmq_topology_enabled | bool
+    - not ansible_check_mode
+
+- name: Ensure RabbitMQ private canary timer is enabled and started
+  ansible.builtin.systemd:
+    name: nutsnews-rabbitmq-canary.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - backend_rabbitmq_topology_enabled | bool
     - not ansible_check_mode
 
 - name: Track whether RabbitMQ durable probe should restart the container
@@ -597,6 +673,7 @@
       topology_drift: "{{ backend_rabbitmq_topology_drift.stdout | default('{}') }}"
       topology_permissions: "{{ backend_rabbitmq_topology_permissions.stdout | default('{}') }}"
       topology_transfer_probe: "{{ backend_rabbitmq_topology_transfer_probe.stdout | default('{}') }}"
+      canary: "{{ backend_rabbitmq_canary_once.stdout | default('{}') }}"
       durable_probe_ran: "{{ backend_rabbitmq_run_durable_probe_now | default(false) }}"
       health: "{{ backend_rabbitmq_health.stdout_lines | default([]) }}"
       network_security: "{{ backend_rabbitmq_network_security.stdout | default('{}') }}"

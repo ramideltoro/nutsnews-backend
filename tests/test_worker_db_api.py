@@ -649,6 +649,59 @@ class RssFeedHealthStore(FakeStore):
         return super().fetch_all(query, params)
 
 
+class FeedManagementStore(FakeStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.feed_quality_rows = [
+            {
+                "feed_id": 501,
+                "source": "Reuters",
+                "feed_url": "https://publisher.example.com/reuters/rss",
+                "is_active": True,
+                "is_positive_source": True,
+                "source_trust_tier": "trusted",
+                "publisher_allowlist_status": "allowlisted",
+                "recommended_trust_tier": "trusted",
+                "tier_recommendation_reason": "Consistently high quality.",
+                "feed_health_id": 401,
+                "last_checked_at": "2026-07-22T10:00:00Z",
+                "last_success_at": "2026-07-22T10:00:00Z",
+                "last_failure_at": "2026-07-21T10:00:00Z",
+                "last_status": 200,
+                "last_error_message": None,
+                "last_article_count": 12,
+                "last_image_count": 10,
+                "last_accepted_count": 6,
+                "last_rejected_count": 4,
+                "consecutive_failure_count": 0,
+                "total_fetch_count": 20,
+                "total_success_count": 18,
+                "total_failure_count": 2,
+                "total_article_count": 200,
+                "total_image_count": 150,
+                "total_accepted_count": 80,
+                "total_rejected_count": 40,
+                "unique_reviewed_url_count": 120,
+                "unique_published_url_count": 75,
+                "success_rate_pct": "90",
+                "thumbnail_rate_pct": "75",
+                "accepted_rate_pct": "66.67",
+                "failure_rate_pct": "10",
+                "duplicate_rate_pct": "5",
+                "quality_score": "91",
+                "quality_grade": "excellent",
+                "quality_reason": "Strong acceptance and image rates.",
+                "updated_at": "2026-07-22T10:01:00Z",
+            }
+        ]
+
+    def fetch_all(self, query: str, params: tuple = ()) -> list[dict]:
+        self.fetches.append((query, params))
+        if "from public.feed_quality_scores" in query:
+            return self.feed_quality_rows[: params[0]]
+        return super().fetch_all(query, params)
+
+
 class WorkerDbApiTests(unittest.TestCase):
     def test_shadow_feed_read_uses_bounded_select(self) -> None:
         store = FakeStore()
@@ -1477,6 +1530,68 @@ class WorkerDbApiTests(unittest.TestCase):
         self.assertIn("updated_at", health_query)
         self.assertIn("order by total_accepted_count desc nulls last, id desc", health_query)
         self.assertEqual((2,), health_params)
+
+    def test_app_admin_feed_management_returns_dashboard_snapshot(self) -> None:
+        store = FeedManagementStore()
+
+        result = worker_db_api.handle_app_operation(
+            "load-admin-feed-management",
+            {
+                "providerMode": "backend_postgres_primary",
+                "limit": 2,
+            },
+            store,
+        )
+
+        self.assertEqual(1, result["rowCount"])
+        self.assertIn("generatedAt", result)
+        row = result["rows"][0]
+        self.assertEqual(store.feed_quality_rows, row["feedQualityRows"])
+        self.assertEqual([], store.executes)
+
+        query, params = store.fetches[0]
+        self.assertIn("from public.feed_quality_scores", query)
+        self.assertIn("feed_id", query)
+        self.assertIn("source", query)
+        self.assertIn("feed_url", query)
+        self.assertIn("is_active", query)
+        self.assertIn("is_positive_source", query)
+        self.assertIn("source_trust_tier", query)
+        self.assertIn("publisher_allowlist_status", query)
+        self.assertIn("recommended_trust_tier", query)
+        self.assertIn("tier_recommendation_reason", query)
+        self.assertIn("feed_health_id", query)
+        self.assertIn("last_checked_at", query)
+        self.assertIn("last_success_at", query)
+        self.assertIn("last_failure_at", query)
+        self.assertIn("last_status", query)
+        self.assertIn("last_error_message", query)
+        self.assertIn("last_article_count", query)
+        self.assertIn("last_image_count", query)
+        self.assertIn("last_accepted_count", query)
+        self.assertIn("last_rejected_count", query)
+        self.assertIn("consecutive_failure_count", query)
+        self.assertIn("total_fetch_count", query)
+        self.assertIn("total_success_count", query)
+        self.assertIn("total_failure_count", query)
+        self.assertIn("total_article_count", query)
+        self.assertIn("total_image_count", query)
+        self.assertIn("total_accepted_count", query)
+        self.assertIn("total_rejected_count", query)
+        self.assertIn("unique_reviewed_url_count", query)
+        self.assertIn("unique_published_url_count", query)
+        self.assertIn("success_rate_pct", query)
+        self.assertIn("thumbnail_rate_pct", query)
+        self.assertIn("accepted_rate_pct", query)
+        self.assertIn("failure_rate_pct", query)
+        self.assertIn("duplicate_rate_pct", query)
+        self.assertIn("quality_score", query)
+        self.assertIn("quality_grade", query)
+        self.assertIn("quality_reason", query)
+        self.assertIn("updated_at", query)
+        self.assertIn("order by quality_score asc nulls first", query)
+        self.assertIn("total_accepted_count desc nulls last", query)
+        self.assertEqual((2,), params)
 
     def test_app_shadow_write_is_rejected_before_database_call(self) -> None:
         store = FakeStore()

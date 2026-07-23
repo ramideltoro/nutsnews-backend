@@ -329,6 +329,106 @@ def main() -> int:
     ):
         failures.append("load-admin-rss-feed-health")
 
+    feed_management_status, feed_management_payload = request_json(
+        base_url,
+        token,
+        "load-admin-feed-management",
+        {
+            "providerMode": "backend_postgres_primary",
+            "limit": 20,
+        },
+    )
+    feed_management_rows = (
+        feed_management_payload.get("rows")
+        if isinstance(feed_management_payload, dict)
+        else None
+    )
+    feed_management_snapshot = (
+        feed_management_rows[0]
+        if isinstance(feed_management_rows, list) and feed_management_rows
+        else {}
+    )
+    feed_quality_rows = (
+        feed_management_snapshot.get("feedQualityRows")
+        if isinstance(feed_management_snapshot, dict)
+        else None
+    )
+    missing_feed_management_fields = sorted(
+        field
+        for field in {"feedQualityRows"}
+        if not isinstance(feed_management_snapshot, dict) or field not in feed_management_snapshot
+    )
+    first_feed_quality = (
+        feed_quality_rows[0]
+        if isinstance(feed_quality_rows, list) and feed_quality_rows
+        else {}
+    )
+    missing_feed_quality_fields = sorted(
+        field
+        for field in {
+            "feed_id",
+            "source",
+            "feed_url",
+            "is_active",
+            "is_positive_source",
+            "source_trust_tier",
+            "publisher_allowlist_status",
+            "recommended_trust_tier",
+            "tier_recommendation_reason",
+            "feed_health_id",
+            "last_checked_at",
+            "last_success_at",
+            "last_failure_at",
+            "last_status",
+            "last_error_message",
+            "last_article_count",
+            "last_image_count",
+            "last_accepted_count",
+            "last_rejected_count",
+            "consecutive_failure_count",
+            "total_fetch_count",
+            "total_success_count",
+            "total_failure_count",
+            "total_article_count",
+            "total_image_count",
+            "total_accepted_count",
+            "total_rejected_count",
+            "unique_reviewed_url_count",
+            "unique_published_url_count",
+            "success_rate_pct",
+            "thumbnail_rate_pct",
+            "accepted_rate_pct",
+            "failure_rate_pct",
+            "duplicate_rate_pct",
+            "quality_score",
+            "quality_grade",
+            "quality_reason",
+            "updated_at",
+        }
+        if isinstance(first_feed_quality, dict)
+        and first_feed_quality
+        and field not in first_feed_quality
+    )
+    checks.append(
+        {
+            "operation": "load-admin-feed-management",
+            "status": feed_management_status,
+            "row_count": len(feed_management_rows) if isinstance(feed_management_rows, list) else None,
+            "feed_quality_count": len(feed_quality_rows) if isinstance(feed_quality_rows, list) else None,
+            "missing_fields": missing_feed_management_fields,
+            "missing_feed_quality_fields": missing_feed_quality_fields,
+        }
+    )
+    if (
+        feed_management_status != 200
+        or not isinstance(feed_management_rows, list)
+        or not feed_management_rows
+        or not isinstance(feed_quality_rows, list)
+        or missing_feed_management_fields
+        or missing_feed_quality_fields
+    ):
+        failures.append("load-admin-feed-management")
+
     article_reviews_status, article_reviews_payload = request_json(
         base_url,
         token,

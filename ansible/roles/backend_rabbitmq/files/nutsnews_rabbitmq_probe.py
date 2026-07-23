@@ -490,21 +490,30 @@ def action_smoke(args: argparse.Namespace) -> int:
         monitor_username = topology_env.get("RABBITMQ_MONITORING_USERNAME", "")
         monitor_password = topology_env.get("RABBITMQ_MONITORING_PASSWORD", "")
         if monitor_username and monitor_password:
-            denied = request_json(
-                base_url=args.management_url,
-                username=monitor_username,
-                password=monitor_password,
-                method="POST",
-                path=api_path("api", "exchanges", vhost, main_exchange, "publish"),
-                payload={
-                    "properties": {"delivery_mode": 2},
-                    "routing_key": "main",
-                    "payload": "{}",
-                    "payload_encoding": "string",
-                },
-                ignored_statuses=(401, 403),
-            )
-            add_check(report, "permission_denial", "healthy" if denied is None else "critical", "monitoring identity cannot publish to probe exchange")
+            denied = False
+            denial_summary = "monitoring identity cannot publish to probe exchange"
+            try:
+                denied_result = request_json(
+                    base_url=args.management_url,
+                    username=monitor_username,
+                    password=monitor_password,
+                    method="POST",
+                    path=api_path("api", "exchanges", vhost, main_exchange, "publish"),
+                    payload={
+                        "properties": {"delivery_mode": 2},
+                        "routing_key": "main",
+                        "payload": "{}",
+                        "payload_encoding": "string",
+                    },
+                    ignored_statuses=(401, 403),
+                )
+                denied = denied_result is None
+            except RuntimeError as exc:
+                message = str(exc)
+                denied = "HTTP 400" in message and "ACCESS_REFUSED" in message
+                if not denied:
+                    denial_summary = f"monitoring publish denial check failed: {message}"
+            add_check(report, "permission_denial", "healthy" if denied else "critical", denial_summary)
         else:
             add_check(report, "permission_denial", "critical", "monitoring credentials were not available by name")
     except Exception as exc:

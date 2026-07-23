@@ -126,6 +126,14 @@ class RabbitMQProbeTests(unittest.TestCase):
                 return {"message_id": published_ids[2]}
             return None
 
+        def fake_request_json(**kwargs):
+            if kwargs.get("username") == "monitor" and kwargs.get("method") == "POST":
+                raise RuntimeError(
+                    "RabbitMQ management API POST /api/exchanges/nutsnews-worker-uplift/probe/publish "
+                    "returned HTTP 400: {\"error\":\"bad_request\",\"reason\":\"403 ACCESS_REFUSED - write access refused\"}"
+                )
+            return None
+
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
             env_path = temp / "rabbitmq.env"
@@ -159,7 +167,7 @@ class RabbitMQProbeTests(unittest.TestCase):
                 patch.object(probe, "get_message", side_effect=fake_get),
                 patch.object(probe, "wait_for_message", return_value=True),
                 patch.object(probe, "completed_process", return_value={"returncode": 0, "stdout": "", "stderr": ""}),
-                patch.object(probe, "request_json", return_value=None),
+                patch.object(probe, "request_json", side_effect=fake_request_json),
                 redirect_stdout(io.StringIO()),
             ):
                 self.assertEqual(probe.action_smoke(args), 0)

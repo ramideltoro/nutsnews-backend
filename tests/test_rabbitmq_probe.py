@@ -200,7 +200,10 @@ class RabbitMQProbeTests(unittest.TestCase):
             def fake_completed(command, _timeout):
                 text = " ".join(str(part) for part in command)
                 if command[:2] == ["docker", "inspect"]:
-                    return {"returncode": 0, "stdout": "rabbitmq@sha256:abc rabbitmq@sha256:abc\n", "stderr": ""}
+                    self.assertEqual(command[-1], "{{.Config.Image}} {{.Image}}")
+                    return {"returncode": 0, "stdout": "rabbitmq@sha256:abc sha256:image-id\n", "stderr": ""}
+                if command[:3] == ["docker", "image", "inspect"]:
+                    return {"returncode": 0, "stdout": "", "stderr": "image inspect should not be needed"}
                 if "nutsnews-rabbitmq-topology" in text:
                     return {"returncode": 0, "stdout": '{"status":"pass","drift":[]}\n', "stderr": ""}
                 if "nutsnews-rabbitmq-network-check" in text:

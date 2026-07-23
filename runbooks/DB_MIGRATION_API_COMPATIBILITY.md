@@ -227,6 +227,15 @@ before/after values, and metadata. The operation must use backend PostgreSQL
 least-privilege read access and must not require Supabase service-role access in
 backend-primary mode.
 
+Runtime feature flag admin views use the read-only app operation
+`load-admin-runtime-feature-flags`. A tokened POST to
+`https://backend.nutsnews.com/api/app/db/load-admin-runtime-feature-flags` with
+`providerMode=backend_postgres_primary` must return bounded rows from
+`public.runtime_feature_flags` containing the flag key, enabled state, creation
+timestamp, and update timestamp. The operation must use backend PostgreSQL
+least-privilege read access and must not require Supabase service-role access in
+backend-primary mode.
+
 ## Authorization Rules
 
 - Browser code must not receive database credentials or service-role style

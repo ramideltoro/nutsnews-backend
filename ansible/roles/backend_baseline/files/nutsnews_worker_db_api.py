@@ -61,6 +61,7 @@ APP_READ_OPERATIONS = {
     "load-admin-rss-feed-health",
     "load-admin-feed-management",
     "load-admin-audit-log",
+    "load-admin-runtime-feature-flags",
     "load-admin-quota-usage-events",
     "load-admin-article-engagement-source-category-summary",
     "load-admin-article-engagement-article-summary",
@@ -480,6 +481,13 @@ ADMIN_AUDIT_LOG_EVENT_COLUMNS = (
     "before_values",
     "after_values",
     "metadata",
+)
+
+ADMIN_RUNTIME_FEATURE_FLAG_COLUMNS = (
+    "key",
+    "enabled",
+    "created_at",
+    "updated_at",
 )
 
 ADMIN_TABLE_READS = {
@@ -1320,6 +1328,10 @@ def admin_audit_log_event_columns() -> str:
     return ", ".join(ADMIN_AUDIT_LOG_EVENT_COLUMNS)
 
 
+def admin_runtime_feature_flag_columns() -> str:
+    return ", ".join(ADMIN_RUNTIME_FEATURE_FLAG_COLUMNS)
+
+
 def category_clause(body: dict[str, Any], params: list[Any]) -> str:
     category = optional_string(body, "category", maximum=96)
     if category is None or category.lower() == "all":
@@ -2137,6 +2149,33 @@ def load_app_admin_audit_log(body: dict[str, Any], store: PostgresStore) -> dict
     }
 
 
+def load_app_admin_runtime_feature_flags(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
+    limit = bounded_int(
+        body,
+        "limit",
+        default=100,
+        minimum=1,
+        maximum=min(store.max_limit, 100),
+    )
+    offset = bounded_int(body, "offset", default=0, minimum=0, maximum=1_000_000)
+
+    rows = store.fetch_all(
+        f"""
+        select {admin_runtime_feature_flag_columns()}
+        from public.runtime_feature_flags
+        order by key asc
+        limit %s offset %s
+        """,
+        (limit, offset),
+    )
+
+    return {
+        "rows": rows,
+        "rowCount": len(rows),
+        "generatedAt": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
+
+
 def load_app_admin_production_readiness(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
     recent_article_limit = bounded_int(
         body,
@@ -2434,6 +2473,9 @@ def handle_app_operation(operation: str, body: dict[str, Any], store: PostgresSt
 
     if operation == "load-admin-audit-log":
         return load_app_admin_audit_log(body, store)
+
+    if operation == "load-admin-runtime-feature-flags":
+        return load_app_admin_runtime_feature_flags(body, store)
 
     if operation in ADMIN_TABLE_READS:
         return load_app_admin_rows(operation, body, store)

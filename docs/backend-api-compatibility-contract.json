@@ -75,7 +75,8 @@
         "load-admin-worker-shards",
         "load-admin-rss-feed-health",
         "load-admin-feed-management",
-        "load-admin-audit-log"
+        "load-admin-audit-log",
+        "load-admin-runtime-feature-flags"
       ],
       "validated_by": "backend_postgres_smoke_tests admin"
     },
@@ -178,6 +179,7 @@
         "load-admin-rss-feed-health snapshot row 1",
         "load-admin-feed-management snapshot row 1",
         "load-admin-audit-log snapshot row 1",
+        "load-admin-runtime-feature-flags rows",
         "backend_postgres_shadow write rejected 409",
         "backend_postgres_primary guarded write skipped when writes are enabled"
       ],

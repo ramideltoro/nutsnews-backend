@@ -501,6 +501,53 @@ def main() -> int:
     ):
         failures.append("load-admin-audit-log")
 
+    feature_flags_status, feature_flags_payload = request_json(
+        base_url,
+        token,
+        "load-admin-runtime-feature-flags",
+        {
+            "providerMode": "backend_postgres_primary",
+            "limit": 20,
+        },
+    )
+    feature_flag_rows = (
+        feature_flags_payload.get("rows")
+        if isinstance(feature_flags_payload, dict)
+        else None
+    )
+    first_feature_flag = (
+        feature_flag_rows[0]
+        if isinstance(feature_flag_rows, list) and feature_flag_rows
+        else {}
+    )
+    missing_feature_flag_fields = sorted(
+        field
+        for field in {
+            "key",
+            "enabled",
+            "created_at",
+            "updated_at",
+        }
+        if isinstance(first_feature_flag, dict)
+        and first_feature_flag
+        and field not in first_feature_flag
+    )
+    checks.append(
+        {
+            "operation": "load-admin-runtime-feature-flags",
+            "status": feature_flags_status,
+            "row_count": len(feature_flag_rows) if isinstance(feature_flag_rows, list) else None,
+            "missing_fields": missing_feature_flag_fields,
+        }
+    )
+    if (
+        feature_flags_status != 200
+        or not isinstance(feature_flag_rows, list)
+        or not feature_flag_rows
+        or missing_feature_flag_fields
+    ):
+        failures.append("load-admin-runtime-feature-flags")
+
     article_reviews_status, article_reviews_payload = request_json(
         base_url,
         token,

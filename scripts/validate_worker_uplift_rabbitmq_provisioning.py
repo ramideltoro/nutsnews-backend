@@ -194,8 +194,8 @@ def main() -> int:
         errors.append("RabbitMQ probe must read credentials from env file")
     if "argparse" not in probe or "Authorization" not in probe:
         errors.append("RabbitMQ probe must use local management API without password args")
-    if "purge_probe_queue" not in probe:
-        errors.append("RabbitMQ probe publish must purge its own stale probe queue before publishing")
+    if "delete_probe_queue_if_present" not in probe or "ignored_statuses=(404,)" not in probe:
+        errors.append("RabbitMQ probe publish must delete its own stale probe queue before declaring and publishing")
 
     if errors:
         for error in errors:

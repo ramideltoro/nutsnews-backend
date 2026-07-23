@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import sys
 import time
 import uuid
 import urllib.error
@@ -21,6 +22,7 @@ from typing import Any
 
 
 DEFAULT_MANAGEMENT_URL = "http://127.0.0.1:15672"
+PROBE_QUEUE_PREFIX = "worker.uplift.probe."
 
 
 def utc_now() -> str:
@@ -51,6 +53,7 @@ def request_json(
     path: str,
     payload: dict[str, Any] | None = None,
     timeout: int = 10,
+    ignored_statuses: tuple[int, ...] = (),
 ) -> Any:
     body = None
     headers = {"Accept": "application/json"}
@@ -65,11 +68,25 @@ def request_json(
         headers=headers,
         method=method,
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        data = response.read()
-        if not data:
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            data = response.read()
+            if not data:
+                return None
+            return json.loads(data.decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            error_body = exc.read().decode("utf-8", errors="replace").strip()
+        finally:
+            exc.close()
+        if exc.code in ignored_statuses:
             return None
-        return json.loads(data.decode("utf-8"))
+        if len(error_body) > 500:
+            error_body = f"{error_body[:500]}..."
+        detail = f"RabbitMQ management API {method} {path} returned HTTP {exc.code}"
+        if error_body:
+            detail = f"{detail}: {error_body}"
+        raise RuntimeError(detail) from exc
 
 
 def rabbitmq_credentials(env_path: Path) -> tuple[str, str, str]:
@@ -81,6 +98,11 @@ def rabbitmq_credentials(env_path: Path) -> tuple[str, str, str]:
     if missing:
         raise SystemExit(f"missing required RabbitMQ environment names: {', '.join(missing)}")
     return username, password, vhost
+
+
+def require_probe_queue_name(queue: str) -> None:
+    if not queue.startswith(PROBE_QUEUE_PREFIX):
+        raise SystemExit(f"refusing to mutate non-probe RabbitMQ queue: {queue}")
 
 
 def wait_for_management(args: argparse.Namespace, username: str, password: str) -> dict[str, Any]:
@@ -124,13 +146,14 @@ def declare_probe_queue(args: argparse.Namespace, username: str, password: str, 
     )
 
 
-def purge_probe_queue(args: argparse.Namespace, username: str, password: str, vhost: str) -> None:
+def delete_probe_queue_if_present(args: argparse.Namespace, username: str, password: str, vhost: str) -> None:
     request_json(
         base_url=args.management_url,
         username=username,
         password=password,
         method="DELETE",
-        path=api_path("api", "queues", vhost, args.queue, "contents"),
+        path=api_path("api", "queues", vhost, args.queue),
+        ignored_statuses=(404,),
     )
 
 
@@ -152,10 +175,11 @@ def action_health(args: argparse.Namespace) -> int:
 
 
 def action_publish(args: argparse.Namespace) -> int:
+    require_probe_queue_name(args.queue)
     username, password, vhost = rabbitmq_credentials(args.env)
     wait_for_management(args, username, password)
+    delete_probe_queue_if_present(args, username, password, vhost)
     declare_probe_queue(args, username, password, vhost)
-    purge_probe_queue(args, username, password, vhost)
     message_id = str(uuid.uuid4())
     payload = {
         "probe": "nutsnews-rabbitmq-durable-restart",
@@ -195,6 +219,7 @@ def action_publish(args: argparse.Namespace) -> int:
 
 
 def action_verify(args: argparse.Namespace) -> int:
+    require_probe_queue_name(args.queue)
     username, password, vhost = rabbitmq_credentials(args.env)
     wait_for_management(args, username, password)
     state = json.loads(args.state.read_text(encoding="utf-8"))
@@ -223,6 +248,7 @@ def action_verify(args: argparse.Namespace) -> int:
             password=password,
             method="DELETE",
             path=api_path("api", "queues", vhost, args.queue),
+            ignored_statuses=(404,),
         )
     print(json.dumps({"status": "verified", "queue": args.queue, "message_id": state.get("message_id")}, sort_keys=True))
     return 0
@@ -241,12 +267,16 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
-    args = parse_args()
-    if args.action == "health":
-        return action_health(args)
-    if args.action == "publish":
-        return action_publish(args)
-    return action_verify(args)
+    try:
+        args = parse_args()
+        if args.action == "health":
+            return action_health(args)
+        if args.action == "publish":
+            return action_publish(args)
+        return action_verify(args)
+    except (RuntimeError, urllib.error.URLError, json.JSONDecodeError, OSError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

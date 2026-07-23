@@ -344,6 +344,39 @@ class RabbitMQProbeTests(unittest.TestCase):
             self.assertEqual(report["failure_class"], "disk-watermark")
             self.assertIn('failure_class="disk-watermark"', metrics)
 
+    def test_restart_drill_retries_post_restart_canary_readiness(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            args = SimpleNamespace(
+                drill="restart",
+                output=temp / "last-canary-drill.json",
+                restart_service="nutsnews-rabbitmq.service",
+                restart_timeout_seconds=1,
+                restart_readiness_attempts=3,
+                restart_readiness_interval_seconds=0,
+            )
+            with (
+                patch.object(
+                    probe,
+                    "build_canary_report",
+                    side_effect=[
+                        {"status": "pass"},
+                        {"status": "fail", "failure_class": "none"},
+                        {"status": "pass", "failure_class": "none"},
+                    ],
+                ),
+                patch.object(probe, "completed_process", return_value={"returncode": 0, "stdout": "", "stderr": ""}),
+                patch.object(probe.time, "sleep"),
+                redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(probe.action_drill(args), 0)
+
+            report = json.loads(args.output.read_text(encoding="utf-8"))
+            after = next(step for step in report["steps"] if step["name"] == "after_restart_canary")
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(after["status"], "pass")
+            self.assertEqual([attempt["status"] for attempt in after["attempts"]], ["fail", "pass"])
+
 
 if __name__ == "__main__":
     unittest.main()

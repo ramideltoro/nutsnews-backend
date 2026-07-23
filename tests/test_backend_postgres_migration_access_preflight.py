@@ -8,6 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/backend_postgres_migration_access_preflight.py"
+PREFLIGHT_WORKFLOW = ROOT / ".github/workflows/backend-postgres-migration-access-preflight.yml"
 
 
 def load_module():
@@ -34,12 +35,36 @@ class BackendPostgresMigrationAccessPreflightTests(unittest.TestCase):
         self.assertIn("worker_uplift_final", module.WORKER_UPLIFT_SCHEMAS)
         self.assertIn("worker_uplift_views", module.WORKER_UPLIFT_SCHEMAS)
 
+    def test_worker_uplift_stage_role_parser_requires_every_stage(self):
+        module = load_module()
+        values = [
+            f"{stage}:configured_{stage}_role"
+            for stage, _schema in module.WORKER_UPLIFT_STAGE_SCHEMAS
+        ]
+        roles = module.parse_worker_uplift_stage_roles(values)
+        self.assertEqual(
+            ("scheduler", "configured_scheduler_role", "worker_uplift_scheduler"),
+            roles[0],
+        )
+        with self.assertRaises(SystemExit):
+            module.parse_worker_uplift_stage_roles(values[:-1])
+        with self.assertRaises(SystemExit):
+            module.parse_worker_uplift_stage_roles([*values, values[0]])
+        with self.assertRaises(SystemExit):
+            module.parse_worker_uplift_stage_roles([*values[:-1], "publication:not-safe-role"])
+
     def test_worker_uplift_role_discovery_uses_explicit_acl_grants(self):
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("aclexplode(coalesce(n.nspacl", source)
         self.assertIn("aclexplode(coalesce(c.relacl", source)
         self.assertIn("not r.rolsuper", source)
         self.assertIn("excluded.role_name = r.rolname", source)
+
+    def test_workflow_passes_configured_worker_uplift_stage_roles(self):
+        workflow = PREFLIGHT_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_USERNAME", workflow)
+        self.assertIn("--worker-uplift-stage-role", workflow)
+        self.assertIn("scheduler fetcher canonicalizer enrichment approval translation persistence publication", workflow)
 
 
 if __name__ == "__main__":

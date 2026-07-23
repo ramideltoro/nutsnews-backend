@@ -384,6 +384,57 @@ class AiUsageStore(FakeStore):
         return super().fetch_all(query, params)
 
 
+class LocalAiStore(FakeStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.usage_rows = [
+            {
+                "id": 201,
+                "run_started_at": "2026-07-22T10:00:00Z",
+                "run_completed_at": "2026-07-22T10:02:00Z",
+                "run_source": "scheduled",
+                "shard_index": 3,
+                "ai_provider": "local",
+                "local_ai_model": "qwen2.5:3b",
+                "local_ai_call_count": 9,
+                "local_ai_prompt_tokens": 1500,
+                "local_ai_completion_tokens": 600,
+                "local_ai_total_tokens": 2100,
+                "local_ai_accepted_count": 6,
+                "local_ai_rejected_count": 3,
+                "local_ai_duration_ms": 45000,
+                "openai_call_count": 1,
+                "ai_reviewed_count": 10,
+                "duration_ms": 135000,
+            }
+        ]
+        self.review_rows = [
+            {
+                "id": 44,
+                "reviewed_at": "2026-07-22T10:03:00Z",
+                "original_url": "https://publisher.example.com/local-ai-review",
+                "source": "Reuters",
+                "title": "Local AI review row",
+                "decision": "accept",
+                "category": "World",
+                "positivity_score": 8,
+                "summary": "Local model accepted this story.",
+                "reason": "Constructive outcome.",
+                "ai_provider": "local",
+                "ai_model": "qwen2.5:3b",
+                "review_duration_ms": 1800,
+            }
+        ]
+
+    def fetch_all(self, query: str, params: tuple = ()) -> list[dict]:
+        self.fetches.append((query, params))
+        if "from public.ai_usage_runs" in query:
+            return self.usage_rows[: params[2]]
+        if "from public.article_ai_reviews" in query:
+            return self.review_rows[: params[1]]
+        return super().fetch_all(query, params)
+
+
 class WorkerDbApiTests(unittest.TestCase):
     def test_shadow_feed_read_uses_bounded_select(self) -> None:
         store = FakeStore()
@@ -944,6 +995,47 @@ class WorkerDbApiTests(unittest.TestCase):
         self.assertIn("where run_started_at >= %s::timestamptz", query)
         self.assertIn("order by run_started_at desc nulls last, id desc", query)
         self.assertEqual((since, 2), params)
+
+    def test_app_admin_local_ai_returns_dashboard_snapshot(self) -> None:
+        store = LocalAiStore()
+        since = "2026-06-22T00:00:00.000Z"
+
+        result = worker_db_api.handle_app_operation(
+            "load-admin-local-ai",
+            {
+                "providerMode": "backend_postgres_primary",
+                "since": since,
+                "runLimit": 2,
+                "reviewLimit": 1,
+            },
+            store,
+        )
+
+        self.assertEqual(1, result["rowCount"])
+        self.assertIn("generatedAt", result)
+        row = result["rows"][0]
+        self.assertEqual(store.usage_rows, row["usageRunRows"])
+        self.assertEqual(store.review_rows, row["recentReviewRows"])
+        self.assertEqual([], store.executes)
+
+        run_query, run_params = store.fetches[0]
+        self.assertIn("from public.ai_usage_runs", run_query)
+        self.assertIn("ai_provider", run_query)
+        self.assertIn("local_ai_model", run_query)
+        self.assertIn("local_ai_duration_ms", run_query)
+        self.assertIn("openai_call_count", run_query)
+        self.assertIn("(ai_provider = %s or local_ai_call_count > 0)", run_query)
+        self.assertIn("run_started_at >= %s::timestamptz", run_query)
+        self.assertIn("order by run_started_at desc nulls last, id desc", run_query)
+        self.assertEqual(("local", since, 2), run_params)
+
+        review_query, review_params = store.fetches[1]
+        self.assertIn("from public.article_ai_reviews", review_query)
+        self.assertIn("original_url", review_query)
+        self.assertIn("review_duration_ms", review_query)
+        self.assertIn("where ai_provider = %s", review_query)
+        self.assertIn("order by reviewed_at desc nulls last, id desc", review_query)
+        self.assertEqual(("local", 1), review_params)
 
     def test_app_shadow_write_is_rejected_before_database_call(self) -> None:
         store = FakeStore()

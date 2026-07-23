@@ -314,6 +314,107 @@ def main() -> int:
     ):
         failures.append("load-admin-ai-usage")
 
+    local_ai_status, local_ai_payload = request_json(
+        base_url,
+        token,
+        "load-admin-local-ai",
+        {
+            "providerMode": "backend_postgres_primary",
+            "since": ai_usage_since,
+            "runLimit": 20,
+            "reviewLimit": 10,
+        },
+    )
+    local_ai_rows = (
+        local_ai_payload.get("rows")
+        if isinstance(local_ai_payload, dict)
+        else None
+    )
+    local_ai_snapshot = (
+        local_ai_rows[0]
+        if isinstance(local_ai_rows, list) and local_ai_rows
+        else {}
+    )
+    local_ai_usage_run_rows = (
+        local_ai_snapshot.get("usageRunRows")
+        if isinstance(local_ai_snapshot, dict)
+        else None
+    )
+    local_ai_review_rows = (
+        local_ai_snapshot.get("recentReviewRows")
+        if isinstance(local_ai_snapshot, dict)
+        else None
+    )
+    missing_local_ai_fields = sorted(
+        field
+        for field in {"usageRunRows", "recentReviewRows"}
+        if not isinstance(local_ai_snapshot, dict) or field not in local_ai_snapshot
+    )
+    first_local_ai_run = (
+        local_ai_usage_run_rows[0]
+        if isinstance(local_ai_usage_run_rows, list) and local_ai_usage_run_rows
+        else {}
+    )
+    missing_local_ai_run_fields = sorted(
+        field
+        for field in {
+            "run_started_at",
+            "ai_provider",
+            "local_ai_model",
+            "local_ai_call_count",
+            "local_ai_total_tokens",
+            "local_ai_duration_ms",
+            "openai_call_count",
+            "ai_reviewed_count",
+            "duration_ms",
+        }
+        if isinstance(first_local_ai_run, dict)
+        and first_local_ai_run
+        and field not in first_local_ai_run
+    )
+    first_local_ai_review = (
+        local_ai_review_rows[0]
+        if isinstance(local_ai_review_rows, list) and local_ai_review_rows
+        else {}
+    )
+    missing_local_ai_review_fields = sorted(
+        field
+        for field in {
+            "reviewed_at",
+            "original_url",
+            "decision",
+            "ai_provider",
+            "ai_model",
+            "review_duration_ms",
+        }
+        if isinstance(first_local_ai_review, dict)
+        and first_local_ai_review
+        and field not in first_local_ai_review
+    )
+    checks.append(
+        {
+            "operation": "load-admin-local-ai",
+            "status": local_ai_status,
+            "row_count": len(local_ai_rows) if isinstance(local_ai_rows, list) else None,
+            "usage_run_count": len(local_ai_usage_run_rows) if isinstance(local_ai_usage_run_rows, list) else None,
+            "recent_review_count": len(local_ai_review_rows) if isinstance(local_ai_review_rows, list) else None,
+            "missing_fields": missing_local_ai_fields,
+            "missing_run_fields": missing_local_ai_run_fields,
+            "missing_review_fields": missing_local_ai_review_fields,
+        }
+    )
+    if (
+        local_ai_status != 200
+        or not isinstance(local_ai_rows, list)
+        or not local_ai_rows
+        or not isinstance(local_ai_usage_run_rows, list)
+        or not isinstance(local_ai_review_rows, list)
+        or missing_local_ai_fields
+        or missing_local_ai_run_fields
+        or missing_local_ai_review_fields
+    ):
+        failures.append("load-admin-local-ai")
+
     shadow_write_status, shadow_write_payload = request_json(
         base_url,
         token,

@@ -387,6 +387,7 @@
             'public.article_engagement_article_summary',
             'public.article_engagement_daily',
             'public.article_engagement_source_category_summary',
+            'public.ai_decision_version_report',
             'public.feed_health',
             'public.feed_quality_scores',
             'public.public_feed_snapshot',

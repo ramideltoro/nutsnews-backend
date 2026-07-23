@@ -188,6 +188,11 @@ jobs:
           NUTSNEWS_BACKEND_WORKER_API_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_API_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_API_TOKEN }}
+          NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN }}
+          NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN }}
+          NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED || 'false' }}
+          NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE: ${{ vars.NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE || 'shadow' }}
+          NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED: ${{ vars.NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED || 'false' }}
           NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENABLED: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENABLED || 'true' }}
           NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_USERNAME || 'nutsnews_worker_uplift_scheduler' }}
           NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD }}
@@ -340,6 +345,11 @@ jobs:
           NUTSNEWS_BACKEND_WORKER_API_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_API_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_API_TOKEN }}
+          NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN }}
+          NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN }}
+          NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED || 'false' }}
+          NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE: ${{ vars.NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE || 'shadow' }}
+          NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED: ${{ vars.NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED || 'false' }}
           NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENABLED: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENABLED || 'true' }}
           NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_USERNAME || 'nutsnews_worker_uplift_scheduler' }}
           NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD }}
@@ -538,6 +548,38 @@ jobs:
               writes_enabled = os.environ.get("NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
               extra_vars["backend_worker_api_enabled"] = True
               extra_vars["backend_worker_api_token"] = token
+              scoped_uplift_enabled = (
+                  os.environ.get("NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED", "false").strip().lower()
+                  in {"1", "true", "yes"}
+              )
+              if scoped_uplift_enabled:
+                  persistence_token = os.environ.get("NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN", "")
+                  publication_token = os.environ.get("NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN", "")
+                  missing_scoped = [
+                      name
+                      for name, value in (
+                          ("NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN", persistence_token),
+                          ("NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN", publication_token),
+                      )
+                      if not value
+                  ]
+                  if missing_scoped:
+                      raise SystemExit(f"Missing required scoped Worker uplift API secrets: {', '.join(missing_scoped)}")
+                  if len({token, persistence_token, publication_token}) != 3:
+                      raise SystemExit("Worker API legacy, persistence, and publication tokens must be distinct")
+                  extra_vars["backend_worker_api_uplift_persistence_token"] = persistence_token
+                  extra_vars["backend_worker_api_uplift_publication_token"] = publication_token
+              cutover_state = os.environ.get("NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE", "shadow").strip() or "shadow"
+              if cutover_state not in {"shadow", "cutover-approved"}:
+                  raise SystemExit("NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE must be shadow or cutover-approved")
+              uplift_production_writes_enabled = (
+                  os.environ.get("NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED", "false").strip().lower()
+                  in {"1", "true", "yes"}
+              )
+              if uplift_production_writes_enabled and cutover_state != "cutover-approved":
+                  raise SystemExit("Worker uplift production writes require cutover-approved state")
+              extra_vars["backend_worker_api_uplift_cutover_state"] = cutover_state
+              extra_vars["backend_worker_api_uplift_production_writes_enabled"] = uplift_production_writes_enabled
               extra_vars["backend_worker_api_db_name"] = extra_vars.get(
                   "backend_postgres_primary_shadow_database",
                   os.environ.get("NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE", "nutsnews_primary_shadow").strip() or "nutsnews_primary_shadow",

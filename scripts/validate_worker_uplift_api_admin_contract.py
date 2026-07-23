@@ -151,6 +151,56 @@ def main() -> int:
     if primary_guarded.get("writes_enabled_false_status") != 403:
         errors.append("guarded primary write status must be 403")
 
+    scoped = contract.get("worker_uplift_scoped_commands", {})
+    if scoped.get("tracking_issue") != 145:
+        errors.append("scoped command tracking issue must be 145")
+    credential_policy = scoped.get("credential_policy", {})
+    for token_name in (
+        "NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN",
+        "NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN",
+    ):
+        if token_name not in json.dumps(credential_policy, sort_keys=True):
+            errors.append(f"scoped command credential policy missing {token_name}")
+    if credential_policy.get("distinct_token_required") is not True:
+        errors.append("scoped command tokens must be distinct")
+    required_metadata = set(scoped.get("required_metadata_fields", []))
+    for field in (
+        "idempotencyKey",
+        "messageId",
+        "correlationId",
+        "pipelineRunId",
+        "stageExecutionId",
+        "sourceMessageId",
+        "actorService",
+        "schemaVersion",
+        "operationVersion",
+        "expectedArticleVersion",
+    ):
+        if field not in required_metadata:
+            errors.append(f"scoped command metadata missing {field}")
+    if scoped.get("shadow_receipt_table") != "worker_uplift_final.api_command_receipts":
+        errors.append("scoped command shadow receipt table must be worker_uplift_final.api_command_receipts")
+    for operation in scoped.get("persistence_scope", []) + scoped.get("publication_scope", []):
+        if operation not in all_operations:
+            errors.append(f"scoped command references unknown operation: {operation}")
+    for operation in (
+        "uplift-record-shadow-aggregate",
+        "uplift-save-accepted-articles-batch",
+        "uplift-save-article-summaries-batch",
+        "uplift-save-article-reviews-batch",
+        "uplift-save-feed-health-batch",
+        "uplift-save-ai-usage-run",
+        "uplift-save-worker-run",
+        "uplift-publish-articles-batch",
+        "uplift-refresh-public-feed-snapshot",
+    ):
+        if operation not in all_operations:
+            errors.append(f"required uplift scoped operation missing: {operation}")
+    if "cutover-approved" not in scoped.get("production_mode_behavior", ""):
+        errors.append("scoped command production behavior must require cutover-approved")
+    if "409" not in scoped.get("idempotency_behavior", ""):
+        errors.append("scoped command idempotency behavior must document 409 conflicts")
+
     translation = contract.get("translation_policy", {})
     if translation.get("required_languages") != ["fr", "ja", "de-CH", "de", "el"]:
         errors.append("translation required languages must match legacy baseline")

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hmac
+import hashlib
 import json
 import math
 import os
@@ -35,7 +36,58 @@ WRITE_OPERATIONS = {
     "refresh-public-feed-snapshot",
     "save-ai-usage-run",
     "save-worker-run",
+    "uplift-record-shadow-aggregate",
+    "uplift-save-accepted-articles-batch",
+    "uplift-save-article-summaries-batch",
+    "uplift-save-article-reviews-batch",
+    "uplift-save-feed-health-batch",
+    "uplift-save-ai-usage-run",
+    "uplift-save-worker-run",
+    "uplift-publish-articles-batch",
+    "uplift-refresh-public-feed-snapshot",
 }
+
+WORKER_UPLIFT_WRITE_OPERATIONS = {
+    "uplift-record-shadow-aggregate",
+    "uplift-save-accepted-articles-batch",
+    "uplift-save-article-summaries-batch",
+    "uplift-save-article-reviews-batch",
+    "uplift-save-feed-health-batch",
+    "uplift-save-ai-usage-run",
+    "uplift-save-worker-run",
+    "uplift-publish-articles-batch",
+    "uplift-refresh-public-feed-snapshot",
+}
+
+WORKER_UPLIFT_DELEGATE_OPERATIONS = {
+    "uplift-save-accepted-articles-batch": "save-accepted-articles-batch",
+    "uplift-save-article-summaries-batch": "save-article-summaries-batch",
+    "uplift-save-article-reviews-batch": "save-article-reviews-batch",
+    "uplift-save-feed-health-batch": "save-feed-health-batch",
+    "uplift-save-ai-usage-run": "save-ai-usage-run",
+    "uplift-save-worker-run": "save-worker-run",
+    "uplift-publish-articles-batch": "publish-articles-batch",
+    "uplift-refresh-public-feed-snapshot": "refresh-public-feed-snapshot",
+}
+
+WORKER_UPLIFT_SCOPE_OPERATIONS = {
+    "worker-uplift-persistence": {
+        "uplift-record-shadow-aggregate",
+        "uplift-save-accepted-articles-batch",
+        "uplift-save-article-summaries-batch",
+        "uplift-save-article-reviews-batch",
+        "uplift-save-feed-health-batch",
+        "uplift-save-ai-usage-run",
+        "uplift-save-worker-run",
+    },
+    "worker-uplift-publication": {
+        "uplift-publish-articles-batch",
+        "uplift-refresh-public-feed-snapshot",
+        "uplift-save-worker-run",
+    },
+}
+
+LEGACY_WORKER_API_SCOPE = "legacy-worker-api"
 
 APP_READ_OPERATIONS = {
     "app-provider-smoke",
@@ -693,6 +745,24 @@ WRITE_TABLE_COLUMNS = {
     ),
 }
 
+WORKER_UPLIFT_SHADOW_AGGREGATE_COLUMNS = (
+    "article_identity_hash",
+    "canonical_url_hash",
+    "original_url_hash",
+    "aggregate_version",
+    "source_feed_url",
+    "title_ref",
+    "image_url_ref",
+    "category",
+    "positivity_score",
+    "approval_version",
+    "translation_languages",
+    "publication_status",
+    "payload_ref",
+    "payload_digest",
+    "diagnostic_metadata",
+)
+
 
 class ApiError(Exception):
     def __init__(self, status: int, message: str) -> None:
@@ -759,6 +829,21 @@ def required_iso_datetime_string(body: dict[str, Any], key: str, *, maximum: int
     except ValueError as exc:
         raise ApiError(400, f"{key} must be an ISO timestamp") from exc
     return value
+
+
+def required_int(body: dict[str, Any], key: str, *, minimum: int, maximum: int) -> int:
+    if key not in body:
+        raise ApiError(400, f"{key} must be an integer")
+    value = body.get(key)
+    if isinstance(value, bool):
+        raise ApiError(400, f"{key} must be an integer")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ApiError(400, f"{key} must be an integer") from exc
+    if parsed < minimum or parsed > maximum:
+        raise ApiError(400, f"{key} must be between {minimum} and {maximum}")
+    return parsed
 
 
 def optional_bool(body: dict[str, Any], key: str, *, default: bool = False) -> bool:
@@ -877,6 +962,11 @@ class PostgresStore:
         self.password = os.environ.get("NUTSNEWS_WORKER_DB_API_DB_PASSWORD", "")
         self.writes_enabled = bool_from_env("NUTSNEWS_WORKER_DB_API_WRITES_ENABLED", False)
         self.max_limit = int(os.environ.get("NUTSNEWS_WORKER_DB_API_MAX_LIMIT", "10000"))
+        self.worker_uplift_cutover_state = os.environ.get("NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE", "shadow")
+        self.worker_uplift_production_writes_enabled = bool_from_env(
+            "NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED",
+            False,
+        )
 
     def connect(self):
         import psycopg2
@@ -929,6 +1019,146 @@ def assert_write_allowed(
         raise ApiError(409, "write operations are disabled outside backend_postgres_primary")
     if not store.writes_enabled:
         raise ApiError(403, "backend PostgreSQL writes are disabled by deployment guardrail")
+
+
+def configured_database_api_tokens() -> dict[str, str]:
+    tokens = {
+        LEGACY_WORKER_API_SCOPE: os.environ.get("NUTSNEWS_BACKEND_API_TOKEN", ""),
+        "worker-uplift-persistence": os.environ.get("NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN", ""),
+        "worker-uplift-publication": os.environ.get("NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN", ""),
+    }
+    return {scope: token for scope, token in tokens.items() if token}
+
+
+def authenticate_database_api_token(authorization: str) -> str:
+    tokens = configured_database_api_tokens()
+    if not tokens:
+        raise ApiError(503, "database compatibility API token is not configured")
+    if len(set(tokens.values())) != len(tokens):
+        raise ApiError(503, "database compatibility API scoped tokens must be distinct")
+    if not authorization.startswith("Bearer "):
+        raise ApiError(401, "invalid database compatibility API token")
+    supplied = authorization.removeprefix("Bearer ")
+    for scope, expected_token in tokens.items():
+        if hmac.compare_digest(supplied, expected_token):
+            return scope
+    raise ApiError(401, "invalid database compatibility API token")
+
+
+def canonical_json(value: Any) -> str:
+    return json.dumps(value, default=json_default, sort_keys=True, separators=(",", ":"))
+
+
+def uplift_payload_digest(operation: str, body: dict[str, Any]) -> str:
+    return hashlib.sha256(canonical_json({"operation": operation, "body": body}).encode("utf-8")).hexdigest()
+
+
+def assert_worker_uplift_scope(operation: str, auth_scope: str, actor_service: str) -> None:
+    allowed_operations = WORKER_UPLIFT_SCOPE_OPERATIONS.get(auth_scope)
+    if not allowed_operations or operation not in allowed_operations:
+        raise ApiError(403, "worker-uplift scoped token is not allowed to call this operation")
+    if actor_service != auth_scope:
+        raise ApiError(403, "actorService must match the authenticated worker-uplift scope")
+
+
+def assert_worker_uplift_production_allowed(store: PostgresStore) -> None:
+    cutover_state = getattr(store, "worker_uplift_cutover_state", "shadow")
+    production_writes_enabled = bool(getattr(store, "worker_uplift_production_writes_enabled", False))
+    if cutover_state != "cutover-approved" or not production_writes_enabled:
+        raise ApiError(403, "worker-uplift production writes require protected cutover approval")
+    if not getattr(store, "writes_enabled", False):
+        raise ApiError(403, "backend PostgreSQL writes are disabled by deployment guardrail")
+
+
+def worker_uplift_metadata(operation: str, body: dict[str, Any], auth_scope: str) -> dict[str, Any]:
+    metadata = {
+        "operation": operation,
+        "idempotency_key": required_string(body, "idempotencyKey", maximum=160),
+        "message_id": required_string(body, "messageId", maximum=160),
+        "correlation_id": required_string(body, "correlationId", maximum=160),
+        "pipeline_run_id": required_string(body, "pipelineRunId", maximum=160),
+        "stage_execution_id": required_string(body, "stageExecutionId", maximum=160),
+        "source_message_id": required_string(body, "sourceMessageId", maximum=160),
+        "actor_service": required_string(body, "actorService", maximum=160),
+        "schema_version": required_int(body, "schemaVersion", minimum=1, maximum=1000),
+        "operation_version": required_int(body, "operationVersion", minimum=1, maximum=1_000_000_000),
+        "expected_article_version": required_int(body, "expectedArticleVersion", minimum=0, maximum=1_000_000_000),
+    }
+    assert_worker_uplift_scope(operation, auth_scope, metadata["actor_service"])
+    return metadata
+
+
+def load_worker_uplift_receipt(store: PostgresStore, idempotency_key: str) -> dict[str, Any] | None:
+    row = store.fetch_one(
+        """
+        select operation, payload_digest, response_json
+        from worker_uplift_final.api_command_receipts
+        where idempotency_key = %s
+        limit 1
+        """,
+        (idempotency_key,),
+    )
+    if not row or "payload_digest" not in row or "operation" not in row:
+        return None
+    return row
+
+
+def receipt_response(row: dict[str, Any]) -> dict[str, Any]:
+    response = row.get("response_json")
+    if isinstance(response, dict):
+        return response
+    if isinstance(response, str):
+        try:
+            parsed = json.loads(response)
+        except json.JSONDecodeError:
+            return {"ok": True, "recorded": True}
+        return parsed if isinstance(parsed, dict) else {"ok": True, "recorded": True}
+    return {"ok": True, "recorded": True}
+
+
+def record_worker_uplift_receipt(
+    store: PostgresStore,
+    metadata: dict[str, Any],
+    *,
+    auth_scope: str,
+    provider_mode: str,
+    payload_digest: str,
+    response: dict[str, Any],
+    status: str,
+    shadow_only: bool,
+) -> None:
+    store.execute(
+        """
+        insert into worker_uplift_final.api_command_receipts (
+          idempotency_key, operation, payload_digest, provider_mode, actor_service, auth_scope,
+          schema_version, operation_version, pipeline_run_id, stage_execution_id, source_message_id,
+          message_id, correlation_id, expected_article_version, response_json, status, shadow_only,
+          diagnostic_metadata
+        )
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s::jsonb)
+        on conflict (idempotency_key) do nothing
+        """,
+        (
+            metadata["idempotency_key"],
+            metadata["operation"],
+            payload_digest,
+            provider_mode,
+            metadata["actor_service"],
+            auth_scope,
+            metadata["schema_version"],
+            metadata["operation_version"],
+            metadata["pipeline_run_id"],
+            metadata["stage_execution_id"],
+            metadata["source_message_id"],
+            metadata["message_id"],
+            metadata["correlation_id"],
+            metadata["expected_article_version"],
+            canonical_json(response),
+            status,
+            shadow_only,
+            canonical_json({"safe_metadata_only": True}),
+        ),
+    )
 
 
 def insert_rows(store: PostgresStore, table: str, rows: list[dict[str, Any]], *, conflict: tuple[str, ...] | None, update: bool) -> None:
@@ -1045,9 +1275,169 @@ def publish_articles_with_translation_guard(
     }
 
 
-def handle_operation(operation: str, body: dict[str, Any], store: PostgresStore) -> Any:
+def aggregate_value(aggregate: dict[str, Any], snake_key: str, camel_key: str | None = None) -> Any:
+    if snake_key in aggregate:
+        return aggregate[snake_key]
+    if camel_key and camel_key in aggregate:
+        return aggregate[camel_key]
+    return None
+
+
+def shadow_aggregate_payload(body: dict[str, Any]) -> dict[str, Any]:
+    aggregate = body.get("shadowAggregate")
+    if not isinstance(aggregate, dict):
+        raise ApiError(400, "shadowAggregate must be an object")
+
+    translation_languages = aggregate_value(aggregate, "translation_languages", "translationLanguages") or []
+    if not isinstance(translation_languages, list) or not all(isinstance(item, str) for item in translation_languages):
+        raise ApiError(400, "shadowAggregate.translationLanguages must be an array of strings")
+    diagnostic_metadata = aggregate_value(aggregate, "diagnostic_metadata", "diagnosticMetadata") or {}
+    if not isinstance(diagnostic_metadata, dict):
+        raise ApiError(400, "shadowAggregate.diagnosticMetadata must be an object")
+
+    row = {
+        "article_identity_hash": required_string(aggregate, "articleIdentityHash", maximum=256)
+        if "articleIdentityHash" in aggregate
+        else required_string(aggregate, "article_identity_hash", maximum=256),
+        "canonical_url_hash": required_string(aggregate, "canonicalUrlHash", maximum=256)
+        if "canonicalUrlHash" in aggregate
+        else required_string(aggregate, "canonical_url_hash", maximum=256),
+        "original_url_hash": required_string(aggregate, "originalUrlHash", maximum=256)
+        if "originalUrlHash" in aggregate
+        else required_string(aggregate, "original_url_hash", maximum=256),
+        "aggregate_version": required_int(aggregate, "aggregateVersion" if "aggregateVersion" in aggregate else "aggregate_version", minimum=1, maximum=1_000_000_000),
+        "source_feed_url": aggregate_value(aggregate, "source_feed_url", "sourceFeedUrl"),
+        "title_ref": aggregate_value(aggregate, "title_ref", "titleRef"),
+        "image_url_ref": aggregate_value(aggregate, "image_url_ref", "imageUrlRef"),
+        "category": aggregate.get("category"),
+        "positivity_score": aggregate_value(aggregate, "positivity_score", "positivityScore"),
+        "approval_version": aggregate_value(aggregate, "approval_version", "approvalVersion"),
+        "translation_languages": list(dict.fromkeys(translation_languages)),
+        "publication_status": aggregate_value(aggregate, "publication_status", "publicationStatus") or "shadow_only",
+        "payload_ref": required_string(aggregate, "payloadRef", maximum=500)
+        if "payloadRef" in aggregate
+        else required_string(aggregate, "payload_ref", maximum=500),
+        "payload_digest": required_string(aggregate, "payloadDigest", maximum=256)
+        if "payloadDigest" in aggregate
+        else required_string(aggregate, "payload_digest", maximum=256),
+        "diagnostic_metadata": diagnostic_metadata,
+    }
+    if row["publication_status"] not in {"shadow_only", "ready", "blocked", "published"}:
+        raise ApiError(400, "shadowAggregate.publicationStatus is unsupported")
+    return row
+
+
+def assert_shadow_aggregate_version_is_current(store: PostgresStore, aggregate: dict[str, Any]) -> None:
+    row = store.fetch_one(
+        """
+        select max(aggregate_version)::integer as aggregate_version
+        from worker_uplift_final.article_shadow_aggregates
+        where article_identity_hash = %s
+        """,
+        (aggregate["article_identity_hash"],),
+    )
+    if row and row.get("aggregate_version") is not None and int(row["aggregate_version"]) >= int(aggregate["aggregate_version"]):
+        raise ApiError(409, "stale article version for worker-uplift shadow aggregate")
+
+
+def upsert_shadow_aggregate(store: PostgresStore, aggregate: dict[str, Any]) -> None:
+    columns = WORKER_UPLIFT_SHADOW_AGGREGATE_COLUMNS
+    values = [
+        canonical_json(aggregate[column]) if column == "diagnostic_metadata" else aggregate.get(column)
+        for column in columns
+    ]
+    placeholders = ", ".join("%s::jsonb" if column == "diagnostic_metadata" else "%s" for column in columns)
+    update_columns = [column for column in columns if column not in {"article_identity_hash", "aggregate_version"}]
+    set_sql = ", ".join(f"{column} = excluded.{column}" for column in update_columns)
+    store.execute(
+        f"""
+        insert into worker_uplift_final.article_shadow_aggregates ({", ".join(columns)})
+        values ({placeholders})
+        on conflict (article_identity_hash, aggregate_version)
+        do update set {set_sql}, updated_at = now()
+        """,
+        tuple(values),
+    )
+
+
+def handle_worker_uplift_operation(
+    operation: str,
+    body: dict[str, Any],
+    store: PostgresStore,
+    auth_scope: str,
+) -> dict[str, Any]:
+    provider_mode = assert_provider_mode(body)
+    metadata = worker_uplift_metadata(operation, body, auth_scope)
+    payload_digest = uplift_payload_digest(operation, body)
+    existing_receipt = load_worker_uplift_receipt(store, metadata["idempotency_key"])
+    if existing_receipt is not None:
+        if existing_receipt.get("operation") != operation or existing_receipt.get("payload_digest") != payload_digest:
+            raise ApiError(409, "idempotencyKey was already used with a different worker-uplift payload")
+        response = receipt_response(existing_receipt)
+        response["duplicate"] = True
+        return response
+
+    if provider_mode == "backend_postgres_shadow":
+        if operation == "uplift-record-shadow-aggregate":
+            aggregate = shadow_aggregate_payload(body)
+            assert_shadow_aggregate_version_is_current(store, aggregate)
+            upsert_shadow_aggregate(store, aggregate)
+        response = {
+            "ok": True,
+            "operation": operation,
+            "mode": "shadow",
+            "idempotencyKey": metadata["idempotency_key"],
+            "recorded": True,
+            "productionSideEffect": False,
+        }
+        record_worker_uplift_receipt(
+            store,
+            metadata,
+            auth_scope=auth_scope,
+            provider_mode=provider_mode,
+            payload_digest=payload_digest,
+            response=response,
+            status="recorded_success",
+            shadow_only=True,
+        )
+        return response
+
+    assert_worker_uplift_production_allowed(store)
+    if operation == "uplift-record-shadow-aggregate":
+        aggregate = shadow_aggregate_payload(body)
+        assert_shadow_aggregate_version_is_current(store, aggregate)
+        upsert_shadow_aggregate(store, aggregate)
+        response = {"ok": True, "operation": operation, "mode": "primary", "recorded": True}
+    else:
+        delegate_operation = WORKER_UPLIFT_DELEGATE_OPERATIONS[operation]
+        delegate_result = handle_operation(delegate_operation, body, store, auth_scope=LEGACY_WORKER_API_SCOPE)
+        response = delegate_result if isinstance(delegate_result, dict) else {"ok": True, "result": delegate_result}
+    record_worker_uplift_receipt(
+        store,
+        metadata,
+        auth_scope=auth_scope,
+        provider_mode=provider_mode,
+        payload_digest=payload_digest,
+        response=response,
+        status="applied_success",
+        shadow_only=False,
+    )
+    return response
+
+
+def handle_operation(
+    operation: str,
+    body: dict[str, Any],
+    store: PostgresStore,
+    auth_scope: str = LEGACY_WORKER_API_SCOPE,
+) -> Any:
     if operation not in READ_OPERATIONS and operation not in WRITE_OPERATIONS:
         raise ApiError(404, f"unknown worker database operation: {operation}")
+
+    if operation in WORKER_UPLIFT_WRITE_OPERATIONS:
+        return handle_worker_uplift_operation(operation, body, store, auth_scope)
+    if auth_scope != LEGACY_WORKER_API_SCOPE:
+        raise ApiError(403, "worker-uplift scoped token cannot call legacy worker operation")
 
     assert_write_allowed(operation, body, store)
 
@@ -2551,12 +2941,7 @@ class WorkerDbApiHandler(BaseHTTPRequestHandler):
         else:
             raise ApiError(404, "not found")
         operation = self.path.rsplit("/", 1)[-1]
-        expected_token = os.environ.get("NUTSNEWS_BACKEND_API_TOKEN", "")
-        if not expected_token:
-            raise ApiError(503, "database compatibility API token is not configured")
-        authorization = self.headers.get("authorization", "")
-        if not authorization.startswith("Bearer ") or not hmac.compare_digest(authorization.removeprefix("Bearer "), expected_token):
-            raise ApiError(401, "invalid database compatibility API token")
+        auth_scope = authenticate_database_api_token(self.headers.get("authorization", ""))
         content_length = int(self.headers.get("content-length", "0") or "0")
         if content_length > 2_000_000:
             raise ApiError(413, "request body too large")
@@ -2567,8 +2952,10 @@ class WorkerDbApiHandler(BaseHTTPRequestHandler):
         if not isinstance(body, dict):
             raise ApiError(400, "request body must be a JSON object")
         if route == "worker":
-            result = handle_operation(operation, body, self.server.store)  # type: ignore[attr-defined]
+            result = handle_operation(operation, body, self.server.store, auth_scope=auth_scope)  # type: ignore[attr-defined]
         else:
+            if auth_scope != LEGACY_WORKER_API_SCOPE:
+                raise ApiError(403, "worker-uplift scoped token cannot call app database operations")
             result = handle_app_operation(operation, body, self.server.store)  # type: ignore[attr-defined]
         self.write_json(200, result)
 

@@ -70,6 +70,7 @@ class WorkerUpliftShadowModelTests(unittest.TestCase):
             "write_requests",
             "publication_readiness",
             "article_shadow_aggregates",
+            "api_command_receipts",
         ):
             self.assertIn(table, template)
         self.assertIn("UNIQUE (message_id)", template)
@@ -80,6 +81,8 @@ class WorkerUpliftShadowModelTests(unittest.TestCase):
         self.assertIn("sanitized_error_message", template)
         self.assertIn("REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA public", template)
         self.assertIn("GRANT SELECT, INSERT, UPDATE ON TABLE %I.article_shadow_aggregates", template)
+        self.assertIn("GRANT SELECT, INSERT, UPDATE ON TABLE %I.api_command_receipts", template)
+        self.assertIn("worker_api_role", template)
         for forbidden in ("article_body", "full_prompt", "raw_provider_response", "bearer_token"):
             self.assertNotIn(forbidden, template)
 

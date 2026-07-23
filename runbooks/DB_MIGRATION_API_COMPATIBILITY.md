@@ -86,10 +86,32 @@ Protected apply inputs:
   and sent by the app server runtime and Worker runtime.
 - `NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED=false` keeps writes fail-closed
   for shadow parity.
+- `NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED=false` keeps the
+  worker-uplift persistence/publication tokens optional until rollout.
+- `NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN` and
+  `NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN` must be distinct from each
+  other and from `NUTSNEWS_BACKEND_API_TOKEN` before scoped tokens are enabled.
+- `NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE=shadow` and
+  `NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED=false` keep scoped
+  worker-uplift production commands blocked until the protected cutover issue
+  explicitly approves `cutover-approved`.
 
 The initial shadow configuration uses the backend PostgreSQL read-only role
 against `nutsnews_primary_shadow`. Backend writes remain disabled until the
 production cutover issue explicitly approves `backend_postgres_primary`.
+
+Scoped worker-uplift commands are exposed only on `/api/worker/db/*`. The
+persistence token can call the `uplift-save-*` commands and
+`uplift-record-shadow-aggregate`; the publication token can call
+`uplift-publish-articles-batch`, `uplift-refresh-public-feed-snapshot`, and
+`uplift-save-worker-run`. All scoped commands require idempotency, message,
+correlation, schema version, actor service, operation version, and expected
+article version fields. In `backend_postgres_shadow`, commands record
+`worker_uplift_final.api_command_receipts` and may upsert
+`worker_uplift_final.article_shadow_aggregates`, but they must not change
+`public.articles` visibility or refresh the live snapshot. Duplicate requests
+with the same idempotency key and payload digest return the recorded response;
+idempotency-key reuse with a different payload returns `409`.
 
 App operations are allow-listed separately from worker operations. Current app
 coverage includes public feed/article/search/sitemap reads, runtime feature

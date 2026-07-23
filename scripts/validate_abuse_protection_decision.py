@@ -32,9 +32,12 @@ def main() -> int:
         errors.append(f"service baseline exposes unsupported public ports for the current decision: {sorted(public_ports)}")
 
     not_deployed = set(baseline.get("not_deployed", []))
-    for service in ("backend app", "Docker Engine"):
-        if service not in not_deployed:
-            errors.append(f"{service} is no longer marked not_deployed; update the abuse-protection decision")
+    if "backend app" not in not_deployed:
+        errors.append("backend app is no longer marked not_deployed; update the abuse-protection decision")
+
+    private_substrates = set(decision.get("private_dependency_substrates", []))
+    if "Docker Engine" not in not_deployed and "Docker Engine for loopback-only RabbitMQ" not in private_substrates:
+        errors.append("Docker Engine is deployed; abuse-protection decision must record its private RabbitMQ-only scope")
 
     if decision.get("selected_tool") != "fail2ban":
         errors.append("selected_tool must remain fail2ban until a new reviewed decision replaces it")

@@ -44,6 +44,16 @@ REMOTE_SAFETY_COMMANDS: dict[str, str] = {
         "--topology-env /etc/nutsnews-rabbitmq/topology.env; "
         "else echo not_configured; fi"
     ),
+    "rabbitmq_drift": (
+        "if systemctl is-active nutsnews-rabbitmq >/dev/null 2>&1 "
+        "&& test -x /usr/local/sbin/nutsnews-rabbitmq-probe; then "
+        "sudo -n /usr/local/sbin/nutsnews-rabbitmq-probe drift "
+        "--env /etc/nutsnews-rabbitmq/rabbitmq.env "
+        "--credentials-env /etc/nutsnews-rabbitmq/topology.env "
+        "--definition /etc/nutsnews-rabbitmq/worker-uplift-topology.json "
+        "--metadata /var/lib/nutsnews/rabbitmq-probes/apply-metadata.json; "
+        "else echo not_configured; fi"
+    ),
     "restore_verification": (
         "test -s /var/lib/nutsnews/backups/last-restore-verification.json "
         "&& cat /var/lib/nutsnews/backups/last-restore-verification.json || echo not_configured"
@@ -143,6 +153,28 @@ def rabbitmq_network_security(evidence: dict[str, Any]) -> dict[str, Any]:
     return {"name": "rabbitmq_network_security", "status": "unknown", "summary": "unknown"}
 
 
+def rabbitmq_drift(evidence: dict[str, Any]) -> dict[str, Any]:
+    output = maintenance.command_stdout(evidence, "rabbitmq_drift").strip()
+    if output == "not_configured":
+        return {"name": "rabbitmq_drift", "status": "not_configured", "summary": "not_configured"}
+    if output.startswith("{"):
+        try:
+            data = json.loads(output)
+        except json.JSONDecodeError:
+            return {"name": "rabbitmq_drift", "status": "unknown", "summary": "drift json invalid"}
+        status = "healthy" if data.get("status") == "pass" else "critical"
+        summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+        blockers = summary.get("high_priority_unexpected") if isinstance(summary, dict) else []
+        return {
+            "name": "rabbitmq_drift",
+            "status": status,
+            "summary": "high_priority_unexpected=none" if status == "healthy" else f"high_priority_unexpected={','.join(str(item) for item in blockers) or 'unknown'}",
+        }
+    if output:
+        return {"name": "rabbitmq_drift", "status": "unknown", "summary": output.splitlines()[-1]}
+    return {"name": "rabbitmq_drift", "status": "unknown", "summary": "unknown"}
+
+
 def rabbitmq_public_exposure(host: str, timeout: int) -> dict[str, Any]:
     if not rabbitmq_enabled_for_gate():
         return {"name": "rabbitmq_public_exposure", "status": "not_configured", "summary": "rabbitmq gate disabled"}
@@ -232,6 +264,7 @@ def safety_checks(args: argparse.Namespace, evidence: dict[str, Any]) -> list[di
         rabbitmq_status = "unknown"
     checks.append({"name": "rabbitmq_health", "status": rabbitmq_status, "summary": f"rabbitmq={rabbitmq_output or 'unknown'}"})
     checks.append(rabbitmq_network_security(evidence))
+    checks.append(rabbitmq_drift(evidence))
 
     restore_output = maintenance.command_stdout(evidence, "restore_verification").strip()
     restore_status = "not_configured"
@@ -281,7 +314,7 @@ def rabbitmq_post_apply_blockers(args: argparse.Namespace, checks: list[dict[str
         return []
     by_name = {check["name"]: check for check in checks}
     result: list[dict[str, str]] = []
-    for name in ("docker_health", "rabbitmq_health", "rabbitmq_network_security", "rabbitmq_public_exposure"):
+    for name in ("docker_health", "rabbitmq_health", "rabbitmq_network_security", "rabbitmq_drift", "rabbitmq_public_exposure"):
         status = by_name.get(name, {}).get("status", "missing")
         if status != "healthy":
             result.append({"check": name, "status": status})

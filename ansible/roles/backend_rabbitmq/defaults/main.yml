@@ -23,6 +23,8 @@ backend_rabbitmq_topology_env_path: "{{ backend_rabbitmq_config_dir }}/topology.
 backend_rabbitmq_probe_state_dir: /var/lib/nutsnews/rabbitmq-probes
 backend_rabbitmq_recovery_state_dir: /var/lib/nutsnews/rabbitmq-recovery
 backend_rabbitmq_probe_state_path: "{{ backend_rabbitmq_probe_state_dir }}/durable-probe.json"
+backend_rabbitmq_apply_metadata_path: "{{ backend_rabbitmq_probe_state_dir }}/apply-metadata.json"
+backend_rabbitmq_smoke_report_path: "{{ backend_rabbitmq_probe_state_dir }}/last-smoke.json"
 backend_rabbitmq_legacy_probe_state_path: "{{ backend_rabbitmq_data_dir }}/durable-probe.json"
 backend_rabbitmq_vhost: nutsnews-worker-uplift
 backend_rabbitmq_admin_username: ""

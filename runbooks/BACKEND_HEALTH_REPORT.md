@@ -10,12 +10,16 @@ The workflow:
 
 - uses repository secrets for read-only SSH to `65.75.201.18`;
 - runs `scripts/backend_health_report.py`;
-- collects a fixed set of read-only host, service, backup, timer, listener, update, and recent-error signals;
+- collects a fixed set of read-only host, service, backup, RabbitMQ drift/smoke
+  status, timer, listener, update, and recent-error signals;
 - writes a sanitized JSON report artifact and GitHub step summary;
 - loads the previous completed report artifact to maintain alert fingerprints, cooldown state, suppression counts, and recovery notices;
 - sends email through SMTP when reporting credentials are configured and there are unsuppressed alert notifications.
 
-It does not run arbitrary remote commands, restart services, change packages, edit files, or call the protected Ansible apply workflow.
+It does not run arbitrary remote commands, restart services, change packages,
+edit files, run RabbitMQ smoke, or call the protected Ansible apply workflow.
+RabbitMQ smoke remains a separate protected workflow because it creates isolated
+probe resources and restarts the broker.
 
 ## Required Repository Secrets
 
@@ -70,6 +74,8 @@ The JSON report includes:
   exists
 - recovery last-run status when `/var/lib/nutsnews/recovery/last-recovery.json`
   exists
+- RabbitMQ recovery status, `rabbitmq_drift`, and the last protected smoke
+  report from `/var/lib/nutsnews/rabbitmq-probes/last-smoke.json`
 - fixed-command SSH evidence
 - classified checks for host resources, failed units, reboot/update state, core services, backup tooling, backup freshness, backup verification, restore drill status, storage quota status, recovery status, and sudo readiness
 

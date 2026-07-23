@@ -25,11 +25,13 @@ Read-only verification on 2026-07-17 showed:
 - `/var/log/caddy/access.log` and `/var/log/caddy/error.log` are not present
   yet because there is no deployed backend app route with access logging.
 
+Private dependency substrate now present:
+
+- Docker Engine for the loopback-only RabbitMQ broker
+
 Not deployed yet:
 
-- Docker
 - backend app service
-- ops dashboard
 
 Because there is no deployed backend app/admin route behavior, HTTP abuse
 blocking would still be speculative and false-positive-prone. The health route
@@ -62,7 +64,9 @@ python3 scripts/validate_abuse_protection_decision.py
 
 The validator intentionally fails if the service baseline starts exposing ports
 outside SSH plus HTTP/HTTPS health routing while this decision is still in the
-observe-only HTTP phase.
+observe-only HTTP phase. If Docker is present, the decision must explicitly
+record that it is only a private dependency substrate, currently the
+loopback-only RabbitMQ broker.
 
 Grafana detection rules:
 

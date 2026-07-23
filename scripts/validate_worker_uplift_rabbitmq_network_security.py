@@ -93,7 +93,7 @@ def main() -> int:
         "rabbitmq_network_security",
         "rabbitmq_public_exposure",
         "RABBITMQ_PUBLIC_PORTS = (5672, 15672, 15692)",
-        '"docker_health", "rabbitmq_health", "rabbitmq_network_security", "rabbitmq_public_exposure"',
+        '"docker_health", "rabbitmq_health", "rabbitmq_network_security", "rabbitmq_drift", "rabbitmq_public_exposure"',
     ):
         if required not in safety:
             errors.append(f"deployment safety missing RabbitMQ network blocker: {required}")

@@ -123,8 +123,16 @@ def main() -> int:
     if not public_ports.issubset({22, 80, 443}):
         errors.append(f"service baseline exposes unsupported public ports: {sorted(public_ports)}")
     not_deployed = set(baseline.get("not_deployed", []))
+    followup = decision.get("followup_provisioning_status", {})
     if "RabbitMQ broker" not in not_deployed:
-        errors.append("service baseline must keep RabbitMQ broker marked as not_deployed")
+        if followup.get("status") != "provisioned_by_later_protected_backend_bootstrap":
+            errors.append("capacity decision must record later protected provisioning before RabbitMQ leaves not_deployed")
+        if "loopback-only" not in followup.get("statement", ""):
+            errors.append("later RabbitMQ provisioning addendum must preserve loopback-only listener scope")
+        followup_issues = set(followup.get("tracking_issues", []))
+        for issue in ("ramideltoro/nutsnews-worker#80", "ramideltoro/nutsnews-worker#84"):
+            if issue not in followup_issues:
+                errors.append(f"later RabbitMQ provisioning addendum missing tracking issue: {issue}")
 
     identity_routes = {route.get("route_id") for route in identities.get("rabbitmq", {}).get("route_permissions", [])}
     workload = decision.get("workload_estimate", {})

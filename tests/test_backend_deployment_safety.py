@@ -45,6 +45,7 @@ class BackendDeploymentSafetyTests(unittest.TestCase):
             {"name": "docker_health", "status": "not_configured"},
             {"name": "rabbitmq_health", "status": "not_configured"},
             {"name": "rabbitmq_network_security", "status": "not_configured"},
+            {"name": "rabbitmq_drift", "status": "not_configured"},
             {"name": "rabbitmq_public_exposure", "status": "not_configured"},
         ]
         with patch.dict(os.environ, {"NUTSNEWS_BACKEND_RABBITMQ_ENABLED": "true"}, clear=True):
@@ -54,6 +55,7 @@ class BackendDeploymentSafetyTests(unittest.TestCase):
                     {"check": "docker_health", "status": "not_configured"},
                     {"check": "rabbitmq_health", "status": "not_configured"},
                     {"check": "rabbitmq_network_security", "status": "not_configured"},
+                    {"check": "rabbitmq_drift", "status": "not_configured"},
                     {"check": "rabbitmq_public_exposure", "status": "not_configured"},
                 ],
             )
@@ -95,10 +97,27 @@ class BackendDeploymentSafetyTests(unittest.TestCase):
             {"name": "docker_health", "status": "healthy"},
             {"name": "rabbitmq_health", "status": "healthy"},
             {"name": "rabbitmq_network_security", "status": "critical"},
+            {"name": "rabbitmq_drift", "status": "healthy"},
             {"name": "rabbitmq_public_exposure", "status": "healthy"},
         ]
         with patch.dict(os.environ, {"NUTSNEWS_BACKEND_RABBITMQ_ENABLED": "true"}, clear=True):
             self.assertEqual(safety.rabbitmq_post_apply_blockers(args, checks), [{"check": "rabbitmq_network_security", "status": "critical"}])
+
+    def test_rabbitmq_drift_json_is_classified(self):
+        fixture = evidence(rabbitmq_drift=command('{"status":"pass","summary":{"high_priority_unexpected":[]}}\n'))
+        check = safety.rabbitmq_drift(fixture)
+        self.assertEqual(check["status"], "healthy")
+        self.assertEqual(check["summary"], "high_priority_unexpected=none")
+
+        fixture = evidence(
+            rabbitmq_drift=command(
+                '{"status":"fail","summary":{"high_priority_unexpected":["rabbitmq_image_digest"]}}\n',
+                returncode=1,
+            )
+        )
+        check = safety.rabbitmq_drift(fixture)
+        self.assertEqual(check["status"], "critical")
+        self.assertEqual(check["summary"], "high_priority_unexpected=rabbitmq_image_digest")
 
     def test_secret_presence_reports_names_only(self):
         with patch.dict(os.environ, {"ONE_SECRET": "present", "EMPTY_SECRET": ""}, clear=True):
@@ -133,12 +152,18 @@ class BackendDeploymentSafetyTests(unittest.TestCase):
         cloudflare = (ROOT / ".github/workflows/backend-cloudflare-routing.yml").read_text(encoding="utf-8")
         maintenance = (ROOT / ".github/workflows/backend-controlled-maintenance.yml").read_text(encoding="utf-8")
         backup = (ROOT / ".github/workflows/backend-backup-maintenance.yml").read_text(encoding="utf-8")
+        rabbitmq_smoke = (ROOT / ".github/workflows/backend-rabbitmq-smoke.yml").read_text(encoding="utf-8")
         self.assertIn("scripts/backend_deployment_safety.py", protected_apply)
         self.assertIn("scripts/backend_deployment_safety.py", cloudflare)
         self.assertIn("scripts/backend_controlled_maintenance.py", maintenance)
         self.assertIn("nutsnews-backup.service", backup)
         self.assertIn("nutsnews-backup-verify.service", backup)
         self.assertIn("nutsnews-restore-drill.service", backup)
+        self.assertIn("confirm_target", rabbitmq_smoke)
+        self.assertIn("backend.nutsnews.com", rabbitmq_smoke)
+        self.assertIn("production-backend", rabbitmq_smoke)
+        self.assertIn("/usr/local/sbin/nutsnews-rabbitmq-probe smoke", rabbitmq_smoke)
+        self.assertNotIn("remote_command", rabbitmq_smoke)
         self.assertIn("Reset fixed backup one-shot failure state", protected_apply)
         self.assertIn("sudo -n systemctl reset-failed \"$unit\"", protected_apply)
         self.assertIn("nutsnews-backup.service nutsnews-backup-verify.service nutsnews-restore-drill.service", protected_apply)

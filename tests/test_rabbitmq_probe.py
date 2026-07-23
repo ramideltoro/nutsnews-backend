@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import json
 import tempfile
 import unittest
 import urllib.error
@@ -109,6 +110,143 @@ class RabbitMQProbeTests(unittest.TestCase):
         message = str(raised.exception)
         self.assertIn("HTTP 400", message)
         self.assertIn("inequivalent arg x-max-length", message)
+
+    def test_smoke_covers_publish_ack_retry_dlq_restart_and_permission_denial(self):
+        published_ids: list[str] = []
+
+        def fake_publish(*call_args, **_kwargs):
+            published_ids.append(call_args[6])
+            return True
+
+        def fake_get(*call_args, **_kwargs):
+            ackmode = call_args[5]
+            if ackmode == "ack_requeue_true":
+                return {"message_id": published_ids[0]}
+            if ackmode == "reject_requeue_false":
+                return {"message_id": published_ids[2]}
+            return None
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            env_path = temp / "rabbitmq.env"
+            topology_env = temp / "topology.env"
+            output_path = temp / "smoke.json"
+            env_path.write_text(
+                "RABBITMQ_DEFAULT_USER=admin\n"
+                "RABBITMQ_DEFAULT_PASS=not-a-real-password\n"
+                "RABBITMQ_DEFAULT_VHOST=nutsnews-worker-uplift\n",
+                encoding="utf-8",
+            )
+            topology_env.write_text(
+                "RABBITMQ_MONITORING_USERNAME=monitor\n"
+                "RABBITMQ_MONITORING_PASSWORD=not-a-real-monitor-password\n",
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(
+                env=env_path,
+                credentials_env=topology_env,
+                management_url="http://127.0.0.1:15672",
+                retry_ttl_ms=10,
+                timeout_seconds=1,
+                restart_timeout_seconds=1,
+                restart_service="nutsnews-rabbitmq.service",
+                skip_restart=False,
+                output=output_path,
+            )
+            with (
+                patch.object(probe, "wait_for_management", return_value={}),
+                patch.object(probe, "publish_message", side_effect=fake_publish),
+                patch.object(probe, "get_message", side_effect=fake_get),
+                patch.object(probe, "wait_for_message", return_value=True),
+                patch.object(probe, "completed_process", return_value={"returncode": 0, "stdout": "", "stderr": ""}),
+                patch.object(probe, "request_json", return_value=None),
+                redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(probe.action_smoke(args), 0)
+
+            report = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(
+                {check["name"] for check in report["checks"]},
+                {"publish_confirm", "consume_manual_ack", "retry", "dlq", "restart_persistence", "permission_denial"},
+            )
+            self.assertTrue(report["resource_prefix"].startswith("worker.uplift.probe.smoke."))
+            self.assertNotIn("not-a-real", json.dumps(report))
+
+    def test_drift_reports_expected_rabbitmq_surfaces(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            env_path = temp / "rabbitmq.env"
+            metadata_path = temp / "metadata.json"
+            config_path = temp / "compose.yml"
+            env_path.write_text(
+                "RABBITMQ_DEFAULT_USER=admin\n"
+                "RABBITMQ_DEFAULT_PASS=not-a-real-password\n"
+                "RABBITMQ_DEFAULT_VHOST=nutsnews-worker-uplift\n",
+                encoding="utf-8",
+            )
+            config_path.write_text("image: rabbitmq@sha256:abc\n", encoding="utf-8")
+            metadata_path.write_text(
+                json.dumps(
+                    {
+                        "image": "rabbitmq@sha256:abc",
+                        "paths": {"compose": str(config_path)},
+                        "checksums": {"compose": probe.sha256_file(config_path)},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            def fake_completed(command, _timeout):
+                text = " ".join(str(part) for part in command)
+                if command[:2] == ["docker", "inspect"]:
+                    return {"returncode": 0, "stdout": "rabbitmq@sha256:abc rabbitmq@sha256:abc\n", "stderr": ""}
+                if "nutsnews-rabbitmq-topology" in text:
+                    return {"returncode": 0, "stdout": '{"status":"pass","drift":[]}\n', "stderr": ""}
+                if "nutsnews-rabbitmq-network-check" in text:
+                    return {"returncode": 0, "stdout": '{"status":"pass","failed_checks":[]}\n', "stderr": ""}
+                if "nutsnews-backup" in text:
+                    return {
+                        "returncode": 0,
+                        "stdout": (
+                            '{"backup":{"status":"healthy"},'
+                            '"rabbitmq_recovery":{'
+                            '"definition_export":{"status":"healthy"},'
+                            '"clean_rebuild_drill":{"status":"healthy"}}}\n'
+                        ),
+                        "stderr": "",
+                    }
+                return {"returncode": 1, "stdout": "", "stderr": "unexpected command"}
+
+            args = SimpleNamespace(
+                env=env_path,
+                metadata=metadata_path,
+                container_name="nutsnews-rabbitmq",
+                timeout_seconds=1,
+                topology_path=Path("/usr/local/sbin/nutsnews-rabbitmq-topology"),
+                credentials_env=Path("/etc/nutsnews-rabbitmq/topology.env"),
+                definition=Path("/etc/nutsnews-rabbitmq/worker-uplift-topology.json"),
+                network_check_path=Path("/usr/local/sbin/nutsnews-rabbitmq-network-check"),
+                backup_path=Path("/usr/local/sbin/nutsnews-backup"),
+                management_url="http://127.0.0.1:15672",
+            )
+            output = io.StringIO()
+            with (
+                patch.object(probe, "wait_for_management", return_value={"rabbitmq_version": "4.3.3"}),
+                patch.object(probe, "completed_process", side_effect=fake_completed),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(probe.action_drift(args), 0)
+
+            report = json.loads(output.getvalue())
+            surfaces = {check["surface"] for check in report["checks"]}
+            self.assertEqual(report["status"], "pass")
+            self.assertIn("rabbitmq_image_digest", surfaces)
+            self.assertIn("rabbitmq_config_checksum:compose", surfaces)
+            self.assertIn("rabbitmq_topology", surfaces)
+            self.assertIn("rabbitmq_permissions_metadata", surfaces)
+            self.assertIn("rabbitmq_listeners_network", surfaces)
+            self.assertIn("rabbitmq_backup_freshness", surfaces)
 
 
 if __name__ == "__main__":

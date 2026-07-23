@@ -229,6 +229,63 @@
   register: backend_rabbitmq_compose_file
   notify: Restart RabbitMQ
 
+- name: Capture RabbitMQ managed file checksum metadata
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    checksum_algorithm: sha256
+  loop:
+    - id: compose
+      path: "{{ backend_rabbitmq_compose_path }}"
+    - id: config
+      path: "{{ backend_rabbitmq_config_path }}"
+    - id: enabled_plugins
+      path: "{{ backend_rabbitmq_enabled_plugins_path }}"
+    - id: topology
+      path: "{{ backend_rabbitmq_topology_definition_path }}"
+  register: backend_rabbitmq_managed_file_checksums
+  changed_when: false
+  when: backend_rabbitmq_topology_enabled | bool
+
+- name: Write RabbitMQ protected apply metadata
+  ansible.builtin.copy:
+    dest: "{{ backend_rabbitmq_apply_metadata_path }}"
+    owner: root
+    group: root
+    mode: "0640"
+    content: |
+      {
+        "version": 1,
+        "tracking_issue": 84,
+        "generated_by": "protected-backend-ansible-apply",
+        "image": "{{ backend_rabbitmq_image }}",
+        "container_name": "{{ backend_rabbitmq_container_name }}",
+        "vhost": "{{ backend_rabbitmq_vhost }}",
+        "paths": {
+          "compose": "{{ backend_rabbitmq_compose_path }}",
+          "config": "{{ backend_rabbitmq_config_path }}",
+          "enabled_plugins": "{{ backend_rabbitmq_enabled_plugins_path }}",
+          "topology": "{{ backend_rabbitmq_topology_definition_path }}"
+        },
+        "checksums": {
+      {% for item in backend_rabbitmq_managed_file_checksums.results | default([]) %}
+          "{{ item.item.id }}": "{{ item.stat.checksum | default('') }}"{% if not loop.last %},{% endif %}
+      {% endfor %}
+        },
+        "rollback": {
+          "preferred_path": "git_revert_then_protected_check_then_protected_apply",
+          "runbook": "runbooks/WORKER_UPLIFT_RABBITMQ_PROVISIONING.md",
+          "recovery_runbook": "runbooks/WORKER_UPLIFT_RABBITMQ_RECOVERY.md",
+          "data_dir": "{{ backend_rabbitmq_data_dir }}",
+          "do_not_delete_data_dir_without_review": true
+        },
+        "reports": {
+          "drift": "sudo -n {{ backend_rabbitmq_probe_path }} drift --env {{ backend_rabbitmq_env_path }} --credentials-env {{ backend_rabbitmq_topology_env_path }} --definition {{ backend_rabbitmq_topology_definition_path }} --metadata {{ backend_rabbitmq_apply_metadata_path }}",
+          "smoke": "sudo -n {{ backend_rabbitmq_probe_path }} smoke --env {{ backend_rabbitmq_env_path }} --credentials-env {{ backend_rabbitmq_topology_env_path }} --output {{ backend_rabbitmq_smoke_report_path }}"
+        }
+      }
+  register: backend_rabbitmq_apply_metadata_file
+  when: backend_rabbitmq_topology_enabled | bool
+
 - name: Install RabbitMQ systemd unit
   ansible.builtin.copy:
     dest: /etc/systemd/system/nutsnews-rabbitmq.service
@@ -497,6 +554,32 @@
     - backend_rabbitmq_runtime_manageable | bool
     - not ansible_check_mode
 
+- name: Capture RabbitMQ read-only drift summary
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_rabbitmq_probe_path }}"
+      - drift
+      - --env
+      - "{{ backend_rabbitmq_env_path }}"
+      - --credentials-env
+      - "{{ backend_rabbitmq_topology_env_path }}"
+      - --definition
+      - "{{ backend_rabbitmq_topology_definition_path }}"
+      - --metadata
+      - "{{ backend_rabbitmq_apply_metadata_path }}"
+      - --topology-path
+      - "{{ backend_rabbitmq_topology_path }}"
+      - --network-check-path
+      - "{{ backend_rabbitmq_network_check_path }}"
+      - --container-name
+      - "{{ backend_rabbitmq_container_name }}"
+  register: backend_rabbitmq_drift_summary
+  changed_when: false
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - backend_rabbitmq_topology_enabled | bool
+    - not ansible_check_mode
+
 - name: Report RabbitMQ provisioning summary
   ansible.builtin.debug:
     msg:
@@ -518,3 +601,6 @@
       health: "{{ backend_rabbitmq_health.stdout_lines | default([]) }}"
       network_security: "{{ backend_rabbitmq_network_security.stdout | default('{}') }}"
       recovery_status: "{{ backend_rabbitmq_recovery_status.stdout | default('{}') }}"
+      apply_metadata_path: "{{ backend_rabbitmq_apply_metadata_path }}"
+      smoke_report_path: "{{ backend_rabbitmq_smoke_report_path }}"
+      drift_summary: "{{ backend_rabbitmq_drift_summary.stdout | default('{}') }}"

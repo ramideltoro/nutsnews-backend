@@ -164,7 +164,7 @@ prometheus.scrape "rabbitmq_detailed" {
   metrics_path    = "/metrics/detailed"
   params          = {
     "vhost"  = ["{{ backend_metrics_rabbitmq_vhost }}"],
-    "queue"  = ["{{ backend_metrics_rabbitmq_queue_regex }}"],
+    "queue"  = [{{ backend_metrics_rabbitmq_queue_regex | to_json }}],
     "family" = {{ backend_metrics_rabbitmq_detailed_families | to_json }},
   }
   scrape_interval = "{{ backend_metrics_rabbitmq_scrape_interval }}"
@@ -187,7 +187,7 @@ prometheus.relabel "rabbitmq_detailed" {
 
   rule {
     source_labels = ["queue"]
-    regex         = "{{ backend_metrics_rabbitmq_queue_regex }}"
+    regex         = {{ backend_metrics_rabbitmq_queue_regex | to_json }}
     action        = "keep"
   }
 

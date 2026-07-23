@@ -153,6 +153,10 @@ def validate() -> list[str]:
         ),
         errors,
     )
+    if protected_apply.count("NUTSNEWS_BACKEND_WORKER_RUNTIME_ENABLED") < 3:
+        errors.append("protected apply must pass NUTSNEWS_BACKEND_WORKER_RUNTIME_ENABLED into both preflight and extra-vars steps")
+    if protected_apply.count("NUTSNEWS_BACKEND_WORKER_RUNTIME_PRODUCTION_WRITES_ENABLED") < 3:
+        errors.append("protected apply must pass NUTSNEWS_BACKEND_WORKER_RUNTIME_PRODUCTION_WRITES_ENABLED into both preflight and extra-vars steps")
     require(
         "worker runtime operations workflow",
         operations_workflow,

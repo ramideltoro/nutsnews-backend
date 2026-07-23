@@ -74,9 +74,34 @@
   ansible.builtin.file:
     path: "{{ backend_rabbitmq_data_dir }}"
     state: directory
-    owner: "999"
-    group: "999"
+    owner: "{{ backend_rabbitmq_container_uid }}"
+    group: "{{ backend_rabbitmq_container_gid }}"
     mode: "0750"
+
+- name: Repair RabbitMQ persistent data tree ownership
+  ansible.builtin.file:
+    path: "{{ backend_rabbitmq_data_dir }}"
+    state: directory
+    owner: "{{ backend_rabbitmq_container_uid }}"
+    group: "{{ backend_rabbitmq_container_gid }}"
+    mode: "u+rwX"
+    recurse: true
+  register: backend_rabbitmq_data_tree_permissions
+  notify: Restart RabbitMQ
+
+- name: Ensure RabbitMQ probe state directory exists
+  ansible.builtin.file:
+    path: "{{ backend_rabbitmq_probe_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Remove legacy probe state from RabbitMQ broker data directory
+  ansible.builtin.file:
+    path: "{{ backend_rabbitmq_legacy_probe_state_path }}"
+    state: absent
+  register: backend_rabbitmq_legacy_probe_state_file
 
 - name: Render RabbitMQ root-only environment
   ansible.builtin.copy:
@@ -233,6 +258,8 @@
           backend_rabbitmq_plugins_file is changed or
           backend_rabbitmq_compose_file is changed or
           backend_rabbitmq_unit_file is changed or
+          backend_rabbitmq_data_tree_permissions is changed or
+          backend_rabbitmq_legacy_probe_state_file is changed or
           backend_rabbitmq_probe_file is changed
         )
       }}

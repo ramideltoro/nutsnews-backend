@@ -15,11 +15,15 @@ backend_rabbitmq_compose_path: "{{ backend_rabbitmq_base_dir }}/compose.yml"
 backend_rabbitmq_config_path: "{{ backend_rabbitmq_config_dir }}/rabbitmq.conf"
 backend_rabbitmq_enabled_plugins_path: "{{ backend_rabbitmq_config_dir }}/enabled_plugins"
 backend_rabbitmq_probe_path: /usr/local/sbin/nutsnews-rabbitmq-probe
-backend_rabbitmq_probe_state_path: "{{ backend_rabbitmq_data_dir }}/durable-probe.json"
+backend_rabbitmq_probe_state_dir: /var/lib/nutsnews/rabbitmq-probes
+backend_rabbitmq_probe_state_path: "{{ backend_rabbitmq_probe_state_dir }}/durable-probe.json"
+backend_rabbitmq_legacy_probe_state_path: "{{ backend_rabbitmq_data_dir }}/durable-probe.json"
 backend_rabbitmq_vhost: nutsnews-worker-uplift
 backend_rabbitmq_admin_username: ""
 backend_rabbitmq_admin_password: ""
 backend_rabbitmq_erlang_cookie: ""
+backend_rabbitmq_container_uid: "999"
+backend_rabbitmq_container_gid: "999"
 backend_rabbitmq_bind_address: 127.0.0.1
 backend_rabbitmq_amqp_port: "5672"
 backend_rabbitmq_management_port: "15672"

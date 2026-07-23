@@ -415,6 +415,107 @@ def main() -> int:
     ):
         failures.append("load-admin-local-ai")
 
+    translation_quality_status, translation_quality_payload = request_json(
+        base_url,
+        token,
+        "load-admin-translation-quality",
+        {
+            "providerMode": "backend_postgres_primary",
+            "auditLimit": 10,
+            "summaryLookupLimit": 100,
+            "targetLanguageCodes": ["fr", "ja", "de-CH", "de", "el"],
+        },
+    )
+    translation_quality_rows = (
+        translation_quality_payload.get("rows")
+        if isinstance(translation_quality_payload, dict)
+        else None
+    )
+    translation_quality_snapshot = (
+        translation_quality_rows[0]
+        if isinstance(translation_quality_rows, list) and translation_quality_rows
+        else {}
+    )
+    translation_article_rows = (
+        translation_quality_snapshot.get("articleRows")
+        if isinstance(translation_quality_snapshot, dict)
+        else None
+    )
+    translation_summary_rows = (
+        translation_quality_snapshot.get("summaryRows")
+        if isinstance(translation_quality_snapshot, dict)
+        else None
+    )
+    missing_translation_quality_fields = sorted(
+        field
+        for field in {"articleRows", "summaryRows"}
+        if not isinstance(translation_quality_snapshot, dict) or field not in translation_quality_snapshot
+    )
+    first_translation_article = (
+        translation_article_rows[0]
+        if isinstance(translation_article_rows, list) and translation_article_rows
+        else {}
+    )
+    missing_translation_article_fields = sorted(
+        field
+        for field in {
+            "id",
+            "source",
+            "title",
+            "original_url",
+            "ai_summary",
+            "category",
+            "published_on_site_at",
+            "snapshot_rank",
+        }
+        if isinstance(first_translation_article, dict)
+        and first_translation_article
+        and field not in first_translation_article
+    )
+    first_translation_summary = (
+        translation_summary_rows[0]
+        if isinstance(translation_summary_rows, list) and translation_summary_rows
+        else {}
+    )
+    missing_translation_summary_fields = sorted(
+        field
+        for field in {
+            "original_url",
+            "language_code",
+            "title",
+            "summary",
+            "updated_at",
+            "generated_by",
+            "model",
+        }
+        if isinstance(first_translation_summary, dict)
+        and first_translation_summary
+        and field not in first_translation_summary
+    )
+    checks.append(
+        {
+            "operation": "load-admin-translation-quality",
+            "status": translation_quality_status,
+            "row_count": len(translation_quality_rows) if isinstance(translation_quality_rows, list) else None,
+            "article_count": len(translation_article_rows) if isinstance(translation_article_rows, list) else None,
+            "summary_count": len(translation_summary_rows) if isinstance(translation_summary_rows, list) else None,
+            "missing_fields": missing_translation_quality_fields,
+            "missing_article_fields": missing_translation_article_fields,
+            "missing_summary_fields": missing_translation_summary_fields,
+        }
+    )
+    if (
+        translation_quality_status != 200
+        or not isinstance(translation_quality_rows, list)
+        or not translation_quality_rows
+        or not isinstance(translation_article_rows, list)
+        or not isinstance(translation_summary_rows, list)
+        or missing_translation_quality_fields
+        or missing_translation_article_fields
+        or missing_translation_summary_fields
+    ):
+        failures.append("load-admin-translation-quality")
+
     shadow_write_status, shadow_write_payload = request_json(
         base_url,
         token,

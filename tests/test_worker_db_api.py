@@ -435,6 +435,61 @@ class LocalAiStore(FakeStore):
         return super().fetch_all(query, params)
 
 
+class TranslationQualityStore(FakeStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.article_rows = [
+            {
+                "id": "article-translation-1",
+                "source": "Reuters",
+                "title": "Helpful climate policy",
+                "original_url": "https://publisher.example.com/climate-policy",
+                "ai_summary": "A constructive climate policy update.",
+                "category": "World",
+                "published_on_site_at": "2026-07-22T10:00:00Z",
+                "snapshot_rank": 1,
+            },
+            {
+                "id": "article-translation-2",
+                "source": "AP",
+                "title": "Battery breakthrough",
+                "original_url": "https://publisher.example.com/battery-breakthrough",
+                "ai_summary": "Scientists improved battery safety.",
+                "category": "Science",
+                "published_on_site_at": "2026-07-22T09:00:00Z",
+                "snapshot_rank": 2,
+            },
+        ]
+        self.summary_rows = [
+            {
+                "original_url": "https://publisher.example.com/climate-policy",
+                "language_code": "fr",
+                "title": "Politique climatique utile",
+                "summary": "Une mise a jour constructive sur le climat.",
+                "updated_at": "2026-07-22T10:05:00Z",
+                "generated_by": "openai",
+                "model": "gpt-4o-mini",
+            },
+            {
+                "original_url": "https://publisher.example.com/climate-policy",
+                "language_code": "ja",
+                "title": "Climate policy",
+                "summary": "Constructive climate policy update.",
+                "updated_at": "2026-07-22T10:06:00Z",
+                "generated_by": "openai",
+                "model": "gpt-4o-mini",
+            },
+        ]
+
+    def fetch_all(self, query: str, params: tuple = ()) -> list[dict]:
+        self.fetches.append((query, params))
+        if "from public.public_feed_snapshot" in query:
+            return self.article_rows[: params[0]]
+        if "from public.article_summaries" in query:
+            return self.summary_rows[: params[2]]
+        return super().fetch_all(query, params)
+
+
 class WorkerDbApiTests(unittest.TestCase):
     def test_shadow_feed_read_uses_bounded_select(self) -> None:
         store = FakeStore()
@@ -1036,6 +1091,54 @@ class WorkerDbApiTests(unittest.TestCase):
         self.assertIn("where ai_provider = %s", review_query)
         self.assertIn("order by reviewed_at desc nulls last, id desc", review_query)
         self.assertEqual(("local", 1), review_params)
+
+    def test_app_admin_translation_quality_returns_dashboard_snapshot(self) -> None:
+        store = TranslationQualityStore()
+
+        result = worker_db_api.handle_app_operation(
+            "load-admin-translation-quality",
+            {
+                "providerMode": "backend_postgres_primary",
+                "auditLimit": 2,
+                "summaryLookupLimit": 3,
+                "targetLanguageCodes": ["fr", "ja", "en", "fr"],
+            },
+            store,
+        )
+
+        self.assertEqual(1, result["rowCount"])
+        self.assertIn("generatedAt", result)
+        row = result["rows"][0]
+        self.assertEqual(store.article_rows, row["articleRows"])
+        self.assertEqual(store.summary_rows, row["summaryRows"])
+        self.assertEqual([], store.executes)
+
+        article_query, article_params = store.fetches[0]
+        self.assertIn("from public.public_feed_snapshot", article_query)
+        self.assertIn("snapshot_rank", article_query)
+        self.assertIn("original_url", article_query)
+        self.assertIn("ai_summary", article_query)
+        self.assertIn("order by snapshot_rank asc", article_query)
+        self.assertEqual((2,), article_params)
+
+        summary_query, summary_params = store.fetches[1]
+        self.assertIn("from public.article_summaries", summary_query)
+        self.assertIn("language_code", summary_query)
+        self.assertIn("generated_by", summary_query)
+        self.assertIn("model", summary_query)
+        self.assertIn("original_url = any(%s)", summary_query)
+        self.assertIn("language_code = any(%s)", summary_query)
+        self.assertEqual(
+            (
+                [
+                    "https://publisher.example.com/climate-policy",
+                    "https://publisher.example.com/battery-breakthrough",
+                ],
+                ["fr", "ja"],
+                3,
+            ),
+            summary_params,
+        )
 
     def test_app_shadow_write_is_rejected_before_database_call(self) -> None:
         store = FakeStore()

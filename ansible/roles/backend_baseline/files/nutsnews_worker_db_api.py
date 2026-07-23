@@ -55,6 +55,7 @@ APP_READ_OPERATIONS = {
     "load-admin-article-engagement",
     "load-admin-ai-usage",
     "load-admin-local-ai",
+    "load-admin-translation-quality",
     "load-admin-quota-usage-events",
     "load-admin-article-engagement-source-category-summary",
     "load-admin-article-engagement-article-summary",
@@ -291,6 +292,27 @@ ADMIN_LOCAL_AI_REVIEW_COLUMNS = (
     "ai_provider",
     "ai_model",
     "review_duration_ms",
+)
+
+ADMIN_TRANSLATION_QUALITY_ARTICLE_COLUMNS = (
+    "id",
+    "source",
+    "title",
+    "original_url",
+    "ai_summary",
+    "category",
+    "published_on_site_at",
+    "snapshot_rank",
+)
+
+ADMIN_TRANSLATION_QUALITY_SUMMARY_COLUMNS = (
+    "original_url",
+    "language_code",
+    "title",
+    "summary",
+    "updated_at",
+    "generated_by",
+    "model",
 )
 
 ADMIN_TABLE_READS = {
@@ -1091,6 +1113,14 @@ def admin_local_ai_review_columns() -> str:
     return ", ".join(ADMIN_LOCAL_AI_REVIEW_COLUMNS)
 
 
+def admin_translation_quality_article_columns() -> str:
+    return ", ".join(ADMIN_TRANSLATION_QUALITY_ARTICLE_COLUMNS)
+
+
+def admin_translation_quality_summary_columns() -> str:
+    return ", ".join(ADMIN_TRANSLATION_QUALITY_SUMMARY_COLUMNS)
+
+
 def category_clause(body: dict[str, Any], params: list[Any]) -> str:
     category = optional_string(body, "category", maximum=96)
     if category is None or category.lower() == "all":
@@ -1575,6 +1605,66 @@ def load_app_admin_local_ai(body: dict[str, Any], store: PostgresStore) -> dict[
     }
 
 
+def load_app_admin_translation_quality(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
+    audit_limit = bounded_int(
+        body,
+        "auditLimit",
+        default=60,
+        minimum=1,
+        maximum=min(store.max_limit, 500),
+    )
+    summary_lookup_limit = bounded_int(
+        body,
+        "summaryLookupLimit",
+        default=20000,
+        minimum=1,
+        maximum=min(store.max_limit, 20000),
+    )
+    target_language_codes = production_readiness_target_language_codes(body)
+
+    article_rows = store.fetch_all(
+        f"""
+        select {admin_translation_quality_article_columns()}
+        from public.public_feed_snapshot
+        order by snapshot_rank asc
+        limit %s
+        """,
+        (audit_limit,),
+    )
+    original_urls = [
+        str(article.get("original_url"))
+        for article in article_rows
+        if article.get("original_url")
+    ]
+    summary_rows: list[dict[str, Any]] = []
+    if original_urls and target_language_codes:
+        summary_rows = store.fetch_all(
+            f"""
+            select {admin_translation_quality_summary_columns()}
+            from public.article_summaries
+            where original_url = any(%s)
+              and language_code = any(%s)
+            limit %s
+            """,
+            (
+                original_urls,
+                target_language_codes,
+                min(store.max_limit, summary_lookup_limit, len(original_urls) * len(target_language_codes)),
+            ),
+        )
+
+    return {
+        "rows": [
+            {
+                "articleRows": article_rows,
+                "summaryRows": summary_rows,
+            }
+        ],
+        "rowCount": 1,
+        "generatedAt": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
+
+
 def load_app_admin_production_readiness(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
     recent_article_limit = bounded_int(
         body,
@@ -1854,6 +1944,9 @@ def handle_app_operation(operation: str, body: dict[str, Any], store: PostgresSt
 
     if operation == "load-admin-local-ai":
         return load_app_admin_local_ai(body, store)
+
+    if operation == "load-admin-translation-quality":
+        return load_app_admin_translation_quality(body, store)
 
     if operation in ADMIN_TABLE_READS:
         return load_app_admin_rows(operation, body, store)

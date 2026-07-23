@@ -404,7 +404,7 @@ def run_admin_backend_operation(
     try:
         with urllib.request.urlopen(request, timeout=operation.timeout) as response:
             http_status = response.getcode()
-            raw_body = response.read(32768).decode("utf-8", errors="replace")
+            raw_body = response.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
         http_status = exc.code
         exc.read(32768)

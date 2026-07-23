@@ -19,6 +19,8 @@ HANDLERS = ROLE / "handlers" / "main.yml"
 COMPOSE_TEMPLATE = ROLE / "templates" / "rabbitmq-compose.yml.j2"
 RABBITMQ_CONFIG_TEMPLATE = ROLE / "templates" / "rabbitmq.conf.j2"
 PROBE = ROLE / "files" / "nutsnews_rabbitmq_probe.py"
+TOPOLOGY = ROLE / "files" / "nutsnews_rabbitmq_topology.py"
+TOPOLOGY_TEMPLATE = ROLE / "templates" / "worker-uplift-topology.json.j2"
 PLAYBOOK = ROOT / "ansible" / "playbooks" / "bootstrap.yml"
 PROTECTED_WORKFLOW = ROOT / ".github" / "workflows" / "protected-backend-ansible-apply.yml"
 BACKEND_CHECKS = ROOT / ".github" / "workflows" / "backend-checks.yml"
@@ -43,6 +45,9 @@ def main() -> int:
     compose = read(COMPOSE_TEMPLATE)
     rabbitmq_conf = read(RABBITMQ_CONFIG_TEMPLATE)
     probe = read(PROBE)
+    topology_script = read(TOPOLOGY)
+    topology_template = read(TOPOLOGY_TEMPLATE)
+    topology = json.loads(topology_template.replace("{{ backend_rabbitmq_vhost }}", "nutsnews-worker-uplift"))
     playbook = read(PLAYBOOK)
     protected = read(PROTECTED_WORKFLOW)
     checks = read(BACKEND_CHECKS)
@@ -62,7 +67,7 @@ def main() -> int:
     if "name: backend_rabbitmq" not in playbook or "backend_rabbitmq_enabled | default(false) | bool" not in playbook:
         errors.append("bootstrap playbook must include focused backend_rabbitmq role behind enable flag")
 
-    for path in (DEFAULTS, TASKS, HANDLERS, COMPOSE_TEMPLATE, RABBITMQ_CONFIG_TEMPLATE, PROBE, RUNBOOK):
+    for path in (DEFAULTS, TASKS, HANDLERS, COMPOSE_TEMPLATE, RABBITMQ_CONFIG_TEMPLATE, PROBE, TOPOLOGY, TOPOLOGY_TEMPLATE, RUNBOOK):
         if not path.exists():
             errors.append(f"missing RabbitMQ provisioning file: {path}")
 
@@ -154,6 +159,85 @@ def main() -> int:
         errors.append("RabbitMQ handlers must be check-mode guarded")
 
     for required in (
+        "backend_rabbitmq_topology_path: /usr/local/sbin/nutsnews-rabbitmq-topology",
+        "backend_rabbitmq_topology_definition_path:",
+        "backend_rabbitmq_topology_env_path:",
+        "backend_rabbitmq_topology_enabled: true",
+        "backend_rabbitmq_topology_transfer_probe_enabled: true",
+        "backend_rabbitmq_topology_required_environment_names:",
+    ):
+        if required not in defaults:
+            errors.append(f"RabbitMQ defaults missing topology setting: {required}")
+    if defaults.count("RABBITMQ_") < 30:
+        errors.append("RabbitMQ topology defaults must enumerate the protected service identity environment names")
+
+    for required in (
+        "Render RabbitMQ topology root-only credential environment",
+        "Install RabbitMQ topology bootstrap",
+        "Render RabbitMQ worker topology definition",
+        "Bootstrap RabbitMQ worker topology",
+        "Verify RabbitMQ worker topology drift",
+        "Verify RabbitMQ least-privilege permissions",
+        "Probe RabbitMQ retry and DLQ transfer routing",
+        "backend_rabbitmq_topology_bootstrap.stdout | from_json",
+        "not ansible_check_mode",
+    ):
+        if required not in tasks:
+            errors.append(f"RabbitMQ tasks missing topology bootstrap/check step: {required}")
+    topology_env_task = tasks.split("Render RabbitMQ topology root-only credential environment", 1)[-1].split("- name:", 1)[0]
+    if "no_log: true" not in topology_env_task or 'mode: "0600"' not in topology_env_task:
+        errors.append("RabbitMQ topology credential env render must be root-only and no_log")
+
+    if topology.get("tracking_issue") != 81:
+        errors.append("RabbitMQ topology definition must track worker issue 81")
+    if topology.get("vhost") != "nutsnews-worker-uplift":
+        errors.append("RabbitMQ topology definition must render the approved production vhost")
+    if topology.get("source", {}).get("contracts_commit") != "396d94dba76e3773ede50783463419501853b107":
+        errors.append("RabbitMQ topology must pin the reviewed contracts commit")
+    if topology.get("queue_type") != "classic":
+        errors.append("RabbitMQ topology must apply the #79 durable classic queue decision")
+    if "application_max_attempts_for_classic_queues" not in json.dumps(topology.get("delivery_behavior", {})):
+        errors.append("RabbitMQ topology must record classic-queue delivery limit handling")
+    if len(topology.get("exchanges", [])) != 3:
+        errors.append("RabbitMQ topology must define main, retry, and DLQ exchanges")
+    if len(topology.get("routes", [])) != 7:
+        errors.append("RabbitMQ topology must define seven worker routes")
+    if len(topology.get("users", [])) != 16:
+        errors.append("RabbitMQ topology must define break-glass, monitoring/canary, and fourteen route users")
+    route_names = {route.get("stage") for route in topology.get("routes", [])}
+    if route_names != {"fetch", "canonicalization", "enrichment", "approval", "translation", "persistence", "publication"}:
+        errors.append(f"RabbitMQ topology route stages mismatch: {sorted(route_names)}")
+    total_retry_queues = sum(len(route.get("retry_queues", [])) for route in topology.get("routes", []))
+    if total_retry_queues != 21:
+        errors.append("RabbitMQ topology must define three retry queues per route")
+    if topology.get("queue_limits", {}).get("main", {}).get("x-overflow") != "reject-publish":
+        errors.append("RabbitMQ topology main queues must reject publish on overflow")
+    if topology.get("queue_limits", {}).get("retry", {}).get("x-max-length") != 1000:
+        errors.append("RabbitMQ topology retry queues must use the #79 retry queue cap")
+    if topology.get("queue_limits", {}).get("dlq", {}).get("x-message-ttl") != 1209600000:
+        errors.append("RabbitMQ topology DLQ retention must be 14 days")
+    if "guest" in topology_template:
+        errors.append("RabbitMQ topology definition must not create a guest user")
+
+    for required in (
+        "def live_drift",
+        "def permission_matrix",
+        "def action_probe_transfers",
+        "ensure_guest_deleted",
+        "x-overflow",
+        "reject-publish",
+        "x-message-ttl",
+        "x-dead-letter-exchange",
+        "x-dead-letter-routing-key",
+        "refusing transfer probe because queue is non-empty",
+    ):
+        if required not in topology_script:
+            errors.append(f"RabbitMQ topology script missing required behavior: {required}")
+    readonly_block = topology_script.split("def live_drift", 1)[-1].split("def regex_allows", 1)[0]
+    if 'client.request("PUT"' in readonly_block or 'client.request("POST"' in readonly_block or 'client.request("DELETE"' in readonly_block:
+        errors.append("RabbitMQ topology live_drift must remain read-only")
+
+    for required in (
         "NUTSNEWS_BACKEND_RABBITMQ_ENABLED",
         "RABBITMQ_VHOST",
         "RABBITMQ_BREAK_GLASS_ADMIN_USERNAME",
@@ -168,6 +252,26 @@ def main() -> int:
     for required_secret in ("--required-secret RABBITMQ_ERLANG_COOKIE", "--required-secret RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD"):
         if required_secret not in protected:
             errors.append(f"protected workflow missing deployment safety secret check: {required_secret}")
+    for required_topology_name in (
+        "RABBITMQ_MONITORING_USERNAME",
+        "RABBITMQ_MONITORING_PASSWORD",
+        "RABBITMQ_SCHEDULER_PUBLISHER_USERNAME",
+        "RABBITMQ_SCHEDULER_PUBLISHER_PASSWORD",
+        "RABBITMQ_FETCHER_CONSUMER_USERNAME",
+        "RABBITMQ_FETCHER_CONSUMER_PASSWORD",
+        "RABBITMQ_PUBLICATION_CONSUMER_USERNAME",
+        "RABBITMQ_PUBLICATION_CONSUMER_PASSWORD",
+        "backend_rabbitmq_topology_environment",
+    ):
+        if required_topology_name not in protected:
+            errors.append(f"protected workflow missing RabbitMQ topology credential wiring: {required_topology_name}")
+    for required_secret in (
+        "--required-secret RABBITMQ_MONITORING_PASSWORD",
+        "--required-secret RABBITMQ_SCHEDULER_PUBLISHER_PASSWORD",
+        "--required-secret RABBITMQ_PUBLICATION_CONSUMER_PASSWORD",
+    ):
+        if required_secret not in protected:
+            errors.append(f"protected workflow missing RabbitMQ topology secret check: {required_secret}")
 
     if "rabbitmq_health" not in safety or "rabbitmq_post_apply_blockers" not in safety:
         errors.append("deployment safety must classify RabbitMQ post-apply health")

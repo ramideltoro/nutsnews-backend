@@ -15,6 +15,18 @@
     fail_msg: "RabbitMQ provisioning requires pinned image, protected credentials, loopback listeners, and approved limits."
   no_log: true
 
+- name: Validate RabbitMQ topology credential settings
+  ansible.builtin.assert:
+    that:
+      - backend_rabbitmq_topology_environment is mapping
+      - (backend_rabbitmq_topology_required_environment_names | difference(backend_rabbitmq_topology_environment.keys() | list) | length) == 0
+      - backend_rabbitmq_topology_environment['RABBITMQ_BREAK_GLASS_ADMIN_USERNAME'] == backend_rabbitmq_admin_username
+      - backend_rabbitmq_topology_environment['RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD'] == backend_rabbitmq_admin_password
+      - backend_rabbitmq_topology_required_environment_names | length == 32
+    fail_msg: "RabbitMQ topology provisioning requires protected least-privilege usernames and passwords for every managed identity."
+  no_log: true
+  when: backend_rabbitmq_topology_enabled | bool
+
 - name: Capture root filesystem free bytes before RabbitMQ bootstrap
   ansible.builtin.command:
     argv:
@@ -118,6 +130,20 @@
   register: backend_rabbitmq_env_file
   notify: Restart RabbitMQ
 
+- name: Render RabbitMQ topology root-only credential environment
+  ansible.builtin.copy:
+    dest: "{{ backend_rabbitmq_topology_env_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      {% for name in backend_rabbitmq_topology_required_environment_names %}
+      {{ name }}={{ backend_rabbitmq_topology_environment[name] }}
+      {% endfor %}
+  no_log: true
+  register: backend_rabbitmq_topology_env_file
+  when: backend_rabbitmq_topology_enabled | bool
+
 - name: Render RabbitMQ config
   ansible.builtin.template:
     src: rabbitmq.conf.j2
@@ -146,6 +172,26 @@
     group: root
     mode: "0755"
   register: backend_rabbitmq_probe_file
+
+- name: Install RabbitMQ topology bootstrap
+  ansible.builtin.copy:
+    src: nutsnews_rabbitmq_topology.py
+    dest: "{{ backend_rabbitmq_topology_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  register: backend_rabbitmq_topology_file
+  when: backend_rabbitmq_topology_enabled | bool
+
+- name: Render RabbitMQ worker topology definition
+  ansible.builtin.template:
+    src: worker-uplift-topology.json.j2
+    dest: "{{ backend_rabbitmq_topology_definition_path }}"
+    owner: root
+    group: root
+    mode: "0640"
+  register: backend_rabbitmq_topology_definition_file
+  when: backend_rabbitmq_topology_enabled | bool
 
 - name: Render RabbitMQ Compose definition
   ansible.builtin.template:
@@ -247,6 +293,71 @@
     - backend_rabbitmq_runtime_manageable | bool
     - not ansible_check_mode
 
+- name: Bootstrap RabbitMQ worker topology
+  ansible.builtin.command:
+    argv: "{{ [backend_rabbitmq_topology_path, 'bootstrap', '--env', backend_rabbitmq_env_path, '--credentials-env', backend_rabbitmq_topology_env_path, '--definition', backend_rabbitmq_topology_definition_path] + (backend_rabbitmq_topology_rotate_passwords | bool | ternary(['--rotate-passwords'], [])) }}"
+  register: backend_rabbitmq_topology_bootstrap
+  changed_when: (backend_rabbitmq_topology_bootstrap.stdout | from_json).changed | bool
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - backend_rabbitmq_topology_enabled | bool
+    - not ansible_check_mode
+
+- name: Verify RabbitMQ worker topology drift
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_rabbitmq_topology_path }}"
+      - check
+      - --env
+      - "{{ backend_rabbitmq_env_path }}"
+      - --credentials-env
+      - "{{ backend_rabbitmq_topology_env_path }}"
+      - --definition
+      - "{{ backend_rabbitmq_topology_definition_path }}"
+  register: backend_rabbitmq_topology_drift
+  changed_when: false
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - backend_rabbitmq_topology_enabled | bool
+    - not ansible_check_mode
+
+- name: Verify RabbitMQ least-privilege permissions
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_rabbitmq_topology_path }}"
+      - permissions
+      - --env
+      - "{{ backend_rabbitmq_env_path }}"
+      - --credentials-env
+      - "{{ backend_rabbitmq_topology_env_path }}"
+      - --definition
+      - "{{ backend_rabbitmq_topology_definition_path }}"
+  register: backend_rabbitmq_topology_permissions
+  changed_when: false
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - backend_rabbitmq_topology_enabled | bool
+    - not ansible_check_mode
+
+- name: Probe RabbitMQ retry and DLQ transfer routing
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_rabbitmq_topology_path }}"
+      - probe-transfers
+      - --env
+      - "{{ backend_rabbitmq_env_path }}"
+      - --credentials-env
+      - "{{ backend_rabbitmq_topology_env_path }}"
+      - --definition
+      - "{{ backend_rabbitmq_topology_definition_path }}"
+  register: backend_rabbitmq_topology_transfer_probe
+  changed_when: false
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - backend_rabbitmq_topology_enabled | bool
+    - backend_rabbitmq_topology_transfer_probe_enabled | bool
+    - not ansible_check_mode
+
 - name: Track whether RabbitMQ durable probe should restart the container
   ansible.builtin.set_fact:
     backend_rabbitmq_run_durable_probe_now: >-
@@ -336,5 +447,10 @@
       management: "{{ backend_rabbitmq_bind_address }}:{{ backend_rabbitmq_management_port }}"
       prometheus: "{{ backend_rabbitmq_bind_address }}:{{ backend_rabbitmq_prometheus_port }}"
       runtime_manageable: "{{ backend_rabbitmq_runtime_manageable }}"
+      topology_enabled: "{{ backend_rabbitmq_topology_enabled }}"
+      topology_bootstrap: "{{ backend_rabbitmq_topology_bootstrap.stdout | default('{}') }}"
+      topology_drift: "{{ backend_rabbitmq_topology_drift.stdout | default('{}') }}"
+      topology_permissions: "{{ backend_rabbitmq_topology_permissions.stdout | default('{}') }}"
+      topology_transfer_probe: "{{ backend_rabbitmq_topology_transfer_probe.stdout | default('{}') }}"
       durable_probe_ran: "{{ backend_rabbitmq_run_durable_probe_now | default(false) }}"
       health: "{{ backend_rabbitmq_health.stdout_lines | default([]) }}"

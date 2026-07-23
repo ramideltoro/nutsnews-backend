@@ -1,0 +1,541 @@
+{
+  "schema_version": 1,
+  "tracking_issue": 81,
+  "tracking_repo": "ramideltoro/nutsnews-worker",
+  "implementation_repo": "ramideltoro/nutsnews-backend",
+  "source": {
+    "contracts_repository": "ramideltoro/nutsnews-worker-contracts",
+    "contracts_commit": "396d94dba76e3773ede50783463419501853b107",
+    "contracts_package_version": "0.3.1",
+    "contracts_snapshot": "docs/compatibility/contract-snapshot.v0.3.0.json",
+    "capacity_security_decision": "docs/worker-uplift-rabbitmq-capacity-security-decision.json",
+    "runtime_identity_source": "docs/worker-uplift-runtime-identities.json",
+    "resolution": [
+      "Use the released contracts topology exchange, queue, route, retry-tier, and DLQ names.",
+      "Use durable classic queues and bounded queue arguments selected by worker issue #79 for the single-node backend broker.",
+      "Use the production-backend RABBITMQ_VHOST value approved by #79/#80: {{ backend_rabbitmq_vhost }}.",
+      "Classic queues do not use quorum delivery-limit semantics; max_attempts remains an application-confirmed retry/DLQ contract."
+    ]
+  },
+  "vhost": "{{ backend_rabbitmq_vhost }}",
+  "namespace": "nutsnews.worker",
+  "schema_id": "nutsnews.worker.rabbitmq-topology.v1",
+  "envelope_schema_id": "nutsnews.worker.envelope.v1",
+  "queue_type": "classic",
+  "delivery_behavior": {
+    "delivery": "at-least-once",
+    "persistent_messages": true,
+    "publisher_confirms_required": true,
+    "mandatory_routing_required": true,
+    "manual_ack_required": true,
+    "retry_transfer_requires_publish_confirm_before_ack": true,
+    "dlq_transfer_requires_publish_confirm_before_ack": true,
+    "max_attempts": 4,
+    "confirm_timeout_ms": 5000,
+    "prefetch_per_consumer": 10,
+    "delivery_limit_policy": "application_max_attempts_for_classic_queues"
+  },
+  "exchanges": [
+    {
+      "id": "main",
+      "name": "nutsnews.worker.v1",
+      "type": "topic",
+      "durable": true,
+      "arguments": {}
+    },
+    {
+      "id": "retry",
+      "name": "nutsnews.worker.retry.v1",
+      "type": "topic",
+      "durable": true,
+      "arguments": {}
+    },
+    {
+      "id": "dlq",
+      "name": "nutsnews.worker.dlq.v1",
+      "type": "topic",
+      "durable": true,
+      "arguments": {}
+    }
+  ],
+  "queue_limits": {
+    "main": {
+      "x-max-length": 2000,
+      "x-max-length-bytes": 268435456,
+      "x-overflow": "reject-publish"
+    },
+    "retry": {
+      "x-max-length": 1000,
+      "x-max-length-bytes": 134217728,
+      "x-overflow": "reject-publish"
+    },
+    "dlq": {
+      "x-max-length": 2000,
+      "x-max-length-bytes": 268435456,
+      "x-overflow": "reject-publish",
+      "x-message-ttl": 1209600000
+    }
+  },
+  "retry_tiers": [
+    {
+      "name": "retry-30s",
+      "delay_ms": 30000
+    },
+    {
+      "name": "retry-5m",
+      "delay_ms": 300000
+    },
+    {
+      "name": "retry-30m",
+      "delay_ms": 1800000
+    }
+  ],
+  "routes": [
+    {
+      "stage": "fetch",
+      "producer": "scheduler",
+      "consumer": "fetcher",
+      "schema_id": "nutsnews.worker.envelope.v1",
+      "routing_key": "nutsnews.worker.fetch.v1",
+      "main_queue": "nutsnews.worker.fetch.v1",
+      "retry_queues": [
+        {
+          "tier": "retry-30s",
+          "name": "nutsnews.worker.fetch.v1.retry-30s",
+          "routing_key": "nutsnews.worker.fetch.v1.retry-30s",
+          "ttl_ms": 30000
+        },
+        {
+          "tier": "retry-5m",
+          "name": "nutsnews.worker.fetch.v1.retry-5m",
+          "routing_key": "nutsnews.worker.fetch.v1.retry-5m",
+          "ttl_ms": 300000
+        },
+        {
+          "tier": "retry-30m",
+          "name": "nutsnews.worker.fetch.v1.retry-30m",
+          "routing_key": "nutsnews.worker.fetch.v1.retry-30m",
+          "ttl_ms": 1800000
+        }
+      ],
+      "terminal_dlq": {
+        "name": "nutsnews.worker.fetch.v1.dlq",
+        "routing_key": "nutsnews.worker.fetch.v1.dlq"
+      }
+    },
+    {
+      "stage": "canonicalization",
+      "producer": "fetcher",
+      "consumer": "canonicalizer",
+      "schema_id": "nutsnews.worker.envelope.v1",
+      "routing_key": "nutsnews.worker.canonicalization.v1",
+      "main_queue": "nutsnews.worker.canonicalization.v1",
+      "retry_queues": [
+        {
+          "tier": "retry-30s",
+          "name": "nutsnews.worker.canonicalization.v1.retry-30s",
+          "routing_key": "nutsnews.worker.canonicalization.v1.retry-30s",
+          "ttl_ms": 30000
+        },
+        {
+          "tier": "retry-5m",
+          "name": "nutsnews.worker.canonicalization.v1.retry-5m",
+          "routing_key": "nutsnews.worker.canonicalization.v1.retry-5m",
+          "ttl_ms": 300000
+        },
+        {
+          "tier": "retry-30m",
+          "name": "nutsnews.worker.canonicalization.v1.retry-30m",
+          "routing_key": "nutsnews.worker.canonicalization.v1.retry-30m",
+          "ttl_ms": 1800000
+        }
+      ],
+      "terminal_dlq": {
+        "name": "nutsnews.worker.canonicalization.v1.dlq",
+        "routing_key": "nutsnews.worker.canonicalization.v1.dlq"
+      }
+    },
+    {
+      "stage": "enrichment",
+      "producer": "canonicalizer",
+      "consumer": "enrichment",
+      "schema_id": "nutsnews.worker.envelope.v1",
+      "routing_key": "nutsnews.worker.enrichment.v1",
+      "main_queue": "nutsnews.worker.enrichment.v1",
+      "retry_queues": [
+        {
+          "tier": "retry-30s",
+          "name": "nutsnews.worker.enrichment.v1.retry-30s",
+          "routing_key": "nutsnews.worker.enrichment.v1.retry-30s",
+          "ttl_ms": 30000
+        },
+        {
+          "tier": "retry-5m",
+          "name": "nutsnews.worker.enrichment.v1.retry-5m",
+          "routing_key": "nutsnews.worker.enrichment.v1.retry-5m",
+          "ttl_ms": 300000
+        },
+        {
+          "tier": "retry-30m",
+          "name": "nutsnews.worker.enrichment.v1.retry-30m",
+          "routing_key": "nutsnews.worker.enrichment.v1.retry-30m",
+          "ttl_ms": 1800000
+        }
+      ],
+      "terminal_dlq": {
+        "name": "nutsnews.worker.enrichment.v1.dlq",
+        "routing_key": "nutsnews.worker.enrichment.v1.dlq"
+      }
+    },
+    {
+      "stage": "approval",
+      "producer": "enrichment",
+      "consumer": "approval",
+      "schema_id": "nutsnews.worker.envelope.v1",
+      "routing_key": "nutsnews.worker.approval.v1",
+      "main_queue": "nutsnews.worker.approval.v1",
+      "retry_queues": [
+        {
+          "tier": "retry-30s",
+          "name": "nutsnews.worker.approval.v1.retry-30s",
+          "routing_key": "nutsnews.worker.approval.v1.retry-30s",
+          "ttl_ms": 30000
+        },
+        {
+          "tier": "retry-5m",
+          "name": "nutsnews.worker.approval.v1.retry-5m",
+          "routing_key": "nutsnews.worker.approval.v1.retry-5m",
+          "ttl_ms": 300000
+        },
+        {
+          "tier": "retry-30m",
+          "name": "nutsnews.worker.approval.v1.retry-30m",
+          "routing_key": "nutsnews.worker.approval.v1.retry-30m",
+          "ttl_ms": 1800000
+        }
+      ],
+      "terminal_dlq": {
+        "name": "nutsnews.worker.approval.v1.dlq",
+        "routing_key": "nutsnews.worker.approval.v1.dlq"
+      }
+    },
+    {
+      "stage": "translation",
+      "producer": "approval",
+      "consumer": "translation",
+      "schema_id": "nutsnews.worker.envelope.v1",
+      "routing_key": "nutsnews.worker.translation.v1",
+      "main_queue": "nutsnews.worker.translation.v1",
+      "retry_queues": [
+        {
+          "tier": "retry-30s",
+          "name": "nutsnews.worker.translation.v1.retry-30s",
+          "routing_key": "nutsnews.worker.translation.v1.retry-30s",
+          "ttl_ms": 30000
+        },
+        {
+          "tier": "retry-5m",
+          "name": "nutsnews.worker.translation.v1.retry-5m",
+          "routing_key": "nutsnews.worker.translation.v1.retry-5m",
+          "ttl_ms": 300000
+        },
+        {
+          "tier": "retry-30m",
+          "name": "nutsnews.worker.translation.v1.retry-30m",
+          "routing_key": "nutsnews.worker.translation.v1.retry-30m",
+          "ttl_ms": 1800000
+        }
+      ],
+      "terminal_dlq": {
+        "name": "nutsnews.worker.translation.v1.dlq",
+        "routing_key": "nutsnews.worker.translation.v1.dlq"
+      }
+    },
+    {
+      "stage": "persistence",
+      "producer": "translation",
+      "consumer": "persistence",
+      "schema_id": "nutsnews.worker.envelope.v1",
+      "routing_key": "nutsnews.worker.persistence.v1",
+      "main_queue": "nutsnews.worker.persistence.v1",
+      "retry_queues": [
+        {
+          "tier": "retry-30s",
+          "name": "nutsnews.worker.persistence.v1.retry-30s",
+          "routing_key": "nutsnews.worker.persistence.v1.retry-30s",
+          "ttl_ms": 30000
+        },
+        {
+          "tier": "retry-5m",
+          "name": "nutsnews.worker.persistence.v1.retry-5m",
+          "routing_key": "nutsnews.worker.persistence.v1.retry-5m",
+          "ttl_ms": 300000
+        },
+        {
+          "tier": "retry-30m",
+          "name": "nutsnews.worker.persistence.v1.retry-30m",
+          "routing_key": "nutsnews.worker.persistence.v1.retry-30m",
+          "ttl_ms": 1800000
+        }
+      ],
+      "terminal_dlq": {
+        "name": "nutsnews.worker.persistence.v1.dlq",
+        "routing_key": "nutsnews.worker.persistence.v1.dlq"
+      }
+    },
+    {
+      "stage": "publication",
+      "producer": "persistence",
+      "consumer": "publication",
+      "schema_id": "nutsnews.worker.envelope.v1",
+      "routing_key": "nutsnews.worker.publication.v1",
+      "main_queue": "nutsnews.worker.publication.v1",
+      "retry_queues": [
+        {
+          "tier": "retry-30s",
+          "name": "nutsnews.worker.publication.v1.retry-30s",
+          "routing_key": "nutsnews.worker.publication.v1.retry-30s",
+          "ttl_ms": 30000
+        },
+        {
+          "tier": "retry-5m",
+          "name": "nutsnews.worker.publication.v1.retry-5m",
+          "routing_key": "nutsnews.worker.publication.v1.retry-5m",
+          "ttl_ms": 300000
+        },
+        {
+          "tier": "retry-30m",
+          "name": "nutsnews.worker.publication.v1.retry-30m",
+          "routing_key": "nutsnews.worker.publication.v1.retry-30m",
+          "ttl_ms": 1800000
+        }
+      ],
+      "terminal_dlq": {
+        "name": "nutsnews.worker.publication.v1.dlq",
+        "routing_key": "nutsnews.worker.publication.v1.dlq"
+      }
+    }
+  ],
+  "users": [
+    {
+      "id": "break_glass_admin",
+      "kind": "break_glass_admin",
+      "username_variable": "RABBITMQ_BREAK_GLASS_ADMIN_USERNAME",
+      "password_variable": "RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD",
+      "tags": ["administrator"],
+      "permissions": {
+        "configure": ".*",
+        "write": ".*",
+        "read": ".*"
+      }
+    },
+    {
+      "id": "monitoring_canary",
+      "kind": "monitoring_canary",
+      "username_variable": "RABBITMQ_MONITORING_USERNAME",
+      "password_variable": "RABBITMQ_MONITORING_PASSWORD",
+      "tags": ["monitoring"],
+      "permissions": {
+        "configure": "^$",
+        "write": "^$",
+        "read": "^$"
+      }
+    },
+    {
+      "id": "scheduler_publisher",
+      "kind": "producer",
+      "stage": "scheduler",
+      "route_stage": "fetch",
+      "username_variable": "RABBITMQ_SCHEDULER_PUBLISHER_USERNAME",
+      "password_variable": "RABBITMQ_SCHEDULER_PUBLISHER_PASSWORD",
+      "tags": [],
+      "permissions": {
+        "configure": "^$",
+        "write": "^nutsnews\\.worker\\.v1$",
+        "read": "^$"
+      }
+    },
+    {
+      "id": "fetcher_consumer",
+      "kind": "consumer",
+      "stage": "fetcher",
+      "route_stage": "fetch",
+      "username_variable": "RABBITMQ_FETCHER_CONSUMER_USERNAME",
+      "password_variable": "RABBITMQ_FETCHER_CONSUMER_PASSWORD",
+      "tags": [],
+      "permissions": {
+        "configure": "^$",
+        "write": "^(nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$",
+        "read": "^nutsnews\\.worker\\.fetch\\.v1$"
+      }
+    },
+    {
+      "id": "fetcher_publisher",
+      "kind": "producer",
+      "stage": "fetcher",
+      "route_stage": "canonicalization",
+      "username_variable": "RABBITMQ_FETCHER_PUBLISHER_USERNAME",
+      "password_variable": "RABBITMQ_FETCHER_PUBLISHER_PASSWORD",
+      "tags": [],
+      "permissions": {
+        "configure": "^$",
+        "write": "^nutsnews\\.worker\\.v1$",
+        "read": "^$"
+      }
+    },
+    {
+      "id": "canonicalizer_consumer",
+      "kind": "consumer",
+      "stage": "canonicalizer",
+      "route_stage": "canonicalization",
+      "username_variable": "RABBITMQ_CANONICALIZER_CONSUMER_USERNAME",
+      "password_variable": "RABBITMQ_CANONICALIZER_CONSUMER_PASSWORD",
+      "tags": [],
+      "permissions": {
+        "configure": "^$",
+        "write": "^(nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$",
+        "read": "^nutsnews\\.worker\\.canonicalization\\.v1$"
+      }
+    },
+    {
+      "id": "canonicalizer_publisher",
+      "kind": "producer",
+      "stage": "canonicalizer",
+      "route_stage": "enrichment",
+      "username_variable": "RABBITMQ_CANONICALIZER_PUBLISHER_USERNAME",
+      "password_variable": "RABBITMQ_CANONICALIZER_PUBLISHER_PASSWORD",
+      "tags": [],
+      "permissions": {
+        "configure": "^$",
+        "write": "^nutsnews\\.worker\\.v1$",
+        "read": "^$"
+      }
+    },
+    {
+      "id": "enrichment_consumer",
+      "kind": "consumer",
+      "stage": "enrichment",
+      "route_stage": "enrichment",
+      "username_variable": "RABBITMQ_ENRICHMENT_CONSUMER_USERNAME",
+      "password_variable": "RABBITMQ_ENRICHMENT_CONSUMER_PASSWORD",
+      "tags": [],
+      "permissions": {
+        "configure": "^$",
+        "write": "^(nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$",
+        "read": "^nutsnews\\.worker\\.enrichment\\.v1$"
+      }
+    },
+    {
+      "id": "enrichment_publisher",
+      "kind": "producer",
+      "stage": "enrichment",
+      "route_stage": "approval",
+      "username_variable": "RABBITMQ_ENRICHMENT_PUBLISHER_USERNAME",
+      "password_variable": "RABBITMQ_ENRICHMENT_PUBLISHER_PASSWORD",
+      "tags": [],
+      "permissions": {
+        "configure": "^$",
+        "write": "^nutsnews\\.worker\\.v1$",
+        "read": "^$"
+      }
+    },
+    {
+      "id": "approval_consumer",
+      "kind": "consumer",
+      "stage": "approval",
+      "route_stage": "approval",
+      "username_variable": "RABBITMQ_APPROVAL_CONSUMER_USERNAME",
+      "password_variable": "RABBITMQ_APPROVAL_CONSUMER_PASSWORD",
+      "tags": [],
+      "permissions": {
+        "configure": "^$",
+        "write": "^(nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$",
+        "read": "^nutsnews\\.worker\\.approval\\.v1$"
+      }
+    },
+    {
+      "id": "approval_publisher",
+      "kind": "producer",
+      "stage": "approval",
+      "route_stage": "translation",
+      "username_variable": "RABBITMQ_APPROVAL_PUBLISHER_USERNAME",
+      "password_variable": "RABBITMQ_APPROVAL_PUBLISHER_PASSWORD",
+      "tags": [],
+      "permissions": {
+        "configure": "^$",
+        "write": "^nutsnews\\.worker\\.v1$",
+        "read": "^$"
+      }
+    },
+    {
+      "id": "translation_consumer",
+      "kind": "consumer",
+      "stage": "translation",
+      "route_stage": "translation",
+      "username_variable": "RABBITMQ_TRANSLATION_CONSUMER_USERNAME",
+      "password_variable": "RABBITMQ_TRANSLATION_CONSUMER_PASSWORD",
+      "tags": [],
+      "permissions": {
+        "configure": "^$",
+        "write": "^(nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$",
+        "read": "^nutsnews\\.worker\\.translation\\.v1$"
+      }
+    },
+    {
+      "id": "translation_publisher",
+      "kind": "producer",
+      "stage": "translation",
+      "route_stage": "persistence",
+      "username_variable": "RABBITMQ_TRANSLATION_PUBLISHER_USERNAME",
+      "password_variable": "RABBITMQ_TRANSLATION_PUBLISHER_PASSWORD",
+      "tags": [],
+      "permissions": {
+        "configure": "^$",
+        "write": "^nutsnews\\.worker\\.v1$",
+        "read": "^$"
+      }
+    },
+    {
+      "id": "persistence_consumer",
+      "kind": "consumer",
+      "stage": "persistence",
+      "route_stage": "persistence",
+      "username_variable": "RABBITMQ_PERSISTENCE_CONSUMER_USERNAME",
+      "password_variable": "RABBITMQ_PERSISTENCE_CONSUMER_PASSWORD",
+      "tags": [],
+      "permissions": {
+        "configure": "^$",
+        "write": "^(nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$",
+        "read": "^nutsnews\\.worker\\.persistence\\.v1$"
+      }
+    },
+    {
+      "id": "persistence_publisher",
+      "kind": "producer",
+      "stage": "persistence",
+      "route_stage": "publication",
+      "username_variable": "RABBITMQ_PERSISTENCE_PUBLISHER_USERNAME",
+      "password_variable": "RABBITMQ_PERSISTENCE_PUBLISHER_PASSWORD",
+      "tags": [],
+      "permissions": {
+        "configure": "^$",
+        "write": "^nutsnews\\.worker\\.v1$",
+        "read": "^$"
+      }
+    },
+    {
+      "id": "publication_consumer",
+      "kind": "consumer",
+      "stage": "publication",
+      "route_stage": "publication",
+      "username_variable": "RABBITMQ_PUBLICATION_CONSUMER_USERNAME",
+      "password_variable": "RABBITMQ_PUBLICATION_CONSUMER_PASSWORD",
+      "tags": [],
+      "permissions": {
+        "configure": "^$",
+        "write": "^(nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$",
+        "read": "^nutsnews\\.worker\\.publication\\.v1$"
+      }
+    }
+  ]
+}

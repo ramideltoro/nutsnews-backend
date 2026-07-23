@@ -72,6 +72,7 @@ Backend owns these operations for the uplift runtime:
 - smoke: `Backend PostgreSQL Smoke Tests`, `Backend Synthetic Monitor`, cutover smoke gates
 - queue and DLQ inspect/replay: future fixed backend RabbitMQ operations
 - broker backup/restore: rebuild topology from backend source control and replay from stage outbox
+- RabbitMQ capacity/security: `runbooks/WORKER_UPLIFT_RABBITMQ_CAPACITY_SECURITY.md`
 - reconciliation: backend stage schemas, outbox/watermark proof, and cutover gates
 - database cutover and rollback: backend provider-switch and production-cutover workflows
 - backend DNS/routing: `Backend Cloudflare Routing` only for `backend.nutsnews.com`

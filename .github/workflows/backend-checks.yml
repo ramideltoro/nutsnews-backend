@@ -184,6 +184,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_worker_uplift_architecture_adr.py
 
+      - name: Validate worker uplift RabbitMQ capacity and security decision
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_rabbitmq_capacity_security.py
+
       - name: Validate backend database provider switch
         shell: bash
         run: python3 scripts/validate_backend_database_provider_switch.py
@@ -233,3 +237,47 @@ jobs:
         shell: bash
         working-directory: ansible
         run: ansible-playbook playbooks/bootstrap.yml --syntax-check -i inventories/production/hosts.yml
+
+  rabbitmq_benchmark:
+    name: Benchmark RabbitMQ queue types
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.title, 'RabbitMQ')) || (github.event_name == 'push' && contains(github.event.head_commit.message, 'RabbitMQ')) }}
+
+    services:
+      rabbitmq:
+        image: rabbitmq@sha256:c427b73a15d01416346f429042125e663452e2a27e07fb3096fadb08f7033fc7
+        ports:
+          - 5672:5672
+          - 15672:15672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 24
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install benchmark dependency
+        shell: bash
+        run: python3 -m pip install --disable-pip-version-check pika==1.3.2
+
+      - name: Run benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/worker_uplift_rabbitmq_capacity_benchmark.py \
+            --messages-per-queue 50 \
+            --message-bytes 1024 \
+            --output rabbitmq-capacity-benchmark.json
+
+      - name: Upload benchmark artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: rabbitmq-capacity-benchmark
+          path: rabbitmq-capacity-benchmark.json
+          if-no-files-found: error

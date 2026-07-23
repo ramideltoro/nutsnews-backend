@@ -594,12 +594,28 @@ def main() -> int:
         for field in required_article_review_fields
         if not isinstance(article_reviews_snapshot, dict) or field not in article_reviews_snapshot
     )
+    article_reviews_version_report_rows = (
+        article_reviews_snapshot.get("versionReportRows")
+        if isinstance(article_reviews_snapshot, dict)
+        else None
+    )
+    article_reviews_version_report_error = (
+        article_reviews_snapshot.get("versionReportError")
+        if isinstance(article_reviews_snapshot, dict)
+        else None
+    )
     checks.append(
         {
             "operation": "load-admin-article-reviews",
             "status": article_reviews_status,
             "row_count": len(article_reviews_rows) if isinstance(article_reviews_rows, list) else None,
             "missing_fields": missing_article_review_fields,
+            "version_report_row_count": (
+                len(article_reviews_version_report_rows)
+                if isinstance(article_reviews_version_report_rows, list)
+                else None
+            ),
+            "version_report_error_present": article_reviews_version_report_error is not None,
         }
     )
     if (
@@ -607,6 +623,8 @@ def main() -> int:
         or not isinstance(article_reviews_rows, list)
         or not article_reviews_rows
         or missing_article_review_fields
+        or not isinstance(article_reviews_version_report_rows, list)
+        or article_reviews_version_report_error is not None
     ):
         failures.append("load-admin-article-reviews")
 

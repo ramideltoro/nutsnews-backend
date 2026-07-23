@@ -92,6 +92,53 @@ class BackendSyntheticMonitorTests(unittest.TestCase):
         self.assertEqual(result["row_count"], 0)
         self.assertNotIn("secret-admin-token", json.dumps(result))
 
+    def test_admin_article_reviews_requires_healthy_version_report(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def getcode(self):
+                return 200
+
+            def read(self, _limit):
+                return json.dumps(
+                    {
+                        "rows": [
+                            {
+                                "versionReportRows": [],
+                                "versionReportError": "permission denied for table sensitive_internal_name",
+                            }
+                        ]
+                    }
+                ).encode()
+
+        def fake_urlopen(_request, timeout):
+            self.assertGreater(timeout, 0)
+            return FakeResponse()
+
+        operation = backend_synthetic_monitor.AdminBackendOperation(
+            name="load-admin-article-reviews",
+            body={"providerMode": "backend_postgres_primary", "limit": 1},
+        )
+        with mock.patch.object(backend_synthetic_monitor.urllib.request, "urlopen", side_effect=fake_urlopen):
+            result = backend_synthetic_monitor.run_admin_backend_operation(
+                operation,
+                "https://backend.nutsnews.com/api/app/db",
+                "secret-admin-token",
+                "2026-07-17T00:00:00Z",
+                "2026-07-17T01:00:00Z",
+            )
+
+        self.assertEqual(result["status"], "critical")
+        self.assertEqual(result["failure_class"], "admin_backend_snapshot_error")
+        self.assertIn("versionReportError_present=true", result["failure_detail"])
+        self.assertEqual(result["last_success_at"], "2026-07-17T00:00:00Z")
+        self.assertNotIn("permission denied", json.dumps(result))
+        self.assertNotIn("secret-admin-token", json.dumps(result))
+
     def test_admin_operation_http_failure_names_operation_route_and_redacts_body(self):
         operation = backend_synthetic_monitor.AdminBackendOperation(
             name="load-admin-ai-usage",

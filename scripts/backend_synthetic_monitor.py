@@ -374,6 +374,33 @@ def run_admin_backend_operation(
     error_class = ""
     error_detail = ""
     rows: Any = None
+
+    def payload_failure(parsed_rows: list[Any]) -> tuple[str, str] | None:
+        if operation.name != "load-admin-article-reviews":
+            return None
+        if not parsed_rows:
+            return (
+                "admin_backend_invalid_shape",
+                f"operation={operation.name} route={redact(url)} snapshot_row=false",
+            )
+        snapshot = parsed_rows[0]
+        if not isinstance(snapshot, dict):
+            return (
+                "admin_backend_invalid_shape",
+                f"operation={operation.name} route={redact(url)} snapshot_shape=false",
+            )
+        if not isinstance(snapshot.get("versionReportRows"), list):
+            return (
+                "admin_backend_invalid_shape",
+                f"operation={operation.name} route={redact(url)} versionReportRows_shape=false",
+            )
+        if snapshot.get("versionReportError") is not None:
+            return (
+                "admin_backend_snapshot_error",
+                f"operation={operation.name} route={redact(url)} versionReportError_present=true",
+            )
+        return None
+
     try:
         with urllib.request.urlopen(request, timeout=operation.timeout) as response:
             http_status = response.getcode()
@@ -406,9 +433,14 @@ def run_admin_backend_operation(
         else:
             rows = parsed.get("rows")
             if isinstance(rows, list):
-                ok = True
-                failure_class = ""
-                failure_detail = ""
+                operation_failure = payload_failure(rows)
+                if operation_failure:
+                    ok = False
+                    failure_class, failure_detail = operation_failure
+                else:
+                    ok = True
+                    failure_class = ""
+                    failure_detail = ""
             else:
                 ok = False
                 failure_class = "admin_backend_invalid_shape"

@@ -78,6 +78,7 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("GRANT INSERT, UPDATE ON TABLE %s TO %I", tasks)
         self.assertIn("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %I", tasks)
         self.assertIn("public.article_engagement_source_category_summary", tasks)
+        self.assertIn("public.ai_decision_version_report", tasks)
         self.assertIn("GRANT EXECUTE ON FUNCTION public.record_article_engagement_event", tasks)
         self.assertIn("GRANT EXECUTE ON FUNCTION public.refresh_public_feed_snapshot()", tasks)
         self.assertNotIn("GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO %I', '{{ backend_postgres_worker_api_user }}'", tasks)

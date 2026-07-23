@@ -733,6 +733,32 @@ class AuditLogStore(FakeStore):
         return super().fetch_all(query, params)
 
 
+class RuntimeFeatureFlagsStore(FakeStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.feature_flag_rows = [
+            {
+                "key": "reader_archive_search",
+                "enabled": True,
+                "created_at": "2026-07-12T16:00:00Z",
+                "updated_at": "2026-07-22T10:00:00Z",
+            },
+            {
+                "key": "worker_public_feed_edge_snapshot_publish",
+                "enabled": False,
+                "created_at": "2026-07-12T16:00:00Z",
+                "updated_at": "2026-07-22T10:01:00Z",
+            },
+        ]
+
+    def fetch_all(self, query: str, params: tuple = ()) -> list[dict]:
+        self.fetches.append((query, params))
+        if "from public.runtime_feature_flags" in query:
+            limit, offset = params
+            return self.feature_flag_rows[offset : offset + limit]
+        return super().fetch_all(query, params)
+
+
 class WorkerDbApiTests(unittest.TestCase):
     def test_shadow_feed_read_uses_bounded_select(self) -> None:
         store = FakeStore()
@@ -1656,6 +1682,33 @@ class WorkerDbApiTests(unittest.TestCase):
         self.assertIn("metadata", query)
         self.assertIn("order by created_at desc nulls last, id desc", query)
         self.assertEqual((2,), params)
+
+    def test_app_admin_runtime_feature_flags_returns_rows_envelope(self) -> None:
+        store = RuntimeFeatureFlagsStore()
+
+        result = worker_db_api.handle_app_operation(
+            "load-admin-runtime-feature-flags",
+            {
+                "providerMode": "backend_postgres_primary",
+                "limit": 1,
+                "offset": 1,
+            },
+            store,
+        )
+
+        self.assertEqual(1, result["rowCount"])
+        self.assertIn("generatedAt", result)
+        self.assertEqual(store.feature_flag_rows[1:], result["rows"])
+        self.assertEqual([], store.executes)
+
+        query, params = store.fetches[0]
+        self.assertIn("from public.runtime_feature_flags", query)
+        self.assertIn("key", query)
+        self.assertIn("enabled", query)
+        self.assertIn("created_at", query)
+        self.assertIn("updated_at", query)
+        self.assertIn("order by key asc", query)
+        self.assertEqual((1, 1), params)
 
     def test_app_shadow_write_is_rejected_before_database_call(self) -> None:
         store = FakeStore()

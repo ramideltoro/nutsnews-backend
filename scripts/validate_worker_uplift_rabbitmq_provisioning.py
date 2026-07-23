@@ -126,6 +126,11 @@ def main() -> int:
         errors.append("RabbitMQ role must pull the pinned image during protected apply")
     if "ExecStartPre=/usr/bin/docker compose" in tasks:
         errors.append("RabbitMQ systemd unit must not require registry access during host restart")
+    headroom_task = tasks.split("Capture root filesystem free bytes before RabbitMQ bootstrap", 1)[-1].split("- name:", 1)[0]
+    if "check_mode: false" not in headroom_task:
+        errors.append("RabbitMQ root filesystem headroom check must run in Ansible check mode")
+    if "stdout_lines[-1]" in tasks:
+        errors.append("RabbitMQ role must avoid negative-list indexing in Jinja assertions")
     if "backend_rabbitmq_runtime_manageable" not in tasks or "not ansible_check_mode" not in tasks:
         errors.append("RabbitMQ role must support check mode without managing missing services")
     if "Publish RabbitMQ durable restart probe message" not in tasks or "Verify RabbitMQ durable probe message after restart" not in tasks:

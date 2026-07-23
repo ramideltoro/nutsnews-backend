@@ -29,6 +29,7 @@
     "secrets_present": [
       "NUTSNEWS_BACKEND_API_TOKEN",
       "NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD",
+      "NUTSNEWS_SHADOW_SMOKE_TOKEN",
       "NUTSNEWS_PRODUCTION_SUPABASE_URL",
       "NUTSNEWS_PRODUCTION_SUPABASE_SERVICE_ROLE_KEY",
       "OPENAI_API_KEY"
@@ -44,14 +45,13 @@
     "ready_now": [
       "NUTSNEWS_BACKEND_API_URL",
       "NUTSNEWS_BACKEND_API_TOKEN",
-      "NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD"
+      "NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD",
+      "NUTSNEWS_SHADOW_SMOKE_TOKEN"
     ],
     "required_before_service_bootstrap": [
       "LOCAL_AI_API_KEY"
     ],
-    "required_before_shadow_validation": [
-      "NUTSNEWS_SHADOW_SMOKE_TOKEN"
-    ],
+    "required_before_shadow_validation": [],
     "not_injected_by_design": [
       "SUPABASE_URL",
       "SUPABASE_SERVICE_ROLE_KEY",
@@ -123,13 +123,13 @@
       "name": "NUTSNEWS_SHADOW_SMOKE_TOKEN",
       "source_inventory_name": "NUTSNEWS_SHADOW_SMOKE_TOKEN",
       "classification": "validation_only",
-      "readiness": "deferred_until_shadow_validation",
+      "readiness": "ready",
       "owner": "ramideltoro/nutsnews-backend",
-      "location": "not injected into runtime containers",
+      "location": "production-backend secret",
       "consumers": [
         "future protected shadow smoke workflows"
       ],
-      "rotation_or_update_procedure": "Generate a validation-only token in the protected validation environment when the shadow smoke workflow is implemented.",
+      "rotation_or_update_procedure": "Generate a replacement validation-only token, update the production-backend Environment secret, and redeploy protected shadow smoke workflows that consume it.",
       "legacy_revocation_dependency": "legacy worker non-production shadow smoke token can be retired after new shadow smoke flow replaces it"
     },
     {
@@ -251,7 +251,7 @@
     "value_free_live_check": "gh secret list/gh variable list against production-backend, names only",
     "blocked_items_are_intentional": [
       "LOCAL_AI_API_KEY must be provided or rotated before article approval service bootstrap",
-      "NUTSNEWS_SHADOW_SMOKE_TOKEN must be generated before protected shadow smoke workflows"
+      "NUTSNEWS_SHADOW_SMOKE_TOKEN is generated and ready for future protected shadow smoke workflows"
     ]
   }
 }

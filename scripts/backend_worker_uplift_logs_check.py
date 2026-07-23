@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import shlex
 import subprocess
 import time
 import urllib.error
@@ -57,7 +58,7 @@ def run_ssh(args: argparse.Namespace, command: str, timeout: int = 20) -> dict[s
         ssh_target,
         "bash",
         "-lc",
-        command,
+        shlex.quote(command),
     ]
     try:
         completed = subprocess.run(argv, check=False, capture_output=True, text=True, timeout=timeout)

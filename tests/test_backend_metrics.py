@@ -259,6 +259,37 @@ class BackendMetricsTests(unittest.TestCase):
             "https://logs.example.net/loki/api/v1/query_range",
         )
 
+    def test_worker_uplift_logs_check_quotes_remote_shell_command(self):
+        logs_check = load_worker_logs_check_module()
+
+        class Args:
+            ssh_host = "65.75.201.18"
+            ssh_user = "rami"
+            ssh_key = Path("/tmp/key")
+            known_hosts = Path("/tmp/known_hosts")
+
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+
+            class Completed:
+                returncode = 0
+                stdout = "active\n"
+                stderr = ""
+
+            return Completed()
+
+        original_run = logs_check.subprocess.run
+        try:
+            logs_check.subprocess.run = fake_run
+            result = logs_check.run_ssh(Args, "systemctl is-active alloy 2>/dev/null || true")
+        finally:
+            logs_check.subprocess.run = original_run
+
+        self.assertEqual(result["stdout"], "active")
+        self.assertEqual(captured["argv"][-3:], ["bash", "-lc", "'systemctl is-active alloy 2>/dev/null || true'"])
+
     def test_new_relic_job_metrics_are_host_managed_and_secret_safe(self):
         defaults = Path("ansible/roles/backend_baseline/defaults/main.yml").read_text(encoding="utf-8")
         tasks = NEW_RELIC_METRICS_TASKS.read_text(encoding="utf-8")

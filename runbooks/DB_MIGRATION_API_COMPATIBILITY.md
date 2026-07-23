@@ -179,6 +179,18 @@ inputs, and guardrail status calculations. The operation must use backend
 PostgreSQL least-privilege read access and must not require Supabase
 service-role access in backend-primary mode.
 
+Worker shard health dashboards use the read-only app operation
+`load-admin-worker-shards`. A tokened POST to
+`https://backend.nutsnews.com/api/app/db/load-admin-worker-shards` with
+`providerMode=backend_postgres_primary` must return one dashboard snapshot row
+containing bounded `workerRunRows` from `public.worker_runs`, ordered newest
+first. The selected fields must preserve the app contract for shard identity,
+recent run timing, run source, success/failure and error details, counts,
+duration, save status, cost-protection flags, spike warnings, and image
+hydration metrics. The operation must use backend PostgreSQL least-privilege
+read access and must not require Supabase service-role access in
+backend-primary mode.
+
 ## Authorization Rules
 
 - Browser code must not receive database credentials or service-role style

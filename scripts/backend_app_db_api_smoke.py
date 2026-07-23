@@ -126,6 +126,103 @@ def main() -> int:
     if readiness_status != 200 or not isinstance(readiness_rows, list) or not readiness_rows:
         failures.append("load-admin-production-readiness")
 
+    worker_shards_status, worker_shards_payload = request_json(
+        base_url,
+        token,
+        "load-admin-worker-shards",
+        {
+            "providerMode": "backend_postgres_primary",
+            "limit": 20,
+            "shardCount": 25,
+            "staleAfterMinutes": 180,
+            "slowRunMs": 15000,
+            "dailyWindowDays": 7,
+        },
+    )
+    worker_shards_rows = (
+        worker_shards_payload.get("rows")
+        if isinstance(worker_shards_payload, dict)
+        else None
+    )
+    worker_shards_snapshot = (
+        worker_shards_rows[0]
+        if isinstance(worker_shards_rows, list) and worker_shards_rows
+        else {}
+    )
+    worker_run_rows = (
+        worker_shards_snapshot.get("workerRunRows")
+        if isinstance(worker_shards_snapshot, dict)
+        else None
+    )
+    missing_worker_shards_fields = sorted(
+        field
+        for field in {"workerRunRows"}
+        if not isinstance(worker_shards_snapshot, dict) or field not in worker_shards_snapshot
+    )
+    first_worker_run = (
+        worker_run_rows[0]
+        if isinstance(worker_run_rows, list) and worker_run_rows
+        else {}
+    )
+    missing_worker_run_fields = sorted(
+        field
+        for field in {
+            "id",
+            "created_at",
+            "run_started_at",
+            "run_completed_at",
+            "run_source",
+            "request_id",
+            "shard_index",
+            "feeds_per_shard",
+            "max_ai_reviews",
+            "success",
+            "error_name",
+            "error_message",
+            "feed_count",
+            "fetched_count",
+            "candidate_count",
+            "already_reviewed_count",
+            "unreviewed_count",
+            "eligible_for_ai_count",
+            "ai_reviewed_count",
+            "accepted_count",
+            "rejected_count",
+            "no_thumbnail_rejected_count",
+            "locally_rejected_count",
+            "image_hydration_lookup_count",
+            "image_hydration_found_count",
+            "review_save_ok",
+            "article_save_ok",
+            "ai_usage_save_ok",
+            "cost_protection_limit_reached",
+            "spike_warning_triggered",
+            "duration_ms",
+        }
+        if isinstance(first_worker_run, dict)
+        and first_worker_run
+        and field not in first_worker_run
+    )
+    checks.append(
+        {
+            "operation": "load-admin-worker-shards",
+            "status": worker_shards_status,
+            "row_count": len(worker_shards_rows) if isinstance(worker_shards_rows, list) else None,
+            "worker_run_count": len(worker_run_rows) if isinstance(worker_run_rows, list) else None,
+            "missing_fields": missing_worker_shards_fields,
+            "missing_run_fields": missing_worker_run_fields,
+        }
+    )
+    if (
+        worker_shards_status != 200
+        or not isinstance(worker_shards_rows, list)
+        or not worker_shards_rows
+        or not isinstance(worker_run_rows, list)
+        or missing_worker_shards_fields
+        or missing_worker_run_fields
+    ):
+        failures.append("load-admin-worker-shards")
+
     article_reviews_status, article_reviews_payload = request_json(
         base_url,
         token,

@@ -9,6 +9,7 @@ import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 from uuid import uuid4
 
 
@@ -148,16 +149,26 @@ def check_static_files() -> list[dict]:
     ]
 
 
-def live_catalog_query() -> str:
-    schema_csv = ",".join([schema for _stage, _role, schema in STAGES] + [FINAL_SCHEMA, VIEWS_SCHEMA])
+def configured_stages(env_prefix: str) -> list[tuple[str, str, str]]:
+    stages: list[tuple[str, str, str]] = []
+    for stage, default_role, schema in STAGES:
+        env_name = f"{env_prefix}_{stage.upper()}_DB_URL"
+        db_url = os.environ.get(env_name, "")
+        parsed_role = urlparse(db_url).username if db_url else None
+        stages.append((stage, parsed_role or default_role, schema))
+    return stages
+
+
+def live_catalog_query(stages: list[tuple[str, str, str]]) -> str:
+    schema_csv = ",".join([schema for _stage, _role, schema in stages] + [FINAL_SCHEMA, VIEWS_SCHEMA])
     table_values = []
-    for _stage, _role, schema in STAGES:
+    for _stage, _role, schema in stages:
         for table in COMMON_TABLES + STAGE_SPECIFIC_TABLES[schema]:
             table_values.append(f"('{schema}','{table}')")
     for table in STAGE_SPECIFIC_TABLES[FINAL_SCHEMA]:
         table_values.append(f"('{FINAL_SCHEMA}','{table}')")
-    role_schema_values = ",".join(f"('{stage}','{role}','{schema}')" for stage, role, schema in STAGES)
-    role_csv = ",".join(role for _stage, role, _schema in STAGES)
+    role_schema_values = ",".join(f"('{stage}','{role}','{schema}')" for stage, role, schema in stages)
+    role_csv = ",".join(role for _stage, role, _schema in stages)
     domain_table_values = ",".join(f"('{table}')" for table in PUBLIC_DOMAIN_TABLES)
     return f"""
 select 'schema=' || n.nspname
@@ -221,21 +232,22 @@ def parse_bool_token(token: str) -> bool:
     return token.strip().lower() in {"1", "on", "t", "true", "yes"}
 
 
-def check_live_catalog(db_url: str) -> list[dict]:
-    code, stdout, stderr = run_psql(db_url, live_catalog_query())
+def check_live_catalog(db_url: str, stages: list[tuple[str, str, str]]) -> list[dict]:
+    code, stdout, stderr = run_psql(db_url, live_catalog_query(stages))
     if code != 0:
         return [{"name": "live_worker_uplift_catalog", "status": "fail", "error": "psql_failed", "returncode": code}]
 
-    expected_schemas = {schema for _stage, _role, schema in STAGES} | {FINAL_SCHEMA, VIEWS_SCHEMA}
+    expected_schemas = {schema for _stage, _role, schema in stages} | {FINAL_SCHEMA, VIEWS_SCHEMA}
     expected_tables = {
         f"{schema}.{table}"
-        for _stage, _role, schema in STAGES
+        for _stage, _role, schema in stages
         for table in COMMON_TABLES + STAGE_SPECIFIC_TABLES[schema]
     } | {f"{FINAL_SCHEMA}.article_shadow_aggregates"}
     expected_redaction_tables = expected_tables - {
-        f"{schema}.transition_ledger" for _stage, _role, schema in STAGES
+        f"{schema}.transition_ledger" for _stage, _role, schema in stages
     }
-    expected_redaction_tables |= {f"{schema}.transition_ledger" for _stage, _role, schema in STAGES}
+    expected_redaction_tables |= {f"{schema}.transition_ledger" for _stage, _role, schema in stages}
+    persistence_role = next(role for stage, role, _schema in stages if stage == "persistence")
 
     schemas = {line.split("=", 1)[1] for line in stdout.splitlines() if line.startswith("schema=")}
     tables = {line.split("=", 1)[1] for line in stdout.splitlines() if line.startswith("table=")}
@@ -269,7 +281,7 @@ def check_live_catalog(db_url: str) -> list[dict]:
             role_name, insert_value, update_value = payload.split(":")
             insert_allowed = parse_bool_token(insert_value.split("=", 1)[1])
             update_allowed = parse_bool_token(update_value.split("=", 1)[1])
-            if role_name == "nutsnews_worker_uplift_persistence":
+            if role_name == persistence_role:
                 if not (insert_allowed and update_allowed):
                     final_grant_failures.append(f"{role_name}:missing_insert_update")
             elif insert_allowed or update_allowed:
@@ -415,11 +427,12 @@ def main() -> int:
         if args.permission_checks:
             checks.append({"name": "live_worker_uplift_role_permissions", "status": "skipped_with_reason", "reason": "offline mode"})
     else:
+        stages = configured_stages(args.stage_db_url_env_prefix)
         target_db_url = os.environ.get(args.target_db_url_env, "")
         if not target_db_url:
             checks.append({"name": "live_worker_uplift_catalog", "status": "fail", "error": "missing_target_db_url_env"})
         else:
-            checks.extend(check_live_catalog(target_db_url))
+            checks.extend(check_live_catalog(target_db_url, stages))
         if args.permission_checks:
             checks.extend(check_role_permissions(args.stage_db_url_env_prefix))
 

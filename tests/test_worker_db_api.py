@@ -596,6 +596,59 @@ class WorkerShardsStore(FakeStore):
         return super().fetch_all(query, params)
 
 
+class RssFeedHealthStore(FakeStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.rss_feed_rows = [
+            {
+                "source": "Reuters",
+                "url": "https://publisher.example.com/reuters/rss",
+                "is_positive_source": True,
+                "is_active": True,
+            },
+            {
+                "source": "Legacy",
+                "url": "https://publisher.example.com/legacy/rss",
+                "is_positive_source": False,
+                "is_active": False,
+            },
+        ]
+        self.feed_health_rows = [
+            {
+                "id": 401,
+                "source": "Reuters",
+                "feed_url": "https://publisher.example.com/reuters/rss",
+                "last_checked_at": "2026-07-22T10:00:00Z",
+                "last_success_at": "2026-07-22T10:00:00Z",
+                "last_failure_at": "2026-07-21T10:00:00Z",
+                "last_status": 200,
+                "last_error_message": None,
+                "last_article_count": 12,
+                "last_image_count": 10,
+                "last_accepted_count": 6,
+                "last_rejected_count": 4,
+                "consecutive_failure_count": 0,
+                "total_fetch_count": 20,
+                "total_success_count": 18,
+                "total_failure_count": 2,
+                "total_article_count": 200,
+                "total_image_count": 150,
+                "total_accepted_count": 80,
+                "total_rejected_count": 40,
+                "created_at": "2026-07-01T00:00:00Z",
+                "updated_at": "2026-07-22T10:01:00Z",
+            }
+        ]
+
+    def fetch_all(self, query: str, params: tuple = ()) -> list[dict]:
+        self.fetches.append((query, params))
+        if "from public.rss_feeds" in query:
+            return self.rss_feed_rows[: params[0]]
+        if "from public.feed_health" in query:
+            return self.feed_health_rows[: params[0]]
+        return super().fetch_all(query, params)
+
+
 class WorkerDbApiTests(unittest.TestCase):
     def test_shadow_feed_read_uses_bounded_select(self) -> None:
         store = FakeStore()
@@ -1371,6 +1424,59 @@ class WorkerDbApiTests(unittest.TestCase):
         self.assertIn("duration_ms", query)
         self.assertIn("order by run_started_at desc nulls last, id desc", query)
         self.assertEqual((2,), params)
+
+    def test_app_admin_rss_feed_health_returns_dashboard_snapshot(self) -> None:
+        store = RssFeedHealthStore()
+
+        result = worker_db_api.handle_app_operation(
+            "load-admin-rss-feed-health",
+            {
+                "providerMode": "backend_postgres_primary",
+                "limit": 2,
+                "staleAfterHours": 24,
+            },
+            store,
+        )
+
+        self.assertEqual(1, result["rowCount"])
+        self.assertIn("generatedAt", result)
+        row = result["rows"][0]
+        self.assertEqual(store.rss_feed_rows, row["rssFeedRows"])
+        self.assertEqual(store.feed_health_rows, row["feedHealthRows"])
+        self.assertEqual([], store.executes)
+
+        rss_query, rss_params = store.fetches[0]
+        self.assertIn("from public.rss_feeds", rss_query)
+        self.assertIn("source", rss_query)
+        self.assertIn("url", rss_query)
+        self.assertIn("is_positive_source", rss_query)
+        self.assertIn("is_active", rss_query)
+        self.assertIn("order by id asc", rss_query)
+        self.assertEqual((2,), rss_params)
+
+        health_query, health_params = store.fetches[1]
+        self.assertIn("from public.feed_health", health_query)
+        self.assertIn("last_checked_at", health_query)
+        self.assertIn("last_success_at", health_query)
+        self.assertIn("last_failure_at", health_query)
+        self.assertIn("last_status", health_query)
+        self.assertIn("last_error_message", health_query)
+        self.assertIn("last_article_count", health_query)
+        self.assertIn("last_image_count", health_query)
+        self.assertIn("last_accepted_count", health_query)
+        self.assertIn("last_rejected_count", health_query)
+        self.assertIn("consecutive_failure_count", health_query)
+        self.assertIn("total_fetch_count", health_query)
+        self.assertIn("total_success_count", health_query)
+        self.assertIn("total_failure_count", health_query)
+        self.assertIn("total_article_count", health_query)
+        self.assertIn("total_image_count", health_query)
+        self.assertIn("total_accepted_count", health_query)
+        self.assertIn("total_rejected_count", health_query)
+        self.assertIn("created_at", health_query)
+        self.assertIn("updated_at", health_query)
+        self.assertIn("order by total_accepted_count desc nulls last, id desc", health_query)
+        self.assertEqual((2,), health_params)
 
     def test_app_shadow_write_is_rejected_before_database_call(self) -> None:
         store = FakeStore()

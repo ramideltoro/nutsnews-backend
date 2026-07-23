@@ -223,6 +223,112 @@ def main() -> int:
     ):
         failures.append("load-admin-worker-shards")
 
+    rss_feed_health_status, rss_feed_health_payload = request_json(
+        base_url,
+        token,
+        "load-admin-rss-feed-health",
+        {
+            "providerMode": "backend_postgres_primary",
+            "limit": 20,
+            "staleAfterHours": 24,
+        },
+    )
+    rss_feed_health_rows = (
+        rss_feed_health_payload.get("rows")
+        if isinstance(rss_feed_health_payload, dict)
+        else None
+    )
+    rss_feed_health_snapshot = (
+        rss_feed_health_rows[0]
+        if isinstance(rss_feed_health_rows, list) and rss_feed_health_rows
+        else {}
+    )
+    rss_feed_rows = (
+        rss_feed_health_snapshot.get("rssFeedRows")
+        if isinstance(rss_feed_health_snapshot, dict)
+        else None
+    )
+    feed_health_rows = (
+        rss_feed_health_snapshot.get("feedHealthRows")
+        if isinstance(rss_feed_health_snapshot, dict)
+        else None
+    )
+    missing_rss_feed_health_fields = sorted(
+        field
+        for field in {"rssFeedRows", "feedHealthRows"}
+        if not isinstance(rss_feed_health_snapshot, dict) or field not in rss_feed_health_snapshot
+    )
+    first_rss_feed = (
+        rss_feed_rows[0]
+        if isinstance(rss_feed_rows, list) and rss_feed_rows
+        else {}
+    )
+    missing_rss_feed_fields = sorted(
+        field
+        for field in {"source", "url", "is_positive_source", "is_active"}
+        if isinstance(first_rss_feed, dict)
+        and first_rss_feed
+        and field not in first_rss_feed
+    )
+    first_feed_health = (
+        feed_health_rows[0]
+        if isinstance(feed_health_rows, list) and feed_health_rows
+        else {}
+    )
+    missing_feed_health_fields = sorted(
+        field
+        for field in {
+            "id",
+            "source",
+            "feed_url",
+            "last_checked_at",
+            "last_success_at",
+            "last_failure_at",
+            "last_status",
+            "last_error_message",
+            "last_article_count",
+            "last_image_count",
+            "last_accepted_count",
+            "last_rejected_count",
+            "consecutive_failure_count",
+            "total_fetch_count",
+            "total_success_count",
+            "total_failure_count",
+            "total_article_count",
+            "total_image_count",
+            "total_accepted_count",
+            "total_rejected_count",
+            "created_at",
+            "updated_at",
+        }
+        if isinstance(first_feed_health, dict)
+        and first_feed_health
+        and field not in first_feed_health
+    )
+    checks.append(
+        {
+            "operation": "load-admin-rss-feed-health",
+            "status": rss_feed_health_status,
+            "row_count": len(rss_feed_health_rows) if isinstance(rss_feed_health_rows, list) else None,
+            "rss_feed_count": len(rss_feed_rows) if isinstance(rss_feed_rows, list) else None,
+            "feed_health_count": len(feed_health_rows) if isinstance(feed_health_rows, list) else None,
+            "missing_fields": missing_rss_feed_health_fields,
+            "missing_rss_feed_fields": missing_rss_feed_fields,
+            "missing_feed_health_fields": missing_feed_health_fields,
+        }
+    )
+    if (
+        rss_feed_health_status != 200
+        or not isinstance(rss_feed_health_rows, list)
+        or not rss_feed_health_rows
+        or not isinstance(rss_feed_rows, list)
+        or not isinstance(feed_health_rows, list)
+        or missing_rss_feed_health_fields
+        or missing_rss_feed_fields
+        or missing_feed_health_fields
+    ):
+        failures.append("load-admin-rss-feed-health")
+
     article_reviews_status, article_reviews_payload = request_json(
         base_url,
         token,

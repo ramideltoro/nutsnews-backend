@@ -1,0 +1,468 @@
+{
+  "contract_id": "worker-uplift-api-admin-compatibility-contract",
+  "version": 1,
+  "tracking_issue": 140,
+  "tracking_repo": "ramideltoro/nutsnews-worker",
+  "implementation_repo": "ramideltoro/nutsnews-backend",
+  "status": "read_only_contract_baseline",
+  "captured_at_utc": "2026-07-23T02:40:43Z",
+  "capture_mode": "source_and_live_name_evidence_only",
+  "production_database_state": {
+    "current_primary": "backend_postgres_primary",
+    "target_for_worker_uplift": "backend_postgres_primary through backend Worker DB API",
+    "supabase_state": "rollback_and_retirement_state_not_target_worker_uplift_database",
+    "service_role_policy": "Do not reuse SUPABASE_SERVICE_ROLE_KEY or any broad legacy service credential for worker-uplift services."
+  },
+  "depends_on": [
+    "docs/backend-api-compatibility-contract.json",
+    "docs/backend-credential-inventory.json",
+    "docs/worker-uplift-cloudflare-inventory.json",
+    "docs/worker-uplift-legacy-parity-baseline.md",
+    "ansible/roles/backend_baseline/files/nutsnews_worker_db_api.py"
+  ],
+  "routes": [
+    {
+      "scope": "worker",
+      "route": "https://backend.nutsnews.com/api/worker/db/*",
+      "source_path_prefix": "/api/worker/db/",
+      "auth": "Bearer NUTSNEWS_BACKEND_API_TOKEN",
+      "token_owner": "ramideltoro/nutsnews-backend production-backend",
+      "request_body": "JSON object",
+      "max_body_bytes": 2000000,
+      "provider_modes": [
+        "backend_postgres_shadow",
+        "backend_postgres_primary"
+      ]
+    },
+    {
+      "scope": "app_admin_public",
+      "route": "https://backend.nutsnews.com/api/app/db/*",
+      "source_path_prefix": "/api/app/db/",
+      "auth": "Bearer NUTSNEWS_BACKEND_API_TOKEN plus app/admin session checks before server-side caller use",
+      "token_owner": "ramideltoro/nutsnews-backend production-backend",
+      "request_body": "JSON object",
+      "max_body_bytes": 2000000,
+      "provider_modes": [
+        "backend_postgres_shadow",
+        "backend_postgres_primary"
+      ]
+    }
+  ],
+  "operation_sets": {
+    "worker_read": {
+      "source_constant": "READ_OPERATIONS",
+      "route_scope": "worker",
+      "names": [
+        "get-runtime-feature-flag",
+        "load-article-count-for-backpressure",
+        "load-existing-summary-language-rows",
+        "load-feed-health-snapshots",
+        "load-feeds-for-shard",
+        "load-public-feed-snapshot-rows",
+        "load-published-article-url-rows",
+        "load-reviewed-url-rows",
+        "load-summary-translation-recovery-articles"
+      ]
+    },
+    "worker_write": {
+      "source_constant": "WRITE_OPERATIONS",
+      "route_scope": "worker",
+      "names": [
+        "publish-articles-batch",
+        "refresh-public-feed-snapshot",
+        "save-accepted-articles-batch",
+        "save-ai-usage-run",
+        "save-article-reviews-batch",
+        "save-article-summaries-batch",
+        "save-feed-health-batch",
+        "save-worker-run"
+      ]
+    },
+    "app_admin_public_read": {
+      "source_constant": "APP_READ_OPERATIONS",
+      "route_scope": "app_admin_public",
+      "names": [
+        "app-provider-smoke",
+        "get-runtime-feature-flag",
+        "load-admin-ai-usage",
+        "load-admin-ai-usage-runs",
+        "load-admin-article-engagement",
+        "load-admin-article-engagement-article-summary",
+        "load-admin-article-engagement-source-category-summary",
+        "load-admin-article-review-rows",
+        "load-admin-article-reviews",
+        "load-admin-audit-log",
+        "load-admin-feed-health-snapshots",
+        "load-admin-feed-management",
+        "load-admin-feed-quality-rows",
+        "load-admin-guardrails",
+        "load-admin-local-ai",
+        "load-admin-production-readiness",
+        "load-admin-quota-usage-events",
+        "load-admin-rss-feed-health",
+        "load-admin-runtime-feature-flags",
+        "load-admin-translation-quality",
+        "load-admin-worker-runs",
+        "load-admin-worker-shards",
+        "load-article-detail",
+        "load-article-sitemap-items-page",
+        "load-home-feed-snapshot",
+        "load-public-feed-snapshot",
+        "load-published-article-sitemap-count",
+        "load-published-articles",
+        "load-published-categories",
+        "load-readiness-schema-contract",
+        "load-recent-article-sitemap-items",
+        "search-published-articles"
+      ]
+    },
+    "app_write": {
+      "source_constant": "APP_WRITE_OPERATIONS",
+      "route_scope": "app_admin_public",
+      "names": [
+        "record-article-engagement-event",
+        "record-quota-usage-event",
+        "set-runtime-feature-flag"
+      ]
+    }
+  },
+  "stage_boundaries": [
+    {
+      "stage": "scheduler",
+      "repo": "ramideltoro/nutsnews-worker-feed-scheduler",
+      "stage_private_state": [
+        "schedule cursor",
+        "RabbitMQ publish outbox",
+        "correlation id and lease metadata"
+      ],
+      "backend_api_operations_initially_allowed": [
+        "load-article-count-for-backpressure",
+        "get-runtime-feature-flag",
+        "save-worker-run"
+      ],
+      "final_domain_write_owner": "backend Worker DB API"
+    },
+    {
+      "stage": "fetcher",
+      "repo": "ramideltoro/nutsnews-worker-feed-fetcher",
+      "stage_private_state": [
+        "fetch attempt inbox/outbox",
+        "feed response metadata",
+        "sanitized parse errors"
+      ],
+      "backend_api_operations_initially_allowed": [
+        "load-feeds-for-shard",
+        "save-feed-health-batch",
+        "save-worker-run"
+      ],
+      "final_domain_write_owner": "backend Worker DB API"
+    },
+    {
+      "stage": "canonicalizer",
+      "repo": "ramideltoro/nutsnews-worker-article-canonicalizer",
+      "stage_private_state": [
+        "canonical URL decisions",
+        "dedupe candidate state"
+      ],
+      "backend_api_operations_initially_allowed": [
+        "load-reviewed-url-rows",
+        "load-published-article-url-rows",
+        "save-worker-run"
+      ],
+      "final_domain_write_owner": "backend Worker DB API"
+    },
+    {
+      "stage": "enrichment",
+      "repo": "ramideltoro/nutsnews-worker-article-enrichment",
+      "stage_private_state": [
+        "image lookup attempt state",
+        "article-page metadata cache"
+      ],
+      "backend_api_operations_initially_allowed": [
+        "save-worker-run"
+      ],
+      "final_domain_write_owner": "backend Worker DB API"
+    },
+    {
+      "stage": "approval",
+      "repo": "ramideltoro/nutsnews-worker-article-approval",
+      "stage_private_state": [
+        "local prefilter decision",
+        "AI review request/response metadata",
+        "provider/model/cost counters"
+      ],
+      "backend_api_operations_initially_allowed": [
+        "save-article-reviews-batch",
+        "save-ai-usage-run",
+        "save-worker-run"
+      ],
+      "final_domain_write_owner": "backend Worker DB API"
+    },
+    {
+      "stage": "translation",
+      "repo": "ramideltoro/nutsnews-worker-article-translation",
+      "stage_private_state": [
+        "translation task inbox/outbox",
+        "language coverage checkpoint",
+        "quality failure samples"
+      ],
+      "backend_api_operations_initially_allowed": [
+        "load-existing-summary-language-rows",
+        "load-summary-translation-recovery-articles",
+        "save-article-summaries-batch",
+        "save-ai-usage-run",
+        "save-worker-run"
+      ],
+      "final_domain_write_owner": "backend Worker DB API"
+    },
+    {
+      "stage": "persistence",
+      "repo": "ramideltoro/nutsnews-worker-article-persistence",
+      "stage_private_state": [
+        "idempotent write request outbox",
+        "write result audit metadata"
+      ],
+      "backend_api_operations_initially_allowed": [
+        "save-accepted-articles-batch",
+        "save-article-reviews-batch",
+        "save-article-summaries-batch",
+        "save-feed-health-batch",
+        "save-ai-usage-run",
+        "save-worker-run"
+      ],
+      "final_domain_write_owner": "backend Worker DB API"
+    },
+    {
+      "stage": "publication",
+      "repo": "ramideltoro/nutsnews-worker-article-publication",
+      "stage_private_state": [
+        "publish eligibility cursor",
+        "snapshot refresh outbox",
+        "publication decision audit metadata"
+      ],
+      "backend_api_operations_initially_allowed": [
+        "load-public-feed-snapshot-rows",
+        "publish-articles-batch",
+        "refresh-public-feed-snapshot",
+        "save-worker-run"
+      ],
+      "final_domain_write_owner": "backend Worker DB API"
+    }
+  ],
+  "write_and_shadow_behavior": {
+    "shadow_mode": {
+      "providerMode": "backend_postgres_shadow",
+      "write_status": 409,
+      "meaning": "write operations are disabled outside backend_postgres_primary"
+    },
+    "primary_mode_guarded": {
+      "providerMode": "backend_postgres_primary",
+      "writes_enabled_false_status": 403,
+      "meaning": "backend PostgreSQL writes are disabled by deployment guardrail"
+    },
+    "primary_mode_allowed": {
+      "providerMode": "backend_postgres_primary",
+      "requires": [
+        "production-backend approval",
+        "NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED=true",
+        "caller bearer token present",
+        "operation-specific payload validation"
+      ]
+    }
+  },
+  "translation_policy": {
+    "required_languages": [
+      "fr",
+      "ja",
+      "de-CH",
+      "de",
+      "el"
+    ],
+    "accepted_article_status_before_translation": "translation_pending",
+    "save_accepted_articles_guard": "save-accepted-articles-batch rejects rows that attempt status=published",
+    "publish_guard": "publish-articles-batch with status=published checks all required article_summaries language rows before publishing",
+    "missing_translation_response": [
+      "ok=false",
+      "requestedCount",
+      "publishedCount=0",
+      "blockedCount",
+      "missingTranslations"
+    ]
+  },
+  "snapshot_behavior": {
+    "refresh_operation": "refresh-public-feed-snapshot",
+    "backend_function": "public.refresh_public_feed_snapshot()",
+    "public_read_operations": [
+      "load-public-feed-snapshot",
+      "load-home-feed-snapshot",
+      "load-public-feed-snapshot-rows"
+    ],
+    "localization_source": "article_summaries joined by requested language code",
+    "edge_snapshot_legacy": "Cloudflare KV public-feed edge snapshot remains legacy fallback until a later publication/storage decision retires it"
+  },
+  "idempotency_and_correlation": {
+    "current_backend_idempotency": [
+      {
+        "operation": "save-article-summaries-batch",
+        "key": [
+          "original_url",
+          "language_code"
+        ],
+        "mode": "upsert"
+      },
+      {
+        "operation": "save-feed-health-batch",
+        "key": [
+          "feed_url"
+        ],
+        "mode": "upsert"
+      },
+      {
+        "operation": "save-article-reviews-batch",
+        "key": [
+          "original_url"
+        ],
+        "mode": "upsert"
+      },
+      {
+        "operation": "save-accepted-articles-batch",
+        "key": [
+          "original_url"
+        ],
+        "mode": "insert_on_conflict_do_nothing"
+      }
+    ],
+    "required_uplift_correlation_fields": [
+      "pipeline_run_id",
+      "stage_execution_id",
+      "source_message_id",
+      "source_feed_url",
+      "original_url",
+      "operation_version"
+    ],
+    "versioning": {
+      "api_contract_version": 1,
+      "payload_version_field": "operation_version",
+      "backward_compatibility_rule": "new optional fields may be ignored by the backend API; breaking payload changes require a contract version bump and fixture update"
+    }
+  },
+  "failure_semantics": [
+    {
+      "status": 400,
+      "case": "request body is not JSON, body is not an object, providerMode is invalid or missing, or operation payload validation fails"
+    },
+    {
+      "status": 401,
+      "case": "missing or invalid bearer token"
+    },
+    {
+      "status": 403,
+      "case": "backend_postgres_primary write requested while deployment write guard is disabled"
+    },
+    {
+      "status": 404,
+      "case": "unknown route or operation"
+    },
+    {
+      "status": 409,
+      "case": "write attempted in backend_postgres_shadow, accepted article attempted as published, or translation gate blocks publication"
+    },
+    {
+      "status": 413,
+      "case": "request body exceeds 2000000 bytes"
+    },
+    {
+      "status": 503,
+      "case": "backend API token is not configured"
+    },
+    {
+      "status": 500,
+      "case": "unexpected internal database compatibility API error"
+    }
+  ],
+  "admin_and_public_consumers": {
+    "public": [
+      "load-public-feed-snapshot",
+      "load-home-feed-snapshot",
+      "load-published-articles",
+      "load-published-categories",
+      "load-article-detail",
+      "load-recent-article-sitemap-items",
+      "load-published-article-sitemap-count",
+      "load-article-sitemap-items-page",
+      "search-published-articles"
+    ],
+    "admin": [
+      "load-admin-production-readiness",
+      "load-admin-article-reviews",
+      "load-admin-article-engagement",
+      "load-admin-ai-usage",
+      "load-admin-local-ai",
+      "load-admin-translation-quality",
+      "load-admin-guardrails",
+      "load-admin-worker-shards",
+      "load-admin-rss-feed-health",
+      "load-admin-feed-management",
+      "load-admin-audit-log",
+      "load-admin-runtime-feature-flags",
+      "load-admin-quota-usage-events",
+      "load-admin-article-engagement-source-category-summary",
+      "load-admin-article-engagement-article-summary",
+      "load-admin-feed-health-snapshots",
+      "load-admin-feed-quality-rows",
+      "load-admin-worker-runs",
+      "load-admin-ai-usage-runs",
+      "load-admin-article-review-rows"
+    ],
+    "server_write": [
+      "record-quota-usage-event",
+      "record-article-engagement-event",
+      "set-runtime-feature-flag"
+    ]
+  },
+  "legacy_field_policy": {
+    "required_during_coexistence": [
+      "original_url",
+      "source",
+      "title",
+      "image_url",
+      "ai_summary",
+      "category",
+      "positivity_score",
+      "reviewed_at",
+      "published_at",
+      "published_on_site_at",
+      "status",
+      "language_code",
+      "ai_provider",
+      "ai_model",
+      "prompt_version",
+      "model_version",
+      "worker_id",
+      "shard_index",
+      "feed_url",
+      "error_message"
+    ],
+    "pipeline_stage_equivalents": [
+      "pipeline_run_id",
+      "stage_execution_id",
+      "source_message_id",
+      "operation_version",
+      "stage_attempt_count",
+      "stage_error_code"
+    ],
+    "retire_only_after_consumer_audit": [
+      "Cloudflare shard index",
+      "KV snapshot status fields",
+      "legacy Upstash lock/rate-limit fields",
+      "legacy Better Stack log delivery metadata",
+      "legacy OpenAI fallback metadata"
+    ]
+  },
+  "validation": {
+    "local_validator": "python3 scripts/validate_worker_uplift_api_admin_contract.py",
+    "source_allowlist_check": "operation sets must match ansible/roles/backend_baseline/files/nutsnews_worker_db_api.py constants",
+    "no_legacy_worker_mutation": true,
+    "no_cloudflare_mutation": true
+  }
+}

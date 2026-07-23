@@ -76,6 +76,14 @@ jobs:
           MODE: ${{ inputs.mode }}
           NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
           NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_USERNAME || 'nutsnews_worker_uplift_scheduler' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_USERNAME || 'nutsnews_worker_uplift_fetcher' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_USERNAME || 'nutsnews_worker_uplift_canonicalizer' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_USERNAME || 'nutsnews_worker_uplift_enrichment' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_USERNAME || 'nutsnews_worker_uplift_approval' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_USERNAME || 'nutsnews_worker_uplift_translation' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_USERNAME || 'nutsnews_worker_uplift_persistence' }}
+          NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_USERNAME: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_USERNAME || 'nutsnews_worker_uplift_publication' }}
         run: |
           set -euo pipefail
 
@@ -93,6 +101,15 @@ jobs:
               --known-hosts "$HOME/.ssh/known_hosts"
               --enforce
             )
+            for stage_name in scheduler fetcher canonicalizer enrichment approval translation persistence publication; do
+              env_name="NUTSNEWS_WORKER_UPLIFT_POSTGRES_${stage_name^^}_USERNAME"
+              username="${!env_name}"
+              if [[ ! "$username" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+                echo "${env_name} must be a safe PostgreSQL identifier" >&2
+                exit 1
+              fi
+              args+=(--worker-uplift-stage-role "${stage_name}:${username}")
+            done
           fi
 
           python3 scripts/backend_postgres_migration_access_preflight.py "${args[@]}"

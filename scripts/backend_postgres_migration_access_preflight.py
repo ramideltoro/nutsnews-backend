@@ -87,6 +87,36 @@ def parse_postgres_bool(value: str) -> bool:
     return value.strip().lower() in POSTGRES_TRUE_VALUES
 
 
+def parse_worker_uplift_stage_roles(values: list[str]) -> list[tuple[str, str, str]]:
+    if not values:
+        return []
+
+    schema_by_stage = dict(WORKER_UPLIFT_STAGE_SCHEMAS)
+    role_by_stage: dict[str, str] = {}
+    for value in values:
+        if ":" in value:
+            stage, role_name = value.split(":", 1)
+        elif "=" in value:
+            stage, role_name = value.split("=", 1)
+        else:
+            raise SystemExit("--worker-uplift-stage-role values must use stage:role or stage=role")
+        stage = stage.strip()
+        role_name = role_name.strip()
+        if stage not in schema_by_stage:
+            raise SystemExit(f"Unsupported worker-uplift stage role: {stage}")
+        if stage in role_by_stage:
+            raise SystemExit(f"Duplicate worker-uplift stage role: {stage}")
+        if not IDENTIFIER_RE.match(role_name):
+            raise SystemExit(f"Worker-uplift stage role must be a safe PostgreSQL identifier: {stage}")
+        role_by_stage[stage] = role_name
+
+    missing_stages = [stage for stage, _schema in WORKER_UPLIFT_STAGE_SCHEMAS if stage not in role_by_stage]
+    if missing_stages:
+        raise SystemExit(f"Missing worker-uplift stage roles: {','.join(missing_stages)}")
+
+    return [(stage, role_by_stage[stage], schema) for stage, schema in WORKER_UPLIFT_STAGE_SCHEMAS]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default=DEFAULT_HOST)
@@ -94,6 +124,13 @@ def main() -> int:
     parser.add_argument("--ssh-key", default="")
     parser.add_argument("--known-hosts", default="")
     parser.add_argument("--primary-shadow-database", default="nutsnews_primary_shadow")
+    parser.add_argument(
+        "--worker-uplift-stage-role",
+        action="append",
+        default=[],
+        metavar="STAGE:ROLE",
+        help="Configured worker-uplift stage login role. Repeat once for every stage.",
+    )
     parser.add_argument("--output", default="")
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--enforce", action="store_true")
@@ -104,6 +141,7 @@ def main() -> int:
 
     if not IDENTIFIER_RE.match(args.primary_shadow_database):
         raise SystemExit("--primary-shadow-database must be a safe PostgreSQL identifier")
+    configured_worker_stage_roles = parse_worker_uplift_stage_roles(args.worker_uplift_stage_role)
 
     try:
         resolved = socket.gethostbyname(args.host)
@@ -148,40 +186,55 @@ def main() -> int:
             worker_stage_schema_values = ",".join(
                 f"('{stage}','{schema}')" for stage, schema in WORKER_UPLIFT_STAGE_SCHEMAS
             )
-            worker_stage_role_cte = (
-                f"with expected(stage, schema_name) as (values {worker_stage_schema_values}), "
-                f"non_worker_roles(role_name) as (select unnest(string_to_array('{non_worker_role_csv}', ','))), "
-                "schema_usage as ("
-                "select n.nspname as schema_name, acl.grantee as role_oid "
-                "from pg_namespace n "
-                "cross join lateral aclexplode(coalesce(n.nspacl, '{}'::aclitem[])) acl "
-                "where acl.privilege_type = 'USAGE' and acl.grantee <> n.nspowner"
-                "), "
-                "table_insert as ("
-                "select n.nspname as schema_name, c.relname as table_name, acl.grantee as role_oid "
-                "from pg_class c "
-                "join pg_namespace n on n.oid = c.relnamespace "
-                "cross join lateral aclexplode(coalesce(c.relacl, '{}'::aclitem[])) acl "
-                "where c.relkind in ('r','p') "
-                "and acl.privilege_type = 'INSERT' "
-                "and acl.grantee <> c.relowner"
-                "), "
-                "stage_roles as ("
-                "select distinct e.stage, e.schema_name, r.rolname "
-                "from expected e "
-                "join schema_usage su on su.schema_name = e.schema_name "
-                "join table_insert inbox on inbox.schema_name = e.schema_name "
-                "and inbox.table_name = 'inbox' "
-                "and inbox.role_oid = su.role_oid "
-                "join table_insert outbox on outbox.schema_name = e.schema_name "
-                "and outbox.table_name = 'outbox' "
-                "and outbox.role_oid = su.role_oid "
-                "join pg_roles r on r.oid = su.role_oid "
-                "where r.rolcanlogin "
-                "and not r.rolsuper "
-                "and not exists (select 1 from non_worker_roles excluded where excluded.role_name = r.rolname)"
-                ") "
-            )
+            if configured_worker_stage_roles:
+                configured_stage_role_values = ",".join(
+                    f"('{stage}','{role_name}','{schema}')"
+                    for stage, role_name, schema in configured_worker_stage_roles
+                )
+                worker_stage_role_cte = (
+                    f"with expected(stage, role_name, schema_name) as (values {configured_stage_role_values}), "
+                    "stage_roles as ("
+                    "select e.stage, e.schema_name, e.role_name as rolname "
+                    "from expected e "
+                    "join pg_roles r on r.rolname = e.role_name "
+                    "where r.rolcanlogin and not r.rolsuper"
+                    ") "
+                )
+            else:
+                worker_stage_role_cte = (
+                    f"with expected(stage, schema_name) as (values {worker_stage_schema_values}), "
+                    f"non_worker_roles(role_name) as (select unnest(string_to_array('{non_worker_role_csv}', ','))), "
+                    "schema_usage as ("
+                    "select n.nspname as schema_name, acl.grantee as role_oid "
+                    "from pg_namespace n "
+                    "cross join lateral aclexplode(coalesce(n.nspacl, '{}'::aclitem[])) acl "
+                    "where upper(acl.privilege_type) = 'USAGE' and acl.grantee <> n.nspowner"
+                    "), "
+                    "table_insert as ("
+                    "select n.nspname as schema_name, c.relname as table_name, acl.grantee as role_oid "
+                    "from pg_class c "
+                    "join pg_namespace n on n.oid = c.relnamespace "
+                    "cross join lateral aclexplode(coalesce(c.relacl, '{}'::aclitem[])) acl "
+                    "where c.relkind in ('r','p') "
+                    "and upper(acl.privilege_type) = 'INSERT' "
+                    "and acl.grantee <> c.relowner"
+                    "), "
+                    "stage_roles as ("
+                    "select distinct e.stage, e.schema_name, r.rolname "
+                    "from expected e "
+                    "join schema_usage su on su.schema_name = e.schema_name "
+                    "join table_insert inbox on inbox.schema_name = e.schema_name "
+                    "and inbox.table_name = 'inbox' "
+                    "and inbox.role_oid = su.role_oid "
+                    "join table_insert outbox on outbox.schema_name = e.schema_name "
+                    "and outbox.table_name = 'outbox' "
+                    "and outbox.role_oid = su.role_oid "
+                    "join pg_roles r on r.oid = su.role_oid "
+                    "where r.rolcanlogin "
+                    "and not r.rolsuper "
+                    "and not exists (select 1 from non_worker_roles excluded where excluded.role_name = r.rolname)"
+                    ") "
+                )
             command = (
                 "set -eu; "
                 "ss -H -ltn sport = :5432 | awk '{print \"listener=\" $4}'; "
@@ -194,7 +247,7 @@ def main() -> int:
                 f"select 'worker_uplift_schema=' || n.nspname from pg_namespace n where n.nspname = any(string_to_array('{worker_schema_csv}', ',')) order by n.nspname;\n"
                 f"{worker_stage_role_cte}select 'worker_uplift_stage_role=' || stage || ':' || schema_name || ':' || rolname from stage_roles order by stage, rolname;\n"
                 f"{worker_stage_role_cte}select 'worker_uplift_stage_connect=' || stage || ':' || rolname || ':' || has_database_privilege(rolname, '{args.primary_shadow_database}', 'CONNECT')::text from stage_roles order by stage, rolname;\n"
-                f"{worker_stage_role_cte}select 'worker_uplift_own_grant=' || stage || ':' || rolname || ':' || schema_name || ':usage=true:inbox_insert=true:outbox_insert=true' from stage_roles order by stage, rolname;\n"
+                f"{worker_stage_role_cte}select 'worker_uplift_own_grant=' || stage || ':' || rolname || ':' || schema_name || ':usage=' || has_schema_privilege(rolname, schema_name, 'USAGE')::text || ':inbox_insert=' || case when to_regclass(schema_name || '.inbox') is null then 'missing_table' else has_table_privilege(rolname, schema_name || '.inbox', 'INSERT')::text end || ':outbox_insert=' || case when to_regclass(schema_name || '.outbox') is null then 'missing_table' else has_table_privilege(rolname, schema_name || '.outbox', 'INSERT')::text end from stage_roles order by stage, rolname;\n"
                 f"{worker_stage_role_cte}select 'worker_uplift_public_write=' || rolname || ':insert=' || case when to_regclass('public.articles') is null then 'missing_table' else has_table_privilege(rolname, 'public.articles', 'INSERT')::text end || ':update=' || case when to_regclass('public.articles') is null then 'missing_table' else has_table_privilege(rolname, 'public.articles', 'UPDATE')::text end || ':delete=' || case when to_regclass('public.articles') is null then 'missing_table' else has_table_privilege(rolname, 'public.articles', 'DELETE')::text end from stage_roles order by rolname;\n"
                 f"{worker_stage_role_cte}select 'worker_uplift_final_grant=' || stage || ':' || rolname || ':insert=' || case when to_regclass('worker_uplift_final.article_shadow_aggregates') is null then 'missing_table' else has_table_privilege(rolname, 'worker_uplift_final.article_shadow_aggregates', 'INSERT')::text end || ':update=' || case when to_regclass('worker_uplift_final.article_shadow_aggregates') is null then 'missing_table' else has_table_privilege(rolname, 'worker_uplift_final.article_shadow_aggregates', 'UPDATE')::text end from stage_roles order by stage, rolname;\n"
                 "SQL"

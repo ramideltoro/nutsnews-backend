@@ -12,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any
-from urllib import parse, request
+from urllib import error, parse, request
 
 
 TOKEN_RE = re.compile(r"(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+|[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})")
@@ -92,6 +92,11 @@ def command_stdout(evidence: dict[str, Any], name: str) -> str:
     return evidence.get("commands", {}).get(name, {}).get("stdout", "")
 
 
+def command_result(evidence: dict[str, Any], name: str) -> dict[str, Any]:
+    result = evidence.get("commands", {}).get(name, {})
+    return result if isinstance(result, dict) else {}
+
+
 def check(name: str, status: str, summary: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
     return {"name": name, "status": status, "summary": summary, "details": details or {}}
 
@@ -101,7 +106,9 @@ def classify_local(evidence: dict[str, Any]) -> list[dict[str, Any]]:
     aggregate = command_stdout(evidence, "rabbitmq_aggregate_metrics")
     detailed = command_stdout(evidence, "rabbitmq_detailed_metrics")
     alloy_active = command_stdout(evidence, "alloy_active").strip()
-    alloy_config = command_stdout(evidence, "alloy_config")
+    alloy_config_result = command_result(evidence, "alloy_config")
+    alloy_config = str(alloy_config_result.get("stdout", ""))
+    alloy_config_rc = alloy_config_result.get("rc")
     listener = command_stdout(evidence, "rabbitmq_listener")
 
     aggregate_has_metrics = "rabbitmq_" in aggregate or "erlang_" in aggregate
@@ -142,12 +149,17 @@ def classify_local(evidence: dict[str, Any]) -> list[dict[str, Any]]:
             f"alloy={alloy_active or 'unknown'}",
         )
     )
+    alloy_config_ok = (
+        alloy_config_rc == 0
+        or "Config file is valid" in alloy_config
+        or "configuration loaded" in alloy_config.lower()
+    )
     checks.append(
         check(
             "alloy_config",
-            "healthy" if "Config file is valid" in alloy_config or "configuration loaded" in alloy_config.lower() else "critical",
-            "Alloy config validates" if "Config file is valid" in alloy_config or "configuration loaded" in alloy_config.lower() else "Alloy config validation did not report success",
-            {"output": redact(alloy_config.strip()[-1000:])},
+            "healthy" if alloy_config_ok else "critical",
+            "Alloy config validates" if alloy_config_ok else "Alloy config validation did not report success",
+            {"rc": alloy_config_rc, "output": redact(alloy_config.strip()[-1000:])},
         )
     )
     return checks
@@ -179,6 +191,8 @@ def grafana_query(remote_write_url: str, username: str, password: str, expressio
     try:
         with request.urlopen(req, timeout=timeout) as response:
             data = json.loads(response.read().decode("utf-8"))
+    except error.HTTPError as exc:
+        return {"status": "critical", "summary": f"Grafana query failed: HTTP {exc.code}"}
     except Exception as exc:  # noqa: BLE001 - classify safely for workflow report
         return {"status": "critical", "summary": f"Grafana query failed: {type(exc).__name__}"}
     result = data.get("data", {}).get("result", []) if isinstance(data, dict) else []
@@ -199,6 +213,12 @@ def build_report(args: argparse.Namespace, evidence: dict[str, Any]) -> dict[str
             'up{job=~"nutsnews-rabbitmq|nutsnews-rabbitmq-queues",environment="production"}',
             args.timeout,
         )
+        if not args.require_grafana_data and rabbitmq_query["status"] != "healthy":
+            rabbitmq_query = {
+                **rabbitmq_query,
+                "status": "not_configured",
+                "summary": f"optional Grafana query did not pass: {rabbitmq_query['summary']}",
+            }
         checks.append(check("grafana_rabbitmq_query", rabbitmq_query["status"], rabbitmq_query["summary"], rabbitmq_query))
     elif args.require_grafana_data:
         checks.append(check("grafana_rabbitmq_query", "critical", "Grafana data was required but query credentials were not provided"))

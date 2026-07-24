@@ -1,0 +1,29 @@
+---
+- name: Supabase standby IPv6 one-job runner baseline
+  hosts: supabase_standby_ipv6_runner
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Verify disposable runner operating system
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == supabase_standby_ipv6_runner_expected_distribution
+          - ansible_distribution_version is version(supabase_standby_ipv6_runner_expected_distribution_version, '>=')
+        fail_msg: >-
+          This disposable runner baseline targets
+          {{ supabase_standby_ipv6_runner_expected_distribution }}
+          {{ supabase_standby_ipv6_runner_expected_distribution_version }} or newer.
+          Found {{ ansible_distribution }} {{ ansible_distribution_version }}.
+        success_msg: "Disposable runner OS target is supported."
+
+    - name: Refuse to run against the production backend inventory group
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname not in (groups.get('backend', []))
+        fail_msg: "The Supabase standby IPv6 runner must never be a member of the production backend group."
+        success_msg: "Disposable runner is isolated from the production backend group."
+
+    - name: Apply disposable Supabase standby IPv6 runner baseline
+      ansible.builtin.include_role:
+        name: supabase_standby_ipv6_runner

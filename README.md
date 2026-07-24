@@ -1,5 +1,10 @@
 # NutsNews Backend
 
+Backend-owned operational runbooks include the disposable Supabase standby IPv6
+one-job runner boundary for the protected app readiness workflow:
+
+- [Supabase Standby IPv6 One-Job Runner](runbooks/SUPABASE_STANDBY_IPV6_RUNNER.md)
+
 This repository owns the repeatable backend server setup for `backend.nutsnews.com` at `65.75.201.18`.
 
 ## Operating Model

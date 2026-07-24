@@ -1,0 +1,28 @@
+---
+- name: Reload disposable runner ssh
+  ansible.builtin.service:
+    name: ssh
+    state: reloaded
+  when: not ansible_check_mode
+
+- name: Restart disposable runner journald
+  ansible.builtin.service:
+    name: systemd-journald
+    state: restarted
+  when: not ansible_check_mode
+
+- name: Restart disposable runner fail2ban
+  ansible.builtin.service:
+    name: fail2ban
+    state: restarted
+  when: not ansible_check_mode
+
+- name: Reload disposable runner ufw
+  community.general.ufw:
+    state: reloaded
+  when: not ansible_check_mode
+
+- name: Reload disposable runner systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: not ansible_check_mode

@@ -160,6 +160,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_supabase_platform_parity_decision.py
 
+      - name: Validate Supabase standby IPv6 runner boundary
+        shell: bash
+        run: python3 scripts/validate_supabase_standby_ipv6_runner.py
+
       - name: Report migration drift gate status
         shell: bash
         run: python3 scripts/check_supabase_migration_drift.py
@@ -269,6 +273,11 @@ jobs:
         shell: bash
         working-directory: ansible
         run: ansible-playbook playbooks/bootstrap.yml --syntax-check -i inventories/production/hosts.yml
+
+      - name: Supabase standby IPv6 runner Ansible syntax check
+        shell: bash
+        working-directory: ansible
+        run: ansible-playbook playbooks/supabase_standby_ipv6_runner.yml --syntax-check -i inventories/supabase_standby_ipv6_runner/hosts.example.yml
 
   rabbitmq_benchmark:
     name: Benchmark RabbitMQ queue types

@@ -1,0 +1,454 @@
+---
+- name: Validate fixed public-repository runner routing contract
+  ansible.builtin.assert:
+    that:
+      - supabase_standby_ipv6_runner_repo_url == 'https://github.com/ramideltoro/nutsnews'
+      - supabase_standby_ipv6_runner_label == 'supabase-standby-ipv6'
+      - supabase_standby_ipv6_runner_label not in ['self-hosted', 'linux', 'x64', 'arm64']
+    fail_msg: "The standby runner must be repository-scoped to ramideltoro/nutsnews and expose only supabase-standby-ipv6."
+    success_msg: "Public-repository runner routing contract is fixed."
+
+- name: Require a short-lived registration token only for registration mode
+  ansible.builtin.assert:
+    that:
+      - supabase_standby_ipv6_runner_registration_token | length > 0
+    fail_msg: "Registration mode requires a short-lived repository registration token."
+  when: supabase_standby_ipv6_runner_register | bool
+  no_log: true
+
+- name: Require a short-lived removal token only for removal mode
+  ansible.builtin.assert:
+    that:
+      - supabase_standby_ipv6_runner_removal_token | length > 0
+    fail_msg: "Removal mode requires a short-lived repository removal token."
+  when: supabase_standby_ipv6_runner_remove | bool
+  no_log: true
+
+- name: Update apt package index for disposable runner
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: "{{ supabase_standby_ipv6_runner_apt_cache_valid_time }}"
+
+- name: Install approved readiness and hardening packages
+  ansible.builtin.apt:
+    name: "{{ supabase_standby_ipv6_runner_required_packages }}"
+    state: present
+
+- name: Remove packages prohibited from the disposable runner
+  ansible.builtin.apt:
+    name: "{{ supabase_standby_ipv6_runner_forbidden_packages }}"
+    state: absent
+    purge: true
+    autoremove: true
+
+- name: Ensure disposable runner group exists
+  ansible.builtin.group:
+    name: "{{ supabase_standby_ipv6_runner_group }}"
+    system: true
+    state: present
+
+- name: Ensure disposable runner account exists without sudo groups
+  ansible.builtin.user:
+    name: "{{ supabase_standby_ipv6_runner_user }}"
+    group: "{{ supabase_standby_ipv6_runner_group }}"
+    groups: ""
+    append: false
+    system: true
+    create_home: true
+    home: "{{ supabase_standby_ipv6_runner_root_dir }}/home"
+    shell: /bin/bash
+    password_lock: true
+    state: present
+
+- name: Remove runner-specific sudoers drop-in if present
+  ansible.builtin.file:
+    path: "/etc/sudoers.d/{{ supabase_standby_ipv6_runner_user }}"
+    state: absent
+
+- name: Capture disposable runner supplementary groups
+  ansible.builtin.command: "id -nG {{ supabase_standby_ipv6_runner_user }}"
+  register: supabase_standby_ipv6_runner_groups
+  changed_when: false
+
+- name: Assert disposable runner account has no sudo-capable group
+  ansible.builtin.assert:
+    that:
+      - "'sudo' not in supabase_standby_ipv6_runner_groups.stdout.split()"
+      - "'admin' not in supabase_standby_ipv6_runner_groups.stdout.split()"
+    fail_msg: "Disposable runner account must not be a sudo/admin group member."
+    success_msg: "Disposable runner account is not sudo-capable through group membership."
+
+- name: Create root-owned disposable runner root directory
+  ansible.builtin.file:
+    path: "{{ supabase_standby_ipv6_runner_root_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create runner application, work, tool cache, and log directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ supabase_standby_ipv6_runner_install_dir }}"
+      owner: "{{ supabase_standby_ipv6_runner_user }}"
+      group: "{{ supabase_standby_ipv6_runner_group }}"
+      mode: "0750"
+    - path: "{{ supabase_standby_ipv6_runner_work_dir }}"
+      owner: "{{ supabase_standby_ipv6_runner_user }}"
+      group: "{{ supabase_standby_ipv6_runner_group }}"
+      mode: "0700"
+    - path: "{{ supabase_standby_ipv6_runner_work_dir }}/_temp"
+      owner: "{{ supabase_standby_ipv6_runner_user }}"
+      group: "{{ supabase_standby_ipv6_runner_group }}"
+      mode: "0700"
+    - path: "{{ supabase_standby_ipv6_runner_tool_cache_dir }}"
+      owner: "{{ supabase_standby_ipv6_runner_user }}"
+      group: "{{ supabase_standby_ipv6_runner_group }}"
+      mode: "0755"
+    - path: "{{ supabase_standby_ipv6_runner_log_dir }}"
+      owner: root
+      group: adm
+      mode: "0750"
+
+- name: Install redacted IPv6 preflight probe
+  ansible.builtin.copy:
+    src: nutsnews_supabase_standby_ipv6_preflight.py
+    dest: "{{ supabase_standby_ipv6_runner_preflight_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure OpenSSH server is installed
+  ansible.builtin.apt:
+    name: openssh-server
+    state: present
+
+- name: Ensure sshd drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install disposable runner SSH hardening drop-in
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/00-nutsnews-supabase-standby-runner.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend for the disposable standby runner VM.
+      PermitRootLogin no
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PubkeyAuthentication yes
+      AllowUsers {{ supabase_standby_ipv6_runner_operator_users | join(' ') }}
+  notify: Reload disposable runner ssh
+
+- name: Validate effective disposable runner sshd configuration
+  ansible.builtin.command: /usr/sbin/sshd -t -f /etc/ssh/sshd_config
+  changed_when: false
+
+- name: Ensure journald drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Configure journald retention for disposable runner
+  ansible.builtin.copy:
+    dest: /etc/systemd/journald.conf.d/99-nutsnews-supabase-standby-runner.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend for a disposable runner VM.
+      [Journal]
+      Storage=persistent
+      SystemMaxUse={{ supabase_standby_ipv6_runner_journal_system_max_use }}
+      MaxRetentionSec={{ supabase_standby_ipv6_runner_journal_max_retention_sec }}
+  notify: Restart disposable runner journald
+
+- name: Configure unattended security updates
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+- name: Ensure time synchronization is enabled
+  ansible.builtin.service:
+    name: systemd-timesyncd
+    enabled: true
+    state: started
+  when: not ansible_check_mode
+
+- name: Install disposable runner fail2ban jail
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.d/nutsnews-supabase-standby-runner-sshd.local
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend for the disposable standby runner VM.
+      [sshd]
+      enabled = true
+      backend = systemd
+      port = ssh
+      filter = sshd
+      bantime = {{ supabase_standby_ipv6_runner_fail2ban_bantime }}
+      findtime = {{ supabase_standby_ipv6_runner_fail2ban_findtime }}
+      maxretry = {{ supabase_standby_ipv6_runner_fail2ban_maxretry }}
+  notify: Restart disposable runner fail2ban
+
+- name: Ensure fail2ban is enabled
+  ansible.builtin.service:
+    name: fail2ban
+    enabled: true
+    state: started
+  when: not ansible_check_mode
+
+- name: Ensure UFW IPv6 policy is enabled
+  ansible.builtin.lineinfile:
+    path: /etc/default/ufw
+    regexp: '^IPV6='
+    line: 'IPV6={{ supabase_standby_ipv6_runner_firewall_ipv6 }}'
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload disposable runner ufw
+
+- name: Reset UFW before applying disposable runner baseline
+  community.general.ufw:
+    state: reset
+  when: supabase_standby_ipv6_runner_firewall_reset_before_apply | bool
+
+- name: Set default deny incoming policy
+  community.general.ufw:
+    direction: incoming
+    policy: deny
+
+- name: Set default deny outgoing policy
+  community.general.ufw:
+    direction: outgoing
+    policy: deny
+
+- name: Configure UFW logging level
+  community.general.ufw:
+    logging: "{{ supabase_standby_ipv6_runner_firewall_logging }}"
+
+- name: Allow operator SSH from reviewed CIDRs
+  community.general.ufw:
+    rule: allow
+    direction: in
+    from_ip: "{{ item }}"
+    port: "22"
+    proto: tcp
+    comment: Standby runner operator SSH
+  loop: "{{ supabase_standby_ipv6_runner_operator_ssh_cidrs }}"
+  when:
+    - supabase_standby_ipv6_runner_firewall_allow_ssh | bool
+    - supabase_standby_ipv6_runner_operator_ssh_cidrs | length > 0
+
+- name: Allow operator SSH when provider console is not the only access path
+  community.general.ufw:
+    rule: allow
+    direction: in
+    port: "22"
+    proto: tcp
+    comment: Standby runner operator SSH temporary bootstrap
+  when:
+    - supabase_standby_ipv6_runner_firewall_allow_ssh | bool
+    - supabase_standby_ipv6_runner_operator_ssh_cidrs | length == 0
+
+- name: Allow outbound DNS, HTTP, HTTPS, and NTP required for bootstrap and GitHub Actions
+  community.general.ufw:
+    rule: allow
+    direction: out
+    port: "{{ item.port }}"
+    proto: "{{ item.proto }}"
+    comment: "{{ item.comment }}"
+  loop:
+    - port: "53"
+      proto: udp
+      comment: DNS UDP
+    - port: "53"
+      proto: tcp
+      comment: DNS TCP
+    - port: "80"
+      proto: tcp
+      comment: HTTP package metadata and redirects
+    - port: "443"
+      proto: tcp
+      comment: HTTPS GitHub actions package access
+    - port: "123"
+      proto: udp
+      comment: NTP time synchronization
+
+- name: Allow outbound IPv6 TCP 5432 to the redacted Supabase direct DB address
+  community.general.ufw:
+    rule: allow
+    direction: out
+    to_ip: "{{ supabase_standby_ipv6_runner_supabase_db_ipv6 }}"
+    port: "5432"
+    proto: tcp
+    comment: Redacted Supabase direct DB IPv6
+  when: supabase_standby_ipv6_runner_supabase_db_ipv6 | length > 0
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+
+- name: Download pinned GitHub Actions runner archive
+  ansible.builtin.get_url:
+    url: "{{ supabase_standby_ipv6_runner_runner_url }}"
+    dest: "/var/tmp/actions-runner-linux-{{ supabase_standby_ipv6_runner_runner_arch }}-{{ supabase_standby_ipv6_runner_runner_version }}.tar.gz"
+    checksum: "sha256:{{ supabase_standby_ipv6_runner_runner_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Extract pinned GitHub Actions runner archive
+  ansible.builtin.unarchive:
+    src: "/var/tmp/actions-runner-linux-{{ supabase_standby_ipv6_runner_runner_arch }}-{{ supabase_standby_ipv6_runner_runner_version }}.tar.gz"
+    dest: "{{ supabase_standby_ipv6_runner_install_dir }}"
+    remote_src: true
+    owner: "{{ supabase_standby_ipv6_runner_user }}"
+    group: "{{ supabase_standby_ipv6_runner_group }}"
+    creates: "{{ supabase_standby_ipv6_runner_install_dir }}/config.sh"
+
+- name: Install disposable runner systemd unit
+  ansible.builtin.template:
+    src: supabase-standby-ipv6-runner.service.j2
+    dest: "/etc/systemd/system/{{ supabase_standby_ipv6_runner_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload disposable runner systemd
+
+- name: Verify readiness commands are available to the unprivileged runner
+  ansible.builtin.command:
+    argv:
+      - /bin/bash
+      - -lc
+      - "command -v {{ item }}"
+  become: true
+  become_user: "{{ supabase_standby_ipv6_runner_user }}"
+  changed_when: false
+  loop:
+    - curl
+    - git
+    - jq
+    - nc
+    - psql
+
+- name: Verify actions/setup-node can populate the runner tool cache without sudo
+  ansible.builtin.command:
+    argv:
+      - /bin/bash
+      - -lc
+      - "test -d \"$RUNNER_TOOL_CACHE\" && test -w \"$RUNNER_TOOL_CACHE\""
+  become: true
+  become_user: "{{ supabase_standby_ipv6_runner_user }}"
+  environment:
+    RUNNER_TOOL_CACHE: "{{ supabase_standby_ipv6_runner_tool_cache_dir }}"
+  changed_when: false
+
+- name: Verify redacted preflight script offline mode
+  ansible.builtin.command:
+    argv:
+      - "{{ supabase_standby_ipv6_runner_preflight_path }}"
+      - --offline
+  become: true
+  become_user: "{{ supabase_standby_ipv6_runner_user }}"
+  changed_when: false
+
+- name: Remove existing runner registration before forced cleanup
+  ansible.builtin.command:
+    argv:
+      - "{{ supabase_standby_ipv6_runner_install_dir }}/config.sh"
+      - remove
+      - --unattended
+      - --token
+      - "{{ supabase_standby_ipv6_runner_removal_token }}"
+  args:
+    chdir: "{{ supabase_standby_ipv6_runner_install_dir }}"
+  become: true
+  become_user: "{{ supabase_standby_ipv6_runner_user }}"
+  environment:
+    RUNNER_TOOL_CACHE: "{{ supabase_standby_ipv6_runner_tool_cache_dir }}"
+  no_log: true
+  changed_when: true
+  when:
+    - supabase_standby_ipv6_runner_remove | bool
+    - not ansible_check_mode
+
+- name: Register one-job repository-scoped ephemeral runner
+  ansible.builtin.command:
+    argv:
+      - "{{ supabase_standby_ipv6_runner_install_dir }}/config.sh"
+      - --unattended
+      - --url
+      - "{{ supabase_standby_ipv6_runner_repo_url }}"
+      - --token
+      - "{{ supabase_standby_ipv6_runner_registration_token }}"
+      - --name
+      - "{{ supabase_standby_ipv6_runner_name }}"
+      - --work
+      - "{{ supabase_standby_ipv6_runner_work_dir }}"
+      - --labels
+      - "{{ supabase_standby_ipv6_runner_label }}"
+      - --no-default-labels
+      - --ephemeral
+      - --replace
+  args:
+    chdir: "{{ supabase_standby_ipv6_runner_install_dir }}"
+  become: true
+  become_user: "{{ supabase_standby_ipv6_runner_user }}"
+  environment:
+    RUNNER_TOOL_CACHE: "{{ supabase_standby_ipv6_runner_tool_cache_dir }}"
+  no_log: true
+  changed_when: true
+  when:
+    - supabase_standby_ipv6_runner_register | bool
+    - not ansible_check_mode
+
+- name: Start one-job runner service only after explicit registration
+  ansible.builtin.service:
+    name: "{{ supabase_standby_ipv6_runner_service_name }}"
+    enabled: false
+    state: started
+  when:
+    - supabase_standby_ipv6_runner_register | bool
+    - not ansible_check_mode
+
+- name: Capture UFW status without exposing protected values
+  ansible.builtin.command: ufw status verbose
+  register: supabase_standby_ipv6_runner_ufw_status
+  changed_when: false
+  failed_when: false
+
+- name: Report disposable runner verification summary
+  ansible.builtin.debug:
+    msg:
+      repository: "{{ supabase_standby_ipv6_runner_repo_url }}"
+      label: "{{ supabase_standby_ipv6_runner_label }}"
+      runner_version: "{{ supabase_standby_ipv6_runner_runner_version }}"
+      registration_requested: "{{ supabase_standby_ipv6_runner_register }}"
+      removal_requested: "{{ supabase_standby_ipv6_runner_remove }}"
+      runner_user: "{{ supabase_standby_ipv6_runner_user }}"
+      runner_user_groups: "{{ supabase_standby_ipv6_runner_groups.stdout }}"
+      node_strategy: "actions/setup-node populates writable RUNNER_TOOL_CACHE without sudo"
+      supabase_db_ipv6_rule_configured: "{{ supabase_standby_ipv6_runner_supabase_db_ipv6 | length > 0 }}"
+      ufw_status_verbose: "{{ supabase_standby_ipv6_runner_ufw_status.stdout_lines | default([]) }}"

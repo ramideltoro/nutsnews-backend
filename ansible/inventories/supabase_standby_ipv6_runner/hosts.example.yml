@@ -1,0 +1,17 @@
+all:
+  children:
+    supabase_standby_ipv6_runner:
+      hosts:
+        standby-ipv6-runner-01:
+          # Replace with the disposable VM's IPv4 or IPv6 management address.
+          # Do not commit the real address if the provider account treats it as sensitive.
+          ansible_host: 2001:db8::10
+          ansible_user: ubuntu
+          ansible_python_interpreter: /usr/bin/python3
+      vars:
+        supabase_standby_ipv6_runner_operator_users:
+          - ubuntu
+        # Optional firewall tightening: set this at runtime to the resolved
+        # direct Supabase DB IPv6 address without committing the hostname,
+        # project ref, URL, user, or password.
+        supabase_standby_ipv6_runner_supabase_db_ipv6: ""

@@ -1,0 +1,199 @@
+name: Supabase Standby IPv6 Runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_mode:
+        description: Run check mode, apply hardening/tooling, register one runner, or remove a stale runner.
+        required: true
+        default: check
+        type: choice
+        options:
+          - check
+          - apply
+          - register
+          - remove
+      confirmation:
+        description: Type the exact confirmation required by the selected mode.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-standby-ipv6-runner
+  cancel-in-progress: false
+
+jobs:
+  runner:
+    name: Apply disposable IPv6 runner baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: supabase-standby-runner
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch intent
+        shell: bash
+        env:
+          RUN_MODE: ${{ inputs.run_mode }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+
+          case "$RUN_MODE" in
+            check)
+              [[ -z "$CONFIRMATION" ]] || {
+                echo "Check mode does not accept a confirmation value." >&2
+                exit 1
+              }
+              ;;
+            apply)
+              [[ "$CONFIRMATION" == "apply-supabase-standby-ipv6-runner-baseline" ]] || {
+                echo "Apply mode requires confirmation apply-supabase-standby-ipv6-runner-baseline." >&2
+                exit 1
+              }
+              ;;
+            register)
+              [[ "$CONFIRMATION" == "register-one-supabase-standby-ipv6-runner" ]] || {
+                echo "Register mode requires confirmation register-one-supabase-standby-ipv6-runner." >&2
+                exit 1
+              }
+              ;;
+            remove)
+              [[ "$CONFIRMATION" == "remove-supabase-standby-ipv6-runner" ]] || {
+                echo "Remove mode requires confirmation remove-supabase-standby-ipv6-runner." >&2
+                exit 1
+              }
+              ;;
+            *)
+              echo "Unsupported run_mode: $RUN_MODE" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Install Ansible in temporary venv
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/ansible-venv"
+          "$RUNNER_TEMP/ansible-venv/bin/python" -m pip install ansible-core
+          echo "$RUNNER_TEMP/ansible-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Install Ansible collections
+        shell: bash
+        working-directory: ansible
+        run: ansible-galaxy collection install -r requirements.yml
+
+      - name: Validate runner target secrets
+        shell: bash
+        env:
+          NUTSNEWS_STANDBY_IPV6_RUNNER_HOSTS_YML: ${{ secrets.NUTSNEWS_STANDBY_IPV6_RUNNER_HOSTS_YML }}
+          NUTSNEWS_STANDBY_IPV6_RUNNER_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_STANDBY_IPV6_RUNNER_SSH_PRIVATE_KEY }}
+          NUTSNEWS_STANDBY_IPV6_RUNNER_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_STANDBY_IPV6_RUNNER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for secret_name in \
+            NUTSNEWS_STANDBY_IPV6_RUNNER_HOSTS_YML \
+            NUTSNEWS_STANDBY_IPV6_RUNNER_SSH_PRIVATE_KEY \
+            NUTSNEWS_STANDBY_IPV6_RUNNER_KNOWN_HOSTS
+          do
+            if [[ -z "${!secret_name}" ]]; then
+              echo "Missing required supabase-standby-runner environment secret: $secret_name" >&2
+              missing=1
+            fi
+          done
+
+          exit "$missing"
+
+      - name: Prepare SSH and runtime inventory
+        shell: bash
+        env:
+          NUTSNEWS_STANDBY_IPV6_RUNNER_HOSTS_YML: ${{ secrets.NUTSNEWS_STANDBY_IPV6_RUNNER_HOSTS_YML }}
+          NUTSNEWS_STANDBY_IPV6_RUNNER_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_STANDBY_IPV6_RUNNER_SSH_PRIVATE_KEY }}
+          NUTSNEWS_STANDBY_IPV6_RUNNER_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_STANDBY_IPV6_RUNNER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          install -m 0700 -d "$HOME/.ssh" "$RUNNER_TEMP/standby-runner"
+          printf '%s\n' "$NUTSNEWS_STANDBY_IPV6_RUNNER_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_standby_ipv6_runner"
+          chmod 0600 "$HOME/.ssh/nutsnews_standby_ipv6_runner"
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_standby_ipv6_runner" > /dev/null
+
+          printf '%s\n' "$NUTSNEWS_STANDBY_IPV6_RUNNER_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+          printf '%s\n' "$NUTSNEWS_STANDBY_IPV6_RUNNER_HOSTS_YML" > "$RUNNER_TEMP/standby-runner/hosts.yml"
+          chmod 0600 "$RUNNER_TEMP/standby-runner/hosts.yml"
+
+      - name: Get short-lived GitHub runner token
+        id: runner-token
+        if: inputs.run_mode == 'register' || inputs.run_mode == 'remove'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.NUTSNEWS_APP_RUNNER_ADMIN_TOKEN }}
+          RUN_MODE: ${{ inputs.run_mode }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "NUTSNEWS_APP_RUNNER_ADMIN_TOKEN is required only for register/remove mode." >&2
+            exit 1
+          fi
+
+          endpoint=registration-token
+          if [[ "$RUN_MODE" == "remove" ]]; then
+            endpoint=remove-token
+          fi
+
+          token="$(gh api --method POST "repos/ramideltoro/nutsnews/actions/runners/$endpoint" --jq .token)"
+          printf '::add-mask::%s\n' "$token"
+          printf 'token=%s\n' "$token" >> "$GITHUB_OUTPUT"
+
+      - name: Run Ansible syntax check
+        shell: bash
+        working-directory: ansible
+        run: ansible-playbook playbooks/supabase_standby_ipv6_runner.yml --syntax-check -i "$RUNNER_TEMP/standby-runner/hosts.yml"
+
+      - name: Run disposable runner Ansible mode
+        shell: bash
+        working-directory: ansible
+        env:
+          RUN_MODE: ${{ inputs.run_mode }}
+          RUNNER_TOKEN: ${{ steps.runner-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            playbooks/supabase_standby_ipv6_runner.yml
+            -i "$RUNNER_TEMP/standby-runner/hosts.yml"
+            --private-key "$HOME/.ssh/nutsnews_standby_ipv6_runner"
+            -e "ansible_ssh_common_args=-o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
+          )
+
+          case "$RUN_MODE" in
+            check)
+              ansible-playbook "${args[@]}" --check
+              ;;
+            apply)
+              ansible-playbook "${args[@]}"
+              ;;
+            register)
+              ansible-playbook "${args[@]}" \
+                -e supabase_standby_ipv6_runner_register=true \
+                -e "supabase_standby_ipv6_runner_registration_token=$RUNNER_TOKEN"
+              ;;
+            remove)
+              ansible-playbook "${args[@]}" \
+                -e supabase_standby_ipv6_runner_remove=true \
+                -e "supabase_standby_ipv6_runner_removal_token=$RUNNER_TOKEN"
+              ;;
+          esac

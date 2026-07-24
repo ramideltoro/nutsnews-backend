@@ -1,0 +1,72 @@
+---
+supabase_standby_ipv6_runner_expected_distribution: Ubuntu
+supabase_standby_ipv6_runner_expected_distribution_version: "24.04"
+
+supabase_standby_ipv6_runner_repo_url: https://github.com/ramideltoro/nutsnews
+supabase_standby_ipv6_runner_label: supabase-standby-ipv6
+supabase_standby_ipv6_runner_name: "{{ inventory_hostname }}"
+
+supabase_standby_ipv6_runner_user: github-runner
+supabase_standby_ipv6_runner_group: github-runner
+supabase_standby_ipv6_runner_root_dir: /opt/nutsnews-supabase-standby-runner
+supabase_standby_ipv6_runner_install_dir: "{{ supabase_standby_ipv6_runner_root_dir }}/actions-runner"
+supabase_standby_ipv6_runner_work_dir: /var/lib/nutsnews-supabase-standby-runner/work
+supabase_standby_ipv6_runner_tool_cache_dir: /opt/nutsnews-supabase-standby-runner/toolcache
+supabase_standby_ipv6_runner_log_dir: /var/log/nutsnews-supabase-standby-runner
+supabase_standby_ipv6_runner_preflight_path: /usr/local/bin/nutsnews-supabase-standby-ipv6-preflight
+supabase_standby_ipv6_runner_service_name: nutsnews-supabase-standby-ipv6-runner
+
+supabase_standby_ipv6_runner_runner_version: "2.336.0"
+supabase_standby_ipv6_runner_runner_arch: x64
+supabase_standby_ipv6_runner_runner_sha256: "04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d"
+supabase_standby_ipv6_runner_runner_url: "https://github.com/actions/runner/releases/download/v{{ supabase_standby_ipv6_runner_runner_version }}/actions-runner-linux-{{ supabase_standby_ipv6_runner_runner_arch }}-{{ supabase_standby_ipv6_runner_runner_version }}.tar.gz"
+
+supabase_standby_ipv6_runner_required_packages:
+  - ca-certificates
+  - curl
+  - fail2ban
+  - git
+  - jq
+  - logrotate
+  - netcat-openbsd
+  - postgresql-client
+  - systemd-timesyncd
+  - ufw
+  - unattended-upgrades
+
+supabase_standby_ipv6_runner_forbidden_packages:
+  - build-essential
+  - chromium
+  - chromium-browser
+  - containerd.io
+  - docker-ce
+  - docker-ce-cli
+  - docker.io
+  - firefox
+  - g++
+  - gcc
+  - make
+  - mariadb-server
+  - mysql-server
+  - postgresql
+
+supabase_standby_ipv6_runner_apt_cache_valid_time: 3600
+supabase_standby_ipv6_runner_firewall_ipv6: "yes"
+supabase_standby_ipv6_runner_firewall_reset_before_apply: true
+supabase_standby_ipv6_runner_firewall_logging: "low"
+supabase_standby_ipv6_runner_firewall_allow_ssh: true
+supabase_standby_ipv6_runner_operator_ssh_cidrs: []
+supabase_standby_ipv6_runner_operator_users:
+  - "{{ ansible_user | default('ubuntu') }}"
+supabase_standby_ipv6_runner_supabase_db_ipv6: ""
+
+supabase_standby_ipv6_runner_journal_system_max_use: 256M
+supabase_standby_ipv6_runner_journal_max_retention_sec: 7day
+supabase_standby_ipv6_runner_fail2ban_bantime: 1h
+supabase_standby_ipv6_runner_fail2ban_findtime: 10m
+supabase_standby_ipv6_runner_fail2ban_maxretry: 4
+
+supabase_standby_ipv6_runner_register: false
+supabase_standby_ipv6_runner_registration_token: ""
+supabase_standby_ipv6_runner_remove: false
+supabase_standby_ipv6_runner_removal_token: ""

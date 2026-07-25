@@ -97,6 +97,7 @@ jobs:
           NUTSNEWS_STANDBY_PROBE_SSH_PUBLIC_KEY: ${{ secrets.NUTSNEWS_STANDBY_PROBE_SSH_PUBLIC_KEY }}
           NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF: ${{ secrets.NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF }}
           NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST: ${{ secrets.NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST }}
+          NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF }}
         run: |
           set -euo pipefail
 
@@ -113,15 +114,17 @@ jobs:
 
           if [[ "$PROBE_STATE" == "present" ]]; then
             for input_name in \
-              NUTSNEWS_STANDBY_PROBE_SSH_PUBLIC_KEY \
-              NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF \
-              NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST
+              NUTSNEWS_STANDBY_PROBE_SSH_PUBLIC_KEY
             do
               if [[ -z "${!input_name}" ]]; then
                 echo "Missing required production-backend protected input: $input_name" >&2
                 missing=1
               fi
             done
+            if [[ -z "$NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF" && -z "$NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF" ]]; then
+              echo "Missing required production-backend protected input: NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF or NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF" >&2
+              missing=1
+            fi
           fi
 
           if [[ "$missing" != "0" ]]; then
@@ -135,8 +138,12 @@ jobs:
           if os.environ["PROBE_STATE"] != "present":
               raise SystemExit(0)
 
-          project_ref = os.environ["NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF"]
-          expected_host = os.environ["NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST"]
+          project_ref = (
+              os.environ.get("NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF", "").strip()
+              or os.environ["NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF"].strip()
+          )
+          expected_host_override = os.environ.get("NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST", "").strip()
+          expected_host = expected_host_override or f"db.{project_ref}.supabase.co"
           public_key = os.environ["NUTSNEWS_STANDBY_PROBE_SSH_PUBLIC_KEY"]
           if not re.fullmatch(r"[a-z0-9]{20}", project_ref):
               raise SystemExit("Invalid protected Supabase project-ref input.")
@@ -177,6 +184,7 @@ jobs:
           NUTSNEWS_STANDBY_PROBE_SSH_PUBLIC_KEY: ${{ secrets.NUTSNEWS_STANDBY_PROBE_SSH_PUBLIC_KEY }}
           NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF: ${{ secrets.NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF }}
           NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST: ${{ secrets.NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST }}
+          NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF }}
         run: |
           set -euo pipefail
 
@@ -210,8 +218,12 @@ jobs:
           }
 
           if os.environ["PROBE_STATE"] == "present":
-              project_ref = os.environ["NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF"]
-              expected_host = os.environ["NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST"]
+              project_ref = (
+                  os.environ.get("NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF", "").strip()
+                  or os.environ["NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF"].strip()
+              )
+              expected_host_override = os.environ.get("NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST", "").strip()
+              expected_host = expected_host_override or f"db.{project_ref}.supabase.co"
               if not re.fullmatch(r"[a-z0-9]{20}", project_ref):
                   raise SystemExit("Invalid protected Supabase project-ref input.")
               if expected_host != f"db.{project_ref}.supabase.co":

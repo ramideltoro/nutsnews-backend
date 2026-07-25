@@ -113,8 +113,16 @@ Rollback is `run_mode=check, probe_state=absent`, followed by
 Backend `production-backend` protected inputs:
 
 - `NUTSNEWS_STANDBY_PROBE_SSH_PUBLIC_KEY`
-- `NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF`
-- `NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST`
+- `NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF`
+- `NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF` optional override
+- `NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST` optional exact-host override
+
+The default expected target is the existing production Supabase project required
+by `ramideltoro/nutsnews#496`. The workflow derives the exact direct host as
+`db.<project-ref>.supabase.co` unless the optional exact-host override is
+present and matches the same project ref. This keeps the forced command scoped
+to one protected target without requiring the owner to retype a write-only
+GitHub secret value.
 
 The workflow also requires the existing protected backend SSH inputs:
 

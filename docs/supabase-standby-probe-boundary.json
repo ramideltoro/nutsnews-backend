@@ -137,9 +137,17 @@
   "secret_and_variable_contract": {
     "backend_production_environment_inputs": [
       "NUTSNEWS_STANDBY_PROBE_SSH_PUBLIC_KEY",
+      "NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF",
       "NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF",
       "NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST"
     ],
+    "backend_expected_target_source": {
+      "default_project_ref_secret": "NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF",
+      "optional_project_ref_override": "NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF",
+      "direct_host_derivation": "db.<project-ref>.supabase.co",
+      "optional_exact_host_override": "NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST",
+      "target_policy": "existing production Supabase project from ramideltoro/nutsnews#496"
+    },
     "app_supabase_standby_environment_secrets": [
       "NUTSNEWS_STANDBY_SUPABASE_PROJECT_REF",
       "NUTSNEWS_STANDBY_SUPABASE_URL",

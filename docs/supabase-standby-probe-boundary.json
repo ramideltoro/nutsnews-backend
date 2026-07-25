@@ -50,6 +50,7 @@
     }
   },
   "probe_program_contract": {
+    "source_path": "scripts/nutsnews_standby_supabase_probe.py",
     "path": "/usr/local/libexec/nutsnews-standby-supabase-probe",
     "owner": "root",
     "mode": "0755",

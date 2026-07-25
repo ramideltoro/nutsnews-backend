@@ -115,6 +115,11 @@ approving the specific `production-backend` environment gate for that run.
 Rollback is `run_mode=check, probe_state=absent`, followed by
 `run_mode=apply, probe_state=absent` after review.
 
+When `probe_state=present`, the workflow also performs a read-only backend TCP
+probe to the protected direct Supabase host on port `5432`. The host is derived
+from protected inputs, sent to the backend over SSH stdin, and never printed.
+The step emits only `backend_direct_tcp_5432=pass` or a generic failure.
+
 ## Secret and Variable Contract
 
 Backend `production-backend` protected inputs:

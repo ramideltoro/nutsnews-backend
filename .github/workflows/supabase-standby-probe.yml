@@ -266,6 +266,59 @@ jobs:
 
           ansible-playbook "${args[@]}"
 
+      - name: Verify backend direct Supabase TCP path
+        if: inputs.probe_state == 'present'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF: ${{ secrets.NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF }}
+          NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST: ${{ secrets.NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST }}
+          NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+
+          probe_host="$(python3 - <<'PY'
+          import os
+          import re
+
+          project_ref = (
+              os.environ.get("NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF", "").strip()
+              or os.environ["NUTSNEWS_PRODUCTION_SUPABASE_PROJECT_REF"].strip()
+          )
+          expected_host_override = os.environ.get("NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST", "").strip()
+          expected_host = expected_host_override or f"db.{project_ref}.supabase.co"
+          if not re.fullmatch(r"[a-z0-9]{20}", project_ref):
+              raise SystemExit("Invalid protected Supabase project-ref input.")
+          if expected_host != f"db.{project_ref}.supabase.co":
+              raise SystemExit("Invalid protected Supabase direct-host input.")
+          print(expected_host)
+          PY
+          )"
+
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          tcp_result="$(
+            printf '%s\n' "$probe_host" | ssh -i "$RUNNER_TEMP/backend-ssh/nutsnews_backend" \
+              -o BatchMode=yes \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$RUNNER_TEMP/backend-ssh/known_hosts" \
+              -o ClearAllForwardings=yes \
+              -o RequestTTY=no \
+              -o ConnectTimeout=10 \
+              -o ConnectionAttempts=1 \
+              "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+              'python3 -c '"'"'exec("import socket, sys\nhost = sys.stdin.readline().strip()\nif not host:\n    raise SystemExit(2)\ntry:\n    sock = socket.create_connection((host, 5432), timeout=8)\n    sock.close()\nexcept OSError:\n    print(\"backend_direct_tcp_5432=fail\")\n    raise SystemExit(1)\nprint(\"backend_direct_tcp_5432=pass\")")'"'"''
+          )"
+
+          if [[ "$tcp_result" != "backend_direct_tcp_5432=pass" ]]; then
+            echo "backend_direct_tcp_5432=fail" >&2
+            exit 1
+          fi
+
+          echo "$tcp_result"
+          echo "- backend_direct_tcp_5432: pass" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Write safe summary
         if: always()
         shell: bash

@@ -130,7 +130,7 @@ class RabbitMQTopologyTests(unittest.TestCase):
     def test_transfer_probe_refuses_nonempty_stage_queues(self):
         definition = load_definition()
         users = topology.user_records(definition, credential_env())
-        args = SimpleNamespace(timeout_seconds=1)
+        args = SimpleNamespace(timeout_seconds=1, skip_non_empty=False)
 
         with (
             patch.object(topology, "wait_for_management", return_value={}),
@@ -139,6 +139,28 @@ class RabbitMQTopologyTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as raised:
                 topology.action_probe_transfers(args, object(), definition, users)
         self.assertIn("refusing transfer probe because queue is non-empty", str(raised.exception))
+
+    def test_transfer_probe_skips_nonempty_stage_queues_when_enabled(self):
+        definition = load_definition()
+        users = topology.user_records(definition, credential_env())
+        args = SimpleNamespace(timeout_seconds=1, skip_non_empty=True)
+
+        with (
+            patch.object(topology, "wait_for_management", return_value={}),
+            patch.object(topology, "queue_message_count", return_value=1),
+            patch.object(topology, "publish_message") as publish_message,
+            patch("builtins.print") as print_report,
+        ):
+            result = topology.action_probe_transfers(args, object(), definition, users)
+
+        self.assertEqual(result, 0)
+        publish_message.assert_not_called()
+        report = json.loads(print_report.call_args.args[0])
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["probed_stages"], [])
+        self.assertEqual(set(report["skipped_stages"]), {route["stage"] for route in definition["routes"]})
+        self.assertEqual(report["non_empty_queue_behavior"], "skip_without_mutating_existing_messages")
+        self.assertEqual(len(report["skipped_queues"]), len(definition["routes"]) * 3)
 
 
 if __name__ == "__main__":

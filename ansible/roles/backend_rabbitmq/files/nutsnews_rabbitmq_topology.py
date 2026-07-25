@@ -888,11 +888,18 @@ def action_probe_transfers(args: argparse.Namespace, client: RabbitMQClient, def
     retry_exchange = exchange_by_id(definition, "retry")["name"]
     dlq_exchange = exchange_by_id(definition, "dlq")["name"]
     probed_stages: list[str] = []
+    skipped_stages: list[str] = []
+    skipped_queues: list[dict[str, str]] = []
+    skip_non_empty = bool(getattr(args, "skip_non_empty", False))
     for route in definition["routes"]:
         queues_to_probe = [route["main_queue"], route["retry_queues"][0]["name"], route["terminal_dlq"]["name"]]
-        for queue in queues_to_probe:
-            if queue_message_count(client, definition, queue) != 0:
-                raise SystemExit(f"refusing transfer probe because queue is non-empty: {queue}")
+        non_empty_queues = [queue for queue in queues_to_probe if queue_message_count(client, definition, queue) != 0]
+        if non_empty_queues:
+            if skip_non_empty:
+                skipped_stages.append(route["stage"])
+                skipped_queues.extend({"stage": route["stage"], "queue": queue} for queue in non_empty_queues)
+                continue
+            raise SystemExit(f"refusing transfer probe because queue is non-empty: {non_empty_queues[0]}")
 
         source_message_id = str(uuid.uuid4())
         if not publish_message(
@@ -955,6 +962,9 @@ def action_probe_transfers(args: argparse.Namespace, client: RabbitMQClient, def
         "status": "pass",
         "changed": False,
         "probed_stages": probed_stages,
+        "skipped_stages": skipped_stages,
+        "skipped_queues": skipped_queues,
+        "non_empty_queue_behavior": "skip_without_mutating_existing_messages" if skip_non_empty else "fail_closed",
         "unroutable_target_behavior": "source_message_visible_until_confirmed_target_publish",
         "full_target_behavior": "all_queues_use_reject-publish_overflow_and_application_ack_requires_confirmed_target_publish",
     }
@@ -982,6 +992,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--management-url", default=DEFAULT_MANAGEMENT_URL)
     parser.add_argument("--timeout-seconds", type=int, default=90)
     parser.add_argument("--rotate-passwords", action="store_true", help="Update managed user passwords from the credential env file.")
+    parser.add_argument("--skip-non-empty", action="store_true", help="Skip route transfer probes when any stage queue already has messages.")
     return parser.parse_args()
 
 

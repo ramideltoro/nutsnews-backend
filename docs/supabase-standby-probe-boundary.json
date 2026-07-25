@@ -112,12 +112,27 @@
     }
   },
   "source_control_assets": {
+    "protected_workflow": ".github/workflows/supabase-standby-probe.yml",
     "backend_playbook": "ansible/playbooks/supabase_standby_probe.yml",
     "backend_role": "ansible/roles/supabase_standby_probe",
     "backend_role_tasks": "ansible/roles/supabase_standby_probe/tasks/main.yml",
     "backend_sshd_match_user_template": "ansible/roles/supabase_standby_probe/templates/standby-probe-sshd.conf.j2",
     "backend_expected_target_template": "ansible/roles/supabase_standby_probe/templates/probe.conf.j2",
     "backend_rollback_state": "supabase_standby_probe_state=absent"
+  },
+  "protected_workflow_guardrails": {
+    "workflow": ".github/workflows/supabase-standby-probe.yml",
+    "trigger": "workflow_dispatch only",
+    "branch": "refs/heads/main only",
+    "environment": "production-backend",
+    "permissions": "contents: read",
+    "runs_on": "ubuntu-latest",
+    "run_modes": ["check", "apply"],
+    "probe_states": ["present", "absent"],
+    "apply_confirmation": "backend.nutsnews.com",
+    "ansible_check_mode_before_apply": true,
+    "strict_backend_ssh_host_checking": true,
+    "prints_sensitive_values": false
   },
   "secret_and_variable_contract": {
     "backend_production_environment_inputs": [

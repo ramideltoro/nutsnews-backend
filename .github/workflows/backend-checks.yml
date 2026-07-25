@@ -168,6 +168,14 @@ jobs:
         shell: bash
         run: python3 scripts/validate_supabase_standby_probe_boundary.py
 
+      - name: Validate Supabase standby forced-command probe implementation
+        shell: bash
+        run: python3 scripts/validate_supabase_standby_probe_command.py
+
+      - name: Run Supabase standby forced-command probe tests
+        shell: bash
+        run: python3 -m unittest tests.test_supabase_standby_probe
+
       - name: Report migration drift gate status
         shell: bash
         run: python3 scripts/check_supabase_migration_drift.py

@@ -176,6 +176,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_supabase_standby_probe_ansible.py
 
+      - name: Validate Supabase standby forced-command probe workflow
+        shell: bash
+        run: python3 scripts/validate_supabase_standby_probe_workflow.py
+
       - name: Run Supabase standby forced-command probe tests
         shell: bash
         run: python3 -m unittest tests.test_supabase_standby_probe

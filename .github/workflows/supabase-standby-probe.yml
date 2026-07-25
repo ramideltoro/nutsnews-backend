@@ -1,0 +1,274 @@
+name: Supabase Standby Probe Boundary
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_mode:
+        description: Run the standby probe Ansible role in check mode or apply mode.
+        required: true
+        default: check
+        type: choice
+        options:
+          - check
+          - apply
+      probe_state:
+        description: Install the probe boundary with present or remove it with absent.
+        required: true
+        default: present
+        type: choice
+        options:
+          - present
+          - absent
+      confirm_apply:
+        description: For apply mode only, type backend.nutsnews.com. Leave blank for check mode.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-standby-probe-production-backend
+  cancel-in-progress: false
+
+jobs:
+  probe-boundary:
+    name: Supabase standby forced-command probe boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          GITHUB_REF_NAME_SAFE: ${{ github.ref }}
+          RUN_MODE: ${{ inputs.run_mode }}
+          PROBE_STATE: ${{ inputs.probe_state }}
+          CONFIRM_APPLY: ${{ inputs.confirm_apply }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF_NAME_SAFE" != "refs/heads/main" ]]; then
+            echo "This protected backend workflow must run from main." >&2
+            exit 1
+          fi
+
+          if [[ "$RUN_MODE" != "check" && "$RUN_MODE" != "apply" ]]; then
+            echo "Unsupported run_mode." >&2
+            exit 1
+          fi
+
+          if [[ "$PROBE_STATE" != "present" && "$PROBE_STATE" != "absent" ]]; then
+            echo "Unsupported probe_state." >&2
+            exit 1
+          fi
+
+          if [[ "$RUN_MODE" == "apply" && "$CONFIRM_APPLY" != "backend.nutsnews.com" ]]; then
+            echo "Apply mode requires confirm_apply to be exactly backend.nutsnews.com." >&2
+            exit 1
+          fi
+
+      - name: Install Ansible in temporary venv
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/ansible-venv"
+          "$RUNNER_TEMP/ansible-venv/bin/python" -m pip install --disable-pip-version-check ansible-core
+          echo "$RUNNER_TEMP/ansible-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Install Ansible collections
+        shell: bash
+        working-directory: ansible
+        run: ansible-galaxy collection install -r requirements.yml
+
+      - name: Validate required protected inputs
+        shell: bash
+        env:
+          PROBE_STATE: ${{ inputs.probe_state }}
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          NUTSNEWS_STANDBY_PROBE_SSH_PUBLIC_KEY: ${{ secrets.NUTSNEWS_STANDBY_PROBE_SSH_PUBLIC_KEY }}
+          NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF: ${{ secrets.NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF }}
+          NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST: ${{ secrets.NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for input_name in \
+            NUTSNEWS_BACKEND_SSH_PRIVATE_KEY \
+            NUTSNEWS_BACKEND_KNOWN_HOSTS
+          do
+            if [[ -z "${!input_name}" ]]; then
+              echo "Missing required production-backend protected input: $input_name" >&2
+              missing=1
+            fi
+          done
+
+          if [[ "$PROBE_STATE" == "present" ]]; then
+            for input_name in \
+              NUTSNEWS_STANDBY_PROBE_SSH_PUBLIC_KEY \
+              NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF \
+              NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST
+            do
+              if [[ -z "${!input_name}" ]]; then
+                echo "Missing required production-backend protected input: $input_name" >&2
+                missing=1
+              fi
+            done
+          fi
+
+          if [[ "$missing" != "0" ]]; then
+            exit "$missing"
+          fi
+
+          python3 - <<'PY'
+          import os
+          import re
+
+          if os.environ["PROBE_STATE"] != "present":
+              raise SystemExit(0)
+
+          project_ref = os.environ["NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF"]
+          expected_host = os.environ["NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST"]
+          public_key = os.environ["NUTSNEWS_STANDBY_PROBE_SSH_PUBLIC_KEY"]
+          if not re.fullmatch(r"[a-z0-9]{20}", project_ref):
+              raise SystemExit("Invalid protected Supabase project-ref input.")
+          if expected_host != f"db.{project_ref}.supabase.co":
+              raise SystemExit("Invalid protected Supabase direct-host input.")
+          if "\n" in public_key or "\r" in public_key:
+              raise SystemExit("Probe SSH public key must be a single line.")
+          if not public_key.startswith(("ssh-ed25519 ", "ecdsa-sha2-", "sk-ssh-ed25519@openssh.com ")):
+              raise SystemExit("Probe SSH public key must use a supported OpenSSH public key format.")
+          PY
+
+      - name: Prepare SSH material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          install -m 0700 -d "$RUNNER_TEMP/backend-ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/backend-ssh/nutsnews_backend"
+          chmod 0600 "$RUNNER_TEMP/backend-ssh/nutsnews_backend"
+
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$RUNNER_TEMP/backend-ssh/known_hosts"
+          chmod 0600 "$RUNNER_TEMP/backend-ssh/known_hosts"
+
+          ssh-keygen -y -f "$RUNNER_TEMP/backend-ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F "$NUTSNEWS_BACKEND_HOST" -f "$RUNNER_TEMP/backend-ssh/known_hosts" > /dev/null
+
+      - name: Build probe Ansible extra vars
+        shell: bash
+        env:
+          PROBE_STATE: ${{ inputs.probe_state }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          NUTSNEWS_BACKEND_BECOME_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_BECOME_PASSWORD }}
+          NUTSNEWS_STANDBY_PROBE_SSH_PUBLIC_KEY: ${{ secrets.NUTSNEWS_STANDBY_PROBE_SSH_PUBLIC_KEY }}
+          NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF: ${{ secrets.NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF }}
+          NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST: ${{ secrets.NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST }}
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          runner_temp = Path(os.environ["RUNNER_TEMP"])
+          known_hosts = runner_temp / "backend-ssh" / "known_hosts"
+          ssh_args = " ".join(
+              [
+                  "-o BatchMode=yes",
+                  "-o IdentitiesOnly=yes",
+                  "-o StrictHostKeyChecking=yes",
+                  f"-o UserKnownHostsFile={known_hosts}",
+                  "-o ClearAllForwardings=yes",
+                  "-o RequestTTY=no",
+                  "-o ConnectTimeout=10",
+                  "-o ConnectionAttempts=2",
+                  "-o ServerAliveInterval=10",
+                  "-o ServerAliveCountMax=2",
+              ]
+          )
+
+          extra_vars = {
+              "ansible_host": os.environ["NUTSNEWS_BACKEND_HOST"].strip() or "65.75.201.18",
+              "ansible_ssh_common_args": ssh_args,
+              "supabase_standby_probe_state": os.environ["PROBE_STATE"],
+          }
+
+          if os.environ["PROBE_STATE"] == "present":
+              project_ref = os.environ["NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF"]
+              expected_host = os.environ["NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST"]
+              if not re.fullmatch(r"[a-z0-9]{20}", project_ref):
+                  raise SystemExit("Invalid protected Supabase project-ref input.")
+              if expected_host != f"db.{project_ref}.supabase.co":
+                  raise SystemExit("Invalid protected Supabase direct-host input.")
+              extra_vars["supabase_standby_probe_public_key"] = os.environ["NUTSNEWS_STANDBY_PROBE_SSH_PUBLIC_KEY"].strip()
+              extra_vars["supabase_standby_probe_expected_project_ref"] = project_ref
+              extra_vars["supabase_standby_probe_expected_host"] = expected_host
+
+          ansible_user = os.environ.get("NUTSNEWS_BACKEND_ANSIBLE_USER", "").strip()
+          if ansible_user:
+              extra_vars["ansible_user"] = ansible_user
+
+          become_password = os.environ.get("NUTSNEWS_BACKEND_BECOME_PASSWORD", "")
+          if become_password:
+              extra_vars["ansible_become_password"] = become_password
+
+          path = runner_temp / "supabase-standby-probe-extra-vars.json"
+          path.write_text(json.dumps(extra_vars), encoding="utf-8")
+          path.chmod(0o600)
+          PY
+
+      - name: Run Supabase standby probe Ansible
+        shell: bash
+        working-directory: ansible
+        env:
+          RUN_MODE: ${{ inputs.run_mode }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            playbooks/supabase_standby_probe.yml
+            -i inventories/production/hosts.yml
+            --private-key "$RUNNER_TEMP/backend-ssh/nutsnews_backend"
+            --extra-vars "@$RUNNER_TEMP/supabase-standby-probe-extra-vars.json"
+          )
+
+          if [[ "$RUN_MODE" == "check" ]]; then
+            args+=(--check)
+          fi
+
+          ansible-playbook "${args[@]}"
+
+      - name: Write safe summary
+        if: always()
+        shell: bash
+        env:
+          RUN_MODE: ${{ inputs.run_mode }}
+          PROBE_STATE: ${{ inputs.probe_state }}
+        run: |
+          set -euo pipefail
+
+          {
+            echo "## Supabase standby probe boundary"
+            echo ""
+            echo "- playbook: ansible/playbooks/supabase_standby_probe.yml"
+            echo "- mode: ${RUN_MODE}"
+            echo "- requested_state: ${PROBE_STATE}"
+            echo "- environment: production-backend"
+            echo "- output policy: no credentials, database URLs, Supabase host/project metadata, PostgreSQL errors, or row data"
+          } >> "$GITHUB_STEP_SUMMARY"

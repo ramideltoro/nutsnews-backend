@@ -76,6 +76,7 @@ probe account manually over SSH.
 
 Source-controlled assets:
 
+- protected workflow: `.github/workflows/supabase-standby-probe.yml`
 - playbook: `ansible/playbooks/supabase_standby_probe.yml`
 - role: `ansible/roles/supabase_standby_probe`
 - probe source copied by Ansible:
@@ -90,6 +91,23 @@ same role with `supabase_standby_probe_state=absent`; it removes the forced key,
 fixed probe program, protected target config, sshd drop-in, dedicated user, and
 dedicated group through Ansible.
 
+The dedicated workflow is `Supabase Standby Probe Boundary`.
+
+- Trigger: `workflow_dispatch` only.
+- Required branch: `main`.
+- Environment: protected `production-backend`.
+- Permissions: `contents: read`.
+- Inputs:
+  - `run_mode`: `check` or `apply`; default `check`.
+  - `probe_state`: `present` or `absent`; default `present`.
+  - `confirm_apply`: must be exactly `backend.nutsnews.com` for apply mode.
+
+Use `run_mode=check, probe_state=present` before installing the probe. Use
+`run_mode=apply, probe_state=present` only after reviewing check mode and
+approving the specific `production-backend` environment gate for that run.
+Rollback is `run_mode=check, probe_state=absent`, followed by
+`run_mode=apply, probe_state=absent` after review.
+
 ## Secret and Variable Contract
 
 Backend `production-backend` protected inputs:
@@ -97,6 +115,16 @@ Backend `production-backend` protected inputs:
 - `NUTSNEWS_STANDBY_PROBE_SSH_PUBLIC_KEY`
 - `NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF`
 - `NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST`
+
+The workflow also requires the existing protected backend SSH inputs:
+
+- `NUTSNEWS_BACKEND_SSH_PRIVATE_KEY`
+- `NUTSNEWS_BACKEND_KNOWN_HOSTS`
+
+Optional existing protected backend inputs:
+
+- `NUTSNEWS_BACKEND_ANSIBLE_USER`
+- `NUTSNEWS_BACKEND_BECOME_PASSWORD`
 
 App `supabase-standby` protected secrets:
 

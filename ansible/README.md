@@ -29,7 +29,8 @@ backend host through `playbooks/supabase_standby_probe.yml`. It provisions the
 locked `nutsnews-standby-probe` identity, root-owned fixed probe program,
 protected expected Supabase target config, forced `authorized_keys` entry, and
 an sshd `Match User` boundary. It must run through the protected
-`production-backend` workflow path, with check mode reviewed before apply.
+`production-backend` workflow path, with check mode reviewed before apply. The
+dedicated workflow is `.github/workflows/supabase-standby-probe.yml`.
 
 Disposable Supabase standby IPv6 runner inventory must stay separate from the
 production backend group. Use

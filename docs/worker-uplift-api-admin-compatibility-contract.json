@@ -113,6 +113,7 @@
         "load-admin-translation-quality",
         "load-admin-worker-runs",
         "load-admin-worker-shards",
+        "load-admin-worker-uplift-health",
         "load-article-detail",
         "load-article-sitemap-items-page",
         "load-home-feed-snapshot",
@@ -394,6 +395,80 @@
       "backward_compatibility_rule": "new optional fields may be ignored by the backend API; breaking payload changes require a contract version bump and fixture update"
     }
   },
+  "worker_uplift_admin_projection": {
+    "tracking_issue": 146,
+    "operation": "load-admin-worker-uplift-health",
+    "embedded_in": [
+      "load-admin-production-readiness",
+      "load-admin-worker-shards"
+    ],
+    "schema_version": 1,
+    "source_table": "worker_uplift_final.stage_health_projections",
+    "source_view": "worker_uplift_views.stage_health_projection",
+    "active_ingestion_owner_field": "activeIngestionOwner",
+    "stage_rows_field": "stageRows",
+    "durable_stage_fields": [
+      "stage",
+      "stageStatus",
+      "staleStatus",
+      "lastAttemptAt",
+      "lastSuccessAt",
+      "lastFailureAt",
+      "consecutiveFailureCount",
+      "throughputPerMinute",
+      "latencyP50Ms",
+      "latencyP95Ms",
+      "retryCount",
+      "dlqCount",
+      "queueAgeSeconds",
+      "activeConsumers",
+      "deploymentVersion",
+      "telemetryVersion",
+      "projectionVersion"
+    ],
+    "active_ingestion_owners": [
+      "legacy_shards",
+      "coexistence",
+      "worker_uplift",
+      "rollback",
+      "unknown"
+    ],
+    "stage_statuses": [
+      "healthy",
+      "degraded",
+      "failed",
+      "stale",
+      "unknown",
+      "legacy_only",
+      "rollback"
+    ],
+    "stale_statuses": [
+      "current",
+      "stale",
+      "unknown"
+    ],
+    "overall_statuses": [
+      "healthy",
+      "degraded",
+      "stale",
+      "unknown",
+      "legacy_only",
+      "rollback",
+      "partial"
+    ],
+    "partial_telemetry_behavior": "Projection table or row gaps return safe partialErrors and unknown or legacy_only stage rows; admin routes do not depend on Grafana availability.",
+    "no_grafana_dependency": true,
+    "redacted_only": true,
+    "forbidden_response_details": [
+      "broker management URLs",
+      "message payloads",
+      "raw feed bodies",
+      "article bodies",
+      "model outputs",
+      "tokens",
+      "database URLs"
+    ]
+  },
   "failure_semantics": [
     {
       "status": 400,
@@ -460,7 +535,8 @@
       "load-admin-feed-quality-rows",
       "load-admin-worker-runs",
       "load-admin-ai-usage-runs",
-      "load-admin-article-review-rows"
+      "load-admin-article-review-rows",
+      "load-admin-worker-uplift-health"
     ],
     "server_write": [
       "record-quota-usage-event",

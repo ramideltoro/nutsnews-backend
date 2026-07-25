@@ -358,6 +358,38 @@ BEGIN
   $ddl$, final_schema);
 
   EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.stage_health_projections (
+      id bigserial PRIMARY KEY,
+      stage_name text NOT NULL CHECK (stage_name IN ('scheduler', 'fetcher', 'canonicalizer', 'enrichment', 'approval', 'translation', 'persistence', 'publication')),
+      active_ingestion_owner text NOT NULL DEFAULT 'legacy_shards' CHECK (active_ingestion_owner IN ('legacy_shards', 'coexistence', 'worker_uplift', 'rollback', 'unknown')),
+      stage_status text NOT NULL CHECK (stage_status IN ('healthy', 'degraded', 'failed', 'stale', 'unknown', 'legacy_only', 'rollback')),
+      stale_status text NOT NULL DEFAULT 'unknown' CHECK (stale_status IN ('current', 'stale', 'unknown')),
+      last_attempt_at timestamptz,
+      last_success_at timestamptz,
+      last_failure_at timestamptz,
+      consecutive_failure_count integer NOT NULL DEFAULT 0 CHECK (consecutive_failure_count >= 0),
+      throughput_per_minute numeric(12,4),
+      latency_p50_ms integer CHECK (latency_p50_ms IS NULL OR latency_p50_ms >= 0),
+      latency_p95_ms integer CHECK (latency_p95_ms IS NULL OR latency_p95_ms >= 0),
+      retry_count bigint NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+      dlq_count bigint NOT NULL DEFAULT 0 CHECK (dlq_count >= 0),
+      queue_age_seconds integer CHECK (queue_age_seconds IS NULL OR queue_age_seconds >= 0),
+      active_consumers integer CHECK (active_consumers IS NULL OR active_consumers >= 0),
+      deployment_version text,
+      telemetry_version integer NOT NULL DEFAULT 1 CHECK (telemetry_version > 0),
+      projection_version integer NOT NULL CHECK (projection_version > 0),
+      sanitized_error_code text,
+      sanitized_error_message text CHECK (sanitized_error_message IS NULL OR length(sanitized_error_message) <= 512),
+      diagnostic_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(diagnostic_metadata) = 'object'),
+      redact_after timestamptz NOT NULL DEFAULT (now() + interval '90 days'),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (stage_name),
+      UNIQUE (stage_name, projection_version)
+    )
+  $ddl$, final_schema);
+
+  EXECUTE format($ddl$
     CREATE TABLE IF NOT EXISTS %I.publication_readiness (
       id bigserial PRIMARY KEY,
       article_identity_hash text NOT NULL,
@@ -395,6 +427,7 @@ BEGIN
   EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', final_schema, worker_api_role);
   EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.article_shadow_aggregates TO %I', final_schema, worker_api_role);
   EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.api_command_receipts TO %I', final_schema, worker_api_role);
+  EXECUTE format('GRANT SELECT ON TABLE %I.stage_health_projections TO %I', final_schema, worker_api_role);
   EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', final_schema, worker_api_role);
   EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I, %I', final_schema, validation_role, readonly_role);
   EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO %I, %I', final_schema, validation_role, readonly_role);
@@ -413,6 +446,7 @@ BEGIN
   EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', final_schema, worker_api_role);
   EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.article_shadow_aggregates TO %I', final_schema, worker_api_role);
   EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.api_command_receipts TO %I', final_schema, worker_api_role);
+  EXECUTE format('GRANT SELECT ON TABLE %I.stage_health_projections TO %I', final_schema, worker_api_role);
   EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', final_schema, worker_api_role);
 
   EXECUTE format($ddl$
@@ -454,6 +488,17 @@ BEGIN
     CREATE OR REPLACE VIEW %I.final_shadow_article_projection AS
     SELECT article_identity_hash, canonical_url_hash, original_url_hash, aggregate_version, publication_status, updated_at
     FROM %I.article_shadow_aggregates
+  $ddl$, views_schema, final_schema);
+  EXECUTE format($ddl$
+    CREATE OR REPLACE VIEW %I.stage_health_projection AS
+    SELECT stage_name, active_ingestion_owner, stage_status, stale_status,
+           last_attempt_at, last_success_at, last_failure_at,
+           consecutive_failure_count, throughput_per_minute,
+           latency_p50_ms, latency_p95_ms, retry_count, dlq_count,
+           queue_age_seconds, active_consumers, deployment_version,
+           telemetry_version, projection_version, sanitized_error_code,
+           sanitized_error_message, updated_at
+    FROM %I.stage_health_projections
   $ddl$, views_schema, final_schema);
 
 {% for item in backend_worker_uplift_postgres_stage_roles %}

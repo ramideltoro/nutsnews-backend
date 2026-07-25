@@ -247,9 +247,15 @@ def main() -> int:
         "x-dead-letter-exchange",
         "x-dead-letter-routing-key",
         "refusing transfer probe because queue is non-empty",
+        "--skip-non-empty",
+        "skipped_stages",
+        "skip_without_mutating_existing_messages",
     ):
         if required not in topology_script:
             errors.append(f"RabbitMQ topology script missing required behavior: {required}")
+    transfer_probe_task = tasks.split("Probe RabbitMQ retry and DLQ transfer routing", 1)[-1].split("- name:", 1)[0]
+    if "--skip-non-empty" not in transfer_probe_task:
+        errors.append("RabbitMQ protected transfer probe must skip non-empty route queues without mutating backlog")
     readonly_block = topology_script.split("def live_drift", 1)[-1].split("def regex_allows", 1)[0]
     if 'client.request("PUT"' in readonly_block or 'client.request("POST"' in readonly_block or 'client.request("DELETE"' in readonly_block:
         errors.append("RabbitMQ topology live_drift must remain read-only")
@@ -332,6 +338,8 @@ def main() -> int:
         errors.append("RabbitMQ provisioning runbook must route host restart verification through controlled maintenance")
     if "legacy Cloudflare Worker" not in runbook:
         errors.append("RabbitMQ provisioning runbook must keep legacy Worker guardrail visible")
+    if "--skip-non-empty" not in runbook or "skipped_stages" not in runbook:
+        errors.append("RabbitMQ provisioning runbook must document non-empty transfer-probe skip reporting")
 
     if probe.count("RABBITMQ_DEFAULT_PASS") < 1:
         errors.append("RabbitMQ probe must read credentials from env file")

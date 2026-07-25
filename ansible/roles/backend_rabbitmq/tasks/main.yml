@@ -476,6 +476,7 @@
       - "{{ backend_rabbitmq_topology_env_path }}"
       - --definition
       - "{{ backend_rabbitmq_topology_definition_path }}"
+      - --skip-non-empty
   register: backend_rabbitmq_topology_transfer_probe
   changed_when: false
   when:

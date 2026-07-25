@@ -155,11 +155,14 @@ sudo -n /usr/local/sbin/nutsnews-rabbitmq-topology permissions \
   --definition /etc/nutsnews-rabbitmq/worker-uplift-topology.json
 ```
 
-The protected apply also runs `probe-transfers` while queues are empty. It
-publishes and cleans up probe messages for every route, verifies retry and DLQ
-routing, and verifies an unroutable retry target leaves the source message
-visible until a confirmed target publish succeeds. The probe refuses to run on
-non-empty stage queues.
+Manual `probe-transfers` runs are fail-closed and refuse to publish probes when
+any stage queue is non-empty. Protected applies run
+`probe-transfers --skip-non-empty` so a shadow backlog does not get mutated by a
+deployment check. The JSON report records `skipped_stages` and `skipped_queues`
+for any route skipped due to existing messages; empty routes are still probed.
+For probed routes, it publishes and cleans up probe messages, verifies retry and
+DLQ routing, and verifies an unroutable retry target leaves the source message
+visible until a confirmed target publish succeeds.
 
 The topology grants the monitoring identity access only to the private canary
 route:

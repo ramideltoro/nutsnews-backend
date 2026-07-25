@@ -26,6 +26,8 @@ backend_worker_runtime_allowed_image_repositories:
   - ghcr.io/ramideltoro/nutsnews-worker-feed-fetcher
   - ghcr.io/ramideltoro/nutsnews-worker-article-canonicalizer
   - ghcr.io/ramideltoro/nutsnews-worker-article-enrichment
+  - ghcr.io/ramideltoro/nutsnews-worker-article-approval
+  - ghcr.io/ramideltoro/nutsnews-worker-article-translation
 backend_worker_runtime_allowed_source_repositories:
   - ramideltoro/nutsnews-backend
   - ramideltoro/nutsnews-worker-services
@@ -33,6 +35,8 @@ backend_worker_runtime_allowed_source_repositories:
   - ramideltoro/nutsnews-worker-feed-fetcher
   - ramideltoro/nutsnews-worker-article-canonicalizer
   - ramideltoro/nutsnews-worker-article-enrichment
+  - ramideltoro/nutsnews-worker-article-approval
+  - ramideltoro/nutsnews-worker-article-translation
 backend_worker_runtime_allowed_stages:
   - scheduler
   - fetcher
@@ -336,6 +340,191 @@ backend_worker_runtime_services:
     rollback:
       image: ghcr.io/ramideltoro/nutsnews-worker-article-enrichment@sha256:c6a1a743ea55d4fdb11a95b4130a384cfcf3edde9ad8b7083d80f96fd236a2ca
       reason: initial-shadow-deploy
+
+  - name: approval
+    stage: approval
+    tracking_issue: 118
+    image: ghcr.io/ramideltoro/nutsnews-worker-article-approval@sha256:03753f620b9d5c332638f271a649cafbd76b61e51d16236c42589cde88b7da6a
+    image_tag: 7c0227f2b0286b78e40e618ac35c66d0df2e6de4
+    contract_version: "0.4.0"
+    runtime_package_version: "0.4.0"
+    runtime_mode: shadow
+    network_mode: host
+    replicas: 1
+    resources:
+      memory: 512m
+      cpus: "0.75"
+      pids: 256
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:18085/ready').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    provenance:
+      required: true
+      signed: true
+      source_repository: ramideltoro/nutsnews-worker-article-approval
+      subject_digest: sha256:03753f620b9d5c332638f271a649cafbd76b61e51d16236c42589cde88b7da6a
+    env:
+      NUTSNEWS_ENVIRONMENT: production
+      NUTSNEWS_APPROVAL_HTTP_HOST: 127.0.0.1
+      NUTSNEWS_APPROVAL_HTTP_PORT: "18085"
+      NUTSNEWS_APPROVAL_DEPENDENCY_MODE: production
+      NUTSNEWS_APPROVAL_QWEN_MODEL: qwen2.5:3b
+      NUTSNEWS_APPROVAL_PROMPT_ID: editorial-approval-v1
+      NUTSNEWS_APPROVAL_TARGET_LANGUAGES: fr,ja,de-CH,de,el
+      NUTSNEWS_APPROVAL_CONCURRENCY: "1"
+      NUTSNEWS_APPROVAL_PREFETCH: "2"
+      NUTSNEWS_APPROVAL_QWEN_TOTAL_TIMEOUT_MS: "30000"
+      NUTSNEWS_APPROVAL_QWEN_MAX_INPUT_BYTES: "32768"
+      NUTSNEWS_APPROVAL_QWEN_MAX_PARALLEL_CALLS: "1"
+      NUTSNEWS_APPROVAL_QWEN_MAX_QUEUED_CALLS: "1"
+      NUTSNEWS_APPROVAL_QWEN_BACKPRESSURE_RETRY_AFTER_MS: "5000"
+      NUTSNEWS_APPROVAL_SUMMARY_MIN_CHARS: "40"
+      NUTSNEWS_APPROVAL_SUMMARY_MAX_CHARS: "600"
+      NUTSNEWS_APPROVAL_OPENAI_FALLBACK_ENABLED: "false"
+      NUTSNEWS_APPROVAL_OPENAI_FALLBACK_PROTECTED_FLAG: "false"
+      NUTSNEWS_APPROVAL_OPENAI_FALLBACK_BUDGET_USD: "0"
+      NUTSNEWS_APPROVAL_OPENAI_FALLBACK_PROVENANCE_MARKER: ""
+      NUTSNEWS_APPROVAL_OPENAI_FALLBACK_ALERT_TOPIC: ""
+      NUTSNEWS_APPROVAL_SHUTDOWN_TIMEOUT_MS: "30000"
+      NUTSNEWS_APPROVAL_SHADOW_MODE: "true"
+      NUTSNEWS_APPROVAL_TELEMETRY_LOGS: stdout
+      NUTSNEWS_APPROVAL_METRICS_ENABLED: "true"
+    secret_env:
+      - name: approval-database-url
+        env_key: NUTSNEWS_APPROVAL_DATABASE_URL
+      - name: approval-rabbitmq-url
+        env_key: NUTSNEWS_APPROVAL_RABBITMQ_URL
+      - name: approval-qwen-base-url
+        env_key: NUTSNEWS_APPROVAL_QWEN_BASE_URL
+      - name: approval-qwen-api-key
+        env_key: NUTSNEWS_APPROVAL_QWEN_API_KEY
+    queues:
+      main: nutsnews.worker.approval.v1
+      retry:
+        - nutsnews.worker.approval.v1.retry-30s
+        - nutsnews.worker.approval.v1.retry-5m
+        - nutsnews.worker.approval.v1.retry-30m
+      dlq: nutsnews.worker.approval.v1.dlq
+      consumes:
+        - nutsnews.worker.approval.v1
+      publishes:
+        - nutsnews.worker.translation.v1
+    postgres:
+      database: "{{ backend_worker_uplift_postgres_database | default('nutsnews_primary_shadow') }}"
+      schemas:
+        - worker_uplift_approval
+      production_write_path: false
+    ai:
+      provider: qwen
+      model: qwen2.5:3b
+      base_url_secret: approval-qwen-base-url
+      api_key_secret: approval-qwen-api-key
+      openai_fallback_enabled: false
+      max_parallel_calls: 1
+      max_queued_calls: 1
+      prompt_id: editorial-approval-v1
+      prompt_logging: metadata_only
+    rollback:
+      image: ghcr.io/ramideltoro/nutsnews-worker-article-approval@sha256:03753f620b9d5c332638f271a649cafbd76b61e51d16236c42589cde88b7da6a
+      reason: initial-ai-shadow-deploy
+
+  - name: translation
+    stage: translation
+    tracking_issue: 118
+    image: ghcr.io/ramideltoro/nutsnews-worker-article-translation@sha256:10e7177bf07a1878b4ea42eafec5d9b2bfa92c8418e70c783364ef0faed2d8a7
+    image_tag: 21d0ef3cea23e362a7afd6b48681d269ddf682fb
+    contract_version: "0.4.0"
+    runtime_package_version: "0.4.0"
+    runtime_mode: shadow
+    network_mode: host
+    replicas: 1
+    resources:
+      memory: 768m
+      cpus: "0.75"
+      pids: 256
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:18086/ready').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    provenance:
+      required: true
+      signed: true
+      source_repository: ramideltoro/nutsnews-worker-article-translation
+      subject_digest: sha256:10e7177bf07a1878b4ea42eafec5d9b2bfa92c8418e70c783364ef0faed2d8a7
+    env:
+      NUTSNEWS_ENVIRONMENT: production
+      NUTSNEWS_TRANSLATION_HTTP_HOST: 127.0.0.1
+      NUTSNEWS_TRANSLATION_HTTP_PORT: "18086"
+      NUTSNEWS_TRANSLATION_DEPENDENCY_MODE: production
+      NUTSNEWS_TRANSLATION_QWEN_MODEL: qwen2.5:3b
+      NUTSNEWS_TRANSLATION_PROMPT_ID: summary-translation-v1
+      NUTSNEWS_TRANSLATION_LANGUAGE_POLICY_ID: required-summaries-v1
+      NUTSNEWS_TRANSLATION_TARGET_LANGUAGES: fr,ja,de-CH,de,el
+      NUTSNEWS_TRANSLATION_PER_LANGUAGE_CONCURRENCY: "1"
+      NUTSNEWS_TRANSLATION_QUALITY_MIN_SCORE: "80"
+      NUTSNEWS_TRANSLATION_SUMMARY_MIN_CHARS: "24"
+      NUTSNEWS_TRANSLATION_SUMMARY_MAX_CHARS: "420"
+      NUTSNEWS_TRANSLATION_QUALITY_REPROMPT_MAX_ATTEMPTS: "2"
+      NUTSNEWS_TRANSLATION_CONCURRENCY: "1"
+      NUTSNEWS_TRANSLATION_PREFETCH: "2"
+      NUTSNEWS_TRANSLATION_QWEN_TOTAL_TIMEOUT_MS: "30000"
+      NUTSNEWS_TRANSLATION_QWEN_MAX_INPUT_BYTES: "32768"
+      NUTSNEWS_TRANSLATION_SHUTDOWN_TIMEOUT_MS: "30000"
+      NUTSNEWS_TRANSLATION_SHADOW_MODE: "true"
+      NUTSNEWS_TRANSLATION_TELEMETRY_LOGS: stdout
+      NUTSNEWS_TRANSLATION_METRICS_ENABLED: "true"
+    secret_env:
+      - name: translation-database-url
+        env_key: NUTSNEWS_TRANSLATION_DATABASE_URL
+      - name: translation-rabbitmq-url
+        env_key: NUTSNEWS_TRANSLATION_RABBITMQ_URL
+      - name: translation-qwen-base-url
+        env_key: NUTSNEWS_TRANSLATION_QWEN_BASE_URL
+      - name: translation-qwen-api-key
+        env_key: NUTSNEWS_TRANSLATION_QWEN_API_KEY
+    queues:
+      main: nutsnews.worker.translation.v1
+      retry:
+        - nutsnews.worker.translation.v1.retry-30s
+        - nutsnews.worker.translation.v1.retry-5m
+        - nutsnews.worker.translation.v1.retry-30m
+      dlq: nutsnews.worker.translation.v1.dlq
+      consumes:
+        - nutsnews.worker.translation.v1
+      publishes:
+        - nutsnews.worker.persistence.v1
+      stops_before:
+        - nutsnews.worker.persistence.v1
+    postgres:
+      database: "{{ backend_worker_uplift_postgres_database | default('nutsnews_primary_shadow') }}"
+      schemas:
+        - worker_uplift_translation
+      production_write_path: false
+    ai:
+      provider: qwen
+      model: qwen2.5:3b
+      base_url_secret: translation-qwen-base-url
+      api_key_secret: translation-qwen-api-key
+      openai_fallback_enabled: false
+      per_language_concurrency: 1
+      prompt_id: summary-translation-v1
+      prompt_logging: metadata_only
+    rollback:
+      image: ghcr.io/ramideltoro/nutsnews-worker-article-translation@sha256:10e7177bf07a1878b4ea42eafec5d9b2bfa92c8418e70c783364ef0faed2d8a7
+      reason: initial-ai-shadow-deploy
 backend_worker_runtime_secret_values: {}
 backend_worker_runtime_rabbitmq_vhost: "{{ backend_rabbitmq_vhost | default('nutsnews-worker-uplift') }}"
 backend_worker_runtime_rabbitmq_env_path: "{{ backend_rabbitmq_env_path | default('/etc/nutsnews-rabbitmq/rabbitmq.env') }}"

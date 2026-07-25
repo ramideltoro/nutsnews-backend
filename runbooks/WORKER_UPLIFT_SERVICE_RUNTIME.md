@@ -2,7 +2,8 @@
 
 This runbook covers tracking issue `ramideltoro/nutsnews-worker#85`.
 It also records the non-AI shadow deployment from
-`ramideltoro/nutsnews-worker#117`.
+`ramideltoro/nutsnews-worker#117` and the approval/translation shadow deployment
+preparation from `ramideltoro/nutsnews-worker#118`.
 
 ## Scope
 
@@ -28,6 +29,17 @@ The #117 deployment registers only the non-AI services:
 No approval, translation, persistence, or publication container is deployed by
 #117. A successful fixture may reach `nutsnews.worker.approval.v1`, where it
 must stop until the later AI approval deployment is reviewed.
+
+The #118 deployment preparation adds the AI-backed shadow services:
+
+| Service | Image source | Health endpoint | Shadow input/output |
+| --- | --- | --- | --- |
+| `approval` | `ramideltoro/nutsnews-worker-article-approval` | `127.0.0.1:18085/ready` | consumes approval, publishes translation tasks for accepted fixtures |
+| `translation` | `ramideltoro/nutsnews-worker-article-translation` | `127.0.0.1:18086/ready` | consumes translation tasks, stops before persistence |
+
+No persistence or publication container is deployed by #118. A successful
+translation fixture may reach `nutsnews.worker.persistence.v1`, where it must
+stop until the persistence deployment is reviewed.
 
 ## Source-Controlled Contract
 
@@ -120,6 +132,9 @@ production-backend secrets:
   stage's runtime identity.
 - The scheduler receives the backend API token only for shadow feed-source
   reads; backend API writes remain disabled.
+- Approval and translation receive Qwen base URL/API key values only from
+  production-backend `LOCAL_AI_URL` and `LOCAL_AI_API_KEY`. Protected apply fails
+  closed when `LOCAL_AI_API_KEY` is absent.
 
 ## Fixed Operations
 
@@ -185,6 +200,41 @@ Expected state:
 - legacy Cloudflare ingestion remains active and unchanged;
 - container logs appear under the existing `nutsnews-worker-uplift-*` journald
   tags and RabbitMQ queue metrics continue to scrape from backend Alloy.
+
+## #118 AI Shadow Verification
+
+Before applying #118, confirm `LOCAL_AI_API_KEY` exists in the
+production-backend Environment. Do not use the backend maintenance
+`OPENAI_API_KEY`; OpenAI fallback must remain disabled.
+
+After protected check/apply:
+
+```bash
+sudo -n /usr/local/sbin/nutsnews-worker-runtime status
+sudo -n /usr/local/sbin/nutsnews-worker-runtime queue-inspect --service-name approval
+sudo -n /usr/local/sbin/nutsnews-worker-runtime queue-inspect --service-name translation
+```
+
+Expected state:
+
+- approval and translation are healthy and independently restartable;
+- approval accepted fixtures create required translation tasks for
+  `fr,ja,de-CH,de,el`;
+- rejected approval fixtures do not create translation tasks;
+- translation outputs are durable shadow state only and stop before the
+  persistence queue;
+- Qwen slowdown produces bounded backlog through `CONCURRENCY=1`, `PREFETCH=2`,
+  and approval `QWEN_MAX_QUEUED_CALLS=1`;
+- `NUTSNEWS_APPROVAL_OPENAI_FALLBACK_ENABLED=false` remains present;
+- logs include provider/model/prompt metadata but no prompt or article body
+  leakage;
+- legacy Cloudflare ingestion, legacy AI, and failover remain active and
+  unchanged.
+
+For model outage, drain only the affected AI service, inspect its queue/DLQ, and
+leave non-AI services running unless queue backpressure requires a wider pause.
+Rotate `LOCAL_AI_API_KEY` in production-backend, rerun protected check/apply,
+then restart `approval` and `translation` through fixed runtime operations.
 
 ## Queue, DLQ, Drain, And Reconciliation
 

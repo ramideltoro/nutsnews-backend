@@ -223,8 +223,6 @@ def validate() -> list[str]:
         )
 
     for forbidden in (
-        "name: approval\n    stage: approval\n",
-        "name: translation\n    stage: translation\n",
         "name: persistence\n    stage: persistence\n",
         "name: publication\n    stage: publication\n",
         "NUTSNEWS_BACKEND_WORKER_RUNTIME_PRODUCTION_WRITES_ENABLED=true",

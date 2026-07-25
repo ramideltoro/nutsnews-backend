@@ -110,6 +110,7 @@ APP_READ_OPERATIONS = {
     "load-admin-translation-quality",
     "load-admin-guardrails",
     "load-admin-worker-shards",
+    "load-admin-worker-uplift-health",
     "load-admin-rss-feed-health",
     "load-admin-feed-management",
     "load-admin-audit-log",
@@ -134,6 +135,34 @@ ALLOWED_PROVIDER_MODES = {"backend_postgres_shadow", "backend_postgres_primary"}
 SUMMARY_TRANSLATION_LANGUAGE_CODES = ("fr", "ja", "de-CH", "de", "el")
 SUMMARY_TRANSLATION_LANGUAGE_CODE_SET = set(SUMMARY_TRANSLATION_LANGUAGE_CODES)
 ARTICLE_STATUSES = {"published", "translation_pending"}
+WORKER_UPLIFT_STAGES = (
+    "scheduler",
+    "fetcher",
+    "canonicalizer",
+    "enrichment",
+    "approval",
+    "translation",
+    "persistence",
+    "publication",
+)
+WORKER_UPLIFT_STAGE_STATUS_SET = {
+    "healthy",
+    "degraded",
+    "failed",
+    "stale",
+    "unknown",
+    "legacy_only",
+    "rollback",
+}
+WORKER_UPLIFT_STALE_STATUS_SET = {"current", "stale", "unknown"}
+WORKER_UPLIFT_ACTIVE_INGESTION_OWNER_SET = {
+    "legacy_shards",
+    "coexistence",
+    "worker_uplift",
+    "rollback",
+    "unknown",
+}
+WORKER_UPLIFT_ADMIN_PROJECTION_VERSION = 1
 
 RUNTIME_FEATURE_FLAG_DEFAULTS = {
     "reader_archive_search": True,
@@ -2316,6 +2345,283 @@ def guardrails_count_table(
         return None
 
 
+def bounded_worker_uplift_stage_names(body: dict[str, Any]) -> list[str]:
+    requested = string_list(body, "stages", maximum=len(WORKER_UPLIFT_STAGES))
+    if not requested:
+        return list(WORKER_UPLIFT_STAGES)
+    normalized = list(dict.fromkeys(stage.strip().lower().replace("-", "_") for stage in requested if stage.strip()))
+    unsupported = [stage for stage in normalized if stage not in WORKER_UPLIFT_STAGES]
+    if unsupported:
+        raise ApiError(400, "stages must contain known worker-uplift stages")
+    return normalized
+
+
+def normalize_worker_uplift_owner(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower().replace("-", "_")
+    aliases = {
+        "legacy": "legacy_shards",
+        "legacy_worker": "legacy_shards",
+        "legacy_workers": "legacy_shards",
+        "uplift": "worker_uplift",
+        "rabbitmq": "worker_uplift",
+        "worker_uplift_primary": "worker_uplift",
+    }
+    normalized = aliases.get(normalized, normalized)
+    return normalized if normalized in WORKER_UPLIFT_ACTIVE_INGESTION_OWNER_SET else None
+
+
+def worker_uplift_cutover_state(store: PostgresStore) -> str:
+    value = str(getattr(store, "worker_uplift_cutover_state", "shadow") or "shadow").strip().lower()
+    return value or "shadow"
+
+
+def worker_uplift_active_ingestion_owner(body: dict[str, Any], store: PostgresStore) -> str:
+    requested = normalize_worker_uplift_owner(optional_string(body, "activeIngestionOwner", maximum=64))
+    if requested:
+        return requested
+    cutover_state = worker_uplift_cutover_state(store)
+    if "rollback" in cutover_state:
+        return "rollback"
+    if cutover_state == "cutover-approved":
+        return "worker_uplift"
+    return "legacy_shards"
+
+
+def safe_projection_int(row: dict[str, Any], key: str) -> int | None:
+    value = row.get(key)
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def safe_projection_float(row: dict[str, Any], key: str) -> float | None:
+    value = row.get(key)
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def safe_projection_string(row: dict[str, Any], key: str, *, maximum: int = 256) -> str | None:
+    value = row.get(key)
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value[:maximum] if value else None
+
+
+def normalize_worker_uplift_stage_status(row: dict[str, Any], active_owner: str) -> str:
+    status = safe_projection_string(row, "stage_status", maximum=64)
+    if status in {"failed", "degraded", "rollback", "legacy_only", "unknown"}:
+        return status
+    if active_owner == "rollback":
+        return "rollback"
+    if active_owner == "legacy_shards" and not any(
+        row.get(key) is not None
+        for key in ("last_attempt_at", "last_success_at", "last_failure_at", "updated_at", "deployment_version")
+    ):
+        return "legacy_only"
+    dlq_count = safe_projection_int(row, "dlq_count") or 0
+    consecutive_failures = safe_projection_int(row, "consecutive_failure_count") or 0
+    stale_status = safe_projection_string(row, "stale_status", maximum=64)
+    if dlq_count > 0 or consecutive_failures > 0:
+        return "degraded"
+    if stale_status == "stale":
+        return "stale"
+    if status == "healthy":
+        return "healthy"
+    if row.get("last_success_at") is not None or row.get("updated_at") is not None:
+        return "healthy"
+    return "unknown"
+
+
+def normalize_worker_uplift_stale_status(row: dict[str, Any]) -> str:
+    status = safe_projection_string(row, "stale_status", maximum=64)
+    return status if status in WORKER_UPLIFT_STALE_STATUS_SET else "unknown"
+
+
+def empty_worker_uplift_stage(stage: str, active_owner: str) -> dict[str, Any]:
+    return {
+        "stage": stage,
+        "activeIngestionOwner": active_owner,
+        "stageStatus": "rollback" if active_owner == "rollback" else "legacy_only",
+        "staleStatus": "unknown",
+        "lastAttemptAt": None,
+        "lastSuccessAt": None,
+        "lastFailureAt": None,
+        "consecutiveFailureCount": 0,
+        "throughputPerMinute": None,
+        "latencyP50Ms": None,
+        "latencyP95Ms": None,
+        "retryCount": 0,
+        "dlqCount": 0,
+        "queueAgeSeconds": None,
+        "activeConsumers": None,
+        "deploymentVersion": None,
+        "telemetryVersion": None,
+        "projectionVersion": None,
+        "updatedAt": None,
+        "errorClass": None,
+        "sanitizedErrorMessage": None,
+    }
+
+
+def worker_uplift_stage_from_row(row: dict[str, Any], active_owner: str) -> dict[str, Any] | None:
+    stage = safe_projection_string(row, "stage_name", maximum=64)
+    if stage not in WORKER_UPLIFT_STAGES:
+        return None
+    normalized = empty_worker_uplift_stage(stage, active_owner)
+    owner = normalize_worker_uplift_owner(safe_projection_string(row, "active_ingestion_owner", maximum=64))
+    if owner:
+        normalized["activeIngestionOwner"] = owner
+    normalized.update(
+        {
+            "stageStatus": normalize_worker_uplift_stage_status(row, active_owner),
+            "staleStatus": normalize_worker_uplift_stale_status(row),
+            "lastAttemptAt": row.get("last_attempt_at"),
+            "lastSuccessAt": row.get("last_success_at"),
+            "lastFailureAt": row.get("last_failure_at"),
+            "consecutiveFailureCount": safe_projection_int(row, "consecutive_failure_count") or 0,
+            "throughputPerMinute": safe_projection_float(row, "throughput_per_minute"),
+            "latencyP50Ms": safe_projection_int(row, "latency_p50_ms"),
+            "latencyP95Ms": safe_projection_int(row, "latency_p95_ms"),
+            "retryCount": safe_projection_int(row, "retry_count") or 0,
+            "dlqCount": safe_projection_int(row, "dlq_count") or 0,
+            "queueAgeSeconds": safe_projection_int(row, "queue_age_seconds"),
+            "activeConsumers": safe_projection_int(row, "active_consumers"),
+            "deploymentVersion": safe_projection_string(row, "deployment_version", maximum=128),
+            "telemetryVersion": safe_projection_int(row, "telemetry_version"),
+            "projectionVersion": safe_projection_int(row, "projection_version"),
+            "updatedAt": row.get("updated_at"),
+            "errorClass": safe_projection_string(row, "sanitized_error_code", maximum=128),
+            "sanitizedErrorMessage": safe_projection_string(row, "sanitized_error_message", maximum=512),
+        }
+    )
+    if normalized["dlqCount"] > 0 and normalized["stageStatus"] == "healthy":
+        normalized["stageStatus"] = "degraded"
+    return normalized
+
+
+def stage_order_sql(column_name: str = "stage_name") -> str:
+    clauses = " ".join(f"when '{stage}' then {index}" for index, stage in enumerate(WORKER_UPLIFT_STAGES))
+    return f"case {column_name} {clauses} else 999 end"
+
+
+def fetch_worker_uplift_stage_projection_rows(
+    store: PostgresStore,
+    stage_names: list[str],
+    limit: int,
+) -> list[dict[str, Any]]:
+    return store.fetch_all(
+        f"""
+        select stage_name, active_ingestion_owner, stage_status, stale_status,
+               last_attempt_at, last_success_at, last_failure_at,
+               consecutive_failure_count, throughput_per_minute,
+               latency_p50_ms, latency_p95_ms, retry_count, dlq_count,
+               queue_age_seconds, active_consumers, deployment_version,
+               telemetry_version, projection_version, sanitized_error_code,
+               sanitized_error_message, updated_at
+        from worker_uplift_final.stage_health_projections
+        where stage_name = any(%s)
+        order by {stage_order_sql()}
+        limit %s
+        """,
+        (stage_names, limit),
+    )
+
+
+def worker_uplift_overall_status(
+    active_owner: str,
+    stage_rows: list[dict[str, Any]],
+    partial_errors: list[dict[str, Any]],
+) -> str:
+    if active_owner == "rollback":
+        return "rollback"
+    statuses = {str(row.get("stageStatus")) for row in stage_rows}
+    if any(status in {"failed", "degraded"} for status in statuses):
+        return "degraded"
+    if "stale" in statuses:
+        return "stale"
+    if partial_errors:
+        return "partial"
+    if statuses and statuses <= {"legacy_only"}:
+        return "legacy_only"
+    if statuses and statuses <= {"healthy"}:
+        return "healthy"
+    return "unknown"
+
+
+def load_worker_uplift_stage_health_projection(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
+    stage_names = bounded_worker_uplift_stage_names(body)
+    stage_limit = bounded_int_value(
+        body.get("stageLimit", len(stage_names)),
+        "stageLimit",
+        default=len(stage_names),
+        minimum=1,
+        maximum=len(WORKER_UPLIFT_STAGES),
+    )
+    active_owner = worker_uplift_active_ingestion_owner(body, store)
+    partial_errors: list[dict[str, Any]] = []
+    stage_rows_by_name = {
+        stage: empty_worker_uplift_stage(stage, active_owner)
+        for stage in stage_names[:stage_limit]
+    }
+
+    try:
+        projection_rows = fetch_worker_uplift_stage_projection_rows(store, list(stage_rows_by_name), stage_limit)
+    except Exception as exc:
+        partial_errors.append(
+            {
+                "source": "worker_uplift_final.stage_health_projections",
+                "errorClass": exc.__class__.__name__,
+                "redacted": True,
+            }
+        )
+        projection_rows = []
+
+    for row in projection_rows:
+        stage_row = worker_uplift_stage_from_row(row, active_owner)
+        if stage_row is not None and stage_row["stage"] in stage_rows_by_name:
+            stage_rows_by_name[stage_row["stage"]] = stage_row
+
+    stage_rows = [stage_rows_by_name[stage] for stage in stage_rows_by_name]
+    overall_status = worker_uplift_overall_status(active_owner, stage_rows, partial_errors)
+    return {
+        "schemaVersion": WORKER_UPLIFT_ADMIN_PROJECTION_VERSION,
+        "source": "backend_postgres_durable_projection",
+        "grafanaDependency": False,
+        "activeIngestionOwner": active_owner,
+        "cutoverState": worker_uplift_cutover_state(store),
+        "productionWritesEnabled": bool(getattr(store, "worker_uplift_production_writes_enabled", False)),
+        "overallStatus": overall_status,
+        "stageRows": stage_rows,
+        "partialErrors": partial_errors,
+        "links": {
+            "dashboardPath": "grafana/backend-metrics/dashboards.json",
+            "runbookPath": "runbooks/WORKER_UPLIFT_RABBITMQ_METRICS.md",
+        },
+    }
+
+
+def load_app_admin_worker_uplift_health(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
+    return {
+        "rows": [
+            {
+                "workerUpliftHealth": load_worker_uplift_stage_health_projection(body, store),
+            }
+        ],
+        "rowCount": 1,
+        "generatedAt": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
+
+
 def load_app_admin_guardrails(body: dict[str, Any], store: PostgresStore) -> dict[str, Any]:
     since = required_iso_datetime_string(body, "since")
     limit = bounded_int(
@@ -2423,11 +2729,13 @@ def load_app_admin_worker_shards(body: dict[str, Any], store: PostgresStore) -> 
         """,
         (limit,),
     )
+    worker_uplift_health = load_worker_uplift_stage_health_projection(body, store)
 
     return {
         "rows": [
             {
                 "workerRunRows": worker_run_rows,
+                "workerUpliftHealth": worker_uplift_health,
             }
         ],
         "rowCount": 1,
@@ -2639,6 +2947,7 @@ def load_app_admin_production_readiness(body: dict[str, Any], store: PostgresSto
                 min(store.max_limit, translation_expected_count),
             ),
         )
+    worker_uplift_health = load_worker_uplift_stage_health_projection(body, store)
 
     return {
         "rows": [
@@ -2651,6 +2960,7 @@ def load_app_admin_production_readiness(body: dict[str, Any], store: PostgresSto
                 "articlesLast7Days": articles_last_7_days,
                 "translationSummaries": translation_summaries,
                 "translationExpectedCount": translation_expected_count,
+                "workerUpliftHealth": worker_uplift_health,
             }
         ],
         "rowCount": 1,
@@ -2854,6 +3164,9 @@ def handle_app_operation(operation: str, body: dict[str, Any], store: PostgresSt
 
     if operation == "load-admin-worker-shards":
         return load_app_admin_worker_shards(body, store)
+
+    if operation == "load-admin-worker-uplift-health":
+        return load_app_admin_worker_uplift_health(body, store)
 
     if operation == "load-admin-rss-feed-health":
         return load_app_admin_rss_feed_health(body, store)

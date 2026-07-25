@@ -123,6 +123,7 @@ def main() -> int:
         "load-admin-translation-quality",
         "load-admin-guardrails",
         "load-admin-worker-shards",
+        "load-admin-worker-uplift-health",
         "load-admin-rss-feed-health",
         "save-accepted-articles-batch",
         "publish-articles-batch",
@@ -223,6 +224,66 @@ def main() -> int:
     versioning = idempotency.get("versioning", {})
     if versioning.get("api_contract_version") != 1:
         errors.append("api contract version must be 1")
+
+    admin_projection = contract.get("worker_uplift_admin_projection", {})
+    if admin_projection.get("tracking_issue") != 146:
+        errors.append("worker uplift admin projection tracking issue must be 146")
+    if admin_projection.get("operation") != "load-admin-worker-uplift-health":
+        errors.append("worker uplift admin projection operation must be load-admin-worker-uplift-health")
+    if admin_projection.get("operation") not in all_operations:
+        errors.append("worker uplift admin projection operation must be part of app admin operations")
+    if set(admin_projection.get("embedded_in", [])) != {
+        "load-admin-production-readiness",
+        "load-admin-worker-shards",
+    }:
+        errors.append("worker uplift admin projection must be embedded in readiness and worker shards responses")
+    if admin_projection.get("schema_version") != 1:
+        errors.append("worker uplift admin projection schema_version must be 1")
+    if admin_projection.get("source_table") != "worker_uplift_final.stage_health_projections":
+        errors.append("worker uplift admin projection source table must be worker_uplift_final.stage_health_projections")
+    if admin_projection.get("source_view") != "worker_uplift_views.stage_health_projection":
+        errors.append("worker uplift admin projection source view must be worker_uplift_views.stage_health_projection")
+    if admin_projection.get("active_ingestion_owner_field") != "activeIngestionOwner":
+        errors.append("worker uplift admin projection must expose activeIngestionOwner")
+    if admin_projection.get("stage_rows_field") != "stageRows":
+        errors.append("worker uplift admin projection must expose stageRows")
+    for field in (
+        "stage",
+        "stageStatus",
+        "staleStatus",
+        "lastAttemptAt",
+        "lastSuccessAt",
+        "lastFailureAt",
+        "throughputPerMinute",
+        "latencyP95Ms",
+        "retryCount",
+        "dlqCount",
+        "queueAgeSeconds",
+        "activeConsumers",
+        "deploymentVersion",
+    ):
+        if field not in admin_projection.get("durable_stage_fields", []):
+            errors.append(f"worker uplift admin projection missing durable stage field: {field}")
+    for owner in ("legacy_shards", "coexistence", "worker_uplift", "rollback", "unknown"):
+        if owner not in admin_projection.get("active_ingestion_owners", []):
+            errors.append(f"worker uplift admin projection missing active owner: {owner}")
+    for status in ("healthy", "degraded", "failed", "stale", "unknown", "legacy_only", "rollback"):
+        if status not in admin_projection.get("stage_statuses", []):
+            errors.append(f"worker uplift admin projection missing stage status: {status}")
+    for status in ("current", "stale", "unknown"):
+        if status not in admin_projection.get("stale_statuses", []):
+            errors.append(f"worker uplift admin projection missing stale status: {status}")
+    for status in ("healthy", "degraded", "stale", "unknown", "legacy_only", "rollback", "partial"):
+        if status not in admin_projection.get("overall_statuses", []):
+            errors.append(f"worker uplift admin projection missing overall status: {status}")
+    if admin_projection.get("no_grafana_dependency") is not True:
+        errors.append("worker uplift admin projection must not depend on Grafana")
+    if admin_projection.get("redacted_only") is not True:
+        errors.append("worker uplift admin projection must be redacted-only")
+    forbidden_response_details = set(admin_projection.get("forbidden_response_details", []))
+    for forbidden in ("tokens", "database URLs", "message payloads", "model outputs"):
+        if forbidden not in forbidden_response_details:
+            errors.append(f"worker uplift admin projection forbidden detail missing: {forbidden}")
 
     statuses = {item.get("status") for item in contract.get("failure_semantics", [])}
     for status in (400, 401, 403, 404, 409, 413, 503, 500):

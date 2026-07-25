@@ -103,6 +103,35 @@ def uplift_shadow_aggregate_body(overrides: dict | None = None) -> dict:
     return body
 
 
+def worker_uplift_stage_health_row(stage: str, overrides: dict | None = None) -> dict:
+    row = {
+        "stage_name": stage,
+        "active_ingestion_owner": "legacy_shards",
+        "stage_status": "healthy",
+        "stale_status": "current",
+        "last_attempt_at": "2026-07-22T10:00:00Z",
+        "last_success_at": "2026-07-22T10:01:00Z",
+        "last_failure_at": None,
+        "consecutive_failure_count": 0,
+        "throughput_per_minute": "12.5",
+        "latency_p50_ms": 240,
+        "latency_p95_ms": 900,
+        "retry_count": 1,
+        "dlq_count": 0,
+        "queue_age_seconds": 7,
+        "active_consumers": 2,
+        "deployment_version": f"{stage}-sha-123",
+        "telemetry_version": 1,
+        "projection_version": 3,
+        "sanitized_error_code": None,
+        "sanitized_error_message": None,
+        "updated_at": "2026-07-22T10:01:30Z",
+    }
+    if overrides:
+        row.update(overrides)
+    return row
+
+
 class EdgeSnapshotStore(FakeStore):
     def __init__(self, summaries: list[dict] | None = None) -> None:
         super().__init__()
@@ -641,6 +670,35 @@ class WorkerShardsStore(FakeStore):
         if "from public.worker_runs" in query:
             return self.worker_rows[: params[0]]
         return super().fetch_all(query, params)
+
+
+class WorkerUpliftHealthStore(WorkerShardsStore):
+    def __init__(self, stage_rows: list[dict] | None = None) -> None:
+        super().__init__()
+        self.stage_rows = stage_rows if stage_rows is not None else [
+            worker_uplift_stage_health_row(stage)
+            for stage in worker_db_api.WORKER_UPLIFT_STAGES
+        ]
+
+    def fetch_all(self, query: str, params: tuple = ()) -> list[dict]:
+        self.fetches.append((query, params))
+        if "from worker_uplift_final.stage_health_projections" in query:
+            stage_names, limit = params
+            selected = [row for row in self.stage_rows if row.get("stage_name") in stage_names]
+            return selected[:limit]
+        if "from public.worker_runs" in query:
+            return self.worker_rows[: params[0]]
+        return FakeStore.fetch_all(self, query, params)
+
+
+class PartialWorkerUpliftHealthStore(WorkerShardsStore):
+    def fetch_all(self, query: str, params: tuple = ()) -> list[dict]:
+        self.fetches.append((query, params))
+        if "from worker_uplift_final.stage_health_projections" in query:
+            raise RuntimeError("projection unavailable password=do-not-leak RABBITMQ_URL=amqps://secret")
+        if "from public.worker_runs" in query:
+            return self.worker_rows[: params[0]]
+        return FakeStore.fetch_all(self, query, params)
 
 
 class RssFeedHealthStore(FakeStore):
@@ -1775,6 +1833,169 @@ class WorkerDbApiTests(unittest.TestCase):
         self.assertIn("duration_ms", query)
         self.assertIn("order by run_started_at desc nulls last, id desc", query)
         self.assertEqual((2,), params)
+
+        health = row["workerUpliftHealth"]
+        self.assertEqual(1, health["schemaVersion"])
+        self.assertEqual("legacy_shards", health["activeIngestionOwner"])
+        self.assertFalse(health["grafanaDependency"])
+        self.assertEqual("legacy_only", health["overallStatus"])
+
+    def test_app_admin_worker_uplift_health_returns_coexistence_projection(self) -> None:
+        store = WorkerUpliftHealthStore()
+
+        result = worker_db_api.handle_app_operation(
+            "load-admin-worker-uplift-health",
+            {
+                "providerMode": "backend_postgres_primary",
+                "activeIngestionOwner": "legacy_shards",
+                "stageLimit": 8,
+            },
+            store,
+        )
+
+        self.assertEqual(1, result["rowCount"])
+        health = result["rows"][0]["workerUpliftHealth"]
+        self.assertEqual("backend_postgres_durable_projection", health["source"])
+        self.assertEqual("legacy_shards", health["activeIngestionOwner"])
+        self.assertEqual("healthy", health["overallStatus"])
+        self.assertFalse(health["grafanaDependency"])
+        self.assertEqual([], health["partialErrors"])
+        self.assertEqual(8, len(health["stageRows"]))
+        fetcher = next(row for row in health["stageRows"] if row["stage"] == "fetcher")
+        self.assertEqual("healthy", fetcher["stageStatus"])
+        self.assertEqual(2, fetcher["activeConsumers"])
+        self.assertEqual(7, fetcher["queueAgeSeconds"])
+        self.assertEqual("fetcher-sha-123", fetcher["deploymentVersion"])
+        query, params = store.fetches[0]
+        self.assertIn("from worker_uplift_final.stage_health_projections", query)
+        self.assertIn("stage_name = any(%s)", query)
+        self.assertEqual((list(worker_db_api.WORKER_UPLIFT_STAGES), 8), params)
+
+    def test_app_admin_worker_uplift_health_handles_legacy_only_state(self) -> None:
+        store = WorkerUpliftHealthStore(stage_rows=[])
+
+        result = worker_db_api.handle_app_operation(
+            "load-admin-worker-uplift-health",
+            {
+                "providerMode": "backend_postgres_primary",
+                "activeIngestionOwner": "legacy_shards",
+            },
+            store,
+        )
+
+        health = result["rows"][0]["workerUpliftHealth"]
+        self.assertEqual("legacy_only", health["overallStatus"])
+        self.assertTrue(all(row["stageStatus"] == "legacy_only" for row in health["stageRows"]))
+
+    def test_app_admin_worker_uplift_health_handles_uplift_primary_state(self) -> None:
+        store = WorkerUpliftHealthStore(
+            [
+                worker_uplift_stage_health_row(
+                    stage,
+                    {"active_ingestion_owner": "worker_uplift"},
+                )
+                for stage in worker_db_api.WORKER_UPLIFT_STAGES
+            ]
+        )
+        store.worker_uplift_cutover_state = "cutover-approved"
+        store.worker_uplift_production_writes_enabled = True
+
+        result = worker_db_api.handle_app_operation(
+            "load-admin-worker-uplift-health",
+            {"providerMode": "backend_postgres_primary"},
+            store,
+        )
+
+        health = result["rows"][0]["workerUpliftHealth"]
+        self.assertEqual("worker_uplift", health["activeIngestionOwner"])
+        self.assertEqual("cutover-approved", health["cutoverState"])
+        self.assertTrue(health["productionWritesEnabled"])
+        self.assertEqual("healthy", health["overallStatus"])
+
+    def test_app_admin_worker_uplift_health_identifies_stalled_stage_and_dlq(self) -> None:
+        store = WorkerUpliftHealthStore(
+            [
+                worker_uplift_stage_health_row(stage)
+                for stage in worker_db_api.WORKER_UPLIFT_STAGES
+            ]
+        )
+        store.stage_rows[2] = worker_uplift_stage_health_row(
+            "canonicalizer",
+            {
+                "stage_status": "healthy",
+                "stale_status": "stale",
+                "consecutive_failure_count": 3,
+                "retry_count": 9,
+                "dlq_count": 2,
+                "queue_age_seconds": 1800,
+                "sanitized_error_code": "canonicalizer_timeout",
+                "sanitized_error_message": "canonicalizer timed out after retry budget",
+            },
+        )
+        store.stage_rows[3] = worker_uplift_stage_health_row(
+            "enrichment",
+            {
+                "stage_status": "healthy",
+                "consecutive_failure_count": 1,
+                "dlq_count": 0,
+            },
+        )
+
+        result = worker_db_api.handle_app_operation(
+            "load-admin-worker-uplift-health",
+            {"providerMode": "backend_postgres_primary"},
+            store,
+        )
+
+        health = result["rows"][0]["workerUpliftHealth"]
+        canonicalizer = next(row for row in health["stageRows"] if row["stage"] == "canonicalizer")
+        self.assertEqual("degraded", canonicalizer["stageStatus"])
+        self.assertEqual("stale", canonicalizer["staleStatus"])
+        self.assertEqual(2, canonicalizer["dlqCount"])
+        self.assertEqual(1800, canonicalizer["queueAgeSeconds"])
+        self.assertEqual("canonicalizer_timeout", canonicalizer["errorClass"])
+        enrichment = next(row for row in health["stageRows"] if row["stage"] == "enrichment")
+        self.assertEqual("degraded", enrichment["stageStatus"])
+        self.assertEqual("degraded", health["overallStatus"])
+
+    def test_app_admin_worker_uplift_health_redacts_partial_telemetry_errors(self) -> None:
+        store = PartialWorkerUpliftHealthStore()
+
+        result = worker_db_api.handle_app_operation(
+            "load-admin-worker-uplift-health",
+            {"providerMode": "backend_postgres_primary"},
+            store,
+        )
+
+        health = result["rows"][0]["workerUpliftHealth"]
+        self.assertEqual("partial", health["overallStatus"])
+        self.assertEqual(
+            [
+                {
+                    "source": "worker_uplift_final.stage_health_projections",
+                    "errorClass": "RuntimeError",
+                    "redacted": True,
+                }
+            ],
+            health["partialErrors"],
+        )
+        self.assertNotIn("do-not-leak", str(health))
+        self.assertNotIn("amqps://secret", str(health))
+
+    def test_app_admin_worker_uplift_health_handles_rollback_state(self) -> None:
+        store = WorkerUpliftHealthStore(stage_rows=[])
+        store.worker_uplift_cutover_state = "rollback-active"
+
+        result = worker_db_api.handle_app_operation(
+            "load-admin-worker-uplift-health",
+            {"providerMode": "backend_postgres_primary"},
+            store,
+        )
+
+        health = result["rows"][0]["workerUpliftHealth"]
+        self.assertEqual("rollback", health["activeIngestionOwner"])
+        self.assertEqual("rollback", health["overallStatus"])
+        self.assertTrue(all(row["stageStatus"] == "rollback" for row in health["stageRows"]))
 
     def test_app_admin_rss_feed_health_returns_dashboard_snapshot(self) -> None:
         store = RssFeedHealthStore()

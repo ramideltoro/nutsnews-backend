@@ -50,7 +50,7 @@ STAGE_SPECIFIC_TABLES = {
     "worker_uplift_translation": ["translation_records"],
     "worker_uplift_persistence": ["write_requests"],
     "worker_uplift_publication": ["publication_readiness", "publication_decisions"],
-    FINAL_SCHEMA: ["article_shadow_aggregates", "api_command_receipts"],
+    FINAL_SCHEMA: ["article_shadow_aggregates", "api_command_receipts", "stage_health_projections"],
 }
 
 
@@ -102,6 +102,8 @@ def check_static_files() -> list[dict]:
         "REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA public",
         "GRANT SELECT, INSERT, UPDATE ON TABLE %I.article_shadow_aggregates",
         "api_command_receipts",
+        "stage_health_projections",
+        "stage_health_projection",
         "UNIQUE (idempotency_key)",
     ):
         if token not in template:
@@ -244,7 +246,7 @@ def check_live_catalog(db_url: str, stages: list[tuple[str, str, str]]) -> list[
         f"{schema}.{table}"
         for _stage, _role, schema in stages
         for table in COMMON_TABLES + STAGE_SPECIFIC_TABLES[schema]
-    } | {f"{FINAL_SCHEMA}.article_shadow_aggregates"}
+    } | {f"{FINAL_SCHEMA}.{table}" for table in STAGE_SPECIFIC_TABLES[FINAL_SCHEMA]}
     expected_redaction_tables = expected_tables - {
         f"{schema}.transition_ledger" for _stage, _role, schema in stages
     }

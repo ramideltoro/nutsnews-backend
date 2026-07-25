@@ -70,6 +70,77 @@ def valid_manifest() -> dict:
     }
 
 
+def ai_manifest() -> dict:
+    manifest = valid_manifest()
+    approval_digest = "sha256:" + ("b" * 64)
+    translation_digest = "sha256:" + ("c" * 64)
+    manifest["allowed_image_repositories"] = [
+        "ghcr.io/ramideltoro/nutsnews-worker-article-approval",
+        "ghcr.io/ramideltoro/nutsnews-worker-article-translation",
+    ]
+    manifest["allowed_source_repositories"] = [
+        "ramideltoro/nutsnews-worker-article-approval",
+        "ramideltoro/nutsnews-worker-article-translation",
+    ]
+    manifest["allowed_stages"] = ["approval", "translation"]
+    manifest["services"] = [
+        {
+            "name": "approval",
+            "stage": "approval",
+            "image": f"ghcr.io/ramideltoro/nutsnews-worker-article-approval@{approval_digest}",
+            "runtime_mode": "shadow",
+            "network_mode": "host",
+            "replicas": 1,
+            "resources": {"memory": "512m", "cpus": "0.75"},
+            "healthcheck": {"test": ["CMD", "node", "-e", "fetch('http://127.0.0.1:18085/ready')"]},
+            "provenance": {
+                "required": True,
+                "signed": True,
+                "subject_digest": approval_digest,
+                "source_repository": "ramideltoro/nutsnews-worker-article-approval",
+            },
+            "env": {
+                "NUTSNEWS_APPROVAL_DEPENDENCY_MODE": "production",
+                "NUTSNEWS_APPROVAL_SHADOW_MODE": "true",
+                "NUTSNEWS_APPROVAL_OPENAI_FALLBACK_ENABLED": "false",
+            },
+            "secret_env": [
+                {"name": "approval-database-url", "env_key": "NUTSNEWS_APPROVAL_DATABASE_URL"},
+                {"name": "approval-rabbitmq-url", "env_key": "NUTSNEWS_APPROVAL_RABBITMQ_URL"},
+            ],
+            "queues": {"main": "nutsnews.worker.approval.v1", "retry": [], "dlq": "nutsnews.worker.approval.v1.dlq"},
+            "postgres": {"production_write_path": False},
+        },
+        {
+            "name": "translation",
+            "stage": "translation",
+            "image": f"ghcr.io/ramideltoro/nutsnews-worker-article-translation@{translation_digest}",
+            "runtime_mode": "shadow",
+            "network_mode": "host",
+            "replicas": 1,
+            "resources": {"memory": "768m", "cpus": "0.75"},
+            "healthcheck": {"test": ["CMD", "node", "-e", "fetch('http://127.0.0.1:18086/ready')"]},
+            "provenance": {
+                "required": True,
+                "signed": True,
+                "subject_digest": translation_digest,
+                "source_repository": "ramideltoro/nutsnews-worker-article-translation",
+            },
+            "env": {
+                "NUTSNEWS_TRANSLATION_DEPENDENCY_MODE": "production",
+                "NUTSNEWS_TRANSLATION_SHADOW_MODE": "true",
+            },
+            "secret_env": [
+                {"name": "translation-database-url", "env_key": "NUTSNEWS_TRANSLATION_DATABASE_URL"},
+                {"name": "translation-rabbitmq-url", "env_key": "NUTSNEWS_TRANSLATION_RABBITMQ_URL"},
+            ],
+            "queues": {"main": "nutsnews.worker.translation.v1", "retry": [], "dlq": "nutsnews.worker.translation.v1.dlq"},
+            "postgres": {"production_write_path": False},
+        },
+    ]
+    return manifest
+
+
 class WorkerRuntimeManagerTests(unittest.TestCase):
     def test_valid_manifest_passes(self):
         manager = load_manager()
@@ -166,6 +237,30 @@ class WorkerRuntimeManagerTests(unittest.TestCase):
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["queues"][0]["queue"], "nutsnews.worker.fetch.v1")
         self.assertEqual(report["queues"][0]["status"], "not_configured")
+
+    def test_ai_smoke_dry_run_has_fixed_fixture_contract(self):
+        manager = load_manager()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / "services.json"
+            manifest_path.write_text(json.dumps(ai_manifest()), encoding="utf-8")
+            args = manager.parse_args(
+                [
+                    "smoke",
+                    "--manifest",
+                    str(manifest_path),
+                    "--compose",
+                    str(Path(tmpdir) / "compose.yml"),
+                    "--service-name",
+                    "approval",
+                    "--dry-run",
+                    "--confirm-action",
+                ]
+            )
+            report = manager.build_report(args, manager.load_json(manifest_path))
+        self.assertEqual(report["status"], "dry_run")
+        self.assertEqual(report["smoke"]["service"], "approval")
+        self.assertIn("approval accepted/rejected", report["smoke"]["fixtures"])
+        self.assertEqual(report["smoke"]["expected_target_languages"], ["fr", "ja", "de-CH", "de", "el"])
 
 
 if __name__ == "__main__":

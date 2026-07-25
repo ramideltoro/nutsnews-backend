@@ -108,6 +108,7 @@ def manifest_for_manager() -> dict:
 def validate() -> list[str]:
     errors: list[str] = []
     defaults = read(DEFAULTS)
+    manager = read(MANAGER_PATH)
     protected = read(PROTECTED_APPLY)
     checks = read(CHECKS_WORKFLOW)
     runbook = read(RUNBOOK)
@@ -128,6 +129,19 @@ def validate() -> list[str]:
     )
     if "python3 scripts/validate_worker_uplift_ai_shadow_deployment.py" not in checks:
         errors.append("Backend Checks must run worker uplift AI shadow deployment validator")
+    require(
+        "worker runtime manager",
+        manager,
+        (
+            "run_approval_smoke",
+            "run_translation_smoke",
+            "approval accepted/rejected",
+            "translation per-language task",
+            "accepted_translation_outbox",
+            "accepted_language_records",
+        ),
+        errors,
+    )
     require(
         "runbook",
         runbook,

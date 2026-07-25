@@ -31,6 +31,13 @@ The dedicated identity is `nutsnews-standby-probe`.
 - `sshd_config` also uses a `Match User nutsnews-standby-probe` boundary as
   defense in depth.
 
+OpenSSH does not allow `PermitUserEnvironment` inside a `Match` block on the
+backend host. The repository-managed sshd drop-in therefore sets
+`PermitUserEnvironment no` globally before the `Match User` block, keeps the
+probe home and `.ssh` directory root-owned, disables user rc execution for the
+probe user, and the fixed probe program ignores caller-controlled environment
+except to reject a non-empty `SSH_ORIGINAL_COMMAND`.
+
 The forced command must reject any non-empty `SSH_ORIGINAL_COMMAND`.
 
 ## Fixed Probe Contract

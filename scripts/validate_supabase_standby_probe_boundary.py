@@ -13,8 +13,16 @@ ROOT = Path(__file__).resolve().parents[1]
 BOUNDARY = ROOT / "docs" / "supabase-standby-probe-boundary.json"
 RUNBOOK = ROOT / "runbooks" / "SUPABASE_STANDBY_PROBE_BOUNDARY.md"
 README = ROOT / "README.md"
-SUPERSEDED_RUNBOOK = ROOT / "runbooks" / "SUPABASE_STANDBY_IPV6_RUNNER.md"
 BACKEND_CHECKS = ROOT / ".github" / "workflows" / "backend-checks.yml"
+RETIRED_RUNNER_ARTIFACTS = [
+    ROOT / ".github" / "workflows" / "supabase-standby-ipv6-runner.yml",
+    ROOT / "ansible" / "inventories" / "supabase_standby_ipv6_runner",
+    ROOT / "ansible" / "playbooks" / "supabase_standby_ipv6_runner.yml",
+    ROOT / "ansible" / "roles" / "supabase_standby_ipv6_runner",
+    ROOT / "docs" / "supabase-standby-ipv6-runner-boundary.json",
+    ROOT / "runbooks" / "SUPABASE_STANDBY_IPV6_RUNNER.md",
+    ROOT / "scripts" / "validate_supabase_standby_ipv6_runner.py",
+]
 
 
 def read(path: Path) -> str:
@@ -36,7 +44,6 @@ def main() -> int:
     boundary_text = json.dumps(boundary, sort_keys=True)
     runbook = read(RUNBOOK)
     readme = read(README)
-    superseded_runbook = read(SUPERSEDED_RUNBOOK)
     backend_checks = read(BACKEND_CHECKS)
 
     require("forced-command SSH probe" in boundary.get("decision", ""), "Boundary must approve the forced-command SSH probe.", errors)
@@ -162,7 +169,18 @@ def main() -> int:
 
     require("Supabase Standby Forced-Command Probe" in readme, "README must point to the new forced-command probe runbook.", errors)
     require("supersedes the disposable IPv6 runner design" in readme, "README must mark the disposable runner design as superseded.", errors)
-    require("SUPERSEDED" in superseded_runbook and "SUPABASE_STANDBY_PROBE_BOUNDARY.md" in superseded_runbook, "Old runner runbook must have a superseded banner.", errors)
+    for retired_path in RETIRED_RUNNER_ARTIFACTS:
+        require(not retired_path.exists(), f"Retired runner artifact must not exist: {retired_path.relative_to(ROOT)}", errors)
+    require(
+        "validate_supabase_standby_ipv6_runner.py" not in backend_checks,
+        "Backend checks must not run the retired standby IPv6 runner validator.",
+        errors,
+    )
+    require(
+        "supabase_standby_ipv6_runner.yml" not in backend_checks,
+        "Backend checks must not syntax-check the retired standby IPv6 runner playbook.",
+        errors,
+    )
     require(
         "python3 scripts/validate_supabase_standby_probe_boundary.py" in backend_checks,
         "Backend checks must run the forced-command probe boundary validator.",

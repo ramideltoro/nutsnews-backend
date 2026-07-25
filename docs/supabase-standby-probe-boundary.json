@@ -1,0 +1,181 @@
+{
+  "decision": "Use the existing backend host only as a restricted forced-command SSH probe for the protected Supabase standby readiness workflow. Keep all GitHub Actions jobs on GitHub-hosted ubuntu-latest and do not install a self-hosted GitHub runner.",
+  "status": "approved-boundary-source-controlled",
+  "date": "2026-07-25",
+  "cost_policy": {
+    "additional_recurring_cost": "zero",
+    "forbidden_paid_paths": [
+      "dedicated cloud VM for a GitHub runner",
+      "Supabase IPv4 add-on",
+      "additional paid network/proxy service"
+    ]
+  },
+  "issues": {
+    "replacement_backend_series": [333, 334, 335, 336, 337, 338, 339, 340],
+    "superseded_backend_series": [323, 324, 325, 326, 327, 328, 329, 330, 331],
+    "app_readiness": ["ramideltoro/nutsnews#496"]
+  },
+  "supersedes_design": {
+    "digitalocean_disposable_runner": true,
+    "github_self_hosted_runner": true,
+    "runner_admin_pat": true,
+    "supabase_pooler": true,
+    "new_supabase_project": true
+  },
+  "runtime_model": {
+    "github_jobs": {
+      "preflight_runs_on": "ubuntu-latest",
+      "readiness_runs_on": "ubuntu-latest",
+      "workflow_trigger": "workflow_dispatch only",
+      "branch_ref": "refs/heads/main only",
+      "environment": "supabase-standby",
+      "default_permissions": "contents: read"
+    },
+    "backend_probe_host": {
+      "address": "65.75.201.18",
+      "role": "dedicated forced-command SSH probe only",
+      "not_authorized_for": [
+        "GitHub runner registration",
+        "arbitrary workflow code execution",
+        "interactive operator shell",
+        "production backend administration"
+      ]
+    },
+    "probe_identity": {
+      "username": "nutsnews-standby-probe",
+      "password": "locked",
+      "groups": "no sudo, admin, docker, or production runtime groups",
+      "authorized_keys": "command=/usr/local/libexec/nutsnews-standby-supabase-probe plus restrict",
+      "sshd_match_user": "defense in depth for no PTY, no forwarding, no user environment, and no interactive shell"
+    }
+  },
+  "probe_program_contract": {
+    "path": "/usr/local/libexec/nutsnews-standby-supabase-probe",
+    "owner": "root",
+    "mode": "0755",
+    "writable_by_probe_user": false,
+    "input": {
+      "source": "stdin only",
+      "shape": "exactly one bounded PostgreSQL URL",
+      "rejects": [
+        "empty input",
+        "multiline input",
+        "oversized input",
+        "non-PostgreSQL protocol",
+        "unexpected Supabase project ref",
+        "unexpected host",
+        "unexpected port",
+        "unexpected database",
+        "missing credentials",
+        "missing sslmode=require",
+        "non-empty SSH_ORIGINAL_COMMAND"
+      ]
+    },
+    "validated_target": {
+      "protocols": ["postgres", "postgresql"],
+      "host_pattern": "db.<expected-project-ref>.supabase.co",
+      "port": 5432,
+      "database": "postgres",
+      "tls": "sslmode=require",
+      "expected_project_source": "protected backend environment input"
+    },
+    "execution": {
+      "sql": "one fixed read-only query owned by the backend program",
+      "caller_supplied_sql": false,
+      "caller_supplied_executable": false,
+      "caller_supplied_arguments": false,
+      "psql_uri_in_argv": false,
+      "connection_timeout": true,
+      "statement_timeout": true,
+      "hard_timeout": true,
+      "flock_serialization": true,
+      "raw_stdout_stderr_discarded": true
+    },
+    "output": {
+      "success": "READY",
+      "failure": "generic failure only",
+      "forbidden": [
+        "credentials",
+        "database URL",
+        "database user",
+        "database password",
+        "Supabase project ref",
+        "Supabase hostname",
+        "PostgreSQL error text",
+        "row data"
+      ]
+    },
+    "persistence": {
+      "database_url_on_backend": false,
+      "probe_logs_sensitive_values": false
+    }
+  },
+  "secret_and_variable_contract": {
+    "backend_production_environment_inputs": [
+      "NUTSNEWS_STANDBY_PROBE_SSH_PUBLIC_KEY",
+      "NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_PROJECT_REF",
+      "NUTSNEWS_STANDBY_PROBE_EXPECTED_SUPABASE_HOST"
+    ],
+    "app_supabase_standby_environment_secrets": [
+      "NUTSNEWS_STANDBY_SUPABASE_PROJECT_REF",
+      "NUTSNEWS_STANDBY_SUPABASE_URL",
+      "NUTSNEWS_STANDBY_SUPABASE_DB_URL",
+      "NUTSNEWS_STANDBY_SUPABASE_SERVICE_ROLE_KEY",
+      "NUTSNEWS_STANDBY_SUPABASE_ANON_KEY",
+      "NUTSNEWS_STANDBY_PROBE_SSH_PRIVATE_KEY",
+      "NUTSNEWS_STANDBY_PROBE_KNOWN_HOSTS"
+    ],
+    "app_fixed_variables": [
+      "NUTSNEWS_STANDBY_PROBE_HOST",
+      "NUTSNEWS_STANDBY_PROBE_USER"
+    ],
+    "key_handling": {
+      "dedicated_keypair": true,
+      "private_key_printed": false,
+      "public_key_backend_secret_only": true,
+      "private_key_app_secret_only": true,
+      "known_hosts_independently_verified": true,
+      "delete_transient_local_key_files_after_secret_confirmation": true
+    }
+  },
+  "live_prerequisites_reported_by_owner": {
+    "backend_host": "65.75.201.18",
+    "outbound_ipv6_verified": true,
+    "direct_supabase_postgresql_tcp_5432_verified": true,
+    "github_self_hosted_runners": 0,
+    "backend_supabase_standby_runner_environment_secrets": 0
+  },
+  "preserved_github_controls": {
+    "default_workflow_permissions": "read",
+    "fork_pr_contributor_approval": "all_external_contributors",
+    "selected_actions": "enabled",
+    "sha_pinning_required": true,
+    "protected_supabase_standby_environment": true
+  },
+  "rollback": [
+    "Remove the app probe SSH private key and known-hosts secrets.",
+    "Disable the app readiness workflow probe step or revert it to the last GitHub-hosted safe implementation.",
+    "Run the backend protected Ansible workflow in rollback/remove mode once implemented.",
+    "Remove the probe user, authorized key, sshd Match User drop-in, and probe program through repository-managed Ansible.",
+    "Confirm there are still zero self-hosted GitHub runners."
+  ],
+  "safe_evidence": [
+    "workflow run URL",
+    "GitHub-hosted runner labels",
+    "READY token",
+    "boolean statement that protected direct connectivity succeeded",
+    "boolean negative SSH boundary results",
+    "no self-hosted runner count"
+  ],
+  "forbidden_evidence": [
+    "database URLs",
+    "Supabase project refs",
+    "Supabase hostnames",
+    "database users",
+    "database passwords",
+    "Supabase API keys",
+    "SSH private keys",
+    "PostgreSQL errors",
+    "row data"
+  ]
+}

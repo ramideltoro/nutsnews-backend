@@ -132,6 +132,8 @@
     "apply_confirmation": "backend.nutsnews.com",
     "ansible_check_mode_before_apply": true,
     "strict_backend_ssh_host_checking": true,
+    "backend_direct_tcp_5432_check": true,
+    "backend_direct_tcp_5432_output": "backend_direct_tcp_5432=pass or generic failure only",
     "prints_sensitive_values": false
   },
   "secret_and_variable_contract": {

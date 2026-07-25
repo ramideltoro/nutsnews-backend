@@ -80,6 +80,11 @@ def main() -> int:
         "--extra-vars \"@$RUNNER_TEMP/supabase-standby-probe-extra-vars.json\"",
         "args+=(--check)",
         "ansible-playbook \"${args[@]}\"",
+        "Verify backend direct Supabase TCP path",
+        "backend_direct_tcp_5432=pass",
+        "backend_direct_tcp_5432=fail",
+        "socket.create_connection((host, 5432), timeout=8)",
+        "printf '%s\\n' \"$probe_host\" | ssh -i \"$RUNNER_TEMP/backend-ssh/nutsnews_backend\"",
         "no credentials, database URLs, Supabase host/project metadata, PostgreSQL errors, or row data",
     ]:
         require(required in workflow, f"Workflow missing required guardrail: {required}", errors)

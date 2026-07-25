@@ -83,6 +83,7 @@ def main() -> int:
         'dest: "{{ supabase_standby_probe_command_path }}"',
         "src: probe.conf.j2",
         "src: standby-probe-sshd.conf.j2",
+        "validate: /usr/sbin/sshd -t -f %s",
         "/usr/sbin/sshd -t -f /etc/ssh/sshd_config",
         "not ansible_check_mode",
         "state: absent",
@@ -102,7 +103,9 @@ def main() -> int:
         require(forbidden not in tasks, f"Tasks must not contain {forbidden}.", errors)
 
     for required in [
+        "PermitUserEnvironment no\n\nMatch User {{ supabase_standby_probe_user }}",
         "ForceCommand {{ supabase_standby_probe_command_path }}",
+        "DisableForwarding yes",
         "PermitTTY no",
         "AllowAgentForwarding no",
         "AllowTcpForwarding no",
@@ -110,11 +113,17 @@ def main() -> int:
         "X11Forwarding no",
         "PermitTunnel no",
         "PermitUserEnvironment no",
+        "PermitUserRC no",
         "GatewayPorts no",
         "PasswordAuthentication no",
         "KbdInteractiveAuthentication no",
     ]:
         require(required in sshd_template, f"sshd Match User template missing {required}.", errors)
+    require(
+        "    PermitUserEnvironment no" not in sshd_template,
+        "PermitUserEnvironment is not allowed inside an sshd Match block.",
+        errors,
+    )
 
     require(
         "expected_project_ref={{ supabase_standby_probe_expected_project_ref }}" in config_template,

@@ -188,6 +188,8 @@ jobs:
           NUTSNEWS_BACKEND_WORKER_API_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_API_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_API_TOKEN }}
+          LOCAL_AI_URL: ${{ vars.LOCAL_AI_URL || 'https://ai.nutsnews.com' }}
+          LOCAL_AI_API_KEY: ${{ secrets.LOCAL_AI_API_KEY }}
           NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN }}
           NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN }}
           NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED || 'false' }}
@@ -345,6 +347,8 @@ jobs:
           NUTSNEWS_BACKEND_WORKER_API_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_API_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_API_TOKEN }}
+          LOCAL_AI_URL: ${{ vars.LOCAL_AI_URL || 'https://ai.nutsnews.com' }}
+          LOCAL_AI_API_KEY: ${{ secrets.LOCAL_AI_API_KEY }}
           NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN }}
           NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN }}
           NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED || 'false' }}
@@ -676,7 +680,11 @@ jobs:
               backend_api_token = os.environ.get("NUTSNEWS_BACKEND_API_TOKEN", "")
               if not backend_api_token:
                   raise SystemExit("Worker runtime scheduler requires NUTSNEWS_BACKEND_API_TOKEN for shadow feed-source reads.")
-              if any("\n" in value or "\r" in value for value in (backend_api_token,)):
+              local_ai_base_url = os.environ.get("LOCAL_AI_URL", "https://ai.nutsnews.com").strip() or "https://ai.nutsnews.com"
+              local_ai_api_key = os.environ.get("LOCAL_AI_API_KEY", "")
+              if not local_ai_api_key:
+                  raise SystemExit("Worker runtime AI shadow services require LOCAL_AI_API_KEY before approval/translation deployment.")
+              if any("\n" in value or "\r" in value for value in (backend_api_token, local_ai_base_url, local_ai_api_key)):
                   raise SystemExit("Worker runtime secret values must be single-line values")
 
               def url_quote(value):
@@ -715,6 +723,14 @@ jobs:
                   "canonicalizer-rabbitmq-url": rabbitmq_url("RABBITMQ_CANONICALIZER_CONSUMER_USERNAME", "RABBITMQ_CANONICALIZER_CONSUMER_PASSWORD"),
                   "enrichment-database-url": postgres_url("enrichment"),
                   "enrichment-rabbitmq-url": rabbitmq_url("RABBITMQ_ENRICHMENT_CONSUMER_USERNAME", "RABBITMQ_ENRICHMENT_CONSUMER_PASSWORD"),
+                  "approval-database-url": postgres_url("approval"),
+                  "approval-rabbitmq-url": rabbitmq_url("RABBITMQ_APPROVAL_CONSUMER_USERNAME", "RABBITMQ_APPROVAL_CONSUMER_PASSWORD"),
+                  "approval-qwen-base-url": local_ai_base_url,
+                  "approval-qwen-api-key": local_ai_api_key,
+                  "translation-database-url": postgres_url("translation"),
+                  "translation-rabbitmq-url": rabbitmq_url("RABBITMQ_TRANSLATION_CONSUMER_USERNAME", "RABBITMQ_TRANSLATION_CONSUMER_PASSWORD"),
+                  "translation-qwen-base-url": local_ai_base_url,
+                  "translation-qwen-api-key": local_ai_api_key,
               }
 
           path = Path(os.environ["RUNNER_TEMP"]) / "backend-extra-vars.json"

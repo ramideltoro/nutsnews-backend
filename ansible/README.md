@@ -32,10 +32,9 @@ an sshd `Match User` boundary. It must run through the protected
 `production-backend` workflow path, with check mode reviewed before apply. The
 dedicated workflow is `.github/workflows/supabase-standby-probe.yml`.
 
-Disposable Supabase standby IPv6 runner inventory must stay separate from the
-production backend group. Use
-`inventories/supabase_standby_ipv6_runner/hosts.example.yml` as the template for
-the protected runtime inventory stored in GitHub Environment secrets.
+The retired disposable Supabase standby IPv6 runner design must not be
+reintroduced. This repository no longer maintains a runner inventory, runner
+playbook, runner role, or runner lifecycle workflow for that path.
 
 ## Validation
 
@@ -44,7 +43,6 @@ Syntax check:
 ```bash
 ansible-playbook playbooks/bootstrap.yml --syntax-check
 ansible-playbook playbooks/supabase_standby_probe.yml --syntax-check
-ansible-playbook playbooks/supabase_standby_ipv6_runner.yml --syntax-check -i inventories/supabase_standby_ipv6_runner/hosts.example.yml
 ```
 
 `ansible.cfg` sets `roles_path = roles` so `playbooks/bootstrap.yml` resolves repository-owned roles from `ansible/roles` in both local checks and the protected GitHub Actions workflow.
@@ -52,10 +50,6 @@ ansible-playbook playbooks/supabase_standby_ipv6_runner.yml --syntax-check -i in
 Dry-run against the backend server must happen only through the protected workflow once issue #10 adds it.
 
 Do not run mutating playbooks directly from an operator laptop as the normal path.
-
-The disposable Supabase standby runner playbook is also protected-workflow
-owned. It must be run only through `.github/workflows/supabase-standby-ipv6-runner.yml`
-for check, apply, one-job registration, or stale-runner removal.
 
 ## Protected Workflow
 

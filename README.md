@@ -6,8 +6,8 @@ forced-command probe boundary for the protected app readiness workflow:
 - [Supabase Standby Forced-Command Probe](runbooks/SUPABASE_STANDBY_PROBE_BOUNDARY.md)
 
 This supersedes the disposable IPv6 runner design. The old runner runbook is
-kept only as historical context until the replacement path is proven and the
-obsolete files are retired.
+retired along with the obsolete runner workflow, Ansible role, playbook,
+inventory, and boundary record.
 
 This repository owns the repeatable backend server setup for `backend.nutsnews.com` at `65.75.201.18`.
 

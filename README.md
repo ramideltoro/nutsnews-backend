@@ -1,9 +1,13 @@
 # NutsNews Backend
 
-Backend-owned operational runbooks include the disposable Supabase standby IPv6
-one-job runner boundary for the protected app readiness workflow:
+Backend-owned operational runbooks include the zero-cost Supabase standby
+forced-command probe boundary for the protected app readiness workflow:
 
-- [Supabase Standby IPv6 One-Job Runner](runbooks/SUPABASE_STANDBY_IPV6_RUNNER.md)
+- [Supabase Standby Forced-Command Probe](runbooks/SUPABASE_STANDBY_PROBE_BOUNDARY.md)
+
+This supersedes the disposable IPv6 runner design. The old runner runbook is
+kept only as historical context until the replacement path is proven and the
+obsolete files are retired.
 
 This repository owns the repeatable backend server setup for `backend.nutsnews.com` at `65.75.201.18`.
 
@@ -90,6 +94,7 @@ Use [runbooks/DB_MIGRATION_ROLLBACK_FAILBACK.md](runbooks/DB_MIGRATION_ROLLBACK_
 Use [runbooks/DB_MIGRATION_PRODUCTION_CUTOVER.md](runbooks/DB_MIGRATION_PRODUCTION_CUTOVER.md) before running production cutover planning or protected cutover workflows.
 Use [runbooks/DB_MIGRATION_BENCHMARK_TUNING.md](runbooks/DB_MIGRATION_BENCHMARK_TUNING.md) before benchmarking or tuning backend PostgreSQL for primary workload.
 Use [runbooks/SUPABASE_PLATFORM_PARITY.md](runbooks/SUPABASE_PLATFORM_PARITY.md) before changing Supabase Auth, Storage, Realtime, Edge Function, Data API, or API key cutover decisions.
+Use [runbooks/SUPABASE_STANDBY_PROBE_BOUNDARY.md](runbooks/SUPABASE_STANDBY_PROBE_BOUNDARY.md) before changing the protected Supabase standby readiness probe.
 
 The current Ansible scaffold is intentionally narrow. It defines the host contract, runtime choice, validation commands, required secret boundaries, and rollback expectations that later issues will fill in through Ansible roles and protected workflows.
 

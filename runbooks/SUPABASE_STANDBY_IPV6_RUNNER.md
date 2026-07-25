@@ -1,5 +1,9 @@
 # Supabase Standby IPv6 One-Job Runner Runbook
 
+> SUPERSEDED: Do not use this paid self-hosted-runner design for new work. The
+> approved zero-recurring-cost replacement is the forced-command backend probe
+> documented in [SUPABASE_STANDBY_PROBE_BOUNDARY.md](SUPABASE_STANDBY_PROBE_BOUNDARY.md).
+
 This runbook covers backend issues #323-#331 for the isolated public-repository runner used by `ramideltoro/nutsnews` issue #496.
 
 The runner exists for one purpose: run the protected `Supabase Standby Credential Readiness` job against the direct Supabase Postgres endpoint from a VM with real outbound IPv6. It is not a general CI runner.

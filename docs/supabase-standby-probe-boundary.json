@@ -111,6 +111,14 @@
       "probe_logs_sensitive_values": false
     }
   },
+  "source_control_assets": {
+    "backend_playbook": "ansible/playbooks/supabase_standby_probe.yml",
+    "backend_role": "ansible/roles/supabase_standby_probe",
+    "backend_role_tasks": "ansible/roles/supabase_standby_probe/tasks/main.yml",
+    "backend_sshd_match_user_template": "ansible/roles/supabase_standby_probe/templates/standby-probe-sshd.conf.j2",
+    "backend_expected_target_template": "ansible/roles/supabase_standby_probe/templates/probe.conf.j2",
+    "backend_rollback_state": "supabase_standby_probe_state=absent"
+  },
   "secret_and_variable_contract": {
     "backend_production_environment_inputs": [
       "NUTSNEWS_STANDBY_PROBE_SSH_PUBLIC_KEY",

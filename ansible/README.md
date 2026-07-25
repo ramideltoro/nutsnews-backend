@@ -16,12 +16,20 @@ This tree will own backend host configuration that must be repeatable:
 - read-only ops dashboard collector
 - PostgreSQL failover target and protected management dashboard
 - backup, restore, monitoring, and verification tasks
+- restricted Supabase standby forced-command probe
 
 ## Inventory
 
 Production inventory lives in `inventories/production/hosts.yml`.
 
 The production host is intentionally addressed by IP until `backend.nutsnews.com` routing is implemented and verified through the Cloudflare issue.
+
+The Supabase standby forced-command probe targets only the existing production
+backend host through `playbooks/supabase_standby_probe.yml`. It provisions the
+locked `nutsnews-standby-probe` identity, root-owned fixed probe program,
+protected expected Supabase target config, forced `authorized_keys` entry, and
+an sshd `Match User` boundary. It must run through the protected
+`production-backend` workflow path, with check mode reviewed before apply.
 
 Disposable Supabase standby IPv6 runner inventory must stay separate from the
 production backend group. Use
@@ -34,6 +42,7 @@ Syntax check:
 
 ```bash
 ansible-playbook playbooks/bootstrap.yml --syntax-check
+ansible-playbook playbooks/supabase_standby_probe.yml --syntax-check
 ansible-playbook playbooks/supabase_standby_ipv6_runner.yml --syntax-check -i inventories/supabase_standby_ipv6_runner/hosts.example.yml
 ```
 

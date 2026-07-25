@@ -68,6 +68,28 @@ Failures return only a generic failure. The probe must never log credentials,
 the URL, Supabase host/project metadata, PostgreSQL errors, or row data. It
 must not persist the database URL on the backend.
 
+## Repository-Managed Provisioning
+
+All backend host mutations for this boundary are owned by Ansible and must run
+through the protected `production-backend` environment. Do not configure the
+probe account manually over SSH.
+
+Source-controlled assets:
+
+- playbook: `ansible/playbooks/supabase_standby_probe.yml`
+- role: `ansible/roles/supabase_standby_probe`
+- probe source copied by Ansible:
+  `scripts/nutsnews_standby_supabase_probe.py`
+- sshd defense-in-depth template:
+  `ansible/roles/supabase_standby_probe/templates/standby-probe-sshd.conf.j2`
+- expected Supabase target template:
+  `ansible/roles/supabase_standby_probe/templates/probe.conf.j2`
+
+Run check mode first and review the output before any apply. Rollback uses the
+same role with `supabase_standby_probe_state=absent`; it removes the forced key,
+fixed probe program, protected target config, sshd drop-in, dedicated user, and
+dedicated group through Ansible.
+
 ## Secret and Variable Contract
 
 Backend `production-backend` protected inputs:

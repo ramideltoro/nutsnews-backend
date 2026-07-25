@@ -1,0 +1,20 @@
+---
+supabase_standby_probe_state: present
+supabase_standby_probe_user: nutsnews-standby-probe
+supabase_standby_probe_group: nutsnews-standby-probe
+supabase_standby_probe_home: /var/lib/nutsnews-standby-probe
+supabase_standby_probe_command_path: /usr/local/libexec/nutsnews-standby-supabase-probe
+supabase_standby_probe_source_path: "{{ playbook_dir }}/../../scripts/nutsnews_standby_supabase_probe.py"
+supabase_standby_probe_config_dir: /etc/nutsnews-standby-probe
+supabase_standby_probe_config_path: /etc/nutsnews-standby-probe/probe.conf
+supabase_standby_probe_sshd_dropin: /etc/ssh/sshd_config.d/60-nutsnews-standby-probe.conf
+supabase_standby_probe_public_key: ""
+supabase_standby_probe_expected_project_ref: ""
+supabase_standby_probe_expected_host: ""
+supabase_standby_probe_packages:
+  - openssh-server
+  - postgresql-client
+supabase_standby_probe_required_absent_groups:
+  - sudo
+  - admin
+  - docker

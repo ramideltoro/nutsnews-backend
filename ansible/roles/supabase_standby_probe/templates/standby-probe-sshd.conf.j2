@@ -1,0 +1,15 @@
+# Managed by ramideltoro/nutsnews-backend.
+# Restricts the Supabase standby probe identity to one forced command.
+Match User {{ supabase_standby_probe_user }}
+    ForceCommand {{ supabase_standby_probe_command_path }}
+    PermitTTY no
+    AllowAgentForwarding no
+    AllowTcpForwarding no
+    AllowStreamLocalForwarding no
+    X11Forwarding no
+    PermitTunnel no
+    PermitUserEnvironment no
+    GatewayPorts no
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    PubkeyAuthentication yes

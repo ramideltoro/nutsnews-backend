@@ -22,6 +22,7 @@ from urllib import error, parse, request
 
 IMAGE_RE = re.compile(r"^(?P<repo>ghcr\.io/[a-z0-9_.-]+/[a-z0-9_.-]+(?:/[a-z0-9_.-]+)*)@sha256:(?P<digest>[0-9a-f]{64})$")
 SERVICE_RE = re.compile(r"^[a-z][a-z0-9-]{2,48}$")
+ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,127}$")
 SECRET_KEY_RE = re.compile(r"(PASSWORD|PASS|TOKEN|SECRET|PRIVATE|KEY|COOKIE)", re.IGNORECASE)
 TOKEN_RE = re.compile(r"(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+|[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})")
 URL_SECRET_RE = re.compile(r"([a-z][a-z0-9+.-]*://[^:/\s]+:)([^@\s]+)(@)", re.IGNORECASE)
@@ -130,6 +131,9 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
             errors.append(f"service {name} image must not include a mutable tag")
         if service.get("runtime_mode", "shadow") != "shadow":
             errors.append(f"service {name} runtime_mode must remain shadow")
+        network_mode = service.get("network_mode")
+        if network_mode not in {None, "bridge", "host"}:
+            errors.append(f"service {name} network_mode must be bridge or host")
         replicas = int(service.get("replicas", 0) or 0)
         if replicas < 0 or replicas > max_replicas:
             errors.append(f"service {name} replicas must be between 0 and {max_replicas}")
@@ -171,6 +175,19 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
                 errors.append(f"service {name} secret file {secret.get('name')} must mount under /run/secrets")
             if not str(secret.get("host_path") or "").startswith("/etc/nutsnews-worker-uplift/services/"):
                 errors.append(f"service {name} secret file {secret.get('name')} must use a root-owned service host_path")
+        for secret in service.get("secret_env", []):
+            if not isinstance(secret, dict):
+                errors.append(f"service {name} secret env entries must be objects")
+                continue
+            if not SERVICE_RE.match(str(secret.get("name") or "")):
+                errors.append(f"service {name} secret env name is invalid")
+            env_key = str(secret.get("env_key") or "")
+            if not ENV_KEY_RE.match(env_key):
+                errors.append(f"service {name} secret env {secret.get('name')} has invalid env_key")
+            if env_key.endswith("_FILE"):
+                errors.append(f"service {name} secret env {secret.get('name')} must expose the direct env key, not *_FILE")
+            if secret.get("value") not in {"", None}:
+                errors.append(f"service {name} secret env {secret.get('name')} must not store values in manifest")
     return errors
 
 

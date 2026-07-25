@@ -701,7 +701,7 @@ def permission_matrix(definition: dict[str, Any], users: list[dict[str, Any]]) -
     canary_exchange = exchange_by_id(definition, canary["exchange_id"])["name"] if canary else ""
     canary_queue = str((canary.get("queue") or {}).get("name") or "") if canary else ""
 
-    app_users = [user for user in users if user.get("kind") in {"producer", "consumer"}]
+    app_users = [user for user in users if user.get("kind") in {"producer", "consumer", "stage_runtime"}]
     if len({user["username"] for user in app_users}) != len(app_users):
         errors.append("app RabbitMQ users must have distinct username values")
 
@@ -712,7 +712,7 @@ def permission_matrix(definition: dict[str, Any], users: list[dict[str, Any]]) -
         configure = permissions.get("configure", "")
         write = permissions.get("write", "")
         read = permissions.get("read", "")
-        if kind in {"producer", "consumer", "monitoring_canary"} and any(regex_allows(configure, resource) for resource in exchange_names + all_queues):
+        if kind in {"producer", "consumer", "stage_runtime", "monitoring_canary"} and any(regex_allows(configure, resource) for resource in exchange_names + all_queues):
             errors.append(f"{user_id} unexpectedly has configure access")
         if kind == "producer":
             if not regex_allows(write, main_exchange):
@@ -735,6 +735,25 @@ def permission_matrix(definition: dict[str, Any], users: list[dict[str, Any]]) -
                     errors.append(f"{user_id} can read unrelated queue {queue_name}")
             if regex_allows(write, main_exchange):
                 errors.append(f"{user_id} can write the main exchange")
+            for exchange in retry_exchanges:
+                if not regex_allows(write, exchange):
+                    errors.append(f"{user_id} cannot write retry/DLQ exchange {exchange}")
+        elif kind == "stage_runtime":
+            stage = user["stage"]
+            route = next((candidate for candidate in definition["routes"] if candidate["consumer"] == stage), None)
+            output_route = next((candidate for candidate in definition["routes"] if candidate["producer"] == stage), None)
+            if route is None:
+                errors.append(f"{user_id} does not map to a route consumer")
+                continue
+            if output_route is None:
+                errors.append(f"{user_id} stage_runtime requires a declared outbound route")
+            if not regex_allows(read, route["main_queue"]):
+                errors.append(f"{user_id} cannot read its route queue")
+            for queue_name in main_queues:
+                if queue_name != route["main_queue"] and regex_allows(read, queue_name):
+                    errors.append(f"{user_id} can read unrelated queue {queue_name}")
+            if not regex_allows(write, main_exchange):
+                errors.append(f"{user_id} cannot write the main exchange for its outbound route")
             for exchange in retry_exchanges:
                 if not regex_allows(write, exchange):
                     errors.append(f"{user_id} cannot write retry/DLQ exchange {exchange}")

@@ -379,7 +379,7 @@
     },
     {
       "id": "fetcher_consumer",
-      "kind": "consumer",
+      "kind": "stage_runtime",
       "stage": "fetcher",
       "route_stage": "fetch",
       "username_variable": "RABBITMQ_FETCHER_CONSUMER_USERNAME",
@@ -387,7 +387,7 @@
       "tags": [],
       "permissions": {
         "configure": "^$",
-        "write": "^(nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$",
+        "write": "^(nutsnews\\.worker\\.v1|nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$",
         "read": "^nutsnews\\.worker\\.fetch\\.v1$"
       }
     },
@@ -407,7 +407,7 @@
     },
     {
       "id": "canonicalizer_consumer",
-      "kind": "consumer",
+      "kind": "stage_runtime",
       "stage": "canonicalizer",
       "route_stage": "canonicalization",
       "username_variable": "RABBITMQ_CANONICALIZER_CONSUMER_USERNAME",
@@ -415,7 +415,7 @@
       "tags": [],
       "permissions": {
         "configure": "^$",
-        "write": "^(nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$",
+        "write": "^(nutsnews\\.worker\\.v1|nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$",
         "read": "^nutsnews\\.worker\\.canonicalization\\.v1$"
       }
     },
@@ -435,7 +435,7 @@
     },
     {
       "id": "enrichment_consumer",
-      "kind": "consumer",
+      "kind": "stage_runtime",
       "stage": "enrichment",
       "route_stage": "enrichment",
       "username_variable": "RABBITMQ_ENRICHMENT_CONSUMER_USERNAME",
@@ -443,7 +443,7 @@
       "tags": [],
       "permissions": {
         "configure": "^$",
-        "write": "^(nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$",
+        "write": "^(nutsnews\\.worker\\.v1|nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$",
         "read": "^nutsnews\\.worker\\.enrichment\\.v1$"
       }
     },
@@ -463,7 +463,7 @@
     },
     {
       "id": "approval_consumer",
-      "kind": "consumer",
+      "kind": "stage_runtime",
       "stage": "approval",
       "route_stage": "approval",
       "username_variable": "RABBITMQ_APPROVAL_CONSUMER_USERNAME",
@@ -471,7 +471,7 @@
       "tags": [],
       "permissions": {
         "configure": "^$",
-        "write": "^(nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$",
+        "write": "^(nutsnews\\.worker\\.v1|nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$",
         "read": "^nutsnews\\.worker\\.approval\\.v1$"
       }
     },
@@ -491,7 +491,7 @@
     },
     {
       "id": "translation_consumer",
-      "kind": "consumer",
+      "kind": "stage_runtime",
       "stage": "translation",
       "route_stage": "translation",
       "username_variable": "RABBITMQ_TRANSLATION_CONSUMER_USERNAME",
@@ -499,7 +499,7 @@
       "tags": [],
       "permissions": {
         "configure": "^$",
-        "write": "^(nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$",
+        "write": "^(nutsnews\\.worker\\.v1|nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$",
         "read": "^nutsnews\\.worker\\.translation\\.v1$"
       }
     },
@@ -519,7 +519,7 @@
     },
     {
       "id": "persistence_consumer",
-      "kind": "consumer",
+      "kind": "stage_runtime",
       "stage": "persistence",
       "route_stage": "persistence",
       "username_variable": "RABBITMQ_PERSISTENCE_CONSUMER_USERNAME",
@@ -527,7 +527,7 @@
       "tags": [],
       "permissions": {
         "configure": "^$",
-        "write": "^(nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$",
+        "write": "^(nutsnews\\.worker\\.v1|nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$",
         "read": "^nutsnews\\.worker\\.persistence\\.v1$"
       }
     },

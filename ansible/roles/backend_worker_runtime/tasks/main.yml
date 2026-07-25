@@ -53,6 +53,16 @@
     mode: "0644"
   when: backend_worker_runtime_services | length > 0
 
+- name: Validate worker runtime direct secret environment values are present
+  ansible.builtin.assert:
+    that:
+      - item.1.name in backend_worker_runtime_secret_values
+      - backend_worker_runtime_secret_values[item.1.name] | length > 0
+    fail_msg: "Worker runtime service secret_env entries must be backed by protected runtime secret values."
+  no_log: true
+  loop: "{{ query('subelements', backend_worker_runtime_services, 'secret_env', {'skip_missing': True}) }}"
+  when: backend_worker_runtime_services | length > 0
+
 - name: Render worker runtime service environments
   ansible.builtin.copy:
     dest: "{{ backend_worker_runtime_config_dir }}/services/{{ item.name }}.env"
@@ -72,6 +82,9 @@
       {% endfor %}
       {% for secret in item.secret_files | default([]) %}
       {{ secret.env_key }}={{ secret.path }}
+      {% endfor %}
+      {% for secret in item.secret_env | default([]) %}
+      {{ secret.env_key }}={{ backend_worker_runtime_secret_values[secret.name] }}
       {% endfor %}
   no_log: true
   loop: "{{ backend_worker_runtime_services }}"

@@ -354,6 +354,7 @@
       "default_guest_user_policy": "delete or disable for the worker vhost during bootstrap",
       "identity_source": "docs/worker-uplift-runtime-identities.json",
       "service_identity_policy": "least-privilege route-scoped publisher and consumer users; no worker service receives break-glass admin credentials",
+      "stage_runtime_identity_policy": "Starting with #117, forwarding services that expose one RabbitMQ URL may use their route-scoped consumer secret as a stage_runtime identity that reads only its input queue and writes only the main/retry/DLQ exchanges needed for its declared outbound route.",
       "monitoring_identity_policy": "monitoring tag only, no configure/write/read permissions on queues"
     },
     "audit_logs": "Ship RabbitMQ auth, connection, channel, alarm, topology, and operator-action logs through backend Alloy with low-cardinality labels and no message payload logging."

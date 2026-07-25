@@ -96,7 +96,7 @@ class RabbitMQTopologyTests(unittest.TestCase):
         self.assertFalse(topology.regex_allows(fetcher_consumer["permissions"]["read"], "nutsnews.worker.translation.v1"))
         self.assertTrue(topology.regex_allows(fetcher_consumer["permissions"]["write"], "nutsnews.worker.retry.v1"))
         self.assertTrue(topology.regex_allows(fetcher_consumer["permissions"]["write"], "nutsnews.worker.dlq.v1"))
-        self.assertFalse(topology.regex_allows(fetcher_consumer["permissions"]["write"], "nutsnews.worker.v1"))
+        self.assertTrue(topology.regex_allows(fetcher_consumer["permissions"]["write"], "nutsnews.worker.v1"))
 
         scheduler = next(user for user in users if user["id"] == "scheduler_publisher")
         self.assertTrue(topology.regex_allows(scheduler["permissions"]["write"], "nutsnews.worker.v1"))

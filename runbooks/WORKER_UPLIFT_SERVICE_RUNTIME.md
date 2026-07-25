@@ -1,6 +1,8 @@
 # Worker-Uplift Service Runtime
 
 This runbook covers tracking issue `ramideltoro/nutsnews-worker#85`.
+It also records the non-AI shadow deployment from
+`ramideltoro/nutsnews-worker#117`.
 
 ## Scope
 
@@ -13,6 +15,19 @@ Business logic for scheduler, fetcher, canonicalizer, enrichment, approval,
 translation, persistence, and publication is added by later service issues.
 This issue establishes the protected deployment and operations surface those
 services must use.
+
+The #117 deployment registers only the non-AI services:
+
+| Service | Image source | Health endpoint | Shadow input/output |
+| --- | --- | --- | --- |
+| `scheduler` | `ramideltoro/nutsnews-worker-feed-scheduler` | `127.0.0.1:18081/ready` | publishes `nutsnews.worker.fetch.v1` |
+| `fetcher` | `ramideltoro/nutsnews-worker-feed-fetcher` | `127.0.0.1:18082/ready` | consumes fetch, publishes canonicalization |
+| `canonicalizer` | `ramideltoro/nutsnews-worker-article-canonicalizer` | `127.0.0.1:18083/ready` | consumes canonicalization, publishes enrichment |
+| `enrichment` | `ramideltoro/nutsnews-worker-article-enrichment` | `127.0.0.1:18084/ready` | consumes enrichment, publishes the approval queue |
+
+No approval, translation, persistence, or publication container is deployed by
+#117. A successful fixture may reach `nutsnews.worker.approval.v1`, where it
+must stop until the later AI approval deployment is reviewed.
 
 ## Source-Controlled Contract
 
@@ -55,6 +70,18 @@ layers, or workflow artifacts. Service secrets are mounted as root-owned files
 under `/run/secrets/...` and service environment variables may point at those
 paths with `*_FILE` names.
 
+#117 also allows direct `secret_env` entries for services whose released
+configuration currently expects direct connection-string variables instead of
+`*_FILE` variables. Those values are assembled only inside the protected
+workflow from production-backend Environment secrets and rendered into root-only
+service env files with `no_log: true`. The service manifest contains only the
+secret names, never the values.
+
+The non-AI services run with Docker host networking and bind their HTTP servers
+to unique loopback ports. This preserves the existing backend posture where
+PostgreSQL and RabbitMQ stay bound to `127.0.0.1`; no worker health port is
+published publicly.
+
 ## Protected Apply
 
 Enable the framework only through a reviewed backend PR and protected apply:
@@ -83,6 +110,16 @@ Protected Backend Ansible Apply -> check -> apply after production-backend appro
 RabbitMQ and unrelated service containers are not redeployed by the service
 runtime operations workflow. Service deploy, restart, scale, and rollback use
 `docker compose up/restart` scoped to the selected service name.
+
+The protected apply builds these service credentials from existing
+production-backend secrets:
+
+- PostgreSQL URLs use the stage-specific worker-uplift roles against
+  `nutsnews_primary_shadow`.
+- RabbitMQ URLs use the scheduler publisher identity and each forwarding
+  stage's runtime identity.
+- The scheduler receives the backend API token only for shadow feed-source
+  reads; backend API writes remain disabled.
 
 ## Fixed Operations
 
@@ -124,6 +161,30 @@ Reports are written under:
 ```
 
 The workflow uploads `backend-worker-runtime-report`.
+
+## #117 Shadow Verification
+
+After protected check/apply:
+
+```bash
+sudo -n /usr/local/sbin/nutsnews-worker-runtime status
+sudo -n /usr/local/sbin/nutsnews-worker-runtime queue-inspect --service-name scheduler
+sudo -n /usr/local/sbin/nutsnews-worker-runtime queue-inspect --service-name fetcher
+sudo -n /usr/local/sbin/nutsnews-worker-runtime queue-inspect --service-name canonicalizer
+sudo -n /usr/local/sbin/nutsnews-worker-runtime queue-inspect --service-name enrichment
+```
+
+Expected state:
+
+- all four services are healthy on `backend.nutsnews.com`;
+- each service uses only its declared RabbitMQ queue route and PostgreSQL stage
+  schema;
+- a bounded fixture advances through enrichment and stops at the approval queue;
+- `NUTSNEWS_BACKEND_API_WRITES_ENABLED=false` remains present in service env
+  files;
+- legacy Cloudflare ingestion remains active and unchanged;
+- container logs appear under the existing `nutsnews-worker-uplift-*` journald
+  tags and RabbitMQ queue metrics continue to scrape from backend Alloy.
 
 ## Queue, DLQ, Drain, And Reconciliation
 

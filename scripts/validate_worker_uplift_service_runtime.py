@@ -69,12 +69,19 @@ def valid_manifest() -> dict:
                     "source_repository": "ramideltoro/nutsnews-backend",
                 },
                 "env": {"NUTSNEWS_RUNTIME_MODE": "shadow"},
+                "network_mode": "host",
                 "secret_files": [
                     {
                         "name": "backend-api-token",
                         "env_key": "NUTSNEWS_BACKEND_API_TOKEN_FILE",
                         "host_path": "/etc/nutsnews-worker-uplift/services/fetcher/secrets/backend-api-token",
                         "path": "/run/secrets/backend-api-token",
+                    }
+                ],
+                "secret_env": [
+                    {
+                        "name": "database-url",
+                        "env_key": "NUTSNEWS_FETCHER_DATABASE_URL",
                     }
                 ],
                 "queues": {"main": "nutsnews.worker.fetch.v1", "retry": [], "dlq": "nutsnews.worker.fetch.v1.dlq"},
@@ -104,7 +111,13 @@ def validate() -> list[str]:
             "backend_worker_runtime_default_mode: shadow",
             "backend_worker_runtime_production_writes_enabled: false",
             "ghcr.io/ramideltoro/nutsnews-worker-uplift/",
+            "ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler",
+            "ghcr.io/ramideltoro/nutsnews-worker-feed-fetcher",
+            "ghcr.io/ramideltoro/nutsnews-worker-article-canonicalizer",
+            "ghcr.io/ramideltoro/nutsnews-worker-article-enrichment",
             "backend_worker_runtime_allowed_actions:",
+            "backend_worker_runtime_services:",
+            "tracking_issue: 117",
         ),
         errors,
     )
@@ -119,6 +132,8 @@ def validate() -> list[str]:
             "production writes require cutover_state=cutover-approved",
             "promote requires cutover_state=cutover-approved",
             "dlq-replay currently fails closed",
+            "secret env",
+            "network_mode must be bridge or host",
         ),
         errors,
     )
@@ -139,6 +154,8 @@ def validate() -> list[str]:
             "ramideltoro/nutsnews-infra",
             "backend_worker_runtime_secret_values",
             "secret_files",
+            "secret_env",
+            "network_mode:",
         ),
         errors,
     )
@@ -150,6 +167,9 @@ def validate() -> list[str]:
             "NUTSNEWS_BACKEND_WORKER_RUNTIME_PRODUCTION_WRITES_ENABLED",
             "Worker runtime production writes must remain disabled until the protected cutover state is implemented.",
             "backend_worker_runtime_enabled",
+            "backend_worker_runtime_secret_values",
+            "scheduler-database-url",
+            "fetcher-rabbitmq-url",
         ),
         errors,
     )

@@ -49,12 +49,19 @@ def valid_manifest() -> dict:
                     "source_repository": "ramideltoro/nutsnews-backend",
                 },
                 "env": {"NUTSNEWS_RUNTIME_MODE": "shadow"},
+                "network_mode": "host",
                 "secret_files": [
                     {
                         "name": "backend-api-token",
                         "env_key": "NUTSNEWS_BACKEND_API_TOKEN_FILE",
                         "host_path": "/etc/nutsnews-worker-uplift/services/fetcher/secrets/backend-api-token",
                         "path": "/run/secrets/backend-api-token",
+                    }
+                ],
+                "secret_env": [
+                    {
+                        "name": "database-url",
+                        "env_key": "NUTSNEWS_FETCHER_DATABASE_URL",
                     }
                 ],
                 "queues": {"main": "nutsnews.worker.fetch.v1", "retry": [], "dlq": "nutsnews.worker.fetch.v1.dlq"},
@@ -86,6 +93,20 @@ class WorkerRuntimeManagerTests(unittest.TestCase):
         manifest["production_writes_enabled"] = True
         errors = "\n".join(manager.validate_manifest(manifest))
         self.assertIn("cutover_state=cutover-approved", errors)
+
+    def test_rejects_committed_secret_env_values(self):
+        manager = load_manager()
+        manifest = valid_manifest()
+        manifest["services"][0]["secret_env"][0]["value"] = "postgresql://user:password@127.0.0.1/db"
+        errors = "\n".join(manager.validate_manifest(manifest))
+        self.assertIn("must not store values in manifest", errors)
+
+    def test_rejects_invalid_network_mode(self):
+        manager = load_manager()
+        manifest = valid_manifest()
+        manifest["services"][0]["network_mode"] = "service:rabbitmq"
+        errors = "\n".join(manager.validate_manifest(manifest))
+        self.assertIn("network_mode must be bridge or host", errors)
 
     def test_mutating_action_requires_confirmation_before_docker(self):
         manager = load_manager()

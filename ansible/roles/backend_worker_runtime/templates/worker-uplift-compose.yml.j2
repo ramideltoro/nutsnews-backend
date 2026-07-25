@@ -15,8 +15,18 @@ services:
       - "{{ secret.host_path }}:{{ secret.path }}:ro"
 {% endfor %}
 {% endif %}
+{% if service.network_mode is defined %}
+    network_mode: "{{ service.network_mode }}"
+{% else %}
     networks:
       - worker-uplift
+{% endif %}
+{% if service.extra_hosts | default([]) | length > 0 %}
+    extra_hosts:
+{% for host_entry in service.extra_hosts %}
+      - "{{ host_entry }}"
+{% endfor %}
+{% endif %}
 {% if service.depends_on | default([]) | length > 0 %}
     depends_on:
 {% for dependency in service.depends_on %}

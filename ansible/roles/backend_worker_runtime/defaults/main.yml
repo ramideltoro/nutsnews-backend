@@ -22,9 +22,17 @@ backend_worker_runtime_default_pids_limit: 256
 backend_worker_runtime_allowed_image_repositories:
   - ghcr.io/ramideltoro/nutsnews-worker-uplift/
   - ghcr.io/ramideltoro/nutsnews-backend/worker-uplift/
+  - ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler
+  - ghcr.io/ramideltoro/nutsnews-worker-feed-fetcher
+  - ghcr.io/ramideltoro/nutsnews-worker-article-canonicalizer
+  - ghcr.io/ramideltoro/nutsnews-worker-article-enrichment
 backend_worker_runtime_allowed_source_repositories:
   - ramideltoro/nutsnews-backend
   - ramideltoro/nutsnews-worker-services
+  - ramideltoro/nutsnews-worker-feed-scheduler
+  - ramideltoro/nutsnews-worker-feed-fetcher
+  - ramideltoro/nutsnews-worker-article-canonicalizer
+  - ramideltoro/nutsnews-worker-article-enrichment
 backend_worker_runtime_allowed_stages:
   - scheduler
   - fetcher
@@ -49,7 +57,285 @@ backend_worker_runtime_allowed_actions:
   - drain
   - reconciliation
   - smoke
-backend_worker_runtime_services: []
+backend_worker_runtime_services:
+  - name: scheduler
+    stage: scheduler
+    tracking_issue: 117
+    image: ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler@sha256:a879649cbab22bd87233fbdd8ae95c87c7c71aabde26e04219773f425bd11a25
+    image_tag: 656016bea8768cf3db97829779f8f908b95d17d2
+    contract_version: "0.3.1"
+    runtime_package_version: "0.4.0"
+    runtime_mode: shadow
+    network_mode: host
+    replicas: 1
+    resources:
+      memory: 256m
+      cpus: "0.35"
+      pids: 256
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:18081/ready').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    provenance:
+      required: true
+      signed: true
+      source_repository: ramideltoro/nutsnews-worker-feed-scheduler
+      subject_digest: sha256:a879649cbab22bd87233fbdd8ae95c87c7c71aabde26e04219773f425bd11a25
+    env:
+      NUTSNEWS_ENVIRONMENT: production
+      NUTSNEWS_SCHEDULER_HTTP_HOST: 127.0.0.1
+      NUTSNEWS_SCHEDULER_HTTP_PORT: "18081"
+      NUTSNEWS_SCHEDULER_DEPENDENCY_MODE: production
+      NUTSNEWS_SCHEDULER_BACKEND_API_URL: "{{ backend_worker_runtime_backend_api_url }}"
+      NUTSNEWS_SCHEDULER_CADENCE_MS: "300000"
+      NUTSNEWS_SCHEDULER_LEASE_MS: "900000"
+      NUTSNEWS_SCHEDULER_CONCURRENCY: "1"
+      NUTSNEWS_SCHEDULER_SHUTDOWN_TIMEOUT_MS: "30000"
+      NUTSNEWS_SCHEDULER_SHADOW_MODE: "true"
+      NUTSNEWS_SCHEDULER_TELEMETRY_LOGS: stdout
+      NUTSNEWS_SCHEDULER_METRICS_ENABLED: "true"
+    secret_env:
+      - name: scheduler-database-url
+        env_key: NUTSNEWS_SCHEDULER_DATABASE_URL
+      - name: scheduler-rabbitmq-url
+        env_key: NUTSNEWS_SCHEDULER_RABBITMQ_URL
+      - name: scheduler-backend-api-token
+        env_key: NUTSNEWS_SCHEDULER_BACKEND_API_TOKEN
+    queues:
+      main: nutsnews.worker.fetch.v1
+      retry: []
+      dlq: nutsnews.worker.fetch.v1.dlq
+      consumes: []
+      publishes:
+        - nutsnews.worker.fetch.v1
+    postgres:
+      database: "{{ backend_worker_uplift_postgres_database | default('nutsnews_primary_shadow') }}"
+      schemas:
+        - worker_uplift_scheduler
+      production_write_path: false
+    rollback:
+      image: ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler@sha256:a879649cbab22bd87233fbdd8ae95c87c7c71aabde26e04219773f425bd11a25
+      reason: initial-shadow-deploy
+
+  - name: fetcher
+    stage: fetcher
+    tracking_issue: 117
+    image: ghcr.io/ramideltoro/nutsnews-worker-feed-fetcher@sha256:1e298e566808411ea1e015b82f7f07866f93138d6aa91189406614b86b0c2c02
+    image_tag: 212cfb68da53d12c517795bae495764d1effb27c
+    contract_version: "0.3.1"
+    runtime_package_version: "0.4.0"
+    runtime_mode: shadow
+    network_mode: host
+    replicas: 1
+    resources:
+      memory: 384m
+      cpus: "0.50"
+      pids: 256
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:18082/ready').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    provenance:
+      required: true
+      signed: true
+      source_repository: ramideltoro/nutsnews-worker-feed-fetcher
+      subject_digest: sha256:1e298e566808411ea1e015b82f7f07866f93138d6aa91189406614b86b0c2c02
+    env:
+      NUTSNEWS_ENVIRONMENT: production
+      NUTSNEWS_FETCHER_HTTP_HOST: 127.0.0.1
+      NUTSNEWS_FETCHER_HTTP_PORT: "18082"
+      NUTSNEWS_FETCHER_DEPENDENCY_MODE: production
+      NUTSNEWS_FETCHER_CONCURRENCY: "2"
+      NUTSNEWS_FETCHER_PREFETCH: "4"
+      NUTSNEWS_FETCHER_CONNECT_TIMEOUT_MS: "5000"
+      NUTSNEWS_FETCHER_READ_TIMEOUT_MS: "10000"
+      NUTSNEWS_FETCHER_TOTAL_TIMEOUT_MS: "15000"
+      NUTSNEWS_FETCHER_MAX_REDIRECTS: "3"
+      NUTSNEWS_FETCHER_MAX_RESPONSE_BYTES: "1048576"
+      NUTSNEWS_FETCHER_RETRY_AFTER_MAX_MS: "1800000"
+      NUTSNEWS_FETCHER_SHUTDOWN_TIMEOUT_MS: "30000"
+      NUTSNEWS_FETCHER_SHADOW_MODE: "true"
+      NUTSNEWS_FETCHER_TELEMETRY_LOGS: stdout
+      NUTSNEWS_FETCHER_METRICS_ENABLED: "true"
+    secret_env:
+      - name: fetcher-database-url
+        env_key: NUTSNEWS_FETCHER_DATABASE_URL
+      - name: fetcher-rabbitmq-url
+        env_key: NUTSNEWS_FETCHER_RABBITMQ_URL
+    queues:
+      main: nutsnews.worker.fetch.v1
+      retry:
+        - nutsnews.worker.fetch.v1.retry-30s
+        - nutsnews.worker.fetch.v1.retry-5m
+        - nutsnews.worker.fetch.v1.retry-30m
+      dlq: nutsnews.worker.fetch.v1.dlq
+      consumes:
+        - nutsnews.worker.fetch.v1
+      publishes:
+        - nutsnews.worker.canonicalization.v1
+    postgres:
+      database: "{{ backend_worker_uplift_postgres_database | default('nutsnews_primary_shadow') }}"
+      schemas:
+        - worker_uplift_fetcher
+      production_write_path: false
+    rollback:
+      image: ghcr.io/ramideltoro/nutsnews-worker-feed-fetcher@sha256:1e298e566808411ea1e015b82f7f07866f93138d6aa91189406614b86b0c2c02
+      reason: initial-shadow-deploy
+
+  - name: canonicalizer
+    stage: canonicalizer
+    tracking_issue: 117
+    image: ghcr.io/ramideltoro/nutsnews-worker-article-canonicalizer@sha256:9238be2edb876a4caea4455472ebd99dd5212de1cf6e12a44a2909e1f5e2bdd8
+    image_tag: c57645fe4b7eb93b5036d3c4a1852bf1b8ded4c1
+    contract_version: "0.4.0"
+    runtime_package_version: "0.4.0"
+    runtime_mode: shadow
+    network_mode: host
+    replicas: 1
+    resources:
+      memory: 384m
+      cpus: "0.50"
+      pids: 256
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:18083/ready').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    provenance:
+      required: true
+      signed: true
+      source_repository: ramideltoro/nutsnews-worker-article-canonicalizer
+      subject_digest: sha256:9238be2edb876a4caea4455472ebd99dd5212de1cf6e12a44a2909e1f5e2bdd8
+    env:
+      NUTSNEWS_ENVIRONMENT: production
+      NUTSNEWS_CANONICALIZER_HTTP_HOST: 127.0.0.1
+      NUTSNEWS_CANONICALIZER_HTTP_PORT: "18083"
+      NUTSNEWS_CANONICALIZER_DEPENDENCY_MODE: production
+      NUTSNEWS_CANONICALIZER_CONCURRENCY: "2"
+      NUTSNEWS_CANONICALIZER_PREFETCH: "4"
+      NUTSNEWS_CANONICALIZER_SHUTDOWN_TIMEOUT_MS: "30000"
+      NUTSNEWS_CANONICALIZER_SHADOW_MODE: "true"
+      NUTSNEWS_CANONICALIZER_TELEMETRY_LOGS: stdout
+      NUTSNEWS_CANONICALIZER_METRICS_ENABLED: "true"
+    secret_env:
+      - name: canonicalizer-database-url
+        env_key: NUTSNEWS_CANONICALIZER_DATABASE_URL
+      - name: canonicalizer-rabbitmq-url
+        env_key: NUTSNEWS_CANONICALIZER_RABBITMQ_URL
+    queues:
+      main: nutsnews.worker.canonicalization.v1
+      retry:
+        - nutsnews.worker.canonicalization.v1.retry-30s
+        - nutsnews.worker.canonicalization.v1.retry-5m
+        - nutsnews.worker.canonicalization.v1.retry-30m
+      dlq: nutsnews.worker.canonicalization.v1.dlq
+      consumes:
+        - nutsnews.worker.canonicalization.v1
+      publishes:
+        - nutsnews.worker.enrichment.v1
+    postgres:
+      database: "{{ backend_worker_uplift_postgres_database | default('nutsnews_primary_shadow') }}"
+      schemas:
+        - worker_uplift_canonicalizer
+      production_write_path: false
+    rollback:
+      image: ghcr.io/ramideltoro/nutsnews-worker-article-canonicalizer@sha256:9238be2edb876a4caea4455472ebd99dd5212de1cf6e12a44a2909e1f5e2bdd8
+      reason: initial-shadow-deploy
+
+  - name: enrichment
+    stage: enrichment
+    tracking_issue: 117
+    image: ghcr.io/ramideltoro/nutsnews-worker-article-enrichment@sha256:c6a1a743ea55d4fdb11a95b4130a384cfcf3edde9ad8b7083d80f96fd236a2ca
+    image_tag: a745b3c755429f17a5c2b6ab0210c8f899b0d55c
+    contract_version: "0.4.0"
+    runtime_package_version: "0.4.0"
+    runtime_mode: shadow
+    network_mode: host
+    replicas: 1
+    resources:
+      memory: 512m
+      cpus: "0.75"
+      pids: 256
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:18084/ready').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    provenance:
+      required: true
+      signed: true
+      source_repository: ramideltoro/nutsnews-worker-article-enrichment
+      subject_digest: sha256:c6a1a743ea55d4fdb11a95b4130a384cfcf3edde9ad8b7083d80f96fd236a2ca
+    env:
+      NUTSNEWS_ENVIRONMENT: production
+      NUTSNEWS_ENRICHMENT_HTTP_HOST: 127.0.0.1
+      NUTSNEWS_ENRICHMENT_HTTP_PORT: "18084"
+      NUTSNEWS_ENRICHMENT_DEPENDENCY_MODE: production
+      NUTSNEWS_ENRICHMENT_CONCURRENCY: "2"
+      NUTSNEWS_ENRICHMENT_PREFETCH: "4"
+      NUTSNEWS_ENRICHMENT_CONNECT_TIMEOUT_MS: "5000"
+      NUTSNEWS_ENRICHMENT_READ_TIMEOUT_MS: "10000"
+      NUTSNEWS_ENRICHMENT_TOTAL_TIMEOUT_MS: "30000"
+      NUTSNEWS_ENRICHMENT_MAX_RESPONSE_BYTES: "1048576"
+      NUTSNEWS_ENRICHMENT_MAX_DECOMPRESSED_BYTES: "1048576"
+      NUTSNEWS_ENRICHMENT_MAX_DECOMPRESSION_RATIO: "20"
+      NUTSNEWS_ENRICHMENT_MAX_REDIRECTS: "3"
+      NUTSNEWS_ENRICHMENT_MAX_CONCURRENT_SOCKETS: "8"
+      NUTSNEWS_ENRICHMENT_PER_HOST_CONCURRENCY: "2"
+      NUTSNEWS_ENRICHMENT_PARSER_TIMEOUT_MS: "5000"
+      NUTSNEWS_ENRICHMENT_MAX_DOM_NODES: "50000"
+      NUTSNEWS_ENRICHMENT_SHUTDOWN_TIMEOUT_MS: "30000"
+      NUTSNEWS_ENRICHMENT_SHADOW_MODE: "true"
+      NUTSNEWS_ENRICHMENT_TELEMETRY_LOGS: stdout
+      NUTSNEWS_ENRICHMENT_METRICS_ENABLED: "true"
+    secret_env:
+      - name: enrichment-database-url
+        env_key: NUTSNEWS_ENRICHMENT_DATABASE_URL
+      - name: enrichment-rabbitmq-url
+        env_key: NUTSNEWS_ENRICHMENT_RABBITMQ_URL
+    queues:
+      main: nutsnews.worker.enrichment.v1
+      retry:
+        - nutsnews.worker.enrichment.v1.retry-30s
+        - nutsnews.worker.enrichment.v1.retry-5m
+        - nutsnews.worker.enrichment.v1.retry-30m
+      dlq: nutsnews.worker.enrichment.v1.dlq
+      consumes:
+        - nutsnews.worker.enrichment.v1
+      publishes:
+        - nutsnews.worker.approval.v1
+      stops_before:
+        - nutsnews.worker.approval.v1
+    postgres:
+      database: "{{ backend_worker_uplift_postgres_database | default('nutsnews_primary_shadow') }}"
+      schemas:
+        - worker_uplift_enrichment
+      production_write_path: false
+    rollback:
+      image: ghcr.io/ramideltoro/nutsnews-worker-article-enrichment@sha256:c6a1a743ea55d4fdb11a95b4130a384cfcf3edde9ad8b7083d80f96fd236a2ca
+      reason: initial-shadow-deploy
 backend_worker_runtime_secret_values: {}
 backend_worker_runtime_rabbitmq_vhost: "{{ backend_rabbitmq_vhost | default('nutsnews-worker-uplift') }}"
 backend_worker_runtime_rabbitmq_env_path: "{{ backend_rabbitmq_env_path | default('/etc/nutsnews-rabbitmq/rabbitmq.env') }}"

@@ -74,6 +74,12 @@ Worker services use the route-scoped identities from
 admin credentials. The default `guest` user must be deleted or disabled for the
 worker vhost during bootstrap.
 
+For #117, forwarding services that expose one RabbitMQ URL use a
+`stage_runtime` identity derived from the existing route-scoped consumer secret.
+That identity reads only its input queue and writes only the main, retry, and
+DLQ exchanges required by the declared outbound route. Dedicated publisher
+identities remain managed for rotation and future split-connection clients.
+
 ## Recovery
 
 Broker definitions may be exported after topology changes, but queue contents

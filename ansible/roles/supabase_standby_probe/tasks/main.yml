@@ -1,0 +1,185 @@
+---
+- name: Validate requested probe state
+  ansible.builtin.assert:
+    that:
+      - supabase_standby_probe_state in ['present', 'absent']
+    fail_msg: "supabase_standby_probe_state must be present or absent."
+
+- name: Validate protected probe inputs
+  ansible.builtin.assert:
+    that:
+      - supabase_standby_probe_public_key | trim | length > 0
+      - supabase_standby_probe_expected_project_ref is match('^[a-z0-9]{20}$')
+      - supabase_standby_probe_expected_host == 'db.' ~ supabase_standby_probe_expected_project_ref ~ '.supabase.co'
+      - supabase_standby_probe_expected_host is match('^db\\.[a-z0-9]{20}\\.supabase\\.co$')
+    fail_msg: "Missing or invalid protected standby probe input."
+    quiet: true
+  no_log: true
+  when: supabase_standby_probe_state == 'present'
+
+- name: Ensure probe packages are installed
+  ansible.builtin.apt:
+    name: "{{ supabase_standby_probe_packages }}"
+    state: present
+    update_cache: true
+  when: supabase_standby_probe_state == 'present'
+
+- name: Ensure dedicated probe group exists
+  ansible.builtin.group:
+    name: "{{ supabase_standby_probe_group }}"
+    system: true
+    state: present
+  when: supabase_standby_probe_state == 'present'
+
+- name: Ensure dedicated probe account exists without privilege groups
+  ansible.builtin.user:
+    name: "{{ supabase_standby_probe_user }}"
+    group: "{{ supabase_standby_probe_group }}"
+    groups: ""
+    append: false
+    system: true
+    create_home: false
+    home: "{{ supabase_standby_probe_home }}"
+    shell: /bin/sh
+    password_lock: true
+    state: present
+  when: supabase_standby_probe_state == 'present'
+
+- name: Ensure probe account is absent from privileged groups
+  ansible.builtin.user:
+    name: "{{ supabase_standby_probe_user }}"
+    groups: ""
+    append: false
+  when: supabase_standby_probe_state == 'present'
+
+- name: Ensure root-owned probe home exists
+  ansible.builtin.file:
+    path: "{{ supabase_standby_probe_home }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: supabase_standby_probe_state == 'present'
+
+- name: Ensure root-owned probe ssh directory exists
+  ansible.builtin.file:
+    path: "{{ supabase_standby_probe_home }}/.ssh"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: supabase_standby_probe_state == 'present'
+
+- name: Install forced-command authorized key
+  ansible.builtin.copy:
+    dest: "{{ supabase_standby_probe_home }}/.ssh/authorized_keys"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      command="{{ supabase_standby_probe_command_path }}",restrict {{ supabase_standby_probe_public_key | trim }}
+  no_log: true
+  when: supabase_standby_probe_state == 'present'
+
+- name: Ensure libexec directory exists
+  ansible.builtin.file:
+    path: /usr/local/libexec
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: supabase_standby_probe_state == 'present'
+
+- name: Install root-owned fixed probe program
+  ansible.builtin.copy:
+    src: "{{ supabase_standby_probe_source_path }}"
+    dest: "{{ supabase_standby_probe_command_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  when: supabase_standby_probe_state == 'present'
+
+- name: Ensure root-owned probe config directory exists
+  ansible.builtin.file:
+    path: "{{ supabase_standby_probe_config_dir }}"
+    state: directory
+    owner: root
+    group: "{{ supabase_standby_probe_group }}"
+    mode: "0750"
+  when: supabase_standby_probe_state == 'present'
+
+- name: Install protected expected Supabase target config
+  ansible.builtin.template:
+    src: probe.conf.j2
+    dest: "{{ supabase_standby_probe_config_path }}"
+    owner: root
+    group: "{{ supabase_standby_probe_group }}"
+    mode: "0640"
+  no_log: true
+  when: supabase_standby_probe_state == 'present'
+
+- name: Install sshd Match User defense-in-depth drop-in
+  ansible.builtin.template:
+    src: standby-probe-sshd.conf.j2
+    dest: "{{ supabase_standby_probe_sshd_dropin }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Validate sshd configuration
+    - Reload ssh
+  when: supabase_standby_probe_state == 'present'
+
+- name: Validate effective sshd configuration after probe drop-in
+  ansible.builtin.command: /usr/sbin/sshd -t -f /etc/ssh/sshd_config
+  changed_when: false
+  when:
+    - supabase_standby_probe_state == 'present'
+    - not ansible_check_mode
+
+- name: Remove probe sshd drop-in
+  ansible.builtin.file:
+    path: "{{ supabase_standby_probe_sshd_dropin }}"
+    state: absent
+  notify:
+    - Validate sshd configuration
+    - Reload ssh
+  when: supabase_standby_probe_state == 'absent'
+
+- name: Remove probe authorized keys
+  ansible.builtin.file:
+    path: "{{ supabase_standby_probe_home }}/.ssh/authorized_keys"
+    state: absent
+  when: supabase_standby_probe_state == 'absent'
+
+- name: Remove fixed probe program
+  ansible.builtin.file:
+    path: "{{ supabase_standby_probe_command_path }}"
+    state: absent
+  when: supabase_standby_probe_state == 'absent'
+
+- name: Remove protected expected target config
+  ansible.builtin.file:
+    path: "{{ supabase_standby_probe_config_path }}"
+    state: absent
+  no_log: true
+  when: supabase_standby_probe_state == 'absent'
+
+- name: Remove probe config directory
+  ansible.builtin.file:
+    path: "{{ supabase_standby_probe_config_dir }}"
+    state: absent
+  when: supabase_standby_probe_state == 'absent'
+
+- name: Remove dedicated probe account
+  ansible.builtin.user:
+    name: "{{ supabase_standby_probe_user }}"
+    state: absent
+    remove: true
+  when: supabase_standby_probe_state == 'absent'
+
+- name: Remove dedicated probe group
+  ansible.builtin.group:
+    name: "{{ supabase_standby_probe_group }}"
+    state: absent
+  when: supabase_standby_probe_state == 'absent'

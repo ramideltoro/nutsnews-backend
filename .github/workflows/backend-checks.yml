@@ -172,6 +172,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_supabase_standby_probe_command.py
 
+      - name: Validate Supabase standby forced-command probe Ansible
+        shell: bash
+        run: python3 scripts/validate_supabase_standby_probe_ansible.py
+
       - name: Run Supabase standby forced-command probe tests
         shell: bash
         run: python3 -m unittest tests.test_supabase_standby_probe
@@ -285,6 +289,11 @@ jobs:
         shell: bash
         working-directory: ansible
         run: ansible-playbook playbooks/bootstrap.yml --syntax-check -i inventories/production/hosts.yml
+
+      - name: Supabase standby forced-command probe Ansible syntax check
+        shell: bash
+        working-directory: ansible
+        run: ansible-playbook playbooks/supabase_standby_probe.yml --syntax-check -i inventories/production/hosts.yml
 
       - name: Supabase standby IPv6 runner Ansible syntax check
         shell: bash

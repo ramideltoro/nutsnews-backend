@@ -213,6 +213,8 @@ After protected check/apply:
 sudo -n /usr/local/sbin/nutsnews-worker-runtime status
 sudo -n /usr/local/sbin/nutsnews-worker-runtime queue-inspect --service-name approval
 sudo -n /usr/local/sbin/nutsnews-worker-runtime queue-inspect --service-name translation
+sudo -n /usr/local/sbin/nutsnews-worker-runtime smoke --service-name approval --confirm-action
+sudo -n /usr/local/sbin/nutsnews-worker-runtime smoke --service-name translation --confirm-action
 ```
 
 Expected state:
@@ -230,6 +232,14 @@ Expected state:
   leakage;
 - legacy Cloudflare ingestion, legacy AI, and failover remain active and
   unchanged.
+
+The approval smoke report records redacted `db_checks` for
+`accepted_decisions`, `accepted_translation_outbox`, `rejected_decisions`,
+`rejected_translation_outbox`, `processed_inbox`, and `provider_metadata`.
+The translation smoke report records `accepted_language_records`,
+`distinct_languages`, `persistence_outbox`, `processed_inbox`, and
+`provider_metadata`. These checks use synthetic `example.test` references and
+do not query or print production article bodies.
 
 For model outage, drain only the affected AI service, inspect its queue/DLQ, and
 leave non-AI services running unless queue backpressure requires a wider pause.

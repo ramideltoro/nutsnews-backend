@@ -11,10 +11,13 @@ from __future__ import annotations
 import argparse
 import base64
 import datetime as dt
+import hashlib
 import json
 import re
 import subprocess
 import sys
+import time
+import uuid
 from pathlib import Path
 from typing import Any
 from urllib import error, parse, request
@@ -31,6 +34,21 @@ PRIVATE_KEY_RE = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z
 READ_ONLY_ACTIONS = {"check", "status", "logs", "queue-inspect", "dlq-inspect"}
 MUTATING_ACTIONS = {"deploy", "promote", "restart", "scale", "rollback", "dlq-replay", "drain", "reconciliation", "smoke"}
 ALL_ACTIONS = sorted(READ_ONLY_ACTIONS | MUTATING_ACTIONS)
+
+WORKER_MAIN_EXCHANGE = "nutsnews.worker.v1"
+WORKER_ENVELOPE_SCHEMA_ID = "nutsnews.worker.envelope.v1"
+WORKER_MAX_ATTEMPTS = 4
+STAGE_PAYLOAD_SCHEMA_VERSION = 1
+STAGE_PAYLOAD_SCHEMA_IDS = {
+    "enrichment_result": "nutsnews.worker.payload.enrichment-result.v1",
+    "translation_task": "nutsnews.worker.payload.translation-task.v1",
+}
+SMOKE_TARGET_LANGUAGES = ["fr", "ja", "de-CH", "de", "el"]
+SERVICE_HTTP_PORTS = {"approval": 18085, "translation": 18086}
+SERVICE_DATABASE_ENV_KEYS = {
+    "approval": "NUTSNEWS_APPROVAL_DATABASE_URL",
+    "translation": "NUTSNEWS_TRANSLATION_DATABASE_URL",
+}
 
 
 class RuntimeErrorWithReport(RuntimeError):
@@ -233,12 +251,103 @@ def read_env(path: Path) -> dict[str, str]:
     return values
 
 
-def rabbitmq_get_json(args: argparse.Namespace, queue: str) -> dict[str, Any]:
+def service_env(args: argparse.Namespace, service: dict[str, Any]) -> dict[str, str]:
+    env_path = args.manifest.parent / "services" / f"{service['name']}.env"
+    return read_env(env_path)
+
+
+def service_database_url(args: argparse.Namespace, service: dict[str, Any]) -> str:
+    env = service_env(args, service)
+    key = SERVICE_DATABASE_ENV_KEYS.get(str(service.get("name") or ""), "")
+    db_url = env.get(key, "")
+    if not db_url:
+        raise RuntimeErrorWithReport(f"{key or 'service database URL'} is not configured for smoke")
+    return db_url
+
+
+def sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def psql_key_values(db_url: str, query: str, timeout: int = 30) -> dict[str, str]:
+    try:
+        completed = subprocess.run(
+            ["psql", "--no-psqlrc", "-v", "ON_ERROR_STOP=1", "-At", db_url, "-c", query],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeErrorWithReport("psql is not installed on backend host") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeErrorWithReport("psql smoke query timed out") from exc
+    if completed.returncode != 0:
+        raise RuntimeErrorWithReport(f"psql smoke query failed: {redact(completed.stderr).strip()}")
+
+    values: dict[str, str] = {}
+    for line in completed.stdout.splitlines():
+        key, separator, value = line.partition("=")
+        if separator:
+            values[key] = value
+    return values
+
+
+def wait_for_psql_values(
+    db_url: str,
+    query: str,
+    expected: dict[str, str],
+    timeout_seconds: int = 90,
+    interval_seconds: float = 3.0,
+) -> tuple[dict[str, str], bool]:
+    deadline = time.monotonic() + timeout_seconds
+    last_values: dict[str, str] = {}
+    while time.monotonic() < deadline:
+        last_values = psql_key_values(db_url, query)
+        if all(last_values.get(key) == value for key, value in expected.items()):
+            return last_values, True
+        time.sleep(interval_seconds)
+    return last_values, False
+
+
+def http_get_local(path: str, port: int, timeout: int = 10) -> dict[str, Any]:
+    url = f"http://127.0.0.1:{port}{path}"
+    try:
+        with request.urlopen(url, timeout=timeout) as response:
+            body = response.read().decode("utf-8", errors="replace")
+            return {
+                "status": "healthy" if 200 <= response.status < 300 else "critical",
+                "http_status": response.status,
+                "body": redact(body[:2048]),
+            }
+    except error.HTTPError as exc:
+        return {
+            "status": "critical",
+            "http_status": exc.code,
+            "body": redact(exc.read().decode("utf-8", errors="replace")[:2048]),
+        }
+    except OSError as exc:
+        return {
+            "status": "critical",
+            "error": type(exc).__name__,
+        }
+
+
+def rabbitmq_admin_env(args: argparse.Namespace) -> tuple[str, str, str]:
     env = read_env(args.rabbitmq_env)
     user = env.get("RABBITMQ_DEFAULT_USER", "")
     password = env.get("RABBITMQ_DEFAULT_PASS", "")
     vhost = env.get("RABBITMQ_DEFAULT_VHOST", args.vhost)
     if not user or not password:
+        raise RuntimeErrorWithReport("RabbitMQ admin env not readable")
+    return user, password, vhost
+
+
+def rabbitmq_get_json(args: argparse.Namespace, queue: str) -> dict[str, Any]:
+    try:
+        user, password, vhost = rabbitmq_admin_env(args)
+    except RuntimeErrorWithReport:
         return {"status": "not_configured", "queue": queue, "summary": "RabbitMQ admin env not readable"}
     path = f"/api/queues/{parse.quote(vhost, safe='')}/{parse.quote(queue, safe='')}"
     url = f"http://127.0.0.1:15672{path}"
@@ -256,6 +365,72 @@ def rabbitmq_get_json(args: argparse.Namespace, queue: str) -> dict[str, Any]:
     return {"status": "healthy", "queue": queue, "metrics": {key: data.get(key) for key in keep if key in data}}
 
 
+def rabbitmq_publish(
+    args: argparse.Namespace,
+    envelope: dict[str, Any],
+    payload: dict[str, Any],
+    routing_key: str,
+) -> dict[str, Any]:
+    user, password, vhost = rabbitmq_admin_env(args)
+    path = f"/api/exchanges/{parse.quote(vhost, safe='')}/{parse.quote(WORKER_MAIN_EXCHANGE, safe='')}/publish"
+    url = f"http://127.0.0.1:15672{path}"
+    body = json.dumps(
+        {
+            "properties": {
+                "delivery_mode": 2,
+                "content_type": "application/json",
+                "content_encoding": "utf-8",
+                "message_id": envelope["messageId"],
+                "correlation_id": envelope["correlationId"],
+                "timestamp": int(dt.datetime.fromisoformat(envelope["occurredAt"].replace("Z", "+00:00")).timestamp()),
+                "headers": {
+                    "schemaId": envelope["schemaId"],
+                    "schemaVersion": envelope["schemaVersion"],
+                    "route": envelope["route"],
+                    "attemptCount": envelope["attempt"]["count"],
+                    "idempotencyKey": envelope["idempotencyKey"],
+                    "payloadCarrier": "envelope-plus-payload",
+                    "traceparent": envelope["traceparent"],
+                },
+            },
+            "routing_key": routing_key,
+            "payload": json.dumps({"envelope": envelope, "payload": payload}, separators=(",", ":")),
+            "payload_encoding": "string",
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    req = request.Request(url, data=body, method="POST")
+    token = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
+    req.add_header("Authorization", f"Basic {token}")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except error.HTTPError as exc:
+        return {
+            "status": "critical",
+            "http_status": exc.code,
+            "message_id": envelope["messageId"],
+            "routing_key": routing_key,
+            "summary": "RabbitMQ publish API failed",
+        }
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "status": "critical",
+            "error": type(exc).__name__,
+            "message_id": envelope["messageId"],
+            "routing_key": routing_key,
+            "summary": "RabbitMQ publish API unavailable",
+        }
+    routed = data.get("routed") is True
+    return {
+        "status": "healthy" if routed else "critical",
+        "routed": routed,
+        "message_id": envelope["messageId"],
+        "routing_key": routing_key,
+    }
+
+
 def declared_queues(service: dict[str, Any], kind: str) -> list[str]:
     queues = service.get("queues", {})
     if not isinstance(queues, dict):
@@ -270,6 +445,345 @@ def declared_queues(service: dict[str, Any], kind: str) -> list[str]:
         value = queues.get("dlq")
         return [value] if isinstance(value, str) else []
     return []
+
+
+def smoke_id(prefix: str) -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:12]}"
+
+
+def smoke_uuid(parts: list[str]) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, ":".join(parts)))
+
+
+def smoke_now() -> str:
+    return dt.datetime.now(dt.UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def sha256_json(value: Any) -> str:
+    return "sha256:" + hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def payload_size(payload: dict[str, Any]) -> int:
+    return len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+
+
+def smoke_envelope(
+    stage: str,
+    producer: str,
+    article_id: str,
+    idempotency_key: str,
+    payload: dict[str, Any],
+    occurred_at: str,
+) -> dict[str, Any]:
+    message_id = smoke_uuid(["worker-runtime-smoke", stage, article_id, idempotency_key])
+    return {
+        "schemaId": WORKER_ENVELOPE_SCHEMA_ID,
+        "schemaVersion": 1,
+        "route": stage,
+        "messageId": message_id,
+        "causationId": smoke_uuid(["worker-runtime-smoke-cause", stage, article_id]),
+        "correlationId": smoke_uuid(["worker-runtime-smoke-correlation", article_id]),
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "idempotencyKey": idempotency_key,
+        "aggregate": {
+            "type": "article",
+            "id": article_id,
+            "version": 1,
+        },
+        "occurredAt": occurred_at,
+        "attempt": {
+            "count": 1,
+            "max": WORKER_MAX_ATTEMPTS,
+            "firstAttemptAt": occurred_at,
+        },
+        "producer": {
+            "name": producer,
+            "version": "0.1.0",
+        },
+        "payloadRef": {
+            "kind": "backend-record",
+            "uri": f"backend://worker-uplift/smoke/{stage}/{parse.quote(article_id, safe='')}",
+            "mediaType": "application/json",
+            "sizeBytes": payload_size(payload),
+            "digest": sha256_json(payload),
+        },
+    }
+
+
+def approval_smoke_payload(article_id: str, fixture: str, idempotency_key: str, occurred_at: str) -> dict[str, Any]:
+    hydrated = fixture == "accepted"
+    return {
+        "schemaId": STAGE_PAYLOAD_SCHEMA_IDS["enrichment_result"],
+        "schemaVersion": STAGE_PAYLOAD_SCHEMA_VERSION,
+        "pipelineRunId": smoke_uuid(["worker-runtime-smoke-pipeline", article_id]),
+        "stageExecutionId": smoke_uuid(["worker-runtime-smoke-stage", article_id, fixture]),
+        "sourceMessageId": smoke_uuid(["worker-runtime-smoke-source", article_id]),
+        "idempotencyKey": idempotency_key,
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "producedAt": occurred_at,
+        "candidateId": f"candidate-{article_id}",
+        "canonicalUrl": f"https://articles.example.test/shadow/{article_id}",
+        "imageStatus": "hydrated" if hydrated else "no_thumbnail",
+        **({"imageUrl": f"https://images.example.test/shadow/{article_id}.jpg"} if hydrated else {}),
+        "articleMetadataRef": {
+            "kind": "backend-record",
+            "uri": f"backend://worker-uplift/smoke/approval/{article_id}/metadata",
+            "mediaType": "application/json",
+            "contentFingerprint": f"fingerprint-{article_id}",
+            "canonicalArticleId": article_id,
+            "articleVersion": 1,
+            "title": "Community volunteers build a new accessible playground for local children",
+            "description": "A synthetic public-interest fixture about a positive civic project with clear community benefit.",
+            "language": "en",
+        },
+    }
+
+
+def translation_smoke_payload(article_id: str, idempotency_key: str, occurred_at: str) -> dict[str, Any]:
+    return {
+        "schemaId": STAGE_PAYLOAD_SCHEMA_IDS["translation_task"],
+        "schemaVersion": STAGE_PAYLOAD_SCHEMA_VERSION,
+        "pipelineRunId": smoke_uuid(["worker-runtime-smoke-pipeline", article_id]),
+        "stageExecutionId": smoke_uuid(["worker-runtime-smoke-stage", article_id, "translation"]),
+        "sourceMessageId": smoke_uuid(["worker-runtime-smoke-source", article_id]),
+        "idempotencyKey": idempotency_key,
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "producedAt": occurred_at,
+        "articleId": article_id,
+        "sourceLanguage": "en",
+        "targetLanguages": SMOKE_TARGET_LANGUAGES,
+        "reason": "new_article",
+        "existingLanguageCodes": [],
+    }
+
+
+def smoke_guardrails(service: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
+    name = str(service.get("name") or "")
+    checks: dict[str, Any] = {
+        "runtime_mode": service.get("runtime_mode"),
+        "production_writes_enabled": service.get("postgres", {}).get("production_write_path") is True,
+        "replicas": service.get("replicas"),
+        "prefetch": env.get(f"NUTSNEWS_{name.upper()}_PREFETCH"),
+        "concurrency": env.get(f"NUTSNEWS_{name.upper()}_CONCURRENCY"),
+        "shadow_mode": env.get(f"NUTSNEWS_{name.upper()}_SHADOW_MODE"),
+    }
+    if name == "approval":
+        checks.update({
+            "qwen_max_parallel_calls": env.get("NUTSNEWS_APPROVAL_QWEN_MAX_PARALLEL_CALLS"),
+            "qwen_max_queued_calls": env.get("NUTSNEWS_APPROVAL_QWEN_MAX_QUEUED_CALLS"),
+            "qwen_backpressure_retry_after_ms": env.get("NUTSNEWS_APPROVAL_QWEN_BACKPRESSURE_RETRY_AFTER_MS"),
+            "openai_fallback_enabled": env.get("NUTSNEWS_APPROVAL_OPENAI_FALLBACK_ENABLED"),
+            "openai_fallback_budget_usd": env.get("NUTSNEWS_APPROVAL_OPENAI_FALLBACK_BUDGET_USD"),
+            "openai_secret_present": any(key.startswith("OPENAI_") for key in env),
+        })
+    if name == "translation":
+        checks.update({
+            "per_language_concurrency": env.get("NUTSNEWS_TRANSLATION_PER_LANGUAGE_CONCURRENCY"),
+            "quality_min_score": env.get("NUTSNEWS_TRANSLATION_QUALITY_MIN_SCORE"),
+            "quality_reprompt_max_attempts": env.get("NUTSNEWS_TRANSLATION_QUALITY_REPROMPT_MAX_ATTEMPTS"),
+        })
+    return checks
+
+
+def approval_smoke_query(accepted_article_id: str, rejected_article_id: str) -> str:
+    accepted = sql_literal(accepted_article_id)
+    rejected = sql_literal(rejected_article_id)
+    translation_routing = sql_literal("nutsnews.worker.translation.v1")
+    return f"""
+select 'accepted_decisions=' || count(*)::text
+from worker_uplift_approval.approval_decisions
+where article_identity_hash = {accepted}
+  and decision = 'approved'
+  and ai_provider = 'local_ai'
+union all
+select 'accepted_translation_outbox=' || count(*)::text
+from worker_uplift_approval.outbox
+where entity_id = {accepted}
+  and destination_stage = 'translation'
+  and routing_key = {translation_routing}
+  and status = 'confirmed'
+union all
+select 'rejected_decisions=' || count(*)::text
+from worker_uplift_approval.approval_decisions
+where article_identity_hash = {rejected}
+  and decision = 'rejected'
+  and diagnostic_metadata->>'rejectionReason' = 'no_thumbnail'
+union all
+select 'rejected_translation_outbox=' || count(*)::text
+from worker_uplift_approval.outbox
+where entity_id = {rejected}
+  and destination_stage = 'translation'
+union all
+select 'processed_inbox=' || count(*)::text
+from worker_uplift_approval.inbox
+where entity_id in ({accepted}, {rejected})
+  and status = 'processed'
+union all
+select 'provider_metadata=' || count(*)::text
+from worker_uplift_approval.approval_decisions
+where article_identity_hash = {accepted}
+  and ai_model = 'qwen2.5:3b'
+  and prompt_version = 'editorial-approval-v1:0.1.0'
+  and model_metadata ? 'latencyMs';
+"""
+
+
+def translation_smoke_query(article_id: str) -> str:
+    article = sql_literal(article_id)
+    language_array = ",".join(sql_literal(language) for language in SMOKE_TARGET_LANGUAGES)
+    persistence_routing = sql_literal("nutsnews.worker.persistence.v1")
+    return f"""
+select 'accepted_language_records=' || count(*)::text
+from worker_uplift_translation.translation_records
+where article_identity_hash = {article}
+  and quality_status = 'accepted'
+  and ai_provider = 'local_ai'
+  and ai_model = 'qwen2.5:3b'
+  and language_code in ({language_array})
+union all
+select 'distinct_languages=' || count(distinct language_code)::text
+from worker_uplift_translation.translation_records
+where article_identity_hash = {article}
+  and quality_status = 'accepted'
+  and language_code in ({language_array})
+union all
+select 'persistence_outbox=' || count(*)::text
+from worker_uplift_translation.outbox
+where entity_id = {article}
+  and destination_stage = 'persistence'
+  and routing_key = {persistence_routing}
+  and status = 'confirmed'
+union all
+select 'processed_inbox=' || count(*)::text
+from worker_uplift_translation.inbox
+where entity_id = {article}
+  and status = 'processed'
+union all
+select 'provider_metadata=' || count(*)::text
+from worker_uplift_translation.translation_records
+where article_identity_hash = {article}
+  and model_metadata ? 'latencyMs'
+  and model_metadata ? 'summaryRef';
+"""
+
+
+def build_smoke_publication(args: argparse.Namespace, service: dict[str, Any], article_id: str, fixture: str) -> dict[str, Any]:
+    occurred_at = smoke_now()
+    if service["name"] == "approval":
+        idempotency_key = f"smoke:approval:{fixture}:{article_id}"
+        payload = approval_smoke_payload(article_id, fixture, idempotency_key, occurred_at)
+        envelope = smoke_envelope("approval", "enrichment", article_id, idempotency_key, payload, occurred_at)
+    else:
+        idempotency_key = f"smoke:translation:{article_id}"
+        payload = translation_smoke_payload(article_id, idempotency_key, occurred_at)
+        envelope = smoke_envelope("translation", "approval", article_id, idempotency_key, payload, occurred_at)
+    routing_key = str(service.get("queues", {}).get("main") or f"nutsnews.worker.{service['name']}.v1")
+    publish = rabbitmq_publish(args, envelope, payload, routing_key)
+    return {
+        "fixture": fixture,
+        "article_id": article_id,
+        "message_id": envelope["messageId"],
+        "idempotency_key": idempotency_key,
+        "publish": publish,
+    }
+
+
+def run_approval_smoke(args: argparse.Namespace, service: dict[str, Any], report: dict[str, Any]) -> None:
+    env = service_env(args, service)
+    db_url = service_database_url(args, service)
+    accepted_article_id = smoke_id("approval-accepted")
+    rejected_article_id = smoke_id("approval-rejected")
+    report["smoke"] = {
+        "fixtures": [
+            build_smoke_publication(args, service, accepted_article_id, "accepted"),
+            build_smoke_publication(args, service, rejected_article_id, "rejected"),
+        ],
+        "guardrails": smoke_guardrails(service, env),
+        "health": http_get_local("/ready", SERVICE_HTTP_PORTS["approval"]),
+        "metrics": {
+            "status": http_get_local("/metrics", SERVICE_HTTP_PORTS["approval"]).get("status"),
+        },
+    }
+    if any(item["publish"]["status"] != "healthy" for item in report["smoke"]["fixtures"]):
+        report["status"] = "fail"
+        report["errors"].append("approval smoke fixture publish failed")
+        return
+    values, ok = wait_for_psql_values(
+        db_url,
+        approval_smoke_query(accepted_article_id, rejected_article_id),
+        {
+            "accepted_decisions": "1",
+            "accepted_translation_outbox": "1",
+            "rejected_decisions": "1",
+            "rejected_translation_outbox": "0",
+            "processed_inbox": "2",
+            "provider_metadata": "1",
+        },
+    )
+    report["smoke"]["db_checks"] = values
+    report["smoke"]["expected_target_languages"] = SMOKE_TARGET_LANGUAGES
+    if not ok:
+        report["status"] = "fail"
+        report["errors"].append("approval smoke did not observe expected accepted/rejected shadow state")
+
+
+def run_translation_smoke(args: argparse.Namespace, service: dict[str, Any], report: dict[str, Any]) -> None:
+    env = service_env(args, service)
+    db_url = service_database_url(args, service)
+    article_id = smoke_id("translation")
+    report["smoke"] = {
+        "fixtures": [
+            build_smoke_publication(args, service, article_id, "translation-task"),
+        ],
+        "guardrails": smoke_guardrails(service, env),
+        "health": http_get_local("/ready", SERVICE_HTTP_PORTS["translation"]),
+        "metrics": {
+            "status": http_get_local("/metrics", SERVICE_HTTP_PORTS["translation"]).get("status"),
+        },
+        "expected_target_languages": SMOKE_TARGET_LANGUAGES,
+    }
+    if report["smoke"]["fixtures"][0]["publish"]["status"] != "healthy":
+        report["status"] = "fail"
+        report["errors"].append("translation smoke fixture publish failed")
+        return
+    expected_language_count = str(len(SMOKE_TARGET_LANGUAGES))
+    values, ok = wait_for_psql_values(
+        db_url,
+        translation_smoke_query(article_id),
+        {
+            "accepted_language_records": expected_language_count,
+            "distinct_languages": expected_language_count,
+            "persistence_outbox": str(len(SMOKE_TARGET_LANGUAGES) + 1),
+            "processed_inbox": "1",
+            "provider_metadata": expected_language_count,
+        },
+        timeout_seconds=150,
+    )
+    report["smoke"]["db_checks"] = values
+    if not ok:
+        report["status"] = "fail"
+        report["errors"].append("translation smoke did not observe expected per-language shadow state")
+
+
+def run_service_smoke(args: argparse.Namespace, service: dict[str, Any], report: dict[str, Any]) -> None:
+    if args.dry_run:
+        report["status"] = "dry_run"
+        report["summary"] = "Runtime smoke would publish sanitized service fixtures and verify redacted shadow state."
+        report["smoke"] = {
+            "service": service["name"],
+            "fixtures": ["approval accepted/rejected"] if service["name"] == "approval" else ["translation per-language task"],
+            "expected_target_languages": SMOKE_TARGET_LANGUAGES if service["name"] in {"approval", "translation"} else [],
+        }
+        return
+    if service["name"] == "approval":
+        run_approval_smoke(args, service, report)
+        return
+    if service["name"] == "translation":
+        run_translation_smoke(args, service, report)
+        return
+    report["status"] = "blocked"
+    report["summary"] = "Runtime smoke requires an approved service-specific smoke contract."
+    report["errors"].append(f"smoke is not implemented for service {service['name']}")
 
 
 def write_report(path: Path | None, report: dict[str, Any]) -> None:
@@ -365,10 +879,7 @@ def build_report(args: argparse.Namespace, manifest: dict[str, Any]) -> dict[str
         if not args.dry_run:
             report["errors"].append("reconciliation requires a later approved service-specific reconciler")
     elif args.action == "smoke":
-        report["status"] = "dry_run" if args.dry_run else "blocked"
-        report["summary"] = "Runtime smoke validates service container health once a service image supplies its smoke contract."
-        if not args.dry_run:
-            report["errors"].append("smoke requires a later approved service-specific smoke contract")
+        run_service_smoke(args, service, report)
 
     if report["commands"] and any(item["returncode"] != 0 for item in report["commands"]):
         report["status"] = "fail"

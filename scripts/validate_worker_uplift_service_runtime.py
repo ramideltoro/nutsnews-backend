@@ -134,6 +134,10 @@ def validate() -> list[str]:
             "dlq-replay currently fails closed",
             "secret env",
             "network_mode must be bridge or host",
+            "run_service_smoke",
+            "approval_smoke_query",
+            "translation_smoke_query",
+            "Runtime smoke would publish sanitized service fixtures",
         ),
         errors,
     )

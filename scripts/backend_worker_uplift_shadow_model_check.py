@@ -31,6 +31,7 @@ STAGES = [
 ]
 FINAL_SCHEMA = "worker_uplift_final"
 VIEWS_SCHEMA = "worker_uplift_views"
+WORKER_API_ROLE = "nutsnews_worker_api"
 PUBLIC_DOMAIN_TABLES = [
     "public.articles",
     "public.article_ai_reviews",
@@ -229,6 +230,17 @@ select 'final_grant=' || r.rolname
 from pg_roles r
 where r.rolname = any(string_to_array('{role_csv}', ','))
 order by r.rolname;
+
+select 'worker_api_final_grant=' || r.rolname
+  || ':aggregate_select=' || case when to_regclass('{FINAL_SCHEMA}.article_shadow_aggregates') is null then 'missing_table' else has_table_privilege(r.rolname, '{FINAL_SCHEMA}.article_shadow_aggregates', 'SELECT')::text end
+  || ':aggregate_insert=' || case when to_regclass('{FINAL_SCHEMA}.article_shadow_aggregates') is null then 'missing_table' else has_table_privilege(r.rolname, '{FINAL_SCHEMA}.article_shadow_aggregates', 'INSERT')::text end
+  || ':aggregate_update=' || case when to_regclass('{FINAL_SCHEMA}.article_shadow_aggregates') is null then 'missing_table' else has_table_privilege(r.rolname, '{FINAL_SCHEMA}.article_shadow_aggregates', 'UPDATE')::text end
+  || ':receipt_select=' || case when to_regclass('{FINAL_SCHEMA}.api_command_receipts') is null then 'missing_table' else has_table_privilege(r.rolname, '{FINAL_SCHEMA}.api_command_receipts', 'SELECT')::text end
+  || ':receipt_insert=' || case when to_regclass('{FINAL_SCHEMA}.api_command_receipts') is null then 'missing_table' else has_table_privilege(r.rolname, '{FINAL_SCHEMA}.api_command_receipts', 'INSERT')::text end
+  || ':receipt_update=' || case when to_regclass('{FINAL_SCHEMA}.api_command_receipts') is null then 'missing_table' else has_table_privilege(r.rolname, '{FINAL_SCHEMA}.api_command_receipts', 'UPDATE')::text end
+  || ':sequence_usage=' || has_sequence_privilege(r.rolname, '{FINAL_SCHEMA}.article_shadow_aggregates_id_seq', 'USAGE')::text
+from pg_roles r
+where r.rolname = '{WORKER_API_ROLE}';
 """
 
 
@@ -260,6 +272,7 @@ def check_live_catalog(db_url: str, stages: list[tuple[str, str, str]]) -> list[
     own_grant_failures = []
     public_write_failures = []
     final_grant_failures = []
+    worker_api_final_grant_failures = []
 
     for line in stdout.splitlines():
         if line.startswith("unique="):
@@ -290,6 +303,12 @@ def check_live_catalog(db_url: str, stages: list[tuple[str, str, str]]) -> list[
                     final_grant_failures.append(f"{role_name}:missing_insert_update")
             elif insert_allowed or update_allowed:
                 final_grant_failures.append(f"{role_name}:unexpected_insert_update")
+        elif line.startswith("worker_api_final_grant="):
+            payload = line.split("=", 1)[1]
+            parts = payload.split(":")
+            values = [part.split("=", 1)[1] for part in parts[1:]]
+            if not values or any(value == "missing_table" or not parse_bool_token(value) for value in values):
+                worker_api_final_grant_failures.append(parts[0])
 
     failures = {
         "missing_schemas": sorted(expected_schemas - schemas),
@@ -299,6 +318,7 @@ def check_live_catalog(db_url: str, stages: list[tuple[str, str, str]]) -> list[
         "own_grant_failures": own_grant_failures,
         "public_write_failures": public_write_failures,
         "final_grant_failures": final_grant_failures,
+        "worker_api_final_grant_failures": worker_api_final_grant_failures,
     }
     failed = any(failures.values())
     return [

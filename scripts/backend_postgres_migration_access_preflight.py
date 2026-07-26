@@ -48,6 +48,8 @@ WORKER_UPLIFT_SCHEMAS = [schema for _stage, schema in WORKER_UPLIFT_STAGE_SCHEMA
     "worker_uplift_views",
 ]
 POSTGRES_TRUE_VALUES = {"1", "on", "t", "true", "yes"}
+WORKER_API_ROLE = "nutsnews_worker_api"
+WORKER_UPLIFT_FINAL_SCHEMA = "worker_uplift_final"
 
 
 def tcp_reachable(host: str, port: int, timeout: float = 3.0) -> bool:
@@ -172,6 +174,7 @@ def main() -> int:
         checks.append({"name": "worker_uplift_own_schema_grants", "status": "skipped_with_reason", "reason": "offline mode"})
         checks.append({"name": "worker_uplift_public_write_denied", "status": "skipped_with_reason", "reason": "offline mode"})
         checks.append({"name": "worker_uplift_persistence_final_grant", "status": "skipped_with_reason", "reason": "offline mode"})
+        checks.append({"name": "worker_api_final_shadow_grant", "status": "skipped_with_reason", "reason": "offline mode"})
     else:
         for path_arg, label in ((args.ssh_key, "ssh_key"), (args.known_hosts, "known_hosts")):
             if not path_arg or not Path(path_arg).exists():
@@ -250,6 +253,7 @@ def main() -> int:
                 f"{worker_stage_role_cte}select 'worker_uplift_own_grant=' || stage || ':' || rolname || ':' || schema_name || ':usage=' || has_schema_privilege(rolname, schema_name, 'USAGE')::text || ':inbox_insert=' || case when to_regclass(schema_name || '.inbox') is null then 'missing_table' else has_table_privilege(rolname, schema_name || '.inbox', 'INSERT')::text end || ':outbox_insert=' || case when to_regclass(schema_name || '.outbox') is null then 'missing_table' else has_table_privilege(rolname, schema_name || '.outbox', 'INSERT')::text end from stage_roles order by stage, rolname;\n"
                 f"{worker_stage_role_cte}select 'worker_uplift_public_write=' || rolname || ':insert=' || case when to_regclass('public.articles') is null then 'missing_table' else has_table_privilege(rolname, 'public.articles', 'INSERT')::text end || ':update=' || case when to_regclass('public.articles') is null then 'missing_table' else has_table_privilege(rolname, 'public.articles', 'UPDATE')::text end || ':delete=' || case when to_regclass('public.articles') is null then 'missing_table' else has_table_privilege(rolname, 'public.articles', 'DELETE')::text end from stage_roles order by rolname;\n"
                 f"{worker_stage_role_cte}select 'worker_uplift_final_grant=' || stage || ':' || rolname || ':insert=' || case when to_regclass('worker_uplift_final.article_shadow_aggregates') is null then 'missing_table' else has_table_privilege(rolname, 'worker_uplift_final.article_shadow_aggregates', 'INSERT')::text end || ':update=' || case when to_regclass('worker_uplift_final.article_shadow_aggregates') is null then 'missing_table' else has_table_privilege(rolname, 'worker_uplift_final.article_shadow_aggregates', 'UPDATE')::text end from stage_roles order by stage, rolname;\n"
+                f"select 'worker_api_final_grant=' || r.rolname || ':aggregate_select=' || case when to_regclass('{WORKER_UPLIFT_FINAL_SCHEMA}.article_shadow_aggregates') is null then 'missing_table' else has_table_privilege(r.rolname, '{WORKER_UPLIFT_FINAL_SCHEMA}.article_shadow_aggregates', 'SELECT')::text end || ':aggregate_insert=' || case when to_regclass('{WORKER_UPLIFT_FINAL_SCHEMA}.article_shadow_aggregates') is null then 'missing_table' else has_table_privilege(r.rolname, '{WORKER_UPLIFT_FINAL_SCHEMA}.article_shadow_aggregates', 'INSERT')::text end || ':aggregate_update=' || case when to_regclass('{WORKER_UPLIFT_FINAL_SCHEMA}.article_shadow_aggregates') is null then 'missing_table' else has_table_privilege(r.rolname, '{WORKER_UPLIFT_FINAL_SCHEMA}.article_shadow_aggregates', 'UPDATE')::text end || ':receipt_select=' || case when to_regclass('{WORKER_UPLIFT_FINAL_SCHEMA}.api_command_receipts') is null then 'missing_table' else has_table_privilege(r.rolname, '{WORKER_UPLIFT_FINAL_SCHEMA}.api_command_receipts', 'SELECT')::text end || ':receipt_insert=' || case when to_regclass('{WORKER_UPLIFT_FINAL_SCHEMA}.api_command_receipts') is null then 'missing_table' else has_table_privilege(r.rolname, '{WORKER_UPLIFT_FINAL_SCHEMA}.api_command_receipts', 'INSERT')::text end || ':receipt_update=' || case when to_regclass('{WORKER_UPLIFT_FINAL_SCHEMA}.api_command_receipts') is null then 'missing_table' else has_table_privilege(r.rolname, '{WORKER_UPLIFT_FINAL_SCHEMA}.api_command_receipts', 'UPDATE')::text end || ':sequence_usage=' || has_sequence_privilege(r.rolname, '{WORKER_UPLIFT_FINAL_SCHEMA}.article_shadow_aggregates_id_seq', 'USAGE')::text from pg_roles r where r.rolname = '{WORKER_API_ROLE}';\n"
                 "SQL"
             )
             code, stdout, _stderr = run_ssh(args.host, args.user, args.ssh_key, args.known_hosts, command)
@@ -356,6 +360,15 @@ def main() -> int:
                             final_grant_failures.append(f"{stage}:{role_name}:missing_persistence_dml")
                     elif allowed:
                         final_grant_failures.append(f"{stage}:{role_name}:unexpected_final_dml")
+                worker_api_final_grant_failures: list[str] = []
+                for line in stdout.splitlines():
+                    if not line.startswith("worker_api_final_grant="):
+                        continue
+                    payload = line.split("=", 1)[1]
+                    parts = payload.split(":")
+                    values = [part.split("=", 1)[1] for part in parts[1:]]
+                    if not values or any(value == "missing_table" or not parse_postgres_bool(value) for value in values):
+                        worker_api_final_grant_failures.append(parts[0])
                 checks.append(
                     {
                         "name": "ssh_loopback_postgres",
@@ -432,6 +445,13 @@ def main() -> int:
                         "failures": final_grant_failures,
                     }
                 )
+                checks.append(
+                    {
+                        "name": "worker_api_final_shadow_grant",
+                        "status": "pass" if not worker_api_final_grant_failures else "fail",
+                        "failures": worker_api_final_grant_failures,
+                    }
+                )
                 if not listeners:
                     blockers.append("postgres_listener_missing")
                 if non_loopback_listeners:
@@ -454,6 +474,8 @@ def main() -> int:
                     blockers.append("worker_uplift_public_write_denial_invalid")
                 if final_grant_failures:
                     blockers.append("worker_uplift_persistence_final_grant_invalid")
+                if worker_api_final_grant_failures:
+                    blockers.append("worker_api_final_shadow_grant_invalid")
 
     status = "pass" if not blockers else "fail"
     report = {

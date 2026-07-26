@@ -31,6 +31,7 @@ class BackendPostgresMigrationAccessPreflightTests(unittest.TestCase):
         module = load_module()
         self.assertNotIn("nutsnews_worker_uplift_scheduler", module.ROLE_NAMES)
         self.assertNotIn("nutsnews_worker_uplift_scheduler", module.PRIMARY_SHADOW_CONNECT_ROLES)
+        self.assertEqual("nutsnews_worker_api", module.WORKER_API_ROLE)
         self.assertIn(("scheduler", "worker_uplift_scheduler"), module.WORKER_UPLIFT_STAGE_SCHEMAS)
         self.assertIn("worker_uplift_final", module.WORKER_UPLIFT_SCHEMAS)
         self.assertIn("worker_uplift_views", module.WORKER_UPLIFT_SCHEMAS)
@@ -59,12 +60,19 @@ class BackendPostgresMigrationAccessPreflightTests(unittest.TestCase):
         self.assertIn("aclexplode(coalesce(c.relacl", source)
         self.assertIn("not r.rolsuper", source)
         self.assertIn("excluded.role_name = r.rolname", source)
+        self.assertIn("worker_api_final_grant=", source)
+        self.assertIn("worker_api_final_shadow_grant", source)
+        self.assertIn("api_command_receipts", source)
 
     def test_workflow_passes_configured_worker_uplift_stage_roles(self):
         workflow = PREFLIGHT_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_USERNAME", workflow)
         self.assertIn("--worker-uplift-stage-role", workflow)
         self.assertIn("scheduler fetcher canonicalizer enrichment approval translation persistence publication", workflow)
+
+    def test_offline_report_includes_worker_api_final_grant_check(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("\"name\": \"worker_api_final_shadow_grant\"", source)
 
 
 if __name__ == "__main__":

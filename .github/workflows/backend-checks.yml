@@ -244,6 +244,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_worker_uplift_final_shadow_deployment.py
 
+      - name: Validate worker uplift API probe offline mode
+        shell: bash
+        run: python3 scripts/backend_worker_uplift_api_probe.py --offline --enforce
+
       - name: Validate worker uplift RabbitMQ metrics
         shell: bash
         run: python3 scripts/validate_worker_uplift_rabbitmq_metrics.py

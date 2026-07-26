@@ -279,8 +279,8 @@ class WorkerRuntimeManagerTests(unittest.TestCase):
         publication_query = manager.publication_smoke_diagnostic_query("article-001")
         self.assertIn("worker_uplift_persistence.inbox", persistence_query)
         self.assertIn("sanitized_error_code", persistence_query)
-        self.assertIn("worker_uplift_final.api_command_receipts", persistence_query)
         self.assertIn("worker_uplift_final.article_shadow_aggregates", persistence_query)
+        self.assertNotIn("worker_uplift_final.api_command_receipts", persistence_query)
         self.assertIn("worker_uplift_publication.publication_readiness", publication_query)
         self.assertIn("worker_uplift_publication.publication_decisions", publication_query)
 

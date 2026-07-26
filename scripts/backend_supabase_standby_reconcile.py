@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -167,7 +168,68 @@ def run_psql(db_url: str, query: str, *, timeout: int = PSQL_TIMEOUT_SECONDS) ->
     return completed.stdout.decode("utf-8", errors="replace").strip(), None
 
 
+def run_psql_to_file(db_url: str, query: str, output_path: Path, *, timeout: int = PSQL_TIMEOUT_SECONDS) -> str | None:
+    psql = shutil.which("psql", path=DEFAULT_PATH)
+    if not psql:
+        return "psql_not_installed"
+    try:
+        with output_path.open("wb") as output:
+            completed = subprocess.run(
+                [
+                    psql,
+                    "--no-psqlrc",
+                    "--set=ON_ERROR_STOP=1",
+                    "--quiet",
+                    "--command",
+                    query,
+                ],
+                stdout=output,
+                stderr=subprocess.PIPE,
+                env=psql_env(db_url),
+                shell=False,
+                timeout=timeout,
+                check=False,
+            )
+    except (OSError, subprocess.TimeoutExpired):
+        return "copy_export_failed"
+    if completed.returncode != 0:
+        return "copy_export_failed"
+    return None
+
+
+def run_psql_script(db_url: str, script_path: Path, *, timeout: int = PSQL_TIMEOUT_SECONDS) -> str | None:
+    psql = shutil.which("psql", path=DEFAULT_PATH)
+    if not psql:
+        return "psql_not_installed"
+    try:
+        completed = subprocess.run(
+            [
+                psql,
+                "--no-psqlrc",
+                "--set=ON_ERROR_STOP=1",
+                "--quiet",
+                "--file",
+                str(script_path),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=psql_env(db_url),
+            shell=False,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "copy_import_failed"
+    if completed.returncode != 0:
+        return "copy_import_failed"
+    return None
+
+
 def sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def psql_meta_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
@@ -547,46 +609,30 @@ def validate_standby(manifest: dict[str, Any], source_db_url: str, target_db_url
     }
 
 
-def connect_psycopg(db_url: str):
-    import psycopg2
-    import psycopg2.extras
-
-    parsed = parse_db_url(db_url)
-    kwargs = {
-        "host": parsed.host,
-        "port": parsed.port,
-        "dbname": parsed.database,
-        "user": parsed.username,
-        "password": parsed.password,
-        "connect_timeout": 10,
-    }
-    if parsed.sslmode:
-        kwargs["sslmode"] = parsed.sslmode
-    return psycopg2.connect(**kwargs)
+def fetch_columns_for_apply(db_url: str, relation: Relation) -> list[str]:
+    columns_text, columns_error = query_value(db_url, relation_column_metadata_sql(relation))
+    if columns_error:
+        raise ReconcileError("apply_column_metadata_unavailable")
+    if columns_text is None:
+        raise ReconcileError("apply_column_metadata_unavailable")
+    return usable_columns(columns_text)
 
 
-def fetch_columns_for_apply(conn, relation: Relation) -> list[str]:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            select column_name
-            from information_schema.columns
-            where table_schema = %s
-              and table_name = %s
-              and is_generated <> 'ALWAYS'
-            order by ordinal_position
-            """,
-            (relation.schema, relation.name),
-        )
-        return [row[0] for row in cur.fetchall()]
-
-
-def apply_table_backfill(source_conn, target_conn, table: dict[str, Any], *, batch_size: int) -> dict[str, Any]:
-    import psycopg2.extras
-
+def apply_table_backfill(
+    source_db_url: str,
+    target_db_url: str,
+    table: dict[str, Any],
+    *,
+    batch_size: int,
+    workdir: Path,
+) -> dict[str, Any]:
     relation = parse_relation(str(table["name"]))
     primary_key = [str(column) for column in table.get("primary_key", [])]
-    columns = fetch_columns_for_apply(source_conn, relation)
+    for column in primary_key:
+        if not IDENTIFIER_RE.fullmatch(column):
+            raise ReconcileError("invalid_primary_key")
+
+    columns = fetch_columns_for_apply(source_db_url, relation)
     if not columns:
         raise ReconcileError("missing_apply_columns")
     quoted_columns = ", ".join(quote_ident(column) for column in columns)
@@ -598,34 +644,51 @@ def apply_table_backfill(source_conn, target_conn, table: dict[str, Any], *, bat
         )
     else:
         update_sql = "do nothing"
-    insert_sql = f"insert into {relation.sql} ({quoted_columns}) values %s on conflict ({quoted_pk}) {update_sql}"
     select_sql = f"select {quoted_columns} from {relation.sql} order by {quoted_pk}"
+    source_count_text, source_count_error = query_value(source_db_url, count_sql(relation))
+    if source_count_error:
+        raise ReconcileError("apply_source_count_unavailable")
+    source_count = parse_int(source_count_text)
+    if source_count is None:
+        raise ReconcileError("apply_source_count_unavailable")
 
-    rows_seen = 0
-    batches = 0
-    with source_conn.cursor(name=f"standby_backfill_{relation.name}") as source_cur:
-        source_cur.itersize = batch_size
-        source_cur.execute(select_sql)
-        with target_conn.cursor() as target_cur:
-            while True:
-                rows = source_cur.fetchmany(batch_size)
-                if not rows:
-                    break
-                psycopg2.extras.execute_values(target_cur, insert_sql, rows, page_size=batch_size)
-                rows_seen += len(rows)
-                batches += 1
-    target_conn.commit()
+    csv_path = workdir / f"{relation.name}.csv"
+    script_path = workdir / f"{relation.name}.sql"
+    temp_table = quote_ident(f"standby_backfill_{relation.name}")
+    copy_query = f"copy ({select_sql}) to stdout with (format csv)"
+    export_error = run_psql_to_file(source_db_url, copy_query, csv_path)
+    if export_error:
+        raise ReconcileError(export_error)
+
+    target_insert_sql = "\n".join(
+        [
+            "begin;",
+            f"create temp table {temp_table} (like {relation.sql} including defaults) on commit drop;",
+            f"\\copy {temp_table} ({quoted_columns}) from {psql_meta_literal(str(csv_path))} with (format csv)",
+            f"insert into {relation.sql} ({quoted_columns})",
+            f"select {quoted_columns}",
+            f"from {temp_table}",
+            f"on conflict ({quoted_pk}) {update_sql};",
+            "commit;",
+            "",
+        ]
+    )
+    script_path.write_text(target_insert_sql, encoding="utf-8")
+    import_error = run_psql_script(target_db_url, script_path)
+    if import_error:
+        raise ReconcileError(import_error)
+
     return {
         "table": relation.id,
         "status": "applied",
-        "rows_seen": rows_seen,
-        "batches": batches,
+        "rows_seen": source_count,
+        "batches": max(1, (source_count + batch_size - 1) // batch_size) if source_count else 0,
         "column_count": len(columns),
         "sensitivity": "counts_only",
     }
 
 
-def apply_sequence_safety(source_db_url: str, target_conn, item: dict[str, Any]) -> dict[str, Any]:
+def apply_sequence_safety(source_db_url: str, target_db_url: str, item: dict[str, Any]) -> dict[str, Any]:
     sequence = parse_relation(str(item["name"]))
     table = parse_relation(str(item["table"]))
     column = str(item["column"])
@@ -638,12 +701,14 @@ def apply_sequence_safety(source_db_url: str, target_conn, item: dict[str, Any])
     source_max = parse_int(source_max_text)
     if not isinstance(source_last, int) or source_max is None:
         raise ReconcileError("invalid_source_sequence_metadata")
-    with target_conn.cursor() as cur:
-        cur.execute(f"select coalesce(max({quote_ident(column)}), 0)::bigint from {table.sql}")
-        target_max = int(cur.fetchone()[0])
-        next_value = max(source_last, source_max, target_max) + 1
-        cur.execute("select setval(%s::regclass, %s, false)", (sequence.id, next_value))
-    target_conn.commit()
+    target_max_text, target_max_error = query_value(target_db_url, f"select coalesce(max({quote_ident(column)}), 0)::bigint from {table.sql}")
+    target_max = parse_int(target_max_text)
+    if target_max_error or target_max is None:
+        raise ReconcileError("target_sequence_metadata_unavailable")
+    next_value = max(source_last, source_max, target_max) + 1
+    _, setval_error = query_value(target_db_url, f"select setval({sql_literal(sequence.id)}::regclass, {next_value}, false)")
+    if setval_error:
+        raise ReconcileError("target_sequence_setval_failed")
     return {
         "sequence": sequence.id,
         "table": table.id,
@@ -655,23 +720,19 @@ def apply_sequence_safety(source_db_url: str, target_conn, item: dict[str, Any])
 
 
 def apply_backfill(manifest: dict[str, Any], source_db_url: str, target_db_url: str, *, batch_size: int) -> dict[str, Any]:
-    source_conn = connect_psycopg(source_db_url)
-    target_conn = connect_psycopg(target_db_url)
-    try:
+    with tempfile.TemporaryDirectory(prefix="nutsnews-standby-backfill-") as tmpdir:
+        workdir = Path(tmpdir)
         table_by_name = {table["name"]: table for table in manifest.get("tables", [])}
         ordered_names = manifest.get("backfill", {}).get("table_order", [])
         table_results = [
-            apply_table_backfill(source_conn, target_conn, table_by_name[name], batch_size=batch_size)
+            apply_table_backfill(source_db_url, target_db_url, table_by_name[name], batch_size=batch_size, workdir=workdir)
             for name in ordered_names
             if name in table_by_name
         ]
         sequence_results = [
-            apply_sequence_safety(source_db_url, target_conn, sequence)
+            apply_sequence_safety(source_db_url, target_db_url, sequence)
             for sequence in manifest.get("sequences", [])
         ]
-    finally:
-        source_conn.close()
-        target_conn.close()
     return {
         "status": "applied",
         "table_count": len(table_results),

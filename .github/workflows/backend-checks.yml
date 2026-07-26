@@ -216,6 +216,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backend_supabase_standby_sequence_gate.py
 
+      - name: Validate Supabase standby writer pause gate guardrails
+        shell: bash
+        run: python3 scripts/validate_backend_supabase_standby_writer_pause_gate.py
+
       - name: Validate backend-to-Supabase sync relay offline mode
         shell: bash
         run: python3 scripts/backend_supabase_sync_relay.py --offline --enforce
@@ -243,6 +247,18 @@ jobs:
       - name: Run Supabase standby sequence gate tests
         shell: bash
         run: python3 -m unittest tests.test_backend_supabase_standby_sequence_gate
+
+      - name: Run Supabase standby writer pause gate tests
+        shell: bash
+        run: python3 -m unittest tests.test_backend_supabase_standby_writer_pause_gate
+
+      - name: Run backend writer pause manager tests
+        shell: bash
+        run: python3 -m unittest tests.test_backend_writer_pause_manager
+
+      - name: Run backend PostgreSQL write position tests
+        shell: bash
+        run: python3 -m unittest tests.test_backend_postgres_write_position
 
       - name: Report migration drift gate status
         shell: bash

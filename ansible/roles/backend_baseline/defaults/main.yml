@@ -166,6 +166,12 @@ backend_worker_api_db_user: "{{ backend_postgres_worker_api_user }}"
 backend_worker_api_db_password: "{{ backend_postgres_worker_api_password }}"
 backend_worker_api_writes_enabled: false
 backend_worker_api_max_limit: 10000
+backend_writer_pause_inventory_source_path: "{{ playbook_dir }}/../../docs/backend-supabase-writer-pause-gate.json"
+backend_writer_pause_config_dir: /etc/nutsnews-writer-pause
+backend_writer_pause_state_dir: /var/lib/nutsnews/writer-pause
+backend_writer_pause_inventory_path: "{{ backend_writer_pause_config_dir }}/inventory.json"
+backend_writer_pause_manager_path: /usr/local/sbin/nutsnews-writer-pause
+backend_writer_pause_worker_api_dropin_dir: /etc/systemd/system/nutsnews-worker-db-api.service.d
 backend_supabase_sync_relay_enabled: false
 backend_supabase_sync_relay_user: nutsnews-standby-relay
 backend_supabase_sync_relay_group: nutsnews-standby-relay

@@ -200,6 +200,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backend_supabase_sync_relay_health.py
 
+      - name: Validate Supabase standby lag gate guardrails
+        shell: bash
+        run: python3 scripts/validate_backend_supabase_standby_lag_gate.py
+
       - name: Validate backend-to-Supabase sync relay offline mode
         shell: bash
         run: python3 scripts/backend_supabase_sync_relay.py --offline --enforce
@@ -211,6 +215,10 @@ jobs:
       - name: Run backend-to-Supabase sync relay smoke tests
         shell: bash
         run: python3 -m unittest tests.test_backend_supabase_sync_relay_smoke
+
+      - name: Run Supabase standby lag gate tests
+        shell: bash
+        run: python3 -m unittest tests.test_backend_supabase_standby_lag_gate
 
       - name: Report migration drift gate status
         shell: bash

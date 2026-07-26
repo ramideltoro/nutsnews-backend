@@ -342,6 +342,7 @@ def schema_fingerprint_sql(table_names: list[str]) -> str:
       join pg_class c on c.oid = con.conrelid
       join pg_namespace n on n.oid = c.relnamespace
       where c.oid in (select oid from selected_tables)
+        and con.contype <> 'n'
     ),
     indexes as (
       select jsonb_agg(jsonb_build_object(
@@ -459,8 +460,7 @@ def migration_contract_sql() -> str:
     select coalesce(jsonb_agg(jsonb_build_object(
       'legacy_schema_version', legacy_schema_version,
       'migration_head', migration_head,
-      'expected_schema_fingerprint', expected_schema_fingerprint,
-      'actual_schema_fingerprint', actual_schema_fingerprint
+      'expected_schema_fingerprint', expected_schema_fingerprint
     ) order by migration_head), '[]'::jsonb)::text
     from public.nutsnews_migration_schema_contract()
     """
@@ -487,7 +487,6 @@ def migration_contract_by_key(contract_text: str) -> dict[str, dict[str, Any]]:
             raise ReconcileError("invalid_migration_contract_metadata")
         keyed[key] = {
             "expected_schema_fingerprint": item.get("expected_schema_fingerprint"),
-            "actual_schema_fingerprint": item.get("actual_schema_fingerprint"),
         }
     return keyed
 

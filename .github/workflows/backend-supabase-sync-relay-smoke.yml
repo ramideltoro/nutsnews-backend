@@ -1,0 +1,220 @@
+name: Backend Supabase Sync Relay Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type prove-backend-supabase-sync-relay.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-supabase-sync-relay-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Prove backend-to-Supabase relay catch-up
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          GITHUB_REF_NAME_SAFE: ${{ github.ref }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF_NAME_SAFE" != "refs/heads/main" ]]; then
+            echo "This protected sync relay smoke workflow must run from main." >&2
+            exit 1
+          fi
+
+          if [[ "$CONFIRMATION" != "prove-backend-supabase-sync-relay" ]]; then
+            echo "Smoke mode requires confirmation prove-backend-supabase-sync-relay." >&2
+            exit 1
+          fi
+
+      - name: Validate smoke implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/backend_supabase_sync_relay_smoke.py
+          python3 -m unittest tests.test_backend_supabase_sync_relay_smoke
+
+      - name: Validate protected material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in \
+            NUTSNEWS_BACKEND_SSH_PRIVATE_KEY \
+            NUTSNEWS_BACKEND_KNOWN_HOSTS \
+            NUTSNEWS_PRODUCTION_SUPABASE_DB_URL
+          do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing required production-backend secret: $name" >&2
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Prepare backend SSH
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+        run: |
+          set -euo pipefail
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F "$NUTSNEWS_BACKEND_HOST" -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Run relay catch-up smoke from backend host
+        shell: bash
+        env:
+          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
+          NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE || vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE || 'nutsnews_primary_shadow' }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          SMOKE_NAMESPACE: nutsnews-test-relay-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL"
+
+          if [[ ! "$NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            echo "Unsafe source database name." >&2
+            exit 1
+          fi
+
+          if [[ ! "$SMOKE_NAMESPACE" =~ ^nutsnews-test-[a-z0-9][a-z0-9-]{5,96}$ ]]; then
+            echo "Unsafe smoke namespace." >&2
+            exit 1
+          fi
+
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh_base=(
+            ssh
+            -i "$HOME/.ssh/nutsnews_backend"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+            -o ClearAllForwardings=yes
+            -o RequestTTY=no
+            -o ConnectTimeout=10
+            -o ConnectionAttempts=1
+            -o ServerAliveInterval=10
+            -o ServerAliveCountMax=2
+          )
+          scp_base=(
+            scp
+            -i "$HOME/.ssh/nutsnews_backend"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+          )
+
+          remote_dir=""
+          target_file=""
+          # shellcheck disable=SC2329
+          cleanup() {
+            rm -f "$target_file"
+            if [[ -n "$remote_dir" ]]; then
+              "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "rm -rf '$remote_dir'" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
+
+          remote_dir="$("${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" 'mktemp -d')"
+          if [[ "$remote_dir" != /tmp/* && "$remote_dir" != /var/tmp/* ]]; then
+            echo "Refusing unexpected remote temp dir." >&2
+            exit 1
+          fi
+          "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "install -m 0700 -d '$remote_dir/scripts'"
+          "${scp_base[@]}" scripts/backend_supabase_sync_relay_smoke.py "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/scripts/"
+
+          target_file="$RUNNER_TEMP/production-supabase-db-url"
+          printf '%s' "$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL" > "$target_file"
+          chmod 0600 "$target_file"
+          "${scp_base[@]}" "$target_file" "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/target-db-url"
+          "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "chmod 0600 '$remote_dir/target-db-url' '$remote_dir/scripts/backend_supabase_sync_relay_smoke.py'"
+
+          set +e
+          "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "set -euo pipefail
+          cd '$remote_dir'
+          export NUTSNEWS_PRODUCTION_SUPABASE_DB_URL=\"\$(cat target-db-url)\"
+          python3 scripts/backend_supabase_sync_relay_smoke.py \
+            --source-db-name '$NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE' \
+            --namespace '$SMOKE_NAMESPACE' \
+            --timeout-seconds 600 \
+            --poll-interval-seconds 10 \
+            --output backend-supabase-sync-relay-smoke.json \
+            --enforce"
+          rc=$?
+          set -e
+
+          if "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "test -f '$remote_dir/backend-supabase-sync-relay-smoke.json'"; then
+            "${scp_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/backend-supabase-sync-relay-smoke.json" \
+              "$RUNNER_TEMP/backend-supabase-sync-relay-smoke.json"
+          fi
+          exit "$rc"
+
+      - name: Summarize safe metadata
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/backend-supabase-sync-relay-smoke.json"
+          {
+            echo "## Backend Supabase sync relay smoke"
+            echo
+            if [[ -f "$report" ]]; then
+              python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads(Path(os.environ["RUNNER_TEMP"], "backend-supabase-sync-relay-smoke.json").read_text(encoding="utf-8"))
+          operations = report.get("operations", {})
+          print(f"- Status: {report.get('status')}")
+          print(f"- Insert catch-up: {operations.get('insert', {}).get('status', 'missing')}")
+          print(f"- Update catch-up: {operations.get('update', {}).get('status', 'missing')}")
+          print(f"- Delete catch-up: {operations.get('delete', {}).get('status', 'missing')}")
+          print(f"- Backend PostgreSQL public 5432 allowed: {report.get('backend_postgres_public_5432_allowed')}")
+          print(f"- Safe metadata only: {report.get('safe_metadata_only')}")
+          PY
+            else
+              echo "- Status: missing-report"
+            fi
+            echo "- Database URLs, passwords, Supabase host/project metadata, PostgreSQL errors, and row values are not printed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload relay smoke report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-supabase-sync-relay-smoke
+          path: ${{ runner.temp }}/backend-supabase-sync-relay-smoke.json
+          if-no-files-found: ignore

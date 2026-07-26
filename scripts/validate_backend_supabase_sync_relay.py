@@ -14,6 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = ROOT / "docs" / "backend-supabase-sync-relay.json"
 SCRIPT_PATH = ROOT / "scripts" / "backend_supabase_sync_relay.py"
 TEST_PATH = ROOT / "tests" / "test_backend_supabase_sync_relay.py"
+SMOKE_SCRIPT_PATH = ROOT / "scripts" / "backend_supabase_sync_relay_smoke.py"
+SMOKE_TEST_PATH = ROOT / "tests" / "test_backend_supabase_sync_relay_smoke.py"
+SMOKE_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "backend-supabase-sync-relay-smoke.yml"
 CHECKS_PATH = ROOT / ".github" / "workflows" / "backend-checks.yml"
 APPLY_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "protected-backend-ansible-apply.yml"
 DEFAULTS_PATH = ROOT / "ansible" / "roles" / "backend_baseline" / "defaults" / "main.yml"
@@ -94,6 +97,9 @@ def main() -> int:
     contract = load_json(CONTRACT_PATH)
     script = SCRIPT_PATH.read_text(encoding="utf-8") if SCRIPT_PATH.exists() else ""
     tests = TEST_PATH.read_text(encoding="utf-8") if TEST_PATH.exists() else ""
+    smoke_script = SMOKE_SCRIPT_PATH.read_text(encoding="utf-8") if SMOKE_SCRIPT_PATH.exists() else ""
+    smoke_tests = SMOKE_TEST_PATH.read_text(encoding="utf-8") if SMOKE_TEST_PATH.exists() else ""
+    smoke_workflow = SMOKE_WORKFLOW_PATH.read_text(encoding="utf-8") if SMOKE_WORKFLOW_PATH.exists() else ""
     checks = CHECKS_PATH.read_text(encoding="utf-8") if CHECKS_PATH.exists() else ""
     apply_workflow = APPLY_WORKFLOW_PATH.read_text(encoding="utf-8") if APPLY_WORKFLOW_PATH.exists() else ""
     defaults = DEFAULTS_PATH.read_text(encoding="utf-8") if DEFAULTS_PATH.exists() else ""
@@ -177,6 +183,9 @@ def main() -> int:
     require(validation.get("unit_tests") == "python3 -m unittest tests.test_backend_supabase_sync_relay", "unit tests command is incorrect", errors)
     require_path("scripts/backend_supabase_sync_relay.py", "validation.offline_validator", errors)
     require_path("tests/test_backend_supabase_sync_relay.py", "validation.unit_tests", errors)
+    require_path("scripts/backend_supabase_sync_relay_smoke.py", "validation.smoke_script", errors)
+    require_path("tests/test_backend_supabase_sync_relay_smoke.py", "validation.smoke_unit_tests", errors)
+    require_path(".github/workflows/backend-supabase-sync-relay-smoke.yml", "validation.smoke_workflow", errors)
 
     for token in (
         "relay_preflight",
@@ -227,9 +236,53 @@ def main() -> int:
     ):
         require(token in apply_workflow, f"protected apply workflow missing token: {token}", errors)
     for token in (
+        "prove_relay",
+        "staging_fixture_runs",
+        "staging_fixture_users",
+        "insert_catchup",
+        "update_catchup",
+        "delete_catchup",
+        "backend_postgres_public_5432_allowed",
+        "safe_metadata_only",
+        "target_database_url_is_pooler",
+        "sudo",
+        "-u",
+        "postgres",
+    ):
+        require(token in smoke_script, f"smoke script missing token: {token}", errors)
+    for token in (
+        "test_target_query_does_not_place_database_url_in_argv",
+        "test_proves_insert_update_delete_catchup_with_safe_metadata",
+        "test_main_output_omits_database_url_when_blocked",
+    ):
+        require(token in smoke_tests, f"smoke tests missing token: {token}", errors)
+    for token in (
+        "workflow_dispatch:",
+        "prove-backend-supabase-sync-relay",
+        "production-backend",
+        "runs-on: ubuntu-latest",
+        "permissions:\n  contents: read",
+        "NUTSNEWS_BACKEND_SSH_PRIVATE_KEY",
+        "NUTSNEWS_BACKEND_KNOWN_HOSTS",
+        "NUTSNEWS_PRODUCTION_SUPABASE_DB_URL",
+        "StrictHostKeyChecking=yes",
+        "ClearAllForwardings=yes",
+        "RequestTTY=no",
+        "backend_supabase_sync_relay_smoke.py",
+        "backend-supabase-sync-relay-smoke",
+    ):
+        require(token in smoke_workflow, f"smoke workflow missing token: {token}", errors)
+    for forbidden in (
+        "ssh-keyscan",
+        "actions/checkout@v",
+        "contents: write",
+    ):
+        require(forbidden not in smoke_workflow, f"smoke workflow contains forbidden token: {forbidden}", errors)
+    for token in (
         "validate_backend_supabase_sync_relay.py",
         "backend_supabase_sync_relay.py --offline --enforce",
         "python3 -m unittest tests.test_backend_supabase_sync_relay",
+        "python3 -m unittest tests.test_backend_supabase_sync_relay_smoke",
     ):
         require(token in checks, f"backend checks missing token: {token}", errors)
 

@@ -7,12 +7,12 @@ machine-readable promotion gate for the existing production Supabase standby.
 
 The gate:
 
-- checks out the candidate `ramideltoro/nutsnews` application revision and
-  reads `supabase/standby_manifest.json`;
+- binds the result to the backend main revision being evaluated;
+- reads the #497 manifest fingerprint and required object sets from the backend
+  sync relay contract;
 - reads the safe relay status JSON already collected by `Backend Health Report`;
-- verifies the candidate manifest fingerprint, required table set, required
-  sequence set, and no-new-Supabase safety flags against the backend sync
-  contract;
+- verifies any optional explicit candidate standby manifest against the backend
+  sync contract when one is supplied locally;
 - requires matching source/target schema fingerprints and source/target
   migration contract fingerprints;
 - verifies every required table has passing manifest replica identity metadata
@@ -58,15 +58,15 @@ PostgreSQL errors.
 
 ## Manual Run
 
-Use the full app commit SHA that would be promoted:
+Use the full backend main commit SHA that would be promoted:
 
 ```bash
-app_revision="$(gh api repos/ramideltoro/nutsnews/commits/main --jq .sha)"
+backend_revision="$(gh api repos/ramideltoro/nutsnews-backend/commits/main --jq .sha)"
 gh workflow run backend-supabase-standby-schema-gate.yml \
   --repo ramideltoro/nutsnews-backend \
   --ref main \
   -f failover_attempt_id=failover-$(date -u +%Y%m%dT%H%M%SZ) \
-  -f candidate_application_revision="$app_revision" \
+  -f candidate_application_revision="$backend_revision" \
   -f confirmation=evaluate-standby-schema-gate \
   -f enforce=false
 ```
@@ -84,7 +84,7 @@ python3 -m unittest tests.test_backend_supabase_standby_schema_gate
 Required fixture coverage:
 
 - exact compatible schema passes;
-- candidate manifest fingerprint or table/sequence set mismatch fails;
+- optional candidate manifest fingerprint or table/sequence set mismatch fails;
 - missing function or view declarations fail closed until explicit validators
   exist;
 - schema fingerprint and migration-contract mismatch fail;
@@ -94,8 +94,8 @@ Required fixture coverage:
 - missing sequence binding fails;
 - sequence position-only failure remains scoped to #525 and does not block this
   schema gate;
-- stale, malformed, mismatched-target, unavailable-telemetry,
-  wrong-candidate-revision, and enforce-mode failures fail closed.
+- stale, malformed, mismatched-target, unavailable-telemetry, wrong-revision, and
+  enforce-mode failures fail closed.
 
 ## Acceptance Evidence
 

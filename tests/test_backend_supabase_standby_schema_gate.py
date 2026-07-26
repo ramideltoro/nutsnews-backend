@@ -20,6 +20,7 @@ def contract() -> dict:
     return {
         "contract_id": "backend-supabase-sync-relay",
         "version": 1,
+        "manifest_schema_fingerprint": MANIFEST_FINGERPRINT,
         "source_manifest": {"schema_fingerprint": MANIFEST_FINGERPRINT},
         "source": {"label": "backend_postgres_primary"},
         "target": {
@@ -81,6 +82,7 @@ def schema_check(**overrides) -> dict:
         "target_schema_sha256": "schema-digest",
         "source_migration_contract_sha256": "contract-digest",
         "target_migration_contract_sha256": "contract-digest",
+        "manifest_schema_fingerprint": MANIFEST_FINGERPRINT,
         "source_schema_bytes": 1000,
         "target_schema_bytes": 1000,
         "sensitivity": "metadata_hash_only",
@@ -187,6 +189,7 @@ def run_gate(
     contract_data: dict | None = None,
     candidate_data: dict | str | None = None,
     *extra_args: str,
+    include_candidate_manifest: bool = True,
 ):
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
@@ -196,38 +199,37 @@ def run_gate(
         output_path = tmp / "gate.json"
         summary_path = tmp / "summary.md"
         contract_path.write_text(json.dumps(contract_data or contract()), encoding="utf-8")
-        if isinstance(candidate_data, str):
-            manifest_path.write_text(candidate_data, encoding="utf-8")
-        else:
-            manifest_path.write_text(json.dumps(candidate_data or candidate_manifest()), encoding="utf-8")
+        if include_candidate_manifest:
+            if isinstance(candidate_data, str):
+                manifest_path.write_text(candidate_data, encoding="utf-8")
+            else:
+                manifest_path.write_text(json.dumps(candidate_data or candidate_manifest()), encoding="utf-8")
         if isinstance(report, str):
             health_path.write_text(report, encoding="utf-8")
         else:
             health_path.write_text(json.dumps(report), encoding="utf-8")
         with redirect_stdout(StringIO()):
-            exit_code = gate.main_args(
-                [
-                    "--health-report",
-                    str(health_path),
-                    "--contract",
-                    str(contract_path),
-                    "--candidate-standby-manifest",
-                    str(manifest_path),
-                    "--candidate-application-revision",
-                    REVISION,
-                    "--repository-revision",
-                    "b" * 40,
-                    "--failover-attempt-id",
-                    "failover-20260726T204000Z",
-                    "--now-utc",
-                    NOW,
-                    "--output",
-                    str(output_path),
-                    "--summary",
-                    str(summary_path),
-                    *extra_args,
-                ]
-            )
+            args = [
+                "--health-report",
+                str(health_path),
+                "--contract",
+                str(contract_path),
+                "--candidate-application-revision",
+                REVISION,
+                "--repository-revision",
+                "b" * 40,
+                "--failover-attempt-id",
+                "failover-20260726T204000Z",
+                "--now-utc",
+                NOW,
+                "--output",
+                str(output_path),
+                "--summary",
+                str(summary_path),
+            ]
+            if include_candidate_manifest:
+                args.extend(["--candidate-standby-manifest", str(manifest_path)])
+            exit_code = gate.main_args([*args, *extra_args])
         return exit_code, json.loads(output_path.read_text(encoding="utf-8")), summary_path.read_text(encoding="utf-8")
 
 
@@ -244,6 +246,13 @@ class BackendSupabaseStandbySchemaGateTests(unittest.TestCase):
         self.assertEqual(result["failed_sequence_binding_count"], 0)
         self.assertEqual(result["candidate_manifest"]["schema_fingerprint"], MANIFEST_FINGERPRINT)
         self.assertEqual(result["blockers"], [])
+
+    def test_exact_compatible_schema_passes_without_candidate_manifest_path(self):
+        exit_code, result, _ = run_gate(health_report(), include_candidate_manifest=False)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["candidate_manifest"]["source"], "relay_contract")
+        self.assertEqual(result["candidate_manifest"]["schema_fingerprint"], MANIFEST_FINGERPRINT)
 
     def test_candidate_manifest_fingerprint_mismatch_fails_wrong_revision_evidence(self):
         candidate = candidate_manifest(schemaFingerprint="e" * 64)
@@ -288,6 +297,32 @@ class BackendSupabaseStandbySchemaGateTests(unittest.TestCase):
         _, result, _ = run_gate(health_report(relay=relay_report(preflight_checks=checks)))
         self.assertEqual(result["status"], "FAIL")
         self.assertIn("migration_contract_fingerprint_mismatch", result["schema"]["blockers"])
+
+    def test_manifest_schema_fingerprint_mismatch_fails(self):
+        checks = [
+            schema_check(status="fail", manifest_schema_fingerprint="e" * 64),
+            manifest_identity("public.articles"),
+            live_identity("public.articles"),
+            manifest_identity("public.rss_feeds"),
+            live_identity("public.rss_feeds"),
+        ]
+        _, result, _ = run_gate(health_report(relay=relay_report(preflight_checks=checks)))
+        self.assertEqual(result["status"], "FAIL")
+        self.assertIn("manifest_schema_fingerprint_mismatch", result["schema"]["blockers"])
+
+    def test_missing_manifest_schema_fingerprint_fails(self):
+        check = schema_check()
+        del check["manifest_schema_fingerprint"]
+        checks = [
+            check,
+            manifest_identity("public.articles"),
+            live_identity("public.articles"),
+            manifest_identity("public.rss_feeds"),
+            live_identity("public.rss_feeds"),
+        ]
+        _, result, _ = run_gate(health_report(relay=relay_report(preflight_checks=checks)))
+        self.assertEqual(result["status"], "FAIL")
+        self.assertIn("manifest_schema_fingerprint_missing", result["schema"]["blockers"])
 
     def test_schema_diff_is_bounded_safe_metadata(self):
         diff = {

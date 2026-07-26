@@ -161,9 +161,34 @@ def required_sequences(contract: dict[str, Any]) -> dict[str, dict[str, str]]:
     return dict(sorted(by_name.items()))
 
 
+def contract_manifest_summary(contract: dict[str, Any]) -> dict[str, Any]:
+    fingerprint = contract.get("manifest_schema_fingerprint") or contract.get("source_manifest", {}).get("schema_fingerprint")
+    if not isinstance(fingerprint, str):
+        raise ValueError("manifest_schema_fingerprint_missing")
+    tables = required_tables(contract)
+    sequences = sorted(required_sequences(contract))
+    functions = extract_named_items(contract.get("functions"))
+    views = extract_named_items(contract.get("views"))
+    return {
+        "source": "relay_contract",
+        "manifest_version": contract.get("version") if isinstance(contract.get("version"), int) else None,
+        "schema_fingerprint": fingerprint,
+        "migration_head": None,
+        "migration_source_fingerprint": None,
+        "table_count": len(tables),
+        "table_set_fingerprint": digest_object(tables),
+        "sequence_count": len(sequences),
+        "sequence_set_fingerprint": digest_object(sequences),
+        "function_count": len(functions),
+        "view_count": len(views),
+        "blockers": [],
+        "safe_metadata_only": True,
+    }
+
+
 def candidate_manifest_summary(path: str, contract: dict[str, Any]) -> dict[str, Any]:
     if not path:
-        raise ValueError("candidate_manifest_unavailable")
+        return contract_manifest_summary(contract)
     manifest = load_json(Path(path), missing="candidate_manifest_unavailable", malformed="candidate_manifest_malformed")
     fingerprint = manifest.get("schemaFingerprint") or manifest.get("schema_fingerprint")
     if not isinstance(fingerprint, str) or not re.fullmatch(r"[a-f0-9]{64}", fingerprint):
@@ -179,8 +204,9 @@ def candidate_manifest_summary(path: str, contract: dict[str, Any]) -> dict[str,
 
     expected_tables = required_tables(contract)
     expected_sequences = sorted(required_sequences(contract))
+    expected_fingerprint = contract.get("manifest_schema_fingerprint") or contract.get("source_manifest", {}).get("schema_fingerprint")
     blockers: list[str] = []
-    if fingerprint != contract.get("source_manifest", {}).get("schema_fingerprint"):
+    if fingerprint != expected_fingerprint:
         blockers.append("candidate_manifest_fingerprint_mismatch")
     if candidate_tables != expected_tables:
         blockers.append("candidate_manifest_table_set_mismatch")
@@ -209,6 +235,8 @@ def candidate_manifest_summary(path: str, contract: dict[str, Any]) -> dict[str,
 
     source = manifest.get("source", {}) if isinstance(manifest.get("source"), dict) else {}
     return {
+        "source": "candidate_standby_manifest",
+        "manifest_version": manifest.get("manifestVersion") if isinstance(manifest.get("manifestVersion"), int) else None,
         "schema_fingerprint": fingerprint,
         "migration_head": source.get("migrationHead") if isinstance(source.get("migrationHead"), str) else None,
         "migration_source_fingerprint": source.get("migrationSourceFingerprint")
@@ -273,7 +301,7 @@ def bounded_diff(diff: Any) -> dict[str, Any] | None:
     return bounded or None
 
 
-def evaluate_schema_check(check: dict[str, Any] | None) -> dict[str, Any]:
+def evaluate_schema_check(check: dict[str, Any] | None, expected_manifest_fingerprint: str | None) -> dict[str, Any]:
     if check is None:
         return {
             "status": "FAIL",
@@ -286,6 +314,7 @@ def evaluate_schema_check(check: dict[str, Any] | None) -> dict[str, Any]:
     target_schema = check.get("target_schema_sha256")
     source_contract = check.get("source_migration_contract_sha256")
     target_contract = check.get("target_migration_contract_sha256")
+    manifest_schema = check.get("manifest_schema_fingerprint")
 
     if not isinstance(source_schema, str) or not isinstance(target_schema, str):
         blockers.append("schema_fingerprint_missing")
@@ -295,6 +324,10 @@ def evaluate_schema_check(check: dict[str, Any] | None) -> dict[str, Any]:
         blockers.append("migration_contract_fingerprint_missing")
     elif source_contract != target_contract:
         blockers.append("migration_contract_fingerprint_mismatch")
+    if not isinstance(manifest_schema, str):
+        blockers.append("manifest_schema_fingerprint_missing")
+    elif expected_manifest_fingerprint and manifest_schema != expected_manifest_fingerprint:
+        blockers.append("manifest_schema_fingerprint_mismatch")
 
     result = {
         "status": "PASS" if not blockers else "FAIL",
@@ -303,6 +336,7 @@ def evaluate_schema_check(check: dict[str, Any] | None) -> dict[str, Any]:
         "target_schema_sha256": target_schema if isinstance(target_schema, str) else None,
         "source_migration_contract_sha256": source_contract if isinstance(source_contract, str) else None,
         "target_migration_contract_sha256": target_contract if isinstance(target_contract, str) else None,
+        "manifest_schema_fingerprint": manifest_schema if isinstance(manifest_schema, str) else None,
         "source_schema_bytes": check.get("source_schema_bytes") if isinstance(check.get("source_schema_bytes"), int) else None,
         "target_schema_bytes": check.get("target_schema_bytes") if isinstance(check.get("target_schema_bytes"), int) else None,
         "safe_metadata_only": True,
@@ -425,7 +459,7 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     expected_target_fingerprint = safe_fingerprint("target", expected_target_label, contract_id, contract_version)
     table_names = required_tables(contract)
     sequence_contract = required_sequences(contract)
-    manifest_fingerprint = contract.get("source_manifest", {}).get("schema_fingerprint")
+    manifest_fingerprint = contract.get("manifest_schema_fingerprint") or contract.get("source_manifest", {}).get("schema_fingerprint")
     if not isinstance(manifest_fingerprint, str):
         manifest_fingerprint = None
 
@@ -514,7 +548,7 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
             post_sync_checks = {}
             blockers.append(str(exc))
 
-        schema_result = evaluate_schema_check(preflight_checks.get("schema-fingerprint"))
+        schema_result = evaluate_schema_check(preflight_checks.get("schema-fingerprint"), manifest_fingerprint)
         result["schema"] = schema_result
         if schema_result["status"] == "FAIL":
             blockers.append("schema_compatibility_failed")
@@ -584,7 +618,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--contract", default=str(DEFAULT_CONTRACT))
     parser.add_argument("--failover-attempt-id", required=True)
     parser.add_argument("--candidate-application-revision", required=True)
-    parser.add_argument("--candidate-standby-manifest", required=True)
+    parser.add_argument("--candidate-standby-manifest", default="")
     parser.add_argument("--expected-application-revision", default="")
     parser.add_argument("--repository-revision", default="")
     parser.add_argument("--output", default="")

@@ -1,0 +1,75 @@
+name: Backend Worker-Uplift API Probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Probe scope to execute.
+        required: true
+        default: final-shadow
+        type: choice
+        options:
+          - final-shadow
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-worker-uplift-api-probe
+  cancel-in-progress: false
+
+jobs:
+  worker-uplift-api-probe:
+    name: Worker-uplift API probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            final-shadow) ;;
+            *) echo "Unsupported mode: $MODE" >&2; exit 1 ;;
+          esac
+
+      - name: Run final-shadow scoped API probe
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_WORKER_API_BASE_URL: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_BASE_URL || 'https://backend.nutsnews.com/api/worker/db' }}
+          NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 scripts/backend_worker_uplift_api_probe.py \
+            --enforce \
+            --output "$RUNNER_TEMP/backend-worker-uplift-api-probe.json"
+
+      - name: Summarize safe metadata
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Backend worker-uplift API probe"
+            echo
+            echo "- Mode: \`${{ inputs.mode }}\`"
+            echo "- Report artifact contains safe metadata only."
+            echo "- The live probe uses the persistence-scoped worker-uplift token and writes only shadow final state."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload worker-uplift API probe report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-worker-uplift-api-probe
+          path: ${{ runner.temp }}/backend-worker-uplift-api-probe.json
+          if-no-files-found: warn

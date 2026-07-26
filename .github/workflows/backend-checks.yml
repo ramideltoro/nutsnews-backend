@@ -204,6 +204,10 @@ jobs:
         shell: bash
         run: python3 -m unittest tests.test_backend_supabase_sync_relay
 
+      - name: Run backend-to-Supabase sync relay smoke tests
+        shell: bash
+        run: python3 -m unittest tests.test_backend_supabase_sync_relay_smoke
+
       - name: Report migration drift gate status
         shell: bash
         run: python3 scripts/check_supabase_migration_drift.py

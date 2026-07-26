@@ -60,9 +60,42 @@ For #499, record:
 - PR and merge SHA.
 - Local validator/test output.
 - Protected backend apply run URL for check and apply mode when enabled.
+- Protected `Backend Supabase Sync Relay Smoke` run URL showing synthetic
+  fixture insert, update, and delete catch-up.
 - Relay `last-run.json` summary showing `status=pass`, `safe_metadata_only=true`,
   `backend_postgresql_remains_primary=true`, and no app/worker Supabase write
   credential injection.
+
+## Protected Catch-Up Smoke
+
+After the relay is installed and the timer is active, run:
+
+```bash
+gh workflow run backend-supabase-sync-relay-smoke.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f confirmation=prove-backend-supabase-sync-relay
+```
+
+The smoke workflow enters the protected `production-backend` Environment,
+copies the fixed smoke script to a remote temp directory on the backend host,
+and uses only synthetic rows in:
+
+```text
+public.staging_fixture_runs
+public.staging_fixture_users
+```
+
+It proves:
+
+- insert catch-up from backend PostgreSQL to Supabase;
+- update catch-up from backend PostgreSQL to Supabase;
+- delete catch-up from backend PostgreSQL to Supabase;
+- backend PostgreSQL remains private on loopback;
+- app/worker Supabase writes remain disabled before failover.
+
+The smoke report is safe metadata only. It must not print database URLs,
+passwords, Supabase host/project metadata, PostgreSQL errors, or row values.
 
 This relay does not approve failover. Later issues still gate failover on lag,
 parity, schema, sequence safety, writer pause, and split-brain checks.

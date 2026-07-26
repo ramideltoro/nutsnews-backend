@@ -95,6 +95,7 @@ Use [runbooks/DB_MIGRATION_PRODUCTION_CUTOVER.md](runbooks/DB_MIGRATION_PRODUCTI
 Use [runbooks/DB_MIGRATION_BENCHMARK_TUNING.md](runbooks/DB_MIGRATION_BENCHMARK_TUNING.md) before benchmarking or tuning backend PostgreSQL for primary workload.
 Use [runbooks/SUPABASE_PLATFORM_PARITY.md](runbooks/SUPABASE_PLATFORM_PARITY.md) before changing Supabase Auth, Storage, Realtime, Edge Function, Data API, or API key cutover decisions.
 Use [runbooks/SUPABASE_STANDBY_PROBE_BOUNDARY.md](runbooks/SUPABASE_STANDBY_PROBE_BOUNDARY.md) before changing the protected Supabase standby readiness probe.
+Use [runbooks/SUPABASE_STANDBY_SYNC_RELAY.md](runbooks/SUPABASE_STANDBY_SYNC_RELAY.md) before enabling, proving, or rolling back the backend-to-Supabase standby sync relay.
 
 The current Ansible scaffold is intentionally narrow. It defines the host contract, runtime choice, validation commands, required secret boundaries, and rollback expectations that later issues will fill in through Ansible roles and protected workflows.
 

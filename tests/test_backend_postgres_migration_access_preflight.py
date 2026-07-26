@@ -63,6 +63,7 @@ class BackendPostgresMigrationAccessPreflightTests(unittest.TestCase):
         self.assertIn("worker_api_final_grant=", source)
         self.assertIn("worker_api_final_shadow_grant", source)
         self.assertIn("api_command_receipts", source)
+        self.assertIn("receipt_sequence_usage", source)
 
     def test_workflow_passes_configured_worker_uplift_stage_roles(self):
         workflow = PREFLIGHT_WORKFLOW.read_text(encoding="utf-8")

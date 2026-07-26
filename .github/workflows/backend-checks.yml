@@ -288,6 +288,14 @@ jobs:
         shell: bash
         run: python3 scripts/backend_worker_uplift_parity_report.py --offline --enforce
 
+      - name: Validate worker uplift soak/capacity report wiring
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_soak_report.py
+
+      - name: Validate worker uplift soak/capacity report offline mode
+        shell: bash
+        run: python3 scripts/backend_worker_uplift_soak_report.py --offline --enforce
+
       - name: Validate worker uplift RabbitMQ metrics
         shell: bash
         run: python3 scripts/validate_worker_uplift_rabbitmq_metrics.py

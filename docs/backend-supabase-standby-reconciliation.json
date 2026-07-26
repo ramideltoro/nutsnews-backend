@@ -87,7 +87,8 @@
     "mutates": "existing production Supabase standby target only",
     "source_of_truth": "backend PostgreSQL primary",
     "safe_evidence_only": true,
-    "deletes_target_extra_rows": false,
+    "deletes_target_extra_rows": true,
+    "mirrors_primary_key_values": true,
     "table_order": [
       "public.articles",
       "public.rss_feeds",

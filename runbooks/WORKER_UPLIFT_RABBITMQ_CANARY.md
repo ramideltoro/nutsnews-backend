@@ -138,6 +138,10 @@ healthy apply; all attempts must still succeed before the workflow can pass.
 Protected apply ensures and purges only the dedicated `worker.uplift.canary.v2`
 queue immediately before the canary. This can delete stale canary probe messages,
 but it never deletes or recreates production worker queues.
+Before topology or canary work, protected apply also repairs RabbitMQ broker data
+ownership/mode metadata from inside the running container. That repair is scoped
+to `/var/lib/rabbitmq` and does not publish, consume, purge, or delete production
+worker queue messages.
 
 Poison message or DLQ replay:
 Use the production DLQ replay procedure only after preserving the DLQ evidence.

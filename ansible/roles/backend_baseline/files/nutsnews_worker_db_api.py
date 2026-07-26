@@ -1078,6 +1078,22 @@ def canonical_json(value: Any) -> str:
     return json.dumps(value, default=json_default, sort_keys=True, separators=(",", ":"))
 
 
+def internal_error_payload(error: Exception) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "error": "internal database compatibility API error",
+        "errorClass": type(error).__name__,
+        "safeMetadataOnly": True,
+    }
+    pgcode = getattr(error, "pgcode", None)
+    if isinstance(pgcode, str) and pgcode:
+        payload["pgcode"] = pgcode
+    diag = getattr(error, "diag", None)
+    sqlstate = getattr(diag, "sqlstate", None)
+    if isinstance(sqlstate, str) and sqlstate:
+        payload["sqlstate"] = sqlstate
+    return payload
+
+
 def uplift_payload_digest(operation: str, body: dict[str, Any]) -> str:
     return hashlib.sha256(canonical_json({"operation": operation, "body": body}).encode("utf-8")).hexdigest()
 
@@ -3242,8 +3258,8 @@ class WorkerDbApiHandler(BaseHTTPRequestHandler):
             self.handle_post()
         except ApiError as error:
             self.write_json(error.status, {"error": error.message})
-        except Exception:
-            self.write_json(500, {"error": "internal database compatibility API error"})
+        except Exception as error:
+            self.write_json(500, internal_error_payload(error))
 
     def handle_post(self) -> None:
         route = None

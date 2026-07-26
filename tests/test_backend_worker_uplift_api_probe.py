@@ -72,6 +72,23 @@ class BackendWorkerUpliftApiProbeTests(unittest.TestCase):
         self.assertEqual(report["status"], "fail")
         self.assertIn("missing_worker_uplift_persistence_token", report["errors"])
 
+    def test_response_snapshot_includes_safe_backend_error_metadata(self):
+        module = load_module()
+        snapshot = module.response_snapshot(
+            500,
+            {
+                "error": "internal database compatibility API error",
+                "errorClass": "UndefinedTable",
+                "pgcode": "42P01",
+                "safeMetadataOnly": True,
+            },
+        )
+
+        self.assertEqual(snapshot["http_status"], 500)
+        self.assertEqual(snapshot["errorClass"], "UndefinedTable")
+        self.assertEqual(snapshot["pgcode"], "42P01")
+        self.assertTrue(snapshot["safeMetadataOnly"])
+
     def test_workflow_uses_protected_environment_and_scoped_secret(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("environment: production-backend", workflow)

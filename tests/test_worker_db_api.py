@@ -887,6 +887,23 @@ class StaleAggregateStore(FakeStore):
 
 
 class WorkerDbApiTests(unittest.TestCase):
+    def test_internal_error_payload_uses_safe_exception_metadata_only(self) -> None:
+        class FakeDiag:
+            sqlstate = "42P01"
+
+        class FakeDatabaseError(Exception):
+            pgcode = "42P01"
+            diag = FakeDiag()
+
+        payload = worker_db_api.internal_error_payload(FakeDatabaseError("secret db detail"))
+
+        self.assertEqual("internal database compatibility API error", payload["error"])
+        self.assertEqual("FakeDatabaseError", payload["errorClass"])
+        self.assertEqual("42P01", payload["pgcode"])
+        self.assertEqual("42P01", payload["sqlstate"])
+        self.assertTrue(payload["safeMetadataOnly"])
+        self.assertNotIn("secret db detail", str(payload))
+
     def test_shadow_feed_read_uses_bounded_select(self) -> None:
         store = FakeStore()
         result = worker_db_api.handle_operation(

@@ -85,6 +85,10 @@ class WorkerUpliftShadowModelTests(unittest.TestCase):
         self.assertIn("GRANT SELECT, INSERT, UPDATE ON TABLE %I.api_command_receipts", template)
         self.assertIn("GRANT SELECT ON TABLE %I.stage_health_projections", template)
         self.assertIn("worker_api_role", template)
+        self.assertIn("CREATE OR REPLACE VIEW %I.enrichment_projection", template)
+        self.assertIn("canonical_url_hash AS article_identity_hash", template)
+        self.assertIn("diagnostic_metadata->>'sourceFeedUrl' AS source_feed_url", template)
+        self.assertIn("summary_ref, quality_status", template)
         for forbidden in ("article_body", "full_prompt", "raw_provider_response", "bearer_token"):
             self.assertNotIn(forbidden, template)
 

@@ -466,9 +466,25 @@ BEGIN
   $ddl$, views_schema, 'worker_uplift_fetcher');
   EXECUTE format($ddl$
     CREATE OR REPLACE VIEW %I.canonical_article_projection AS
-    SELECT original_url_hash, canonical_url_hash, operation_version, identity_status
+    SELECT canonical_url_hash AS article_identity_hash,
+           original_url_hash,
+           canonical_url_hash,
+           diagnostic_metadata->>'sourceFeedUrl' AS source_feed_url,
+           operation_version,
+           identity_status
     FROM %I.article_identities
   $ddl$, views_schema, 'worker_uplift_canonicalizer');
+  EXECUTE format($ddl$
+    CREATE OR REPLACE VIEW %I.enrichment_projection AS
+    SELECT article_identity_hash,
+           enrichment_version,
+           coalesce(diagnostic_metadata->>'titleRef', metadata_ref || '/title') AS title_ref,
+           coalesce(image_url_ref, diagnostic_metadata->>'imageUrlRef', metadata_ref || '/image') AS image_url_ref,
+           diagnostic_metadata->>'category' AS category,
+           status,
+           created_at
+    FROM %I.enrichment_records
+  $ddl$, views_schema, 'worker_uplift_enrichment');
   EXECUTE format($ddl$
     CREATE OR REPLACE VIEW %I.approval_projection AS
     SELECT article_identity_hash, approval_version, decision, positivity_score, reviewed_at
@@ -476,7 +492,7 @@ BEGIN
   $ddl$, views_schema, 'worker_uplift_approval');
   EXECUTE format($ddl$
     CREATE OR REPLACE VIEW %I.translation_coverage_projection AS
-    SELECT article_identity_hash, language_code, translation_version, quality_status, translated_at
+    SELECT article_identity_hash, language_code, translation_version, summary_ref, quality_status, translated_at
     FROM %I.translation_records
   $ddl$, views_schema, 'worker_uplift_translation');
   EXECUTE format($ddl$

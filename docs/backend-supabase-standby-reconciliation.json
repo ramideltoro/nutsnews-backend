@@ -28,6 +28,7 @@
   },
   "safety": {
     "safe_metadata_only_report": true,
+    "schema_mismatch_diagnostics": "bounded object names and metadata hashes only",
     "app_worker_writes_to_supabase_before_failover": false,
     "supabase_as_production_provider_before_failover": false,
     "failover_requires_later_gates": [

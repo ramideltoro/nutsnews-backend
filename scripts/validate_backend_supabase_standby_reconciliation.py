@@ -115,6 +115,7 @@ def main() -> int:
 
     safety = manifest.get("safety", {})
     require(safety.get("safe_metadata_only_report") is True, "report must be safe metadata only", errors)
+    require(safety.get("schema_mismatch_diagnostics") == "bounded object names and metadata hashes only", "schema mismatch diagnostics must stay safe metadata only", errors)
     require(safety.get("app_worker_writes_to_supabase_before_failover") is False, "app/worker Supabase writes must remain blocked", errors)
     require(safety.get("supabase_as_production_provider_before_failover") is False, "Supabase provider exposure must remain failover-only", errors)
     for gate in ("lag-seconds-lte-30", "table-parity-match", "schema-fingerprint-match", "sequence-safety-verified", "primary-writers-paused", "split-brain-absence-verified"):
@@ -197,6 +198,7 @@ def main() -> int:
     for token in (
         "NUTSNEWS_STANDBY_RECONCILE_CONFIRMATION",
         "primary_key_values_mirrored",
+        "schema_diff",
         "safe_metadata_only",
         "app_worker_writes_to_supabase_before_failover",
     ):

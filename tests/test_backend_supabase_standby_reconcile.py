@@ -160,6 +160,109 @@ class BackendSupabaseStandbyReconcileTests(unittest.TestCase):
         self.assertIn("row_checksum_mismatch", table_check["reasons"])
         self.assertNotIn("raw row", json.dumps(report).lower())
 
+    def test_schema_mismatch_reports_safe_metadata_diff(self) -> None:
+        source_schema = json.dumps(
+            {
+                "columns": [
+                    {
+                        "schema": "public",
+                        "table": "worker_runs",
+                        "column": "id",
+                        "position": 1,
+                        "type": "bigint",
+                        "not_null": True,
+                        "generated": "",
+                        "identity": "",
+                        "default_md5": "source-default",
+                    }
+                ],
+                "constraints": [
+                    {
+                        "schema": "public",
+                        "table": "worker_runs",
+                        "constraint": "worker_runs_pkey",
+                        "type": "p",
+                        "definition_md5": "source-constraint",
+                    }
+                ],
+                "indexes": [
+                    {
+                        "schema": "public",
+                        "table": "worker_runs",
+                        "index": "worker_runs_pkey",
+                        "definition_md5": "source-index",
+                    }
+                ],
+            }
+        )
+        target_schema = json.dumps(
+            {
+                "columns": [
+                    {
+                        "schema": "public",
+                        "table": "worker_runs",
+                        "column": "id",
+                        "position": 1,
+                        "type": "bigint",
+                        "not_null": False,
+                        "generated": "",
+                        "identity": "",
+                        "default_md5": "target-default",
+                    }
+                ],
+                "constraints": [],
+                "indexes": [
+                    {
+                        "schema": "public",
+                        "table": "worker_runs",
+                        "index": "worker_runs_pkey",
+                        "definition_md5": "target-index",
+                    }
+                ],
+            }
+        )
+        source_contract = json.dumps(
+            [
+                {
+                    "legacy_schema_version": "1",
+                    "migration_head": "abc",
+                    "expected_schema_fingerprint": "expected",
+                    "actual_schema_fingerprint": "source-actual",
+                }
+            ]
+        )
+        target_contract = json.dumps(
+            [
+                {
+                    "legacy_schema_version": "1",
+                    "migration_head": "abc",
+                    "expected_schema_fingerprint": "expected",
+                    "actual_schema_fingerprint": "target-actual",
+                }
+            ]
+        )
+        effects = passing_psql_side_effect()
+        effects[0] = (source_schema, None)
+        effects[1] = (target_schema, None)
+        effects[2] = (source_contract, None)
+        effects[3] = (target_contract, None)
+        exit_code, report = run_with_manifest(
+            manifest(),
+            ["--enforce"],
+            {"SRC": "postgresql://source:pw@127.0.0.1/postgres", "TGT": "postgresql://target:pw@127.0.0.1/postgres"},
+            effects,
+        )
+
+        schema_check = next(check for check in report["post_reconciliation"]["checks"] if check["id"] == "schema-fingerprint")
+        self.assertEqual(1, exit_code)
+        self.assertEqual("fail", schema_check["status"])
+        self.assertEqual(1, schema_check["schema_diff"]["columns"]["different_count"])
+        self.assertEqual(["public.worker_runs.worker_runs_pkey"], schema_check["schema_diff"]["constraints"]["missing_in_target"])
+        self.assertEqual(1, schema_check["migration_contract_diff"]["different_count"])
+        report_text = json.dumps(report).lower()
+        self.assertNotIn("create table", report_text)
+        self.assertNotIn("postgresql://", report_text)
+
     def test_sequence_next_value_not_above_source_max_id_fails(self) -> None:
         effects = passing_psql_side_effect()
         effects[11] = (json.dumps({"last_value": 12, "is_called": True, "increment_by": 1}), None)

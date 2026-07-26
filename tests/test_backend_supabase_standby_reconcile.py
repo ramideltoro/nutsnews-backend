@@ -258,6 +258,33 @@ class BackendSupabaseStandbyReconcileTests(unittest.TestCase):
         self.assertEqual("applied", report["backfill"]["status"])
         apply_backfill.assert_called_once()
 
+    def test_apply_backfill_uses_psql_copy_without_python_driver(self) -> None:
+        query_results = [
+            (COLUMN_METADATA, None),
+            ("12", None),
+            (json.dumps({"last_value": 12, "is_called": True, "increment_by": 1}), None),
+            ("12", None),
+            ("12", None),
+            ("13", None),
+        ]
+        with mock.patch.object(reconcile, "query_value", side_effect=query_results):
+            with mock.patch.object(reconcile, "run_psql_to_file", return_value=None) as copy_to_file:
+                with mock.patch.object(reconcile, "run_psql_script", return_value=None) as run_script:
+                    result = reconcile.apply_backfill(
+                        manifest(),
+                        "postgresql://source:pw@127.0.0.1/postgres",
+                        "postgresql://target:pw@127.0.0.1/postgres",
+                        batch_size=5,
+                    )
+
+        self.assertEqual("applied", result["status"])
+        self.assertEqual(1, result["table_count"])
+        self.assertEqual(1, result["sequence_count"])
+        self.assertEqual(12, result["tables"][0]["rows_seen"])
+        self.assertEqual(3, result["tables"][0]["batches"])
+        copy_to_file.assert_called_once()
+        run_script.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

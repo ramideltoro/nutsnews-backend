@@ -17,6 +17,7 @@ This tree will own backend host configuration that must be repeatable:
 - PostgreSQL failover target and protected management dashboard
 - backup, restore, monitoring, and verification tasks
 - restricted Supabase standby forced-command probe
+- backend-local Supabase standby relay
 
 ## Inventory
 
@@ -36,6 +37,14 @@ The retired disposable Supabase standby IPv6 runner design must not be
 reintroduced. This repository no longer maintains a runner inventory, runner
 playbook, runner role, or runner lifecycle workflow for that path.
 
+The backend-to-Supabase standby relay targets only the existing production
+backend host through `playbooks/backend_supabase_standby_relay.yml`. It
+provisions the locked `nutsnews-standby-relay` runtime identity, source trigger
+ledger, systemd service/timer, and root-owned credential environment. It must
+run through the protected `production-backend` workflow path, with check mode
+reviewed before apply. The dedicated workflow is
+`.github/workflows/backend-supabase-standby-relay.yml`.
+
 ## Validation
 
 Syntax check:
@@ -43,6 +52,7 @@ Syntax check:
 ```bash
 ansible-playbook playbooks/bootstrap.yml --syntax-check
 ansible-playbook playbooks/supabase_standby_probe.yml --syntax-check
+ansible-playbook playbooks/backend_supabase_standby_relay.yml --syntax-check
 ```
 
 `ansible.cfg` sets `roles_path = roles` so `playbooks/bootstrap.yml` resolves repository-owned roles from `ansible/roles` in both local checks and the protected GitHub Actions workflow.

@@ -1,0 +1,301 @@
+---
+- name: Validate relay state
+  ansible.builtin.assert:
+    that:
+      - backend_supabase_standby_relay_state in ['present', 'absent']
+      - backend_supabase_standby_relay_source_database is match('^[A-Za-z_][A-Za-z0-9_]*$')
+      - backend_supabase_standby_relay_source_role is match('^[A-Za-z_][A-Za-z0-9_]*$')
+      - backend_supabase_standby_relay_schema is match('^[A-Za-z_][A-Za-z0-9_]*$')
+      - backend_supabase_standby_relay_batch_size | int >= 1
+      - backend_supabase_standby_relay_batch_size | int <= 1000
+    fail_msg: "Backend Supabase standby relay variables are invalid."
+
+- name: Validate relay protected secrets for present state
+  ansible.builtin.assert:
+    that:
+      - backend_supabase_standby_relay_source_password | length > 0
+      - backend_supabase_standby_relay_target_db_url | length > 0
+    fail_msg: "Backend Supabase standby relay requires source and target protected secrets."
+  no_log: true
+  when: backend_supabase_standby_relay_state == 'present'
+
+- name: Install relay runtime packages
+  ansible.builtin.apt:
+    name: "{{ backend_supabase_standby_relay_required_packages }}"
+    state: present
+    update_cache: true
+  register: backend_supabase_standby_relay_packages
+  when: backend_supabase_standby_relay_state == 'present'
+
+- name: Track whether relay can be configured in this run
+  ansible.builtin.set_fact:
+    backend_supabase_standby_relay_manageable: "{{ (not ansible_check_mode) or not (backend_supabase_standby_relay_packages is changed) }}"
+
+- name: Ensure relay group exists
+  ansible.builtin.group:
+    name: "{{ backend_supabase_standby_relay_group }}"
+    system: true
+    state: present
+  when:
+    - backend_supabase_standby_relay_state == 'present'
+    - backend_supabase_standby_relay_manageable | bool
+
+- name: Ensure locked relay user exists
+  ansible.builtin.user:
+    name: "{{ backend_supabase_standby_relay_user }}"
+    group: "{{ backend_supabase_standby_relay_group }}"
+    shell: /usr/sbin/nologin
+    home: /nonexistent
+    create_home: false
+    system: true
+    password_lock: true
+    state: present
+  when:
+    - backend_supabase_standby_relay_state == 'present'
+    - backend_supabase_standby_relay_manageable | bool
+
+- name: Ensure relay directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ backend_supabase_standby_relay_config_dir }}"
+      owner: root
+      group: "{{ backend_supabase_standby_relay_group }}"
+      mode: "0750"
+    - path: "{{ backend_supabase_standby_relay_state_dir }}"
+      owner: "{{ backend_supabase_standby_relay_user }}"
+      group: "{{ backend_supabase_standby_relay_group }}"
+      mode: "0750"
+    - path: "{{ backend_supabase_standby_relay_lock_dir }}"
+      owner: "{{ backend_supabase_standby_relay_user }}"
+      group: "{{ backend_supabase_standby_relay_group }}"
+      mode: "0750"
+  when:
+    - backend_supabase_standby_relay_state == 'present'
+    - backend_supabase_standby_relay_manageable | bool
+
+- name: Build relay source database URL
+  ansible.builtin.set_fact:
+    backend_supabase_standby_relay_source_db_url: "postgresql://{{ backend_supabase_standby_relay_source_role | urlencode }}:{{ backend_supabase_standby_relay_source_password | urlencode }}@127.0.0.1:5432/{{ backend_supabase_standby_relay_source_database | urlencode }}"
+  no_log: true
+  when:
+    - backend_supabase_standby_relay_state == 'present'
+    - backend_supabase_standby_relay_manageable | bool
+
+- name: Install relay script
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../scripts/backend_supabase_standby_relay.py"
+    dest: "{{ backend_supabase_standby_relay_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - backend_supabase_standby_relay_state == 'present'
+    - backend_supabase_standby_relay_manageable | bool
+
+- name: Install relay manifest
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../docs/backend-supabase-standby-reconciliation.json"
+    dest: "{{ backend_supabase_standby_relay_manifest_path }}"
+    owner: root
+    group: "{{ backend_supabase_standby_relay_group }}"
+    mode: "0640"
+  when:
+    - backend_supabase_standby_relay_state == 'present'
+    - backend_supabase_standby_relay_manageable | bool
+
+- name: Install relay environment
+  ansible.builtin.template:
+    src: relay.env.j2
+    dest: "{{ backend_supabase_standby_relay_env_path }}"
+    owner: root
+    group: "{{ backend_supabase_standby_relay_group }}"
+    mode: "0640"
+  no_log: true
+  when:
+    - backend_supabase_standby_relay_state == 'present'
+    - backend_supabase_standby_relay_manageable | bool
+
+- name: Install source relay schema, functions, and triggers
+  # Guardrail marker for CI: --mode install-source.
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ backend_supabase_standby_relay_script_path }}"
+      - --mode
+      - install-source
+      - --manifest
+      - "{{ backend_supabase_standby_relay_manifest_path }}"
+      - --source-db-name
+      - "{{ backend_supabase_standby_relay_source_database }}"
+      - --relay-schema
+      - "{{ backend_supabase_standby_relay_schema }}"
+      - --relay-role
+      - "{{ backend_supabase_standby_relay_source_role }}"
+      - --enforce
+      - --output
+      - "{{ backend_supabase_standby_relay_state_dir }}/install-source.json"
+  become_user: postgres
+  register: backend_supabase_standby_relay_install_source
+  changed_when: false
+  no_log: true
+  when:
+    - backend_supabase_standby_relay_state == 'present'
+    - backend_supabase_standby_relay_manageable | bool
+    - not ansible_check_mode
+
+- name: Install relay systemd service
+  ansible.builtin.template:
+    src: nutsnews-supabase-standby-relay.service.j2
+    dest: "/etc/systemd/system/{{ backend_supabase_standby_relay_service_unit }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - backend_supabase_standby_relay_state == 'present'
+    - backend_supabase_standby_relay_manageable | bool
+
+- name: Install relay systemd timer
+  ansible.builtin.template:
+    src: nutsnews-supabase-standby-relay.timer.j2
+    dest: "/etc/systemd/system/{{ backend_supabase_standby_relay_timer_unit }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - backend_supabase_standby_relay_state == 'present'
+    - backend_supabase_standby_relay_manageable | bool
+
+- name: Enable relay timer
+  ansible.builtin.systemd_service:
+    name: "{{ backend_supabase_standby_relay_timer_unit }}"
+    enabled: "{{ backend_supabase_standby_relay_enabled | bool }}"
+    state: "{{ 'started' if backend_supabase_standby_relay_enabled | bool else 'stopped' }}"
+    daemon_reload: true
+  when:
+    - backend_supabase_standby_relay_state == 'present'
+    - backend_supabase_standby_relay_manageable | bool
+    - not ansible_check_mode
+
+- name: Run relay status once after installation
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_supabase_standby_relay_script_path }}"
+      - --mode
+      - status
+      - --manifest
+      - "{{ backend_supabase_standby_relay_manifest_path }}"
+      - --relay-schema
+      - "{{ backend_supabase_standby_relay_schema }}"
+      - --lock-file
+      - "{{ backend_supabase_standby_relay_lock_dir }}/relay.lock"
+      - --output
+      - "{{ backend_supabase_standby_relay_status_path }}"
+  become_user: "{{ backend_supabase_standby_relay_user }}"
+  register: backend_supabase_standby_relay_status
+  changed_when: false
+  no_log: true
+  environment:
+    NUTSNEWS_BACKEND_PRIMARY_DB_URL: "{{ backend_supabase_standby_relay_source_db_url }}"
+    NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: "{{ backend_supabase_standby_relay_target_db_url }}"
+  when:
+    - backend_supabase_standby_relay_state == 'present'
+    - backend_supabase_standby_relay_manageable | bool
+    - not ansible_check_mode
+
+- name: Disable relay timer for absent state
+  ansible.builtin.systemd_service:
+    name: "{{ backend_supabase_standby_relay_timer_unit }}"
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  failed_when: false
+  when:
+    - backend_supabase_standby_relay_state == 'absent'
+    - not ansible_check_mode
+
+- name: Check relay script before source rollback
+  ansible.builtin.stat:
+    path: "{{ backend_supabase_standby_relay_script_path }}"
+  register: backend_supabase_standby_relay_script_stat
+  when:
+    - backend_supabase_standby_relay_state == 'absent'
+    - not ansible_check_mode
+
+- name: Check relay manifest before source rollback
+  ansible.builtin.stat:
+    path: "{{ backend_supabase_standby_relay_manifest_path }}"
+  register: backend_supabase_standby_relay_manifest_stat
+  when:
+    - backend_supabase_standby_relay_state == 'absent'
+    - not ansible_check_mode
+
+- name: Remove source relay schema, functions, and triggers
+  # Guardrail marker for CI: --mode remove-source.
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ backend_supabase_standby_relay_script_path }}"
+      - --mode
+      - remove-source
+      - --manifest
+      - "{{ backend_supabase_standby_relay_manifest_path }}"
+      - --source-db-name
+      - "{{ backend_supabase_standby_relay_source_database }}"
+      - --relay-schema
+      - "{{ backend_supabase_standby_relay_schema }}"
+      - --enforce
+  become_user: postgres
+  register: backend_supabase_standby_relay_remove_source
+  changed_when: false
+  no_log: true
+  when:
+    - backend_supabase_standby_relay_state == 'absent'
+    - not ansible_check_mode
+    - backend_supabase_standby_relay_script_stat.stat.exists | default(false)
+    - backend_supabase_standby_relay_manifest_stat.stat.exists | default(false)
+
+- name: Remove relay systemd units and files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/etc/systemd/system/{{ backend_supabase_standby_relay_service_unit }}"
+    - "/etc/systemd/system/{{ backend_supabase_standby_relay_timer_unit }}"
+    - "{{ backend_supabase_standby_relay_script_path }}"
+    - "{{ backend_supabase_standby_relay_env_path }}"
+    - "{{ backend_supabase_standby_relay_manifest_path }}"
+  when: backend_supabase_standby_relay_state == 'absent'
+
+- name: Remove relay directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ backend_supabase_standby_relay_config_dir }}"
+    - "{{ backend_supabase_standby_relay_state_dir }}"
+    - "{{ backend_supabase_standby_relay_lock_dir }}"
+  when:
+    - backend_supabase_standby_relay_state == 'absent'
+    - not ansible_check_mode
+
+- name: Remove relay user
+  ansible.builtin.user:
+    name: "{{ backend_supabase_standby_relay_user }}"
+    state: absent
+    remove: false
+  when:
+    - backend_supabase_standby_relay_state == 'absent'
+    - not ansible_check_mode
+
+- name: Remove relay group
+  ansible.builtin.group:
+    name: "{{ backend_supabase_standby_relay_group }}"
+    state: absent
+  when:
+    - backend_supabase_standby_relay_state == 'absent'
+    - not ansible_check_mode

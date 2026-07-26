@@ -1,0 +1,24 @@
+[Unit]
+Description=NutsNews backend PostgreSQL to Supabase standby relay
+Documentation=https://github.com/ramideltoro/nutsnews/issues/499
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User={{ backend_supabase_standby_relay_user }}
+Group={{ backend_supabase_standby_relay_group }}
+EnvironmentFile={{ backend_supabase_standby_relay_env_path }}
+ExecStart={{ backend_supabase_standby_relay_script_path }} --mode run-once --manifest {{ backend_supabase_standby_relay_manifest_path }} --relay-schema {{ backend_supabase_standby_relay_schema }} --batch-size {{ backend_supabase_standby_relay_batch_size }} --lock-file {{ backend_supabase_standby_relay_lock_dir }}/relay.lock --output {{ backend_supabase_standby_relay_status_path }} --enforce
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths={{ backend_supabase_standby_relay_state_dir }} {{ backend_supabase_standby_relay_lock_dir }}
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+UMask=0077
+TimeoutStartSec=120

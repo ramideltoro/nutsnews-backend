@@ -1,0 +1,24 @@
+---
+backend_supabase_standby_relay_state: present
+backend_supabase_standby_relay_enabled: true
+backend_supabase_standby_relay_user: nutsnews-standby-relay
+backend_supabase_standby_relay_group: nutsnews-standby-relay
+backend_supabase_standby_relay_schema: nutsnews_standby_relay
+backend_supabase_standby_relay_source_role: "{{ backend_postgres_replication_user | default('nutsnews_migration_replication') }}"
+backend_supabase_standby_relay_source_password: ""
+backend_supabase_standby_relay_source_database: "{{ backend_postgres_primary_shadow_database | default('nutsnews_primary_shadow') }}"
+backend_supabase_standby_relay_target_db_url: ""
+backend_supabase_standby_relay_config_dir: /etc/nutsnews-supabase-standby-relay
+backend_supabase_standby_relay_state_dir: /var/lib/nutsnews/supabase-standby-relay
+backend_supabase_standby_relay_lock_dir: /run/nutsnews-supabase-standby-relay
+backend_supabase_standby_relay_script_path: /usr/local/libexec/nutsnews-supabase-standby-relay
+backend_supabase_standby_relay_manifest_path: "{{ backend_supabase_standby_relay_config_dir }}/manifest.json"
+backend_supabase_standby_relay_env_path: "{{ backend_supabase_standby_relay_config_dir }}/relay.env"
+backend_supabase_standby_relay_status_path: "{{ backend_supabase_standby_relay_state_dir }}/status.json"
+backend_supabase_standby_relay_batch_size: 100
+backend_supabase_standby_relay_calendar: "*:0/1:00"
+backend_supabase_standby_relay_service_unit: nutsnews-supabase-standby-relay.service
+backend_supabase_standby_relay_timer_unit: nutsnews-supabase-standby-relay.timer
+backend_supabase_standby_relay_required_packages:
+  - postgresql-client
+  - python3

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run NutsNews backend PostgreSQL to Supabase standby relay
+
+[Timer]
+OnCalendar={{ backend_supabase_standby_relay_calendar }}
+Persistent=true
+RandomizedDelaySec=10s
+Unit={{ backend_supabase_standby_relay_service_unit }}
+
+[Install]
+WantedBy=timers.target

@@ -4,6 +4,7 @@ Backend-owned operational runbooks include the zero-cost Supabase standby
 forced-command probe boundary for the protected app readiness workflow:
 
 - [Supabase Standby Forced-Command Probe](runbooks/SUPABASE_STANDBY_PROBE_BOUNDARY.md)
+- [Backend-to-Supabase Standby Relay](runbooks/SUPABASE_STANDBY_RELAY.md)
 
 This supersedes the disposable IPv6 runner design. The old runner runbook is
 retired along with the obsolete runner workflow, Ansible role, playbook,
@@ -95,6 +96,7 @@ Use [runbooks/DB_MIGRATION_PRODUCTION_CUTOVER.md](runbooks/DB_MIGRATION_PRODUCTI
 Use [runbooks/DB_MIGRATION_BENCHMARK_TUNING.md](runbooks/DB_MIGRATION_BENCHMARK_TUNING.md) before benchmarking or tuning backend PostgreSQL for primary workload.
 Use [runbooks/SUPABASE_PLATFORM_PARITY.md](runbooks/SUPABASE_PLATFORM_PARITY.md) before changing Supabase Auth, Storage, Realtime, Edge Function, Data API, or API key cutover decisions.
 Use [runbooks/SUPABASE_STANDBY_PROBE_BOUNDARY.md](runbooks/SUPABASE_STANDBY_PROBE_BOUNDARY.md) before changing the protected Supabase standby readiness probe.
+Use [runbooks/SUPABASE_STANDBY_RELAY.md](runbooks/SUPABASE_STANDBY_RELAY.md) before changing the backend-local standby sync relay.
 
 The current Ansible scaffold is intentionally narrow. It defines the host contract, runtime choice, validation commands, required secret boundaries, and rollback expectations that later issues will fill in through Ansible roles and protected workflows.
 
@@ -148,4 +150,6 @@ python3 scripts/backend_postgres_smoke_tests.py --offline
 python3 scripts/backend_app_db_api_smoke.py --offline
 python3 scripts/backend_postgres_benchmark_tuning.py --offline
 python3 scripts/validate_backend_postgres_backup_proof.py
+python3 scripts/validate_backend_supabase_standby_relay.py
+python3 scripts/backend_supabase_standby_relay.py --mode offline --enforce
 ```

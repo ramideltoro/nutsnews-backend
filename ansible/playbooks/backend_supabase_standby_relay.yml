@@ -1,0 +1,18 @@
+---
+- name: Backend Supabase standby relay
+  hosts: backend
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Verify the relay is applied only to the production backend group
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname in (groups.get('backend', []))
+          - backend_supabase_standby_relay_state in ['present', 'absent']
+        fail_msg: "The standby relay role must target only the existing backend host with a reviewed state."
+        success_msg: "Standby relay inventory target is scoped to backend."
+
+    - name: Apply backend-local Supabase standby relay
+      ansible.builtin.include_role:
+        name: backend_supabase_standby_relay

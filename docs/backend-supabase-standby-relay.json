@@ -1,0 +1,131 @@
+{
+  "contract_id": "backend-supabase-standby-relay",
+  "version": 1,
+  "issue": "ramideltoro/nutsnews#499",
+  "epic": "ramideltoro/nutsnews#223",
+  "depends_on": [
+    "ramideltoro/nutsnews#496",
+    "ramideltoro/nutsnews#497",
+    "ramideltoro/nutsnews#498"
+  ],
+  "updated_at_utc": "2026-07-26",
+  "source_manifest": {
+    "repository": "ramideltoro/nutsnews",
+    "path": "supabase/standby_manifest.json",
+    "issue": "ramideltoro/nutsnews#497",
+    "policy": "backend-postgres-primary-to-existing-production-supabase-standby"
+  },
+  "reconciliation_prerequisite": {
+    "repository": "ramideltoro/nutsnews-backend",
+    "path": "docs/backend-supabase-standby-reconciliation.json",
+    "issue": "ramideltoro/nutsnews#498",
+    "required_before_enable": true
+  },
+  "architecture": {
+    "mode": "backend-local-trigger-ledger-relay",
+    "source": "backend_postgres_primary",
+    "target": "existing_production_supabase_standby",
+    "direction": "backend-postgres-to-existing-production-supabase",
+    "backend_postgres_public_5432_allowed": false,
+    "inbound_supabase_to_backend_connection_required": false,
+    "outbound_backend_to_supabase_direct_5432_required": true,
+    "pooler_allowed": false,
+    "app_worker_supabase_writes_before_approved_failover": false
+  },
+  "source_capture": {
+    "schema": "nutsnews_standby_relay",
+    "event_table": "nutsnews_standby_relay.events",
+    "trigger_name": "nutsnews_standby_relay_capture",
+    "trigger_operations": [
+      "insert",
+      "update",
+      "delete"
+    ],
+    "captures_raw_rows_in_source_private_queue": true,
+    "prints_raw_rows": false,
+    "prints_database_errors": false,
+    "prints_connection_strings": false
+  },
+  "runtime": {
+    "os_user": "nutsnews-standby-relay",
+    "service_unit": "nutsnews-supabase-standby-relay.service",
+    "timer_unit": "nutsnews-supabase-standby-relay.timer",
+    "script_path": "/usr/local/libexec/nutsnews-supabase-standby-relay",
+    "config_dir": "/etc/nutsnews-supabase-standby-relay",
+    "state_dir": "/var/lib/nutsnews/supabase-standby-relay",
+    "lock_dir": "/run/nutsnews-supabase-standby-relay",
+    "batch_size_max": 1000,
+    "systemd_hardening": [
+      "NoNewPrivileges",
+      "PrivateTmp",
+      "ProtectHome",
+      "ProtectSystem=strict",
+      "RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX",
+      "LockPersonality",
+      "MemoryDenyWriteExecute"
+    ]
+  },
+  "secret_contract": {
+    "environment": "production-backend",
+    "source_password_secret": "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD",
+    "target_db_url_secret": "NUTSNEWS_PRODUCTION_SUPABASE_DB_URL",
+    "backend_ssh_secret": "NUTSNEWS_BACKEND_SSH_PRIVATE_KEY",
+    "backend_known_hosts_secret": "NUTSNEWS_BACKEND_KNOWN_HOSTS",
+    "database_urls_printed": false,
+    "secrets_persisted_on_backend": {
+      "path": "/etc/nutsnews-supabase-standby-relay/relay.env",
+      "owner": "root",
+      "group": "nutsnews-standby-relay",
+      "mode": "0640",
+      "purpose": "continuous systemd relay credential file"
+    }
+  },
+  "fail_closed": {
+    "schema_mismatch_blocks_apply": true,
+    "unsafe_source_table_identity_blocks_apply": true,
+    "unsafe_target_table_identity_blocks_apply": true,
+    "missing_source_ledger_blocks_apply": true,
+    "target_apply_failure_does_not_ack_source_events": true,
+    "locked_single_execution": true,
+    "safe_metadata_only_report": true
+  },
+  "sequence_readiness": {
+    "source_snapshot_function": "nutsnews_standby_relay.sequence_snapshot()",
+    "target_policy": "advance target nextval above source nextval and target max id",
+    "prints_sequence_values": false,
+    "reported_metadata": [
+      "checked_count",
+      "advanced_count"
+    ]
+  },
+  "ansible": {
+    "playbook": "ansible/playbooks/backend_supabase_standby_relay.yml",
+    "role": "ansible/roles/backend_supabase_standby_relay",
+    "check_mode_before_apply": true,
+    "rollback_state": "absent"
+  },
+  "workflow": {
+    "path": ".github/workflows/backend-supabase-standby-relay.yml",
+    "trigger": "workflow_dispatch",
+    "environment": "production-backend",
+    "runs_on": "ubuntu-latest",
+    "permissions": "contents: read",
+    "modes": [
+      "check",
+      "apply"
+    ],
+    "states": [
+      "present",
+      "absent"
+    ],
+    "apply_confirmation": "backend.nutsnews.com",
+    "artifact": "backend-supabase-standby-relay",
+    "app_worker_failover_changes": false
+  },
+  "validation": {
+    "contract_validator": "python3 scripts/validate_backend_supabase_standby_relay.py",
+    "offline_validator": "python3 scripts/backend_supabase_standby_relay.py --mode offline --enforce",
+    "unit_tests": "python3 -m unittest tests.test_backend_supabase_standby_relay",
+    "ansible_syntax": "ansible-playbook playbooks/backend_supabase_standby_relay.yml --syntax-check -i inventories/production/hosts.yml"
+  }
+}

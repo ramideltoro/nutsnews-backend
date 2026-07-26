@@ -192,6 +192,18 @@ jobs:
         shell: bash
         run: python3 -m unittest tests.test_backend_supabase_standby_reconcile
 
+      - name: Validate backend-to-Supabase standby relay guardrails
+        shell: bash
+        run: python3 scripts/validate_backend_supabase_standby_relay.py
+
+      - name: Validate backend-to-Supabase standby relay offline mode
+        shell: bash
+        run: python3 scripts/backend_supabase_standby_relay.py --mode offline --enforce
+
+      - name: Run backend-to-Supabase standby relay tests
+        shell: bash
+        run: python3 -m unittest tests.test_backend_supabase_standby_relay
+
       - name: Report migration drift gate status
         shell: bash
         run: python3 scripts/check_supabase_migration_drift.py
@@ -330,6 +342,11 @@ jobs:
         shell: bash
         working-directory: ansible
         run: ansible-playbook playbooks/supabase_standby_probe.yml --syntax-check -i inventories/production/hosts.yml
+
+      - name: Backend Supabase standby relay Ansible syntax check
+        shell: bash
+        working-directory: ansible
+        run: ansible-playbook playbooks/backend_supabase_standby_relay.yml --syntax-check -i inventories/production/hosts.yml
 
   rabbitmq_benchmark:
     name: Benchmark RabbitMQ queue types

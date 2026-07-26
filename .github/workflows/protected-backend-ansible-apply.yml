@@ -178,6 +178,7 @@ jobs:
           NUTSNEWS_BACKEND_POSTGRES_ENABLED: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_ENABLED || 'true' }}
           NUTSNEWS_BACKEND_DB_DASHBOARD_ENABLED: ${{ vars.NUTSNEWS_BACKEND_DB_DASHBOARD_ENABLED || 'true' }}
           NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE || 'nutsnews_primary_shadow' }}
+          NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE || vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE || 'nutsnews_primary_shadow' }}
           NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_MIGRATION_RESTORE_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_RESTORE_PASSWORD }}
@@ -185,6 +186,10 @@ jobs:
           NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD }}
+          NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_ENABLED: ${{ vars.NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_ENABLED || 'false' }}
+          NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_INTERVAL_SECONDS: ${{ vars.NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_INTERVAL_SECONDS || '30' }}
+          NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_BATCH_SIZE: ${{ vars.NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_BATCH_SIZE || '500' }}
+          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
           NUTSNEWS_BACKEND_WORKER_API_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_API_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_API_TOKEN }}
@@ -340,6 +345,7 @@ jobs:
           NUTSNEWS_BACKUP_QUOTA_WARN_BYTES: ${{ vars.NUTSNEWS_BACKUP_QUOTA_WARN_BYTES || '0' }}
           NUTSNEWS_BACKEND_POSTGRES_ENABLED: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_ENABLED || 'true' }}
           NUTSNEWS_BACKEND_DB_DASHBOARD_ENABLED: ${{ vars.NUTSNEWS_BACKEND_DB_DASHBOARD_ENABLED || 'true' }}
+          NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE || vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE || 'nutsnews_primary_shadow' }}
           NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_APP_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_READONLY_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_MIGRATION_RESTORE_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_RESTORE_PASSWORD }}
@@ -347,6 +353,10 @@ jobs:
           NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD }}
+          NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_ENABLED: ${{ vars.NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_ENABLED || 'false' }}
+          NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_INTERVAL_SECONDS: ${{ vars.NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_INTERVAL_SECONDS || '30' }}
+          NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_BATCH_SIZE: ${{ vars.NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_BATCH_SIZE || '500' }}
+          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
           NUTSNEWS_BACKEND_WORKER_API_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED || 'false' }}
           NUTSNEWS_BACKEND_API_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_API_TOKEN }}
@@ -520,6 +530,49 @@ jobs:
               extra_vars["backend_postgres_replication_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD"]
               extra_vars["backend_postgres_app_rehearsal_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD"]
               extra_vars["backend_postgres_worker_api_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD"]
+
+          supabase_sync_relay_enabled = (
+              os.environ.get("NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_ENABLED", "false").strip().lower()
+              in {"1", "true", "yes"}
+          )
+          if supabase_sync_relay_enabled:
+              if not postgres_enabled:
+                  raise SystemExit("Backend Supabase sync relay requires NUTSNEWS_BACKEND_POSTGRES_ENABLED=true")
+              source_password = os.environ.get("NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD", "")
+              target_db_url = os.environ.get("NUTSNEWS_PRODUCTION_SUPABASE_DB_URL", "").strip()
+              if not source_password:
+                  raise SystemExit("Backend Supabase sync relay requires NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD")
+              if not target_db_url:
+                  raise SystemExit("Backend Supabase sync relay requires NUTSNEWS_PRODUCTION_SUPABASE_DB_URL")
+              if "nutsnews-standby" in target_db_url.lower():
+                  raise SystemExit("Backend Supabase sync relay must target existing production Supabase, not nutsnews-standby")
+              primary_database = (
+                  os.environ.get("NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE", "").strip()
+                  or extra_vars.get("backend_postgres_primary_shadow_database", "nutsnews_primary_shadow")
+              )
+              if not identifier_re.match(str(primary_database)):
+                  raise SystemExit("NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE must be a safe PostgreSQL identifier")
+              if any("\n" in value or "\r" in value for value in (source_password, target_db_url, str(primary_database))):
+                  raise SystemExit("Backend Supabase sync relay DB URL values must be single-line values")
+              interval_seconds = int(os.environ.get("NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_INTERVAL_SECONDS", "30") or "30")
+              batch_size = int(os.environ.get("NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_BATCH_SIZE", "500") or "500")
+              if interval_seconds < 10 or interval_seconds > 3600:
+                  raise SystemExit("NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_INTERVAL_SECONDS must be between 10 and 3600")
+              if batch_size < 1 or batch_size > 5000:
+                  raise SystemExit("NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_BATCH_SIZE must be between 1 and 5000")
+              source_user = "nutsnews_migration_validation"
+              source_url = (
+                  "postgresql://"
+                  f"{urllib.parse.quote(source_user, safe='')}:"
+                  f"{urllib.parse.quote(source_password, safe='')}"
+                  f"@127.0.0.1:5432/{urllib.parse.quote(str(primary_database), safe='')}"
+                  "?sslmode=disable"
+              )
+              extra_vars["backend_supabase_sync_relay_enabled"] = True
+              extra_vars["backend_supabase_sync_relay_source_db_url"] = source_url
+              extra_vars["backend_supabase_sync_relay_target_db_url"] = target_db_url
+              extra_vars["backend_supabase_sync_relay_interval_seconds"] = interval_seconds
+              extra_vars["backend_supabase_sync_relay_batch_size"] = batch_size
 
           worker_uplift_postgres_enabled = postgres_enabled and (
               os.environ.get("NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENABLED", "true").strip().lower() in {"1", "true", "yes"}

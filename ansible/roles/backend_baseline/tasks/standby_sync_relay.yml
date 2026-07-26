@@ -1,0 +1,167 @@
+---
+- name: Validate backend Supabase sync relay settings
+  ansible.builtin.assert:
+    that:
+      - backend_supabase_sync_relay_user is match('^[a-z_][a-z0-9_-]*$')
+      - backend_supabase_sync_relay_group is match('^[a-z_][a-z0-9_-]*$')
+      - backend_supabase_sync_relay_source_db_url | length > 0
+      - backend_supabase_sync_relay_target_db_url | length > 0
+      - backend_supabase_sync_relay_source_db_url is search('^postgresql?://')
+      - backend_supabase_sync_relay_target_db_url is search('^postgresql?://')
+      - "'nutsnews-standby' not in backend_supabase_sync_relay_target_db_url"
+      - backend_supabase_sync_relay_interval_seconds | int >= 10
+      - backend_supabase_sync_relay_interval_seconds | int <= 3600
+      - backend_supabase_sync_relay_batch_size | int >= 1
+      - backend_supabase_sync_relay_batch_size | int <= 5000
+    fail_msg: "Backend Supabase sync relay requires safe service settings and protected DB URLs."
+  no_log: true
+
+- name: Ensure backend Supabase sync relay group exists
+  ansible.builtin.group:
+    name: "{{ backend_supabase_sync_relay_group }}"
+    system: true
+    state: present
+
+- name: Ensure backend Supabase sync relay user exists
+  ansible.builtin.user:
+    name: "{{ backend_supabase_sync_relay_user }}"
+    group: "{{ backend_supabase_sync_relay_group }}"
+    home: "{{ backend_supabase_sync_relay_state_dir }}"
+    shell: /usr/sbin/nologin
+    create_home: false
+    system: true
+    state: present
+
+- name: Ensure backend Supabase sync relay directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ backend_supabase_sync_relay_config_dir }}"
+      owner: root
+      group: "{{ backend_supabase_sync_relay_group }}"
+      mode: "0750"
+    - path: "{{ backend_supabase_sync_relay_state_dir }}"
+      owner: "{{ backend_supabase_sync_relay_user }}"
+      group: "{{ backend_supabase_sync_relay_group }}"
+      mode: "0750"
+
+- name: Install backend Supabase sync relay runner
+  ansible.builtin.copy:
+    src: "{{ backend_supabase_sync_relay_source_path }}"
+    dest: "{{ backend_supabase_sync_relay_runner_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart backend Supabase sync relay timer
+
+- name: Install backend Supabase sync relay reconcile library
+  ansible.builtin.copy:
+    src: "{{ backend_supabase_sync_relay_reconcile_library_source_path }}"
+    dest: "{{ backend_supabase_sync_relay_reconcile_library_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart backend Supabase sync relay timer
+
+- name: Install backend Supabase sync relay contract
+  ansible.builtin.copy:
+    src: "{{ backend_supabase_sync_relay_contract_source_path }}"
+    dest: "{{ backend_supabase_sync_relay_contract_path }}"
+    owner: root
+    group: "{{ backend_supabase_sync_relay_group }}"
+    mode: "0640"
+  notify: Restart backend Supabase sync relay timer
+
+- name: Install backend Supabase sync relay protected environment
+  ansible.builtin.copy:
+    dest: "{{ backend_supabase_sync_relay_env_path }}"
+    owner: root
+    group: "{{ backend_supabase_sync_relay_group }}"
+    mode: "0640"
+    content: |
+      NUTSNEWS_BACKEND_PRIMARY_DB_URL={{ backend_supabase_sync_relay_source_db_url | quote }}
+      NUTSNEWS_PRODUCTION_SUPABASE_DB_URL={{ backend_supabase_sync_relay_target_db_url | quote }}
+  no_log: true
+  notify: Restart backend Supabase sync relay timer
+
+- name: Install backend Supabase sync relay service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nutsnews-supabase-sync-relay.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      [Unit]
+      Description=NutsNews backend PostgreSQL to existing Supabase standby sync relay
+      Documentation=https://github.com/ramideltoro/nutsnews/issues/499
+      After=network-online.target {{ backend_postgres_service_name }}.service
+      Wants=network-online.target
+      Requires={{ backend_postgres_service_name }}.service
+
+      [Service]
+      Type=oneshot
+      User={{ backend_supabase_sync_relay_user }}
+      Group={{ backend_supabase_sync_relay_group }}
+      EnvironmentFile={{ backend_supabase_sync_relay_env_path }}
+      WorkingDirectory={{ backend_supabase_sync_relay_state_dir }}
+      ExecStart=/usr/bin/python3 {{ backend_supabase_sync_relay_runner_path }} --contract {{ backend_supabase_sync_relay_contract_path }} --mode sync-once --enforce --batch-size {{ backend_supabase_sync_relay_batch_size }} --output {{ backend_supabase_sync_relay_state_dir }}/last-run.json
+      NoNewPrivileges=true
+      PrivateTmp=true
+      ProtectHome=true
+      ProtectSystem=strict
+      ReadOnlyPaths={{ backend_supabase_sync_relay_config_dir }} /usr/local/libexec
+      ReadWritePaths={{ backend_supabase_sync_relay_state_dir }}
+  notify:
+    - Reload systemd
+    - Restart backend Supabase sync relay timer
+
+- name: Install backend Supabase sync relay timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nutsnews-supabase-sync-relay.timer
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      [Unit]
+      Description=Run NutsNews backend to existing Supabase standby sync relay
+
+      [Timer]
+      OnBootSec={{ backend_supabase_sync_relay_interval_seconds }}s
+      OnUnitActiveSec={{ backend_supabase_sync_relay_interval_seconds }}s
+      AccuracySec=5s
+      Persistent=false
+      Unit=nutsnews-supabase-sync-relay.service
+
+      [Install]
+      WantedBy=timers.target
+  notify:
+    - Reload systemd
+    - Restart backend Supabase sync relay timer
+
+- name: Flush handlers before enabling backend Supabase sync relay timer
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure backend Supabase sync relay timer is enabled and started
+  ansible.builtin.systemd:
+    name: nutsnews-supabase-sync-relay.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: not ansible_check_mode
+
+- name: Report backend Supabase sync relay summary
+  ansible.builtin.debug:
+    msg:
+      enabled: "{{ backend_supabase_sync_relay_enabled }}"
+      service: nutsnews-supabase-sync-relay.service
+      timer: nutsnews-supabase-sync-relay.timer
+      interval_seconds: "{{ backend_supabase_sync_relay_interval_seconds }}"
+      source_network_path: backend_host_loopback_postgresql
+      target: existing_production_supabase_standby
+      safety: app/worker services do not receive Supabase write credentials

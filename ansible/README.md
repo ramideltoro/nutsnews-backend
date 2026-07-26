@@ -17,6 +17,7 @@ This tree will own backend host configuration that must be repeatable:
 - PostgreSQL failover target and protected management dashboard
 - backup, restore, monitoring, and verification tasks
 - restricted Supabase standby forced-command probe
+- backend-to-existing-Supabase standby sync relay
 
 ## Inventory
 
@@ -35,6 +36,14 @@ dedicated workflow is `.github/workflows/supabase-standby-probe.yml`.
 The retired disposable Supabase standby IPv6 runner design must not be
 reintroduced. This repository no longer maintains a runner inventory, runner
 playbook, runner role, or runner lifecycle workflow for that path.
+
+The backend-to-existing-Supabase sync relay is installed by the main protected
+backend apply path when `NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_ENABLED=true`.
+It runs as `nutsnews-standby-relay` under
+`nutsnews-supabase-sync-relay.timer`, reads backend PostgreSQL over loopback,
+and writes outbound to the existing production Supabase standby. Its env file
+is root-owned and group-readable only by the relay user; app and worker
+services do not receive Supabase write credentials.
 
 ## Validation
 

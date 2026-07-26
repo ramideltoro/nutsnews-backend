@@ -166,6 +166,22 @@ backend_worker_api_db_user: "{{ backend_postgres_worker_api_user }}"
 backend_worker_api_db_password: "{{ backend_postgres_worker_api_password }}"
 backend_worker_api_writes_enabled: false
 backend_worker_api_max_limit: 10000
+backend_supabase_sync_relay_enabled: false
+backend_supabase_sync_relay_user: nutsnews-standby-relay
+backend_supabase_sync_relay_group: nutsnews-standby-relay
+backend_supabase_sync_relay_config_dir: /etc/nutsnews-supabase-sync-relay
+backend_supabase_sync_relay_env_path: /etc/nutsnews-supabase-sync-relay/relay.env
+backend_supabase_sync_relay_contract_path: /etc/nutsnews-supabase-sync-relay/contract.json
+backend_supabase_sync_relay_state_dir: /var/lib/nutsnews/supabase-sync-relay
+backend_supabase_sync_relay_runner_path: /usr/local/libexec/nutsnews-backend-supabase-sync-relay.py
+backend_supabase_sync_relay_reconcile_library_path: /usr/local/libexec/backend_supabase_standby_reconcile.py
+backend_supabase_sync_relay_source_path: "{{ playbook_dir }}/../../scripts/backend_supabase_sync_relay.py"
+backend_supabase_sync_relay_reconcile_library_source_path: "{{ playbook_dir }}/../../scripts/backend_supabase_standby_reconcile.py"
+backend_supabase_sync_relay_contract_source_path: "{{ playbook_dir }}/../../docs/backend-supabase-sync-relay.json"
+backend_supabase_sync_relay_source_db_url: ""
+backend_supabase_sync_relay_target_db_url: ""
+backend_supabase_sync_relay_interval_seconds: 30
+backend_supabase_sync_relay_batch_size: 500
 backend_db_dashboard_enabled: false
 backend_db_dashboard_bind: 127.0.0.1
 backend_db_dashboard_port: "8082"

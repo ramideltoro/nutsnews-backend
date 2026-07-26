@@ -25,6 +25,10 @@
   ansible.builtin.import_tasks: worker_api.yml
   when: backend_worker_api_enabled | bool
 
+- name: Configure backend to Supabase standby sync relay
+  ansible.builtin.import_tasks: standby_sync_relay.yml
+  when: backend_supabase_sync_relay_enabled | bool
+
 - name: Configure service-aware backup baseline
   ansible.builtin.import_tasks: backup.yml
   when: backend_backup_enabled | bool

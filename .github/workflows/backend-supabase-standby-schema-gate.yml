@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       candidate_application_revision:
-        description: Commit SHA in ramideltoro/nutsnews whose standby manifest should be promoted.
+        description: Backend commit SHA expected to match this protected main run.
         required: true
         type: string
       confirmation:
@@ -67,21 +67,16 @@ jobs:
             echo "Invalid candidate_application_revision." >&2
             exit 1
           fi
-
-      - name: Checkout app candidate manifest
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-        with:
-          repository: ramideltoro/nutsnews
-          ref: ${{ env.CANDIDATE_APPLICATION_REVISION }}
-          path: app-candidate
-          persist-credentials: false
+          if [[ "$CANDIDATE_APPLICATION_REVISION" != "$GITHUB_SHA" ]]; then
+            echo "Candidate application revision must match this main revision." >&2
+            exit 1
+          fi
 
       - name: Validate schema gate implementation
         shell: bash
         run: |
           set -euo pipefail
 
-          test -f app-candidate/supabase/standby_manifest.json
           python3 scripts/validate_backend_supabase_standby_schema_gate.py
           python3 -m unittest tests.test_backend_supabase_standby_schema_gate
 
@@ -134,8 +129,8 @@ jobs:
 
           args=(
             --health-report "$RUNNER_TEMP/backend-health-report.json"
-            --candidate-standby-manifest app-candidate/supabase/standby_manifest.json
             --candidate-application-revision "$CANDIDATE_APPLICATION_REVISION"
+            --expected-application-revision "$GITHUB_SHA"
             --repository-revision "$GITHUB_SHA"
             --failover-attempt-id "$FAILOVER_ATTEMPT_ID"
             --output "$RUNNER_TEMP/backend-supabase-standby-schema-gate.json"

@@ -134,8 +134,11 @@ def main() -> int:
         "MAX_TELEMETRY_AGE_SECONDS = 300",
         "RESULT_TTL_SECONDS = 300",
         "REVISION_RE = re.compile",
+        "contract_manifest_summary",
         "candidate_manifest_summary",
         "candidate_manifest_fingerprint_mismatch",
+        "manifest_schema_fingerprint",
+        "manifest_schema_fingerprint_mismatch",
         "schema_fingerprint_mismatch",
         "migration_contract_fingerprint_mismatch",
         "identity_compatibility_failed",
@@ -154,11 +157,14 @@ def main() -> int:
 
     for token in (
         "test_exact_compatible_schema_passes",
+        "test_exact_compatible_schema_passes_without_candidate_manifest_path",
         "test_candidate_manifest_fingerprint_mismatch_fails_wrong_revision_evidence",
         "test_candidate_manifest_table_set_mismatch_fails",
         "test_candidate_manifest_function_or_view_requires_validator",
         "test_schema_fingerprint_mismatch_fails",
         "test_migration_contract_mismatch_fails",
+        "test_manifest_schema_fingerprint_mismatch_fails",
+        "test_missing_manifest_schema_fingerprint_fails",
         "test_schema_diff_is_bounded_safe_metadata",
         "test_missing_identity_check_fails",
         "test_primary_key_or_replica_identity_mismatch_fails",
@@ -187,15 +193,13 @@ def main() -> int:
         "CONFIRMATION: ${{ inputs.confirmation }}",
         "CANDIDATE_APPLICATION_REVISION: ${{ inputs.candidate_application_revision }}",
         "FAILOVER_ATTEMPT_ID: ${{ inputs.failover_attempt_id }}",
+        "Candidate application revision must match this main revision.",
         "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
-        "repository: ramideltoro/nutsnews",
-        "ref: ${{ env.CANDIDATE_APPLICATION_REVISION }}",
-        "path: app-candidate",
         "python3 scripts/backend_health_report.py",
         "--ssh-key \"$HOME/.ssh/nutsnews_backend_schema_gate\"",
         "> \"$RUNNER_TEMP/backend-health-report.stdout\"",
         "python3 scripts/backend_supabase_standby_schema_gate.py",
-        "--candidate-standby-manifest app-candidate/supabase/standby_manifest.json",
+        "--expected-application-revision \"$GITHUB_SHA\"",
         "backend-supabase-standby-schema-gate",
         "if-no-files-found: error",
     ):
@@ -211,6 +215,8 @@ def main() -> int:
         require(unsafe_pattern not in workflow, f"workflow contains unsafe direct input interpolation: {unsafe_pattern}", errors)
     for forbidden in ("NUTSNEWS_BACKEND_HOST", "NUTSNEWS_PRODUCTION_SUPABASE_DB_URL", "PGPASSWORD", "postgresql://", "postgres://"):
         require(forbidden not in workflow, f"schema gate workflow must not contain credential marker: {forbidden}", errors)
+    for forbidden in ("repository: ramideltoro/nutsnews", "path: app-candidate", "--candidate-standby-manifest app-candidate"):
+        require(forbidden not in workflow, f"schema gate workflow must not require app checkout: {forbidden}", errors)
 
     for token in (
         "python3 scripts/validate_backend_supabase_standby_schema_gate.py",
@@ -225,7 +231,7 @@ def main() -> int:
         "schema compatibility",
         "candidate application revision",
         "safe metadata only",
-        "wrong-candidate-revision",
+        "wrong-revision",
         "sequence position-only failure remains scoped to #525",
     ):
         require_token(token, runbook, "schema gate runbook", errors)

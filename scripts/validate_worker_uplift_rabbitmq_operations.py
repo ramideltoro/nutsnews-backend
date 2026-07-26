@@ -124,6 +124,8 @@ def validate() -> list[str]:
             "Install RabbitMQ private canary timer",
             "Run RabbitMQ private canary once after topology bootstrap",
             "backend_rabbitmq_canary_metrics_path",
+            "retries: 3",
+            "until: backend_rabbitmq_canary_once.rc == 0",
         ),
         errors,
     )

@@ -501,6 +501,9 @@
       - "{{ backend_rabbitmq_canary_metrics_path }}"
   register: backend_rabbitmq_canary_once
   changed_when: false
+  retries: 3
+  delay: 10
+  until: backend_rabbitmq_canary_once.rc == 0
   when:
     - backend_rabbitmq_runtime_manageable | bool
     - backend_rabbitmq_topology_enabled | bool

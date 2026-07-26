@@ -102,6 +102,14 @@ class AnsibleCheckModeGuardTests(unittest.TestCase):
         self.assertIn("Remove legacy probe state from RabbitMQ broker data directory", tasks)
         self.assertIn("backend_rabbitmq_legacy_probe_state_file is changed", tasks)
 
+    def test_rabbitmq_apply_canary_has_bounded_retries(self):
+        tasks = read_role_file("ansible/roles/backend_rabbitmq/tasks/main.yml")
+        canary_task = tasks.split("Run RabbitMQ private canary once after topology bootstrap", 1)[1].split("- name:", 1)[0]
+        self.assertIn("retries: 3", canary_task)
+        self.assertIn("delay: 10", canary_task)
+        self.assertIn("until: backend_rabbitmq_canary_once.rc == 0", canary_task)
+        self.assertIn("changed_when: false", canary_task)
+
 
 if __name__ == "__main__":
     unittest.main()

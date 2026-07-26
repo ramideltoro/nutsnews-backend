@@ -665,6 +665,16 @@ def query_value(db_url: str, query: str) -> tuple[str | None, str | None]:
     return value, error
 
 
+def manifest_schema_fingerprint(manifest: dict[str, Any]) -> str | None:
+    direct = manifest.get("manifest_schema_fingerprint")
+    if isinstance(direct, str):
+        return direct
+    source_manifest = manifest.get("source_manifest", {})
+    if isinstance(source_manifest, dict) and isinstance(source_manifest.get("schema_fingerprint"), str):
+        return source_manifest["schema_fingerprint"]
+    return None
+
+
 def validate_schema(manifest: dict[str, Any], source_db_url: str, target_db_url: str) -> dict[str, Any]:
     table_names = [table["name"] for table in manifest.get("tables", [])]
     schema_query = schema_fingerprint_sql(table_names)
@@ -706,7 +716,7 @@ def validate_schema(manifest: dict[str, Any], source_db_url: str, target_db_url:
         "target_schema_bytes": len(target_schema.encode("utf-8")),
         "source_migration_contract_sha256": source_contract_hash,
         "target_migration_contract_sha256": target_contract_hash,
-        "manifest_schema_fingerprint": manifest.get("manifest_schema_fingerprint"),
+        "manifest_schema_fingerprint": manifest_schema_fingerprint(manifest),
         "sensitivity": "metadata_hash_only",
     }
     if status == "fail":

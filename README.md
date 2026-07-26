@@ -98,6 +98,7 @@ Use [runbooks/SUPABASE_STANDBY_PROBE_BOUNDARY.md](runbooks/SUPABASE_STANDBY_PROB
 Use [runbooks/SUPABASE_STANDBY_SYNC_RELAY.md](runbooks/SUPABASE_STANDBY_SYNC_RELAY.md) before enabling, proving, or rolling back the backend-to-Supabase standby sync relay.
 Use [runbooks/SUPABASE_STANDBY_LAG_GATE.md](runbooks/SUPABASE_STANDBY_LAG_GATE.md) before evaluating or consuming the Supabase standby lag gate.
 Use [runbooks/SUPABASE_STANDBY_PARITY_GATE.md](runbooks/SUPABASE_STANDBY_PARITY_GATE.md) before evaluating or consuming the Supabase standby required-table parity gate.
+Use [runbooks/SUPABASE_STANDBY_SCHEMA_GATE.md](runbooks/SUPABASE_STANDBY_SCHEMA_GATE.md) before evaluating or consuming the Supabase standby schema compatibility gate.
 
 The current Ansible scaffold is intentionally narrow. It defines the host contract, runtime choice, validation commands, required secret boundaries, and rollback expectations that later issues will fill in through Ansible roles and protected workflows.
 

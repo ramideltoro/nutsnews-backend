@@ -33,6 +33,7 @@ IDENTITY_JSON = json.dumps(
 def contract() -> dict:
     return {
         "version": 1,
+        "manifest_schema_fingerprint": "f" * 64,
         "tables": [
             {
                 "name": "public.worker_runs",
@@ -131,6 +132,8 @@ class BackendSupabaseSyncRelayTests(unittest.TestCase):
         self.assertEqual("pass", report["status"])
         self.assertEqual("pass", report["preflight"]["status"])
         self.assertEqual("not_run", report["sync"]["status"])
+        schema_check = next(check for check in report["preflight"]["checks"] if check["id"] == "schema-fingerprint")
+        self.assertEqual("f" * 64, schema_check["manifest_schema_fingerprint"])
 
     def test_sync_once_blocks_before_mutation_when_schema_preflight_fails(self) -> None:
         side_effect = [

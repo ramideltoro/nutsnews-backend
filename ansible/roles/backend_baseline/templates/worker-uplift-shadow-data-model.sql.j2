@@ -466,12 +466,12 @@ BEGIN
   $ddl$, views_schema, 'worker_uplift_fetcher');
   EXECUTE format($ddl$
     CREATE OR REPLACE VIEW %I.canonical_article_projection AS
-    SELECT canonical_url_hash AS article_identity_hash,
-           original_url_hash,
+    SELECT original_url_hash,
            canonical_url_hash,
-           diagnostic_metadata->>'sourceFeedUrl' AS source_feed_url,
            operation_version,
-           identity_status
+           identity_status,
+           canonical_url_hash AS article_identity_hash,
+           diagnostic_metadata->>'sourceFeedUrl' AS source_feed_url
     FROM %I.article_identities
   $ddl$, views_schema, 'worker_uplift_canonicalizer');
   EXECUTE format($ddl$
@@ -492,7 +492,7 @@ BEGIN
   $ddl$, views_schema, 'worker_uplift_approval');
   EXECUTE format($ddl$
     CREATE OR REPLACE VIEW %I.translation_coverage_projection AS
-    SELECT article_identity_hash, language_code, translation_version, summary_ref, quality_status, translated_at
+    SELECT article_identity_hash, language_code, translation_version, quality_status, translated_at, summary_ref
     FROM %I.translation_records
   $ddl$, views_schema, 'worker_uplift_translation');
   EXECUTE format($ddl$

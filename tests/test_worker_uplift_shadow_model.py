@@ -88,7 +88,8 @@ class WorkerUpliftShadowModelTests(unittest.TestCase):
         self.assertIn("CREATE OR REPLACE VIEW %I.enrichment_projection", template)
         self.assertIn("canonical_url_hash AS article_identity_hash", template)
         self.assertIn("diagnostic_metadata->>'sourceFeedUrl' AS source_feed_url", template)
-        self.assertIn("summary_ref, quality_status", template)
+        self.assertIn("original_url_hash,\n           canonical_url_hash,\n           operation_version,\n           identity_status,\n           canonical_url_hash AS article_identity_hash", template)
+        self.assertIn("translation_version, quality_status, translated_at, summary_ref", template)
         for forbidden in ("article_body", "full_prompt", "raw_provider_response", "bearer_token"):
             self.assertNotIn(forbidden, template)
 

@@ -143,7 +143,19 @@ def response_snapshot(status_code: int, payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return {"http_status": status_code, "payload_type": type(payload).__name__}
     snapshot: dict[str, Any] = {"http_status": status_code}
-    for key in ("ok", "operation", "mode", "recorded", "duplicate", "productionSideEffect", "idempotencyKey"):
+    for key in (
+        "ok",
+        "operation",
+        "mode",
+        "recorded",
+        "duplicate",
+        "productionSideEffect",
+        "idempotencyKey",
+        "errorClass",
+        "pgcode",
+        "sqlstate",
+        "safeMetadataOnly",
+    ):
         if key in payload:
             snapshot[key] = payload[key]
     if "error" in payload:

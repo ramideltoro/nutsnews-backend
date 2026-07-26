@@ -1,0 +1,461 @@
+name: Backend Supabase Standby Writer Pause Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Fixed writer pause operation.
+        required: true
+        default: pause-and-prove
+        type: choice
+        options:
+          - pause-and-prove
+          - resume-aborted-attempt
+          - status
+      failover_attempt_id:
+        description: Attempt identifier shared by all failover gates.
+        required: true
+        type: string
+      quiet_window_seconds:
+        description: Seconds between backend PostgreSQL write-position snapshots for pause-and-prove.
+        required: true
+        default: "120"
+        type: string
+      drain_timeout_seconds:
+        description: Seconds allowed for worker runtime services to drain.
+        required: true
+        default: "120"
+        type: string
+      confirmation:
+        description: For pause type pause-backend-writers-for-supabase-standby; for resume type resume-backend-writers-after-aborted-failover.
+        required: false
+        default: ""
+        type: string
+      manual_freeze_confirmation:
+        description: For pause-and-prove, type no-manual-backend-postgres-writes.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: backend-supabase-standby-writer-pause-gate
+  cancel-in-progress: false
+
+jobs:
+  writer-pause:
+    name: Backend writer pause and quiescence gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          GITHUB_REF_NAME_SAFE: ${{ github.ref }}
+          ACTION: ${{ inputs.action }}
+          FAILOVER_ATTEMPT_ID: ${{ inputs.failover_attempt_id }}
+          QUIET_WINDOW_SECONDS: ${{ inputs.quiet_window_seconds }}
+          DRAIN_TIMEOUT_SECONDS: ${{ inputs.drain_timeout_seconds }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          MANUAL_FREEZE_CONFIRMATION: ${{ inputs.manual_freeze_confirmation }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF_NAME_SAFE" != "refs/heads/main" ]]; then
+            echo "This protected writer pause gate must run from main." >&2
+            exit 1
+          fi
+          if [[ ! "$FAILOVER_ATTEMPT_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then
+            echo "failover_attempt_id is invalid." >&2
+            exit 1
+          fi
+          if [[ ! "$QUIET_WINDOW_SECONDS" =~ ^[0-9]+$ || "$QUIET_WINDOW_SECONDS" -lt 30 || "$QUIET_WINDOW_SECONDS" -gt 600 ]]; then
+            echo "quiet_window_seconds must be between 30 and 600." >&2
+            exit 1
+          fi
+          if [[ ! "$DRAIN_TIMEOUT_SECONDS" =~ ^[0-9]+$ || "$DRAIN_TIMEOUT_SECONDS" -lt 1 || "$DRAIN_TIMEOUT_SECONDS" -gt 900 ]]; then
+            echo "drain_timeout_seconds must be between 1 and 900." >&2
+            exit 1
+          fi
+
+          case "$ACTION" in
+            pause-and-prove)
+              if [[ "$CONFIRMATION" != "pause-backend-writers-for-supabase-standby" ]]; then
+                echo "pause-and-prove requires confirmation pause-backend-writers-for-supabase-standby." >&2
+                exit 1
+              fi
+              if [[ "$MANUAL_FREEZE_CONFIRMATION" != "no-manual-backend-postgres-writes" ]]; then
+                echo "pause-and-prove requires manual_freeze_confirmation no-manual-backend-postgres-writes." >&2
+                exit 1
+              fi
+              ;;
+            resume-aborted-attempt)
+              if [[ "$CONFIRMATION" != "resume-backend-writers-after-aborted-failover" ]]; then
+                echo "resume-aborted-attempt requires confirmation resume-backend-writers-after-aborted-failover." >&2
+                exit 1
+              fi
+              ;;
+            status)
+              ;;
+            *)
+              echo "Unsupported action: $ACTION" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Validate workflow contract
+        shell: bash
+        run: python3 scripts/validate_backend_supabase_standby_writer_pause_gate.py
+
+      - name: Validate protected material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in \
+            NUTSNEWS_BACKEND_SSH_PRIVATE_KEY \
+            NUTSNEWS_BACKEND_KNOWN_HOSTS \
+            NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD
+          do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing required production-backend secret: $name" >&2
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Prepare backend SSH
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+        run: |
+          set -euo pipefail
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F "$NUTSNEWS_BACKEND_HOST" -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Collect protected automation freeze evidence
+        if: inputs.action == 'pause-and-prove'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_RUN_ID_SAFE: ${{ github.run_id }}
+          GITHUB_REPOSITORY_SAFE: ${{ github.repository }}
+          MANUAL_FREEZE_CONFIRMATION: ${{ inputs.manual_freeze_confirmation }}
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          from datetime import UTC, datetime
+          from pathlib import Path
+
+          repo = os.environ["GITHUB_REPOSITORY_SAFE"]
+          current = str(os.environ["GITHUB_RUN_ID_SAFE"])
+          workflows = [
+              "protected-backend-ansible-apply.yml",
+              "backend-worker-runtime-operations.yml",
+              "backend-production-cutover.yml",
+          ]
+          active = []
+          for workflow in workflows:
+              for status in ("queued", "in_progress"):
+                  completed = subprocess.run(
+                      [
+                          "gh",
+                          "run",
+                          "list",
+                          "--repo",
+                          repo,
+                          "--workflow",
+                          workflow,
+                          "--branch",
+                          "main",
+                          "--status",
+                          status,
+                          "--limit",
+                          "20",
+                          "--json",
+                          "databaseId,workflowName,status,url",
+                      ],
+                      check=False,
+                      stdout=subprocess.PIPE,
+                      stderr=subprocess.PIPE,
+                      text=True,
+                  )
+                  if completed.returncode != 0:
+                      active.append({"workflow": workflow, "status": "query_failed"})
+                      continue
+                  for item in json.loads(completed.stdout or "[]"):
+                      if str(item.get("databaseId")) == current:
+                          continue
+                      active.append(
+                          {
+                              "workflow": workflow,
+                              "status": item.get("status") or status,
+                              "run_id": item.get("databaseId"),
+                              "url": item.get("url"),
+                          }
+                      )
+
+          report = {
+              "status": "pass" if not active else "fail",
+              "checked_at_utc": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+              "manual_freeze_confirmed": os.environ.get("MANUAL_FREEZE_CONFIRMATION") == "no-manual-backend-postgres-writes",
+              "active_writer_workflows": active,
+              "checked_workflows": workflows,
+              "safe_metadata_only": True,
+          }
+          output = Path(os.environ["RUNNER_TEMP"]) / "backend-writer-automation-freeze.json"
+          output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          if report["status"] != "pass" or not report["manual_freeze_confirmed"]:
+              raise SystemExit(1)
+          PY
+
+      - name: Run fixed writer pause operation
+        if: inputs.action == 'pause-and-prove'
+        shell: bash
+        env:
+          FAILOVER_ATTEMPT_ID: ${{ inputs.failover_attempt_id }}
+          DRAIN_TIMEOUT_SECONDS: ${{ inputs.drain_timeout_seconds }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -o ClearAllForwardings=yes \
+            -o RequestTTY=no \
+            -o ConnectTimeout=10 \
+            -o ConnectionAttempts=1 \
+            -o ServerAliveInterval=10 \
+            -o ServerAliveCountMax=2 \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "sudo -n /usr/local/sbin/nutsnews-writer-pause pause --failover-attempt-id '$FAILOVER_ATTEMPT_ID' --drain-timeout-seconds '$DRAIN_TIMEOUT_SECONDS' --confirm-action" \
+            | tee "$RUNNER_TEMP/backend-writer-pause-report.json"
+
+      - name: Capture backend write positions during quiet window
+        if: inputs.action == 'pause-and-prove'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
+          NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE || vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE || 'nutsnews_primary_shadow' }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          QUIET_WINDOW_SECONDS: ${{ inputs.quiet_window_seconds }}
+        run: |
+          set -euo pipefail
+
+          source_url="$(python3 - <<'PY'
+          import os
+          from urllib.parse import quote
+
+          password = os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD"]
+          database = os.environ["NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE"].strip()
+          if "\n" in password or "\r" in password or "\n" in database or "\r" in database:
+              raise SystemExit("Backend PostgreSQL source credentials must be single-line values.")
+          print(
+              "postgresql://"
+              f"{quote('nutsnews_migration_validation', safe='')}:"
+              f"{quote(password, safe='')}"
+              f"@127.0.0.1:5432/{quote(database, safe='')}"
+          )
+          PY
+          )"
+          echo "::add-mask::$source_url"
+
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh_base=(
+            ssh
+            -i "$HOME/.ssh/nutsnews_backend"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+            -o ClearAllForwardings=yes
+            -o RequestTTY=no
+            -o ConnectTimeout=10
+            -o ConnectionAttempts=1
+            -o ServerAliveInterval=10
+            -o ServerAliveCountMax=2
+          )
+          scp_base=(
+            scp
+            -i "$HOME/.ssh/nutsnews_backend"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+          )
+
+          remote_dir=""
+          cleanup() {
+            if [[ -n "$remote_dir" ]]; then
+              "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "rm -rf -- '$remote_dir'" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
+
+          remote_dir="$("${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" 'mktemp -d')"
+          if [[ ! "$remote_dir" =~ ^/(tmp|var/tmp)/tmp\.[A-Za-z0-9._-]+$ ]]; then
+            echo "Refusing unexpected remote temp dir." >&2
+            exit 1
+          fi
+          "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "install -m 0700 -d '$remote_dir/scripts' '$remote_dir/docs'"
+          "${scp_base[@]}" \
+            scripts/backend_postgres_write_position.py \
+            scripts/backend_supabase_standby_reconcile.py \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/scripts/"
+          "${scp_base[@]}" \
+            docs/backend-supabase-sync-relay.json \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/docs/"
+
+          run_position() {
+            local output_name="$1"
+            printf '%s\n' "$source_url" \
+              | "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "set -euo pipefail
+                cd '$remote_dir'
+                IFS= read -r NUTSNEWS_BACKEND_PRIMARY_DB_URL
+                export NUTSNEWS_BACKEND_PRIMARY_DB_URL
+                python3 scripts/backend_postgres_write_position.py \
+                  --contract docs/backend-supabase-sync-relay.json \
+                  --output '$output_name' \
+                  --enforce" >/dev/null
+            "${scp_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/$output_name" "$RUNNER_TEMP/$output_name"
+          }
+
+          run_position backend-write-position-first.json
+          sleep "$QUIET_WINDOW_SECONDS"
+          run_position backend-write-position-second.json
+
+      - name: Evaluate writer pause gate
+        if: inputs.action == 'pause-and-prove'
+        shell: bash
+        env:
+          FAILOVER_ATTEMPT_ID: ${{ inputs.failover_attempt_id }}
+          QUIET_WINDOW_SECONDS: ${{ inputs.quiet_window_seconds }}
+        run: |
+          set -euo pipefail
+
+          python3 scripts/backend_supabase_standby_writer_pause_gate.py \
+            --inventory docs/backend-supabase-writer-pause-gate.json \
+            --pause-report "$RUNNER_TEMP/backend-writer-pause-report.json" \
+            --first-write-position "$RUNNER_TEMP/backend-write-position-first.json" \
+            --second-write-position "$RUNNER_TEMP/backend-write-position-second.json" \
+            --automation-report "$RUNNER_TEMP/backend-writer-automation-freeze.json" \
+            --failover-attempt-id "$FAILOVER_ATTEMPT_ID" \
+            --repository-revision "$GITHUB_SHA" \
+            --quiet-window-seconds "$QUIET_WINDOW_SECONDS" \
+            --output "$RUNNER_TEMP/backend-supabase-standby-writer-pause-gate.json" \
+            --summary "$GITHUB_STEP_SUMMARY" \
+            --enforce
+
+      - name: Run fixed resume recovery
+        if: inputs.action == 'resume-aborted-attempt'
+        shell: bash
+        env:
+          FAILOVER_ATTEMPT_ID: ${{ inputs.failover_attempt_id }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -o ClearAllForwardings=yes \
+            -o RequestTTY=no \
+            -o ConnectTimeout=10 \
+            -o ConnectionAttempts=1 \
+            -o ServerAliveInterval=10 \
+            -o ServerAliveCountMax=2 \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "sudo -n /usr/local/sbin/nutsnews-writer-pause resume --failover-attempt-id '$FAILOVER_ATTEMPT_ID' --confirm-action" \
+            | tee "$RUNNER_TEMP/backend-writer-resume-report.json"
+
+      - name: Check writer pause status
+        if: inputs.action == 'status'
+        shell: bash
+        env:
+          FAILOVER_ATTEMPT_ID: ${{ inputs.failover_attempt_id }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          set +e
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -o ClearAllForwardings=yes \
+            -o RequestTTY=no \
+            -o ConnectTimeout=10 \
+            -o ConnectionAttempts=1 \
+            -o ServerAliveInterval=10 \
+            -o ServerAliveCountMax=2 \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "sudo -n /usr/local/sbin/nutsnews-writer-pause status --failover-attempt-id '$FAILOVER_ATTEMPT_ID'" \
+            | tee "$RUNNER_TEMP/backend-writer-status-report.json"
+          rc=$?
+          set -e
+          exit "$rc"
+
+      - name: Summarize safe metadata
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Backend Supabase standby writer pause gate"
+            echo
+            echo "- Action: \`${{ inputs.action }}\`"
+            echo "- Attempt: \`${{ inputs.failover_attempt_id }}\`"
+            echo "- Backend PostgreSQL remains primary until a later protected provider switch."
+            echo "- This workflow pauses writer classes only for the supplied attempt; it does not switch providers."
+            echo "- Reports contain writer class status plus aggregate/hash write-position metadata only."
+            echo "- Credentials, database URLs, SQL text, PostgreSQL errors, and row data are not printed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload writer pause evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-supabase-standby-writer-pause-gate
+          path: |
+            ${{ runner.temp }}/backend-writer-automation-freeze.json
+            ${{ runner.temp }}/backend-writer-pause-report.json
+            ${{ runner.temp }}/backend-write-position-first.json
+            ${{ runner.temp }}/backend-write-position-second.json
+            ${{ runner.temp }}/backend-supabase-standby-writer-pause-gate.json
+            ${{ runner.temp }}/backend-writer-resume-report.json
+            ${{ runner.temp }}/backend-writer-status-report.json
+          if-no-files-found: ignore

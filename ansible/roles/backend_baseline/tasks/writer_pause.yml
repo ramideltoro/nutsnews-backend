@@ -1,0 +1,55 @@
+---
+- name: Ensure writer pause config and state directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ backend_writer_pause_config_dir }}"
+      mode: "0755"
+    - path: "{{ backend_writer_pause_state_dir }}"
+      mode: "0750"
+    - path: "{{ backend_writer_pause_worker_api_dropin_dir }}"
+      mode: "0755"
+
+- name: Install writer pause inventory
+  ansible.builtin.copy:
+    src: "{{ backend_writer_pause_inventory_source_path }}"
+    dest: "{{ backend_writer_pause_inventory_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install writer pause manager
+  ansible.builtin.copy:
+    src: nutsnews_writer_pause.py
+    dest: "{{ backend_writer_pause_manager_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Validate writer pause manager inventory
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_writer_pause_manager_path }}"
+      - status
+      - --inventory
+      - "{{ backend_writer_pause_inventory_path }}"
+      - --state-dir
+      - "{{ backend_writer_pause_state_dir }}"
+      - --failover-attempt-id
+      - ansible-inventory-validation
+  changed_when: false
+  failed_when: false
+  register: backend_writer_pause_validation
+  when: not ansible_check_mode
+
+- name: Report writer pause manager summary
+  ansible.builtin.debug:
+    msg:
+      manager_path: "{{ backend_writer_pause_manager_path }}"
+      inventory_path: "{{ backend_writer_pause_inventory_path }}"
+      state_dir: "{{ backend_writer_pause_state_dir }}"
+      validation_rc: "{{ backend_writer_pause_validation.rc | default('check-mode') }}"

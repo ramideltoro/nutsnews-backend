@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "gate_id": "backend-supabase-standby-writer-pause",
+  "tracking_issue": "ramideltoro/nutsnews#526",
+  "epic": "ramideltoro/nutsnews#521",
+  "source": {
+    "label": "backend_postgres_primary",
+    "role": "normal production read/write primary",
+    "db_url_env": "NUTSNEWS_BACKEND_PRIMARY_DB_URL",
+    "database_variable": "NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE",
+    "network_path": "backend_host_loopback_postgresql",
+    "public_5432_allowed": false
+  },
+  "target": {
+    "label": "existing_production_supabase_standby",
+    "role": "backup/hot standby target",
+    "existing_production_supabase_project": true,
+    "create_new_supabase_project": false,
+    "create_nutsnews_standby_database": false
+  },
+  "safety": {
+    "backend_postgresql_remains_primary": true,
+    "target_is_existing_production_supabase": true,
+    "create_new_supabase_project": false,
+    "create_nutsnews_standby_database": false,
+    "app_worker_writes_to_supabase_before_failover": false,
+    "safe_metadata_only": true,
+    "sql_text_exposed": false,
+    "row_data_exposed": false,
+    "credentials_exposed": false
+  },
+  "quiet_window": {
+    "minimum_seconds": 30,
+    "maximum_seconds": 600,
+    "default_seconds": 120,
+    "write_position_source": "backend_postgresql_required_table_counts_and_hashes"
+  },
+  "known_runtime_services": [
+    "scheduler",
+    "fetcher",
+    "canonicalizer",
+    "enrichment",
+    "approval",
+    "translation",
+    "persistence",
+    "publication"
+  ],
+  "writer_classes": [
+    {
+      "id": "backend_worker_database_api",
+      "class": "web_app_and_legacy_worker_write_api",
+      "kind": "systemd_env_guard",
+      "required": true,
+      "production_write_path": true,
+      "unit": "nutsnews-worker-db-api.service",
+      "environment_file": "/etc/nutsnews-worker-db-api.env",
+      "pause_method": "systemd_dropin_forces_write_flags_false_then_restarts_service",
+      "resume_method": "remove_dropin_then_restore_previous_service_state",
+      "write_flags": [
+        "NUTSNEWS_WORKER_DB_API_WRITES_ENABLED",
+        "NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED"
+      ],
+      "safe_status_only": true
+    },
+    {
+      "id": "worker_uplift_runtime_services",
+      "class": "worker_scheduler_and_stage_containers",
+      "kind": "docker_compose_scale_zero",
+      "required": true,
+      "production_write_path": false,
+      "manifest_path": "/etc/nutsnews-worker-uplift/services.json",
+      "compose_path": "/opt/nutsnews-worker-uplift/compose.yml",
+      "project_name": "nutsnews-worker-uplift",
+      "pause_method": "scale_every_manifest_service_to_zero_replicas",
+      "resume_method": "restore_recorded_replica_counts_for_aborted_attempt",
+      "drain_observation": "running_container_count_must_reach_zero",
+      "safe_status_only": true
+    },
+    {
+      "id": "backend_mutation_workflows",
+      "class": "github_actions_admin_migration_and_maintenance_jobs",
+      "kind": "protected_automation_freeze",
+      "required": true,
+      "production_write_path": true,
+      "pause_method": "workflow_concurrency_protected_environment_and_attempt_scoped_confirmation",
+      "workflows": [
+        "protected-backend-ansible-apply.yml",
+        "backend-worker-runtime-operations.yml",
+        "backend-production-cutover.yml"
+      ],
+      "safe_status_only": true
+    },
+    {
+      "id": "manual_database_access",
+      "class": "manual_admin_or_break_glass_postgresql_access",
+      "kind": "operator_freeze",
+      "required": true,
+      "production_write_path": true,
+      "pause_method": "attempt_scoped_operator_confirmation_no_manual_backend_postgres_writes",
+      "safe_status_only": true
+    },
+    {
+      "id": "standby_sync_relay",
+      "class": "backend_to_supabase_sync_relay",
+      "kind": "read_source_write_target",
+      "required": true,
+      "production_write_path": false,
+      "unit": "nutsnews-supabase-sync-relay.timer",
+      "pause_method": "not_paused_by_this_gate_because_it_reads_backend_source_and_catches_up_standby",
+      "safe_status_only": true
+    }
+  ],
+  "failure_policy": {
+    "unknown_writer": "FAIL",
+    "incomplete_inventory": "FAIL",
+    "unsuccessful_pause": "FAIL",
+    "drain_timeout": "FAIL",
+    "resumed_writer": "FAIL",
+    "observed_write_position_advance": "FAIL",
+    "stale_evidence": "FAIL",
+    "mismatched_attempt": "FAIL",
+    "malformed_evidence": "FAIL",
+    "target_mismatch": "FAIL"
+  },
+  "result_contract": {
+    "status_values": [
+      "PASS",
+      "FAIL"
+    ],
+    "result_ttl_seconds": 300,
+    "required_fields": [
+      "failover_attempt_id",
+      "writer_inventory_fingerprint",
+      "pause_started_at_utc",
+      "quiet_window_seconds",
+      "write_position_fingerprint",
+      "expires_at_utc",
+      "blockers"
+    ],
+    "safe_metadata_only": true,
+    "forbidden_evidence": [
+      "database URLs",
+      "passwords",
+      "tokens",
+      "service-role keys",
+      "raw SQL text",
+      "raw row data",
+      "PostgreSQL error text",
+      "host project metadata"
+    ]
+  }
+}

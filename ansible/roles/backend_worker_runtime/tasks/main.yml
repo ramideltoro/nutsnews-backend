@@ -77,6 +77,8 @@
       NUTSNEWS_BACKEND_API_URL={{ backend_worker_runtime_backend_api_url }}
       NUTSNEWS_BACKEND_API_WRITES_ENABLED={{ backend_worker_runtime_backend_api_writes_enabled | bool | ternary('true', 'false') }}
       RABBITMQ_VHOST={{ backend_worker_runtime_rabbitmq_vhost }}
+      NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_APPLY_ENABLED={{ backend_worker_runtime_reconciliation_apply_enabled | bool | ternary('true', 'false') }}
+      NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_STOP={{ backend_worker_runtime_reconciliation_stop | bool | ternary('true', 'false') }}
       {% for key, value in item.env | default({}) | dictsort %}
       {{ key }}={{ value }}
       {% endfor %}

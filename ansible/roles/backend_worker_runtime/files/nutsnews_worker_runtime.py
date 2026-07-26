@@ -86,6 +86,17 @@ STAGE_SCHEMAS = {
 PIPELINE_SMOKE_STAGES = ["fetcher", "canonicalizer", "enrichment", "approval", "translation", "persistence", "publication"]
 RECONCILIATION_STALE_AFTER_SECONDS = 900
 RECONCILIATION_MAX_CANDIDATES = 100
+RECONCILIATION_ENDPOINT_PATH = "/reconcile/outbox"
+RECONCILIATION_CONFIRMATIONS = {
+    "scheduler": "scheduler:fail-closed:v1",
+    "fetcher": "fetcher:fail-closed:v1",
+    "canonicalizer": "canonicalizer:fail-closed:v1",
+    "enrichment": "enrichment:fail-closed:v1",
+    "approval": "approval:replay-outbox:v1",
+    "translation": "translation:replay-outbox:v1",
+    "persistence": "persistence:replay-outbox:v1",
+    "publication": "publication:terminal-reconcile:v1",
+}
 TRACKING_QUERY_PARAMETER_NAMES = {
     "cmp",
     "cmpid",
@@ -121,6 +132,14 @@ def redact(value: str) -> str:
     value = TOKEN_RE.sub("<redacted-token>", value)
     value = URL_SECRET_RE.sub(r"\1<redacted>\3", value)
     return value
+
+
+def redacted_json(value: Any) -> Any:
+    try:
+        encoded = json.dumps(value)
+        return json.loads(redact(encoded))
+    except (TypeError, json.JSONDecodeError):
+        return redact(str(value))
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -320,6 +339,16 @@ def service_database_url(args: argparse.Namespace, service: dict[str, Any]) -> s
     return db_url
 
 
+def service_reconciliation_token(args: argparse.Namespace, service: dict[str, Any]) -> str:
+    env = service_env(args, service)
+    stage = str(service.get("stage") or service.get("name") or "").upper().replace("-", "_")
+    for key in (f"NUTSNEWS_{stage}_RECONCILIATION_TOKEN", "NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN"):
+        token = env.get(key, "").strip()
+        if token:
+            return token
+    raise RuntimeErrorWithReport(f"reconciliation token is not configured for service {service.get('name')}")
+
+
 def sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
@@ -492,6 +521,76 @@ def build_reconciliation_plan(args: argparse.Namespace, service: dict[str, Any])
     }
 
 
+def reconciliation_request_body(args: argparse.Namespace, service: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
+    stage = str(service.get("stage") or service.get("name") or "")
+    mode = "dry-run" if args.dry_run else "apply"
+    run_id = f"backend:{stage}:reconciliation:{uuid.uuid4()}"
+    body: dict[str, Any] = {
+        "mode": mode,
+        "runId": run_id,
+        "reason": "backend-worker-runtime-protected-reconciliation",
+        "maxItems": int(plan.get("candidate_limit", RECONCILIATION_MAX_CANDIDATES)),
+        "minAgeSeconds": int(plan.get("stale_after_seconds", RECONCILIATION_STALE_AFTER_SECONDS)),
+    }
+    if mode == "apply":
+        confirmation = RECONCILIATION_CONFIRMATIONS.get(stage)
+        if not confirmation:
+            raise RuntimeErrorWithReport(f"no protected reconciliation confirmation is registered for stage {stage}")
+        body["protectedConfirmation"] = confirmation
+    return body
+
+
+def invoke_service_reconciliation(args: argparse.Namespace, service: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
+    stage = str(service.get("stage") or service.get("name") or "")
+    port = SERVICE_HTTP_PORTS.get(stage)
+    if port is None:
+        raise RuntimeErrorWithReport(f"no reconciliation HTTP port is registered for stage {stage}")
+
+    body = reconciliation_request_body(args, service, plan)
+    token = service_reconciliation_token(args, service)
+    response = http_post_json_local(RECONCILIATION_ENDPOINT_PATH, port, body, token)
+    service_report = response.get("body")
+    return {
+        "endpoint": f"http://127.0.0.1:{port}{RECONCILIATION_ENDPOINT_PATH}",
+        "request": {
+            "mode": body["mode"],
+            "runId": body["runId"],
+            "reason": body["reason"],
+            "maxItems": body["maxItems"],
+            "minAgeSeconds": body["minAgeSeconds"],
+            "protectedConfirmationProvided": "protectedConfirmation" in body,
+        },
+        "response": response,
+        "service_report": service_report if isinstance(service_report, dict) else {},
+    }
+
+
+def service_reconciliation_outcome(invocation: dict[str, Any]) -> tuple[bool, str]:
+    response = invocation.get("response", {})
+    if not isinstance(response, dict) or response.get("status") != "received":
+        return False, "service-owned reconciliation endpoint did not return a usable response"
+
+    service_report = invocation.get("service_report", {})
+    if not isinstance(service_report, dict):
+        return False, "service-owned reconciliation endpoint did not return a JSON report"
+
+    service_status = service_report.get("status")
+    writes_performed = service_report.get("writesPerformed") is True
+    selected_count = int(service_report.get("selectedCount", 0) or 0)
+    production_visibility_enabled = service_report.get("productionVisibilityEnabled") is True
+    legacy_runtime_required = service_report.get("legacyRuntimeRequired") is True
+
+    if production_visibility_enabled or legacy_runtime_required:
+        return False, "service reconciliation report enabled production visibility or required legacy runtime"
+    if service_status in {"dry_run", "applied"}:
+        return True, "service-owned reconciliation endpoint completed"
+    if service_status == "failed_closed" and not writes_performed and selected_count == 0:
+        return True, "service-owned reconciliation endpoint failed closed before selecting replay candidates"
+    if service_status == "kill_switch_active":
+        return False, "service-owned reconciliation stop switch is active"
+    return False, f"service-owned reconciliation ended with status {service_status or '<missing>'}"
+
+
 def wait_for_psql_values(
     db_url: str,
     query: str,
@@ -530,6 +629,45 @@ def http_get_local(path: str, port: int, timeout: int = 10) -> dict[str, Any]:
             "status": "critical",
             "error": type(exc).__name__,
         }
+
+
+def http_post_json_local(path: str, port: int, payload: dict[str, Any], token: str, timeout: int = 30) -> dict[str, Any]:
+    url = f"http://127.0.0.1:{port}{path}"
+    body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    req = request.Request(url, data=body, method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Accept", "application/json")
+    req.add_header("Authorization", f"Bearer {token}")
+
+    try:
+        with request.urlopen(req, timeout=timeout) as response:
+            response_body = response.read().decode("utf-8", errors="replace")
+            return {
+                "status": "received" if 200 <= response.status < 300 else "critical",
+                "http_status": response.status,
+                "body": parse_json_body(response_body),
+            }
+    except error.HTTPError as exc:
+        response_body = exc.read().decode("utf-8", errors="replace")
+        return {
+            "status": "received" if exc.code in {400, 409, 423} else "critical",
+            "http_status": exc.code,
+            "body": parse_json_body(response_body),
+        }
+    except OSError as exc:
+        return {
+            "status": "critical",
+            "error": type(exc).__name__,
+            "summary": "service-owned reconciliation endpoint is not reachable",
+        }
+
+
+def parse_json_body(body: str) -> Any:
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError:
+        return redact(body[:2048])
+    return redacted_json(parsed)
 
 
 def rabbitmq_admin_env(args: argparse.Namespace) -> tuple[str, str, str]:
@@ -1776,15 +1914,20 @@ def build_report(args: argparse.Namespace, manifest: dict[str, Any]) -> dict[str
     elif args.action == "reconciliation":
         try:
             report["reconciliation"] = build_reconciliation_plan(args, service)
+            report["reconciliation"]["service_invocation"] = invoke_service_reconciliation(args, service, report["reconciliation"])
         except RuntimeErrorWithReport as exc:
             report["status"] = "fail"
-            report["summary"] = "Reconciliation dry-run planning could not read safe stage metadata."
+            report["summary"] = "Reconciliation could not complete safe stage planning or service-owned invocation."
             report["errors"].append(str(exc))
             return report
-        report["status"] = "dry_run" if args.dry_run else "blocked"
-        report["summary"] = "Reconciliation dry-run plans safe stage metadata only; protected apply remains fail-closed until service-owned replayers exist."
-        if not args.dry_run:
-            report["errors"].append("reconciliation requires a later approved service-specific reconciler")
+        ok, summary = service_reconciliation_outcome(report["reconciliation"]["service_invocation"])
+        if ok:
+            report["status"] = "dry_run" if args.dry_run else "pass"
+            report["summary"] = summary
+        else:
+            report["status"] = "fail"
+            report["summary"] = summary
+            report["errors"].append(summary)
     elif args.action == "smoke":
         run_service_smoke(args, manifest, service, report)
 

@@ -263,8 +263,10 @@ def main() -> int:
         if name not in validation_secrets:
             errors.append(f"validation identity missing: {name}")
     for item in identities.get("validation_identities", []):
-        if item.get("runtime_service_injection") is not False:
-            errors.append(f"validation identity must not be injected into runtime services: {item.get('id')}")
+        if item.get("id") == "shadow_smoke" and item.get("runtime_service_injection") is not False:
+            errors.append("shadow smoke identity must not be injected into runtime services")
+        if item.get("id") == "reconciliation_confirmation" and item.get("runtime_service_injection") is not True:
+            errors.append("reconciliation identity must be injected into runtime services for bearer authorization")
 
     telemetry = identities.get("telemetry_policy", {})
     if "GRAFANA_SERVICE_ACCOUNT_TOKEN" not in telemetry.get("grafana_management_credentials_not_for_worker_services", []):

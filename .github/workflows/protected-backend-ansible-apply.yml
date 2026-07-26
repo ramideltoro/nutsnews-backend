@@ -193,6 +193,8 @@ jobs:
           NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN }}
           NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN }}
           NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED || 'false' }}
+          NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN }}
+          NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_APPLY_ENABLED: ${{ vars.NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_APPLY_ENABLED || 'false' }}
           NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE: ${{ vars.NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE || 'shadow' }}
           NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED: ${{ vars.NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED || 'false' }}
           NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENABLED: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENABLED || 'true' }}
@@ -288,6 +290,7 @@ jobs:
             --required-secret NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_PASSWORD \
             --required-secret NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_PASSWORD \
             --required-secret NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_PASSWORD \
+            --required-secret NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN \
             --required-secret RABBITMQ_ERLANG_COOKIE \
             --required-secret RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD \
             --required-secret RABBITMQ_MONITORING_PASSWORD \
@@ -352,6 +355,8 @@ jobs:
           NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN }}
           NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN }}
           NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED || 'false' }}
+          NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN }}
+          NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_APPLY_ENABLED: ${{ vars.NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_APPLY_ENABLED || 'false' }}
           NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE: ${{ vars.NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE || 'shadow' }}
           NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED: ${{ vars.NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED || 'false' }}
           NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENABLED: ${{ vars.NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENABLED || 'true' }}
@@ -694,11 +699,13 @@ jobs:
                   raise SystemExit("Worker runtime final shadow services require NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED=true.")
               persistence_token = os.environ.get("NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN", "")
               publication_token = os.environ.get("NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN", "")
+              reconciliation_token = os.environ.get("NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN", "")
               missing_scoped = [
                   name
                   for name, value in (
                       ("NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN", persistence_token),
                       ("NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN", publication_token),
+                      ("NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN", reconciliation_token),
                   )
                   if not value
               ]
@@ -706,7 +713,7 @@ jobs:
                   raise SystemExit(f"Worker runtime final shadow services require scoped Worker API secrets: {', '.join(missing_scoped)}")
               if len({backend_api_token, persistence_token, publication_token}) != 3:
                   raise SystemExit("Worker runtime legacy, persistence, and publication API tokens must be distinct")
-              if any("\n" in value or "\r" in value for value in (backend_api_token, local_ai_base_url, local_ai_api_key, persistence_token, publication_token)):
+              if any("\n" in value or "\r" in value for value in (backend_api_token, local_ai_base_url, local_ai_api_key, persistence_token, publication_token, reconciliation_token)):
                   raise SystemExit("Worker runtime secret values must be single-line values")
 
               def url_quote(value):
@@ -732,6 +739,10 @@ jobs:
               extra_vars["backend_worker_runtime_enabled"] = True
               extra_vars["backend_worker_runtime_default_mode"] = "shadow"
               extra_vars["backend_worker_runtime_production_writes_enabled"] = False
+              extra_vars["backend_worker_runtime_reconciliation_apply_enabled"] = (
+                  os.environ.get("NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_APPLY_ENABLED", "false").strip().lower()
+                  in {"1", "true", "yes"}
+              )
               backend_domain = os.environ.get("NUTSNEWS_BACKEND_DOMAIN", "backend.nutsnews.com").strip() or "backend.nutsnews.com"
               extra_vars["backend_worker_runtime_backend_api_url"] = f"https://{backend_domain}"
               extra_vars["backend_worker_runtime_rabbitmq_vhost"] = os.environ.get("RABBITMQ_VHOST", "nutsnews-worker-uplift").strip() or "nutsnews-worker-uplift"
@@ -759,6 +770,7 @@ jobs:
                   "publication-database-url": postgres_url("publication"),
                   "publication-rabbitmq-url": rabbitmq_url("RABBITMQ_PUBLICATION_CONSUMER_USERNAME", "RABBITMQ_PUBLICATION_CONSUMER_PASSWORD"),
                   "publication-backend-api-token": publication_token,
+                  "reconciliation-token": reconciliation_token,
               }
 
           path = Path(os.environ["RUNNER_TEMP"]) / "backend-extra-vars.json"

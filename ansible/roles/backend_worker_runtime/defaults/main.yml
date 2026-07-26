@@ -19,6 +19,8 @@ backend_worker_runtime_default_restart_policy: unless-stopped
 backend_worker_runtime_default_cpu_limit: "0.50"
 backend_worker_runtime_default_memory_limit: 256m
 backend_worker_runtime_default_pids_limit: 256
+backend_worker_runtime_reconciliation_apply_enabled: false
+backend_worker_runtime_reconciliation_stop: false
 backend_worker_runtime_allowed_image_repositories:
   - ghcr.io/ramideltoro/nutsnews-worker-uplift/
   - ghcr.io/ramideltoro/nutsnews-backend/worker-uplift/
@@ -115,6 +117,8 @@ backend_worker_runtime_services:
         env_key: NUTSNEWS_SCHEDULER_RABBITMQ_URL
       - name: scheduler-backend-api-token
         env_key: NUTSNEWS_SCHEDULER_BACKEND_API_TOKEN
+      - name: reconciliation-token
+        env_key: NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN
     queues:
       main: nutsnews.worker.fetch.v1
       retry: []
@@ -182,6 +186,8 @@ backend_worker_runtime_services:
         env_key: NUTSNEWS_FETCHER_DATABASE_URL
       - name: fetcher-rabbitmq-url
         env_key: NUTSNEWS_FETCHER_RABBITMQ_URL
+      - name: reconciliation-token
+        env_key: NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN
     queues:
       main: nutsnews.worker.fetch.v1
       retry:
@@ -247,6 +253,8 @@ backend_worker_runtime_services:
         env_key: NUTSNEWS_CANONICALIZER_DATABASE_URL
       - name: canonicalizer-rabbitmq-url
         env_key: NUTSNEWS_CANONICALIZER_RABBITMQ_URL
+      - name: reconciliation-token
+        env_key: NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN
     queues:
       main: nutsnews.worker.canonicalization.v1
       retry:
@@ -323,6 +331,8 @@ backend_worker_runtime_services:
         env_key: NUTSNEWS_ENRICHMENT_DATABASE_URL
       - name: enrichment-rabbitmq-url
         env_key: NUTSNEWS_ENRICHMENT_RABBITMQ_URL
+      - name: reconciliation-token
+        env_key: NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN
     queues:
       main: nutsnews.worker.enrichment.v1
       retry:
@@ -409,6 +419,8 @@ backend_worker_runtime_services:
         env_key: NUTSNEWS_APPROVAL_QWEN_BASE_URL
       - name: approval-qwen-api-key
         env_key: NUTSNEWS_APPROVAL_QWEN_API_KEY
+      - name: reconciliation-token
+        env_key: NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN
     queues:
       main: nutsnews.worker.approval.v1
       retry:
@@ -499,6 +511,8 @@ backend_worker_runtime_services:
         env_key: NUTSNEWS_TRANSLATION_QWEN_BASE_URL
       - name: translation-qwen-api-key
         env_key: NUTSNEWS_TRANSLATION_QWEN_API_KEY
+      - name: reconciliation-token
+        env_key: NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN
     queues:
       main: nutsnews.worker.translation.v1
       retry:
@@ -583,6 +597,8 @@ backend_worker_runtime_services:
         env_key: NUTSNEWS_PERSISTENCE_RABBITMQ_URL
       - name: persistence-backend-api-token
         env_key: NUTSNEWS_PERSISTENCE_BACKEND_API_TOKEN
+      - name: reconciliation-token
+        env_key: NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN
     queues:
       main: nutsnews.worker.persistence.v1
       retry:
@@ -661,6 +677,8 @@ backend_worker_runtime_services:
         env_key: NUTSNEWS_PUBLICATION_RABBITMQ_URL
       - name: publication-backend-api-token
         env_key: NUTSNEWS_PUBLICATION_BACKEND_API_TOKEN
+      - name: reconciliation-token
+        env_key: NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN
     queues:
       main: nutsnews.worker.publication.v1
       retry:

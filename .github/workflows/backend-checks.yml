@@ -196,6 +196,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backend_supabase_sync_relay.py
 
+      - name: Validate backend-to-Supabase sync relay health guardrails
+        shell: bash
+        run: python3 scripts/validate_backend_supabase_sync_relay_health.py
+
       - name: Validate backend-to-Supabase sync relay offline mode
         shell: bash
         run: python3 scripts/backend_supabase_sync_relay.py --offline --enforce

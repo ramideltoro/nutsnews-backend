@@ -78,8 +78,25 @@ The JSON report includes:
   report from `/var/lib/nutsnews/rabbitmq-probes/last-smoke.json`
 - the last private AMQP canary report from
   `/var/lib/nutsnews/rabbitmq-probes/last-canary.json`
+- `supabase_sync_relay_health` from the backend-to-Supabase standby relay timer
+  and `/var/lib/nutsnews/supabase-sync-relay/last-run.json`
 - fixed-command SSH evidence
-- classified checks for host resources, failed units, reboot/update state, core services, backup tooling, backup freshness, backup verification, restore drill status, storage quota status, recovery status, and sudo readiness
+- classified checks for host resources, failed units, reboot/update state, core services, backup tooling, backup freshness, backup verification, restore drill status, storage quota status, recovery status, standby relay health, and sudo readiness
+
+The standby relay health check reports only safe metadata:
+
+- relay timer state, service state, and last service result;
+- `last_applied_at_utc`;
+- `lag_seconds`;
+- `failed_table_count`;
+- generic `last_error` code;
+- `standby_failover_blocked`.
+
+Lag over `30 seconds`, missing relay status, invalid relay status, stopped relay
+timer, failed relay result, unknown failed-table count, or any failed replicated
+table marks `supabase_sync_relay_health` as `critical`. That critical check
+creates an alert candidate and blocks Supabase failover decision-making until a
+fresh healthy relay report exists.
 
 Statuses are:
 

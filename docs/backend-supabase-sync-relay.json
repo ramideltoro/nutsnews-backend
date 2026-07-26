@@ -53,6 +53,41 @@
     "app_worker_supabase_write_credentials_injected": false,
     "supabase_as_production_provider_before_failover": false
   },
+  "health": {
+    "issue": "ramideltoro/nutsnews#500",
+    "report_path": "/var/lib/nutsnews/supabase-sync-relay/last-run.json",
+    "check_name": "supabase_sync_relay_health",
+    "lag_critical_seconds": 30,
+    "source": "backend_health_report",
+    "safe_metadata_only": true,
+    "reported_fields": [
+      "timer_state",
+      "service_state",
+      "service_result",
+      "last_applied_at_utc",
+      "lag_seconds",
+      "failed_table_count",
+      "last_error"
+    ],
+    "critical_blockers": [
+      "relay_timer_stopped",
+      "relay_timer_not_enabled",
+      "relay_service_last_result_failed",
+      "relay_report_missing",
+      "relay_report_invalid",
+      "relay_last_run_not_pass",
+      "relay_report_not_marked_safe_metadata_only",
+      "relay_lag_unknown",
+      "relay_lag_exceeds_threshold",
+      "relay_failed_table_count_unknown",
+      "relay_failed_tables_present"
+    ],
+    "failover_decision": {
+      "lag_over_threshold": "blocked",
+      "missing_or_failed_relay": "blocked",
+      "scope": "health telemetry only; final failover remains gated by #521"
+    }
+  },
   "safety": {
     "safe_metadata_only_report": true,
     "backend_postgresql_remains_primary": true,

@@ -184,6 +184,8 @@ class BackendSupabaseSyncRelayTests(unittest.TestCase):
         self.assertEqual(0, exit_code)
         self.assertEqual("pass", report["status"])
         self.assertEqual("applied", report["sync"]["status"])
+        self.assertIn("completed_at_utc", report)
+        self.assertIn("last_applied_at_utc", report)
         self.assertEqual(["insert", "update", "delete", "sequence-readiness"], report["sync"]["supported_change_types"])
         apply_table_backfill.assert_called_once()
         apply_sequence_safety.assert_called_once()

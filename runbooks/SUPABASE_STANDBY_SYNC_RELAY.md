@@ -54,6 +54,45 @@ sudo -u nutsnews-standby-relay python3 /usr/local/libexec/nutsnews-backend-supab
   --enforce
 ```
 
+## Health, Lag, and Alerting
+
+Issue #500 exposes relay health through the existing `Backend Health Report`
+workflow as the `supabase_sync_relay_health` check. The health report reads the
+timer/service state and the safe relay report at:
+
+```text
+/var/lib/nutsnews/supabase-sync-relay/last-run.json
+```
+
+The report includes only safe metadata:
+
+- timer state, service state, and last service result;
+- `last_applied_at_utc` from successful relay runs, falling back to
+  `checked_at_utc` for older reports;
+- `lag_seconds`;
+- `failed_table_count`;
+- generic `last_error` code.
+
+Lag over `30` seconds marks standby failover as blocked with
+`relay_lag_exceeds_threshold`. Missing or stopped relay timer state marks the
+check critical with `relay_timer_stopped` or `relay_report_missing`. Failed
+relay status, failed table checks, invalid report JSON, or missing safe-metadata
+marking also fail closed.
+
+Run the health report manually without email:
+
+```bash
+gh workflow run backend-health-report.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f send_email=false
+```
+
+Acceptance evidence for #500 must include the successful health report run URL,
+the `supabase_sync_relay_health` check summary, and confirmation that no
+database URLs, passwords, Supabase keys, raw row data, or host/project metadata
+were printed.
+
 ## Acceptance Evidence
 
 For #499, record:

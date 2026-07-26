@@ -99,7 +99,6 @@
     mode: "u+rwX"
     recurse: true
   register: backend_rabbitmq_data_tree_permissions
-  notify: Restart RabbitMQ
 
 - name: Ensure RabbitMQ probe state directory exists
   ansible.builtin.file:

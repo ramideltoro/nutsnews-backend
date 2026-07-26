@@ -161,6 +161,10 @@ any stage queue is non-empty or has active consumers. Protected applies run
 get mutated by a deployment check. The JSON report records `skipped_stages`,
 `skipped_queues`, and `skipped_consumers` for any route skipped due to existing
 messages or consumers; empty idle routes are still probed.
+The persistent data ownership repair does not notify an immediate RabbitMQ
+restart before this live transfer probe; ownership repairs are instead covered by
+the later durable restart probe so consumers are not disconnected during the
+consumer-count skip check.
 For probed routes, it publishes and cleans up probe messages, verifies retry and
 DLQ routing, and verifies an unroutable retry target leaves the source message
 visible until a confirmed target publish succeeds.

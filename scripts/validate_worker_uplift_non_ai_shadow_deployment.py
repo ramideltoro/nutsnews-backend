@@ -223,8 +223,6 @@ def validate() -> list[str]:
         )
 
     for forbidden in (
-        "name: persistence\n    stage: persistence\n",
-        "name: publication\n    stage: publication\n",
         "NUTSNEWS_BACKEND_WORKER_RUNTIME_PRODUCTION_WRITES_ENABLED=true",
         "wrangler",
         "CLOUDFLARE_API_TOKEN",

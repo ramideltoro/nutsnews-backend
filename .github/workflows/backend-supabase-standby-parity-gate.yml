@@ -1,0 +1,135 @@
+name: Backend Supabase Standby Parity Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      failover_attempt_id:
+        description: Stable failover attempt identifier for binding gate evidence.
+        required: true
+        type: string
+      confirmation:
+        description: Type evaluate-standby-parity-gate to run this gate.
+        required: true
+        type: string
+      enforce:
+        description: Return non-zero when the gate result is FAIL.
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-supabase-standby-parity-gate-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    name: Evaluate standby parity gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production-backend
+    env:
+      CONFIRMATION: ${{ inputs.confirmation }}
+      ENFORCE: ${{ inputs.enforce }}
+      FAILOVER_ATTEMPT_ID: ${{ inputs.failover_attempt_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF_NAME" != "main" ]]; then
+            echo "This gate only runs from main." >&2
+            exit 1
+          fi
+          if [[ "$CONFIRMATION" != "evaluate-standby-parity-gate" ]]; then
+            echo "Invalid confirmation." >&2
+            exit 1
+          fi
+          if ! [[ "$FAILOVER_ATTEMPT_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then
+            echo "Invalid failover_attempt_id." >&2
+            exit 1
+          fi
+
+      - name: Validate parity gate implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 scripts/validate_backend_supabase_standby_parity_gate.py
+          python3 -m unittest tests.test_backend_supabase_standby_parity_gate
+
+      - name: Prepare read-only SSH material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for secret_name in NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
+            if [[ -z "${!secret_name}" ]]; then
+              echo "Missing required repository secret: $secret_name" >&2
+              missing=1
+            fi
+          done
+          if [[ "$missing" -ne 0 ]]; then
+            exit "$missing"
+          fi
+
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend_parity_gate"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend_parity_gate"
+
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend_parity_gate" > /dev/null
+
+      - name: Collect fresh relay parity telemetry
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+
+          python3 scripts/backend_health_report.py \
+            --ssh-user "${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}" \
+            --ssh-key "$HOME/.ssh/nutsnews_backend_parity_gate" \
+            --known-hosts "$HOME/.ssh/known_hosts" \
+            --output "$RUNNER_TEMP/backend-health-report.json" \
+            > "$RUNNER_TEMP/backend-health-report.stdout"
+
+      - name: Evaluate parity gate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          args=(
+            --health-report "$RUNNER_TEMP/backend-health-report.json"
+            --failover-attempt-id "$FAILOVER_ATTEMPT_ID"
+            --output "$RUNNER_TEMP/backend-supabase-standby-parity-gate.json"
+            --summary "$GITHUB_STEP_SUMMARY"
+          )
+          if [[ "$ENFORCE" == "true" ]]; then
+            args+=(--enforce)
+          fi
+
+          python3 scripts/backend_supabase_standby_parity_gate.py "${args[@]}"
+
+      - name: Upload parity gate result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-supabase-standby-parity-gate
+          path: ${{ runner.temp }}/backend-supabase-standby-parity-gate.json
+          if-no-files-found: error

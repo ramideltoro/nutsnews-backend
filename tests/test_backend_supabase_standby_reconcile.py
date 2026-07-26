@@ -61,6 +61,35 @@ def manifest() -> dict:
     }
 
 
+def sequence_state(
+    *,
+    last_value: int = 12,
+    is_called: bool = True,
+    increment_by: int = 1,
+    min_value: int = 1,
+    max_value: int = 9223372036854775807,
+    cycle: bool = False,
+    table: str = "public.worker_runs",
+    column: str = "id",
+    owned_by_count: int = 1,
+    expected_binding_matches: bool = True,
+) -> str:
+    return json.dumps(
+        {
+            "last_value": last_value,
+            "is_called": is_called,
+            "increment_by": increment_by,
+            "min_value": min_value,
+            "max_value": max_value,
+            "cycle": cycle,
+            "owned_by_table": table,
+            "owned_by_column": column,
+            "owned_by_count": owned_by_count,
+            "expected_binding_matches": expected_binding_matches,
+        }
+    )
+
+
 def run_with_manifest(manifest_data: dict, argv: list[str], env: dict[str, str], side_effect: list[tuple[str | None, str | None]]):
     with tempfile.TemporaryDirectory() as tmpdir:
         manifest_path = Path(tmpdir) / "standby.json"
@@ -97,8 +126,8 @@ def passing_psql_side_effect() -> list[tuple[str | None, str | None]]:
         (COLUMN_METADATA, None),
         ("row-checksum", None),
         ("row-checksum", None),
-        (json.dumps({"last_value": 12, "is_called": True, "increment_by": 1}), None),
-        (json.dumps({"last_value": 12, "is_called": True, "increment_by": 1}), None),
+        (sequence_state(), None),
+        (sequence_state(), None),
         ("12", None),
         ("12", None),
     ]
@@ -265,7 +294,7 @@ class BackendSupabaseStandbyReconcileTests(unittest.TestCase):
 
     def test_sequence_next_value_not_above_source_max_id_fails(self) -> None:
         effects = passing_psql_side_effect()
-        effects[11] = (json.dumps({"last_value": 12, "is_called": True, "increment_by": 1}), None)
+        effects[11] = (sequence_state(), None)
         effects[12] = ("14", None)
         exit_code, report = run_with_manifest(
             manifest(),
@@ -278,6 +307,58 @@ class BackendSupabaseStandbyReconcileTests(unittest.TestCase):
         self.assertEqual(1, exit_code)
         self.assertEqual("fail", sequence_check["status"])
         self.assertIn("target_next_value_not_above_source_max_id", sequence_check["reasons"])
+
+    def test_sequence_state_sql_does_not_consume_nextval(self) -> None:
+        sql = reconcile.sequence_state_sql(
+            reconcile.parse_relation("public.worker_runs_id_seq"),
+            reconcile.parse_relation("public.worker_runs"),
+            "id",
+        )
+        self.assertNotIn("nextval", sql.lower())
+        self.assertIn("expected_binding_matches", sql)
+        self.assertIn("pg_depend", sql)
+
+    def test_target_sequence_next_value_behind_source_next_fails(self) -> None:
+        effects = passing_psql_side_effect()
+        effects[10] = (sequence_state(last_value=20), None)
+        effects[11] = (sequence_state(last_value=12), None)
+        exit_code, report = run_with_manifest(
+            manifest(),
+            ["--enforce"],
+            {"SRC": "postgresql://source:pw@127.0.0.1/postgres", "TGT": "postgresql://target:pw@127.0.0.1/postgres"},
+            effects,
+        )
+
+        sequence_check = next(check for check in report["post_reconciliation"]["checks"] if check["id"] == "sequence.public.worker_runs_id_seq")
+        self.assertEqual(1, exit_code)
+        self.assertEqual("fail", sequence_check["status"])
+        self.assertIn("target_next_value_lt_source_next_value", sequence_check["reasons"])
+        self.assertIn("target_last_value_lt_source_last_value", sequence_check["reasons"])
+
+    def test_sequence_misbound_cycled_or_exhausted_fails(self) -> None:
+        effects = passing_psql_side_effect()
+        effects[11] = (
+            sequence_state(
+                cycle=True,
+                max_value=12,
+                table="public.other_table",
+                expected_binding_matches=False,
+            ),
+            None,
+        )
+        exit_code, report = run_with_manifest(
+            manifest(),
+            ["--enforce"],
+            {"SRC": "postgresql://source:pw@127.0.0.1/postgres", "TGT": "postgresql://target:pw@127.0.0.1/postgres"},
+            effects,
+        )
+
+        sequence_check = next(check for check in report["post_reconciliation"]["checks"] if check["id"] == "sequence.public.worker_runs_id_seq")
+        self.assertEqual(1, exit_code)
+        self.assertEqual("fail", sequence_check["status"])
+        self.assertIn("target_sequence_cycle_enabled", sequence_check["reasons"])
+        self.assertIn("target_sequence_exhausted", sequence_check["reasons"])
+        self.assertIn("target_sequence_misbound", sequence_check["reasons"])
 
     def test_apply_backfill_requires_exact_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -367,7 +448,7 @@ class BackendSupabaseStandbyReconcileTests(unittest.TestCase):
             ("12", None),
             ("[]", None),
             ("[]", None),
-            (json.dumps({"last_value": 12, "is_called": True, "increment_by": 1}), None),
+            (sequence_state(), None),
             ("12", None),
             ("12", None),
             ("13", None),
@@ -416,7 +497,7 @@ class BackendSupabaseStandbyReconcileTests(unittest.TestCase):
             ("12", None),
             ("[]", None),
             ("[]", None),
-            (json.dumps({"last_value": 12, "is_called": True, "increment_by": 1}), None),
+            (sequence_state(), None),
             ("12", None),
             ("12", None),
             ("13", None),
@@ -461,7 +542,7 @@ class BackendSupabaseStandbyReconcileTests(unittest.TestCase):
             ("12", None),
             (source_constraints, None),
             ("[]", None),
-            (json.dumps({"last_value": 12, "is_called": True, "increment_by": 1}), None),
+            (sequence_state(), None),
             ("12", None),
             ("12", None),
             ("13", None),

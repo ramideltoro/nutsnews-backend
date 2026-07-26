@@ -212,6 +212,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backend_supabase_standby_schema_gate.py
 
+      - name: Validate Supabase standby sequence gate guardrails
+        shell: bash
+        run: python3 scripts/validate_backend_supabase_standby_sequence_gate.py
+
       - name: Validate backend-to-Supabase sync relay offline mode
         shell: bash
         run: python3 scripts/backend_supabase_sync_relay.py --offline --enforce
@@ -235,6 +239,10 @@ jobs:
       - name: Run Supabase standby schema gate tests
         shell: bash
         run: python3 -m unittest tests.test_backend_supabase_standby_schema_gate
+
+      - name: Run Supabase standby sequence gate tests
+        shell: bash
+        run: python3 -m unittest tests.test_backend_supabase_standby_sequence_gate
 
       - name: Report migration drift gate status
         shell: bash

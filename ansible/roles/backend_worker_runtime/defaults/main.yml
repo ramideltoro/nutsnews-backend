@@ -533,8 +533,8 @@ backend_worker_runtime_services:
   - name: persistence
     stage: persistence
     tracking_issue: 119
-    image: ghcr.io/ramideltoro/nutsnews-worker-article-persistence@sha256:b65a36262cb4d7fda20843f7d5f210df65cd0e5096de28aa773ee7bbda4ddb30
-    image_tag: b8b1215ee7020e8737ca70e1280a2d5a001f0065
+    image: ghcr.io/ramideltoro/nutsnews-worker-article-persistence@sha256:73b50ce1042f6a454d12b9db53314fb219402dc5da40b5748f3d7cddabecad72
+    image_tag: 5ef89ecb67742cf8cc26b43948d4121d98286668
     contract_version: "0.4.0"
     runtime_package_version: "0.4.0"
     runtime_mode: shadow
@@ -558,7 +558,7 @@ backend_worker_runtime_services:
       required: true
       signed: true
       source_repository: ramideltoro/nutsnews-worker-article-persistence
-      subject_digest: sha256:b65a36262cb4d7fda20843f7d5f210df65cd0e5096de28aa773ee7bbda4ddb30
+      subject_digest: sha256:73b50ce1042f6a454d12b9db53314fb219402dc5da40b5748f3d7cddabecad72
     env:
       NUTSNEWS_ENVIRONMENT: production
       NUTSNEWS_PERSISTENCE_HTTP_HOST: 127.0.0.1

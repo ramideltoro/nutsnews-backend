@@ -43,6 +43,20 @@
       "sequence-readiness"
     ],
     "apply_strategy": "copy-source-snapshot-to-temp-table-update-insert-delete-target-rows",
+    "sequence_readiness_metadata_fields": [
+      "last_value",
+      "next_value",
+      "is_called",
+      "increment_by",
+      "min_value",
+      "max_value",
+      "cycle",
+      "owned_by_table",
+      "owned_by_column",
+      "owned_by_count",
+      "expected_binding_matches",
+      "owning_column_max_id"
+    ],
     "fail_closed_before_target_mutation": [
       "schema-fingerprint-mismatch",
       "migration-contract-fingerprint-mismatch",

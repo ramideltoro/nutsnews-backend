@@ -637,12 +637,71 @@ def apply_schema_constraint_repair(
     return result
 
 
-def sequence_state_sql(sequence: Relation) -> str:
+def sequence_state_sql(sequence: Relation, table: Relation | None = None, column: str | None = None) -> str:
+    expected_binding_sql = "null::boolean"
+    if table is not None and column is not None:
+        expected_binding_sql = f"""
+        exists (
+          select 1
+          from owned_by
+          where table_schema = {sql_literal(table.schema)}
+            and table_name = {sql_literal(table.name)}
+            and column_name = {sql_literal(column)}
+        )
+        """
     return f"""
+    with sequence_relation as (
+      select c.oid
+      from pg_class c
+      join pg_namespace n
+        on n.oid = c.relnamespace
+      where n.nspname = {sql_literal(sequence.schema)}
+        and c.relname = {sql_literal(sequence.name)}
+        and c.relkind = 'S'
+    ),
+    owned_by as (
+      select
+        tn.nspname as table_schema,
+        t.relname as table_name,
+        a.attname as column_name
+      from sequence_relation sr
+      join pg_depend d
+        on d.classid = 'pg_class'::regclass
+       and d.objid = sr.oid
+       and d.deptype in ('a', 'i')
+      join pg_class t
+        on t.oid = d.refobjid
+      join pg_namespace tn
+        on tn.oid = t.relnamespace
+      join pg_attribute a
+        on a.attrelid = t.oid
+       and a.attnum = d.refobjsubid
+      where t.relkind in ('r', 'p')
+    )
     select jsonb_build_object(
       'last_value', sequence_state.last_value,
       'is_called', sequence_state.is_called,
-      'increment_by', pg_sequences.increment_by
+      'increment_by', pg_sequences.increment_by,
+      'min_value', pg_sequences.min_value,
+      'max_value', pg_sequences.max_value,
+      'cycle', pg_sequences.cycle,
+      'data_type', pg_sequences.data_type,
+      'start_value', pg_sequences.start_value,
+      'cache_size', pg_sequences.cache_size,
+      'owned_by_table', (
+        select owned_by.table_schema || '.' || owned_by.table_name
+        from owned_by
+        order by owned_by.table_schema, owned_by.table_name, owned_by.column_name
+        limit 1
+      ),
+      'owned_by_column', (
+        select owned_by.column_name
+        from owned_by
+        order by owned_by.table_schema, owned_by.table_name, owned_by.column_name
+        limit 1
+      ),
+      'owned_by_count', (select count(*) from owned_by),
+      'expected_binding_matches', {expected_binding_sql}
     )::text
     from {sequence.sql} as sequence_state
     join pg_sequences
@@ -658,6 +717,50 @@ def sequence_next_value(state: dict[str, Any]) -> int | None:
     if not isinstance(last_value, int) or not isinstance(increment_by, int) or not isinstance(is_called, bool):
         return None
     return last_value + increment_by if is_called else last_value
+
+
+def sequence_metadata_reasons(prefix: str, state: dict[str, Any], expected_table: Relation, expected_column: str) -> list[str]:
+    reasons: list[str] = []
+    next_value = sequence_next_value(state)
+    increment_by = state.get("increment_by")
+    min_value = state.get("min_value")
+    max_value = state.get("max_value")
+    is_called = state.get("is_called")
+    cycle = state.get("cycle")
+    owned_by_count = state.get("owned_by_count")
+    owned_by_table = state.get("owned_by_table")
+    owned_by_column = state.get("owned_by_column")
+    expected_binding_matches = state.get("expected_binding_matches")
+
+    if not isinstance(is_called, bool):
+        reasons.append(f"{prefix}_is_called_missing")
+    if not isinstance(increment_by, int):
+        reasons.append(f"{prefix}_sequence_increment_missing")
+    elif increment_by != 1:
+        reasons.append(f"{prefix}_sequence_increment_not_one")
+    if not isinstance(cycle, bool):
+        reasons.append(f"{prefix}_sequence_cycle_missing")
+    elif cycle:
+        reasons.append(f"{prefix}_sequence_cycle_enabled")
+    if not isinstance(owned_by_count, int):
+        reasons.append(f"{prefix}_sequence_ownership_missing")
+    elif owned_by_count == 0:
+        reasons.append(f"{prefix}_sequence_unowned")
+    elif owned_by_count > 1:
+        reasons.append(f"{prefix}_sequence_multiple_owners")
+    if expected_binding_matches is not True:
+        reasons.append(f"{prefix}_sequence_misbound")
+    if (
+        isinstance(owned_by_table, str)
+        and isinstance(owned_by_column, str)
+        and (owned_by_table != expected_table.id or owned_by_column != expected_column)
+    ):
+        reasons.append(f"{prefix}_sequence_misbound")
+    if next_value is None or not isinstance(min_value, int) or not isinstance(max_value, int):
+        reasons.append(f"{prefix}_sequence_range_metadata_missing")
+    elif next_value < min_value or next_value > max_value:
+        reasons.append(f"{prefix}_sequence_exhausted")
+    return sorted(set(reasons))
 
 
 def query_value(db_url: str, query: str) -> tuple[str | None, str | None]:
@@ -810,8 +913,8 @@ def validate_sequence(item: dict[str, Any], source_db_url: str, target_db_url: s
     column = str(item.get("column", ""))
     if not IDENTIFIER_RE.fullmatch(column):
         raise ReconcileError("invalid_sequence_column")
-    source_state_text, source_state_error = query_value(source_db_url, sequence_state_sql(sequence))
-    target_state_text, target_state_error = query_value(target_db_url, sequence_state_sql(sequence))
+    source_state_text, source_state_error = query_value(source_db_url, sequence_state_sql(sequence, table, column))
+    target_state_text, target_state_error = query_value(target_db_url, sequence_state_sql(sequence, table, column))
     source_max_text, source_max_error = query_value(source_db_url, f"select coalesce(max({quote_ident(column)}), 0)::bigint from {table.sql}")
     target_max_text, target_max_error = query_value(target_db_url, f"select coalesce(max({quote_ident(column)}), 0)::bigint from {table.sql}")
     errors = {
@@ -844,30 +947,54 @@ def validate_sequence(item: dict[str, Any], source_db_url: str, target_db_url: s
     source_next = sequence_next_value(source_state)
 
     reasons: list[str] = []
+    reasons.extend(sequence_metadata_reasons("source", source_state, table, column))
+    reasons.extend(sequence_metadata_reasons("target", target_state, table, column))
     if not isinstance(source_last, int):
         reasons.append("source_last_value_missing")
     if not isinstance(target_last, int):
         reasons.append("target_last_value_missing")
     if isinstance(source_last, int) and isinstance(target_last, int) and target_last < source_last:
         reasons.append("target_last_value_lt_source_last_value")
-    if source_max is None or target_max is None or target_next is None:
+    if source_max is None or target_max is None or target_next is None or source_next is None:
         reasons.append("invalid_max_or_next_value")
     else:
+        if source_next <= source_max:
+            reasons.append("source_next_value_not_above_source_max_id")
         if target_next <= target_max:
             reasons.append("target_next_value_not_above_target_max_id")
         if target_next <= source_max:
             reasons.append("target_next_value_not_above_source_max_id")
+        if target_next < source_next:
+            reasons.append("target_next_value_lt_source_next_value")
     return {
         "id": f"sequence.{sequence.id}",
         "name": sequence.id,
         "table": table.id,
         "column": column,
         "status": "pass" if not reasons else "fail",
-        "reasons": reasons,
+        "reasons": sorted(set(reasons)),
         "source_last_value": source_last,
         "source_next_value": source_next,
+        "source_is_called": source_state.get("is_called"),
+        "source_increment_by": source_state.get("increment_by"),
+        "source_sequence_min_value": source_state.get("min_value"),
+        "source_sequence_max_value": source_state.get("max_value"),
+        "source_sequence_cycle": source_state.get("cycle"),
+        "source_owned_by_table": source_state.get("owned_by_table"),
+        "source_owned_by_column": source_state.get("owned_by_column"),
+        "source_owned_by_count": source_state.get("owned_by_count"),
+        "source_expected_binding_matches": source_state.get("expected_binding_matches"),
         "target_last_value": target_last,
         "target_next_value": target_next,
+        "target_is_called": target_state.get("is_called"),
+        "target_increment_by": target_state.get("increment_by"),
+        "target_sequence_min_value": target_state.get("min_value"),
+        "target_sequence_max_value": target_state.get("max_value"),
+        "target_sequence_cycle": target_state.get("cycle"),
+        "target_owned_by_table": target_state.get("owned_by_table"),
+        "target_owned_by_column": target_state.get("owned_by_column"),
+        "target_owned_by_count": target_state.get("owned_by_count"),
+        "target_expected_binding_matches": target_state.get("expected_binding_matches"),
         "source_max_id": source_max,
         "target_max_id": target_max,
         "sensitivity": "sequence_metadata_only",

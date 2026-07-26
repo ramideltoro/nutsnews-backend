@@ -1,0 +1,87 @@
+{
+  "gate_id": "supabase_standby_lag",
+  "version": 1,
+  "issue": "ramideltoro/nutsnews#522",
+  "epic": "ramideltoro/nutsnews#521",
+  "parent_prerequisites": [
+    "ramideltoro/nutsnews#499",
+    "ramideltoro/nutsnews#500"
+  ],
+  "goal": "Emit an independent, fail-closed standby lag promotion gate for the existing production Supabase standby.",
+  "input": {
+    "authoritative_telemetry": "Backend Health Report supabase_sync_relay_health check",
+    "relay_status_command": "supabase_sync_relay_status",
+    "contract": "docs/backend-supabase-sync-relay.json",
+    "forbidden_inputs": [
+      "database URLs",
+      "caller-supplied SQL",
+      "raw row data",
+      "hostnames",
+      "Supabase project refs",
+      "Supabase keys"
+    ]
+  },
+  "thresholds": {
+    "max_allowed_lag_seconds": 30,
+    "max_telemetry_age_seconds": 120,
+    "result_ttl_seconds": 300
+  },
+  "result_schema": {
+    "required_fields": [
+      "status",
+      "gate",
+      "failover_attempt_id",
+      "source_fingerprint",
+      "target_fingerprint",
+      "observed_lag_seconds",
+      "measured_at_utc",
+      "expires_at_utc",
+      "blockers",
+      "safe_metadata_only"
+    ],
+    "status_values": [
+      "PASS",
+      "FAIL"
+    ],
+    "safe_metadata_only": true
+  },
+  "pass_conditions": [
+    "relay health status is healthy",
+    "relay safe metadata marker is present",
+    "source fingerprint matches the sync relay contract",
+    "target fingerprint matches the sync relay contract",
+    "telemetry is fresh",
+    "observed lag seconds is less than or equal to 30"
+  ],
+  "fail_closed_blockers": [
+    "invalid_failover_attempt_id",
+    "telemetry_unavailable",
+    "telemetry_malformed",
+    "telemetry_measurement_time_malformed",
+    "telemetry_measurement_time_from_future",
+    "telemetry_stale",
+    "relay_health_telemetry_missing",
+    "lag_seconds_missing",
+    "lag_exceeds_threshold",
+    "relay_unhealthy",
+    "relay_health_not_safe_metadata",
+    "relay_telemetry_malformed",
+    "relay_telemetry_unavailable",
+    "source_fingerprint_mismatch",
+    "target_fingerprint_mismatch",
+    "relay_telemetry_not_safe_metadata"
+  ],
+  "workflow": {
+    "path": ".github/workflows/backend-supabase-standby-lag-gate.yml",
+    "runs_on": "ubuntu-latest",
+    "environment": "production-backend",
+    "default_enforce": false,
+    "artifact": "backend-supabase-standby-lag-gate"
+  },
+  "validation": {
+    "validator": "python3 scripts/validate_backend_supabase_standby_lag_gate.py",
+    "unit_tests": "python3 -m unittest tests.test_backend_supabase_standby_lag_gate",
+    "workflow_lint": "actionlint .github/workflows/backend-supabase-standby-lag-gate.yml"
+  },
+  "scope": "Lag eligibility only. Parity, schema, sequence safety, writer pause, split-brain fencing, and the combined decision are separate gates."
+}

@@ -738,16 +738,6 @@ from (
   where article_identity_hash = {article}
   order by updated_at desc
   limit 5
-) row
-union all
-select 'api_command_receipts=' || coalesce(jsonb_agg(to_jsonb(row) order by row.created_at desc), '[]'::jsonb)::text
-from (
-  select idempotency_key, operation, provider_mode, actor_service, auth_scope, status, diagnostic_metadata, created_at, updated_at
-  from worker_uplift_final.api_command_receipts
-  where expected_article_version = 1
-    and (response_json->>'idempotencyKey' like {sql_literal('%' + article_id + '%')} or idempotency_key like {sql_literal('%' + article_id + '%')})
-  order by created_at desc
-  limit 10
 ) row;
 """
 

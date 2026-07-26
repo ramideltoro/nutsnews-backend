@@ -1,0 +1,140 @@
+{
+  "contract_id": "backend-supabase-sync-relay",
+  "version": 1,
+  "issue": "ramideltoro/nutsnews#499",
+  "epic": "ramideltoro/nutsnews#223",
+  "updated_at_utc": "2026-07-26",
+  "source_manifest": {
+    "repository": "ramideltoro/nutsnews",
+    "path": "supabase/standby_manifest.json",
+    "issue": "ramideltoro/nutsnews#497",
+    "schema_fingerprint": "9f8cffa694100f438abaddbf6e00db13ff969572e8c16fd4b8ee4afa5087088f",
+    "policy": "backend-postgres-primary-to-existing-production-supabase-standby"
+  },
+  "source": {
+    "label": "backend_postgres_primary",
+    "role": "normal production read/write primary",
+    "db_url_env": "NUTSNEWS_BACKEND_PRIMARY_DB_URL",
+    "database_variable": "NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE",
+    "network_path": "backend_host_loopback_postgresql",
+    "public_5432_allowed": false
+  },
+  "target": {
+    "label": "existing_production_supabase_standby",
+    "role": "backup/hot standby target",
+    "db_url_env": "NUTSNEWS_PRODUCTION_SUPABASE_DB_URL",
+    "existing_production_supabase_project": true,
+    "create_new_supabase_project": false,
+    "create_nutsnews_standby_database": false,
+    "network_path": "backend_host_outbound_to_supabase_postgresql"
+  },
+  "relay": {
+    "direction": "backend-postgres-to-existing-production-supabase",
+    "runtime": "backend-host-systemd-timer",
+    "service": "nutsnews-supabase-sync-relay.service",
+    "timer": "nutsnews-supabase-sync-relay.timer",
+    "interval_seconds": 30,
+    "mode": "snapshot-apply-relay",
+    "supported_change_types": [
+      "insert",
+      "update",
+      "delete",
+      "sequence-readiness"
+    ],
+    "apply_strategy": "copy-source-snapshot-to-temp-table-update-insert-delete-target-rows",
+    "fail_closed_before_target_mutation": [
+      "schema-fingerprint-mismatch",
+      "migration-contract-fingerprint-mismatch",
+      "manifest-table-identity-missing",
+      "source-table-identity-mismatch",
+      "target-table-identity-mismatch",
+      "unsafe-replica-identity"
+    ],
+    "app_worker_supabase_write_credentials_injected": false,
+    "supabase_as_production_provider_before_failover": false
+  },
+  "safety": {
+    "safe_metadata_only_report": true,
+    "backend_postgresql_remains_primary": true,
+    "target_is_existing_production_supabase": true,
+    "app_worker_writes_to_supabase_before_failover": false,
+    "no_inbound_supabase_connection_to_backend_postgres": true,
+    "service_env_file_owner": "root:nutsnews-standby-relay",
+    "service_env_file_mode": "0640",
+    "service_user": "nutsnews-standby-relay",
+    "failover_requires_later_gates": [
+      "lag-seconds-lte-30",
+      "table-parity-match",
+      "schema-fingerprint-match",
+      "sequence-safety-verified",
+      "primary-writers-paused",
+      "split-brain-absence-verified"
+    ],
+    "forbidden_evidence": [
+      "database URLs",
+      "passwords",
+      "tokens",
+      "service-role keys",
+      "raw row data",
+      "PostgreSQL error text"
+    ]
+  },
+  "tables": [
+    {"name": "public.admin_audit_events", "primary_key": ["id"], "replica_identity": {"type": "primary_key", "columns": ["id"]}},
+    {"name": "public.ai_usage_runs", "primary_key": ["id"], "replica_identity": {"type": "primary_key", "columns": ["id"]}},
+    {"name": "public.article_ai_reviews", "primary_key": ["id"], "backfill_key": ["original_url"], "replica_identity": {"type": "primary_key", "columns": ["id"]}},
+    {"name": "public.article_engagement_daily", "primary_key": ["event_date", "event_type", "article_id", "source", "category"], "replica_identity": {"type": "primary_key", "columns": ["event_date", "event_type", "article_id", "source", "category"]}},
+    {"name": "public.article_summaries", "primary_key": ["id"], "backfill_key": ["original_url", "language_code"], "replica_identity": {"type": "primary_key", "columns": ["id"]}},
+    {"name": "public.articles", "primary_key": ["id"], "backfill_key": ["original_url"], "replica_identity": {"type": "primary_key", "columns": ["id"]}},
+    {"name": "public.feed_health", "primary_key": ["id"], "backfill_key": ["feed_url"], "replica_identity": {"type": "primary_key", "columns": ["id"]}},
+    {"name": "public.migration_schema_contract", "primary_key": ["singleton"], "replica_identity": {"type": "primary_key", "columns": ["singleton"]}},
+    {"name": "public.quota_usage_events", "primary_key": ["id"], "replica_identity": {"type": "primary_key", "columns": ["id"]}},
+    {"name": "public.release_readiness", "primary_key": ["singleton"], "replica_identity": {"type": "primary_key", "columns": ["singleton"]}},
+    {"name": "public.rss_feeds", "primary_key": ["id"], "backfill_key": ["url"], "replica_identity": {"type": "primary_key", "columns": ["id"]}},
+    {"name": "public.runtime_feature_flags", "primary_key": ["key"], "replica_identity": {"type": "primary_key", "columns": ["key"]}},
+    {"name": "public.staging_fixture_runs", "primary_key": ["namespace"], "replica_identity": {"type": "primary_key", "columns": ["namespace"]}},
+    {"name": "public.staging_fixture_users", "primary_key": ["namespace"], "replica_identity": {"type": "primary_key", "columns": ["namespace"]}},
+    {"name": "public.worker_runs", "primary_key": ["id"], "replica_identity": {"type": "primary_key", "columns": ["id"]}}
+  ],
+  "sequences": [
+    {"name": "public.ai_usage_runs_id_seq", "table": "public.ai_usage_runs", "column": "id"},
+    {"name": "public.article_summaries_id_seq", "table": "public.article_summaries", "column": "id"},
+    {"name": "public.feed_health_id_seq", "table": "public.feed_health", "column": "id"},
+    {"name": "public.quota_usage_events_id_seq", "table": "public.quota_usage_events", "column": "id"},
+    {"name": "public.rss_feeds_id_seq", "table": "public.rss_feeds", "column": "id"},
+    {"name": "public.worker_runs_id_seq", "table": "public.worker_runs", "column": "id"}
+  ],
+  "apply_order": [
+    "public.articles",
+    "public.rss_feeds",
+    "public.runtime_feature_flags",
+    "public.release_readiness",
+    "public.migration_schema_contract",
+    "public.article_summaries",
+    "public.article_ai_reviews",
+    "public.feed_health",
+    "public.ai_usage_runs",
+    "public.worker_runs",
+    "public.quota_usage_events",
+    "public.article_engagement_daily",
+    "public.admin_audit_events",
+    "public.staging_fixture_runs",
+    "public.staging_fixture_users"
+  ],
+  "ansible": {
+    "playbook": "ansible/playbooks/bootstrap.yml",
+    "role": "backend_baseline",
+    "task_file": "ansible/roles/backend_baseline/tasks/standby_sync_relay.yml",
+    "protected_workflow": ".github/workflows/protected-backend-ansible-apply.yml",
+    "enable_variable": "NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_ENABLED",
+    "environment": "production-backend",
+    "source_password_secret": "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD",
+    "target_db_url_secret": "NUTSNEWS_PRODUCTION_SUPABASE_DB_URL"
+  },
+  "validation": {
+    "local_validator": "python3 scripts/validate_backend_supabase_sync_relay.py",
+    "offline_validator": "python3 scripts/backend_supabase_sync_relay.py --offline --enforce",
+    "unit_tests": "python3 -m unittest tests.test_backend_supabase_sync_relay",
+    "ansible_syntax": "ansible-playbook playbooks/bootstrap.yml --syntax-check -i inventories/production/hosts.yml"
+  }
+}

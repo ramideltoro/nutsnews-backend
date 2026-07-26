@@ -73,3 +73,10 @@
     name: nutsnews-worker-db-api
     state: restarted
   when: not ansible_check_mode
+
+- name: Restart backend Supabase sync relay timer
+  ansible.builtin.systemd:
+    name: nutsnews-supabase-sync-relay.timer
+    state: restarted
+    daemon_reload: true
+  when: not ansible_check_mode

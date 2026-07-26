@@ -107,6 +107,7 @@ jobs:
           )
           remote_dir=""
           secret_file=""
+          # shellcheck disable=SC2329
           cleanup() {
             if [[ -n "$secret_file" ]]; then
               rm -f "$secret_file"

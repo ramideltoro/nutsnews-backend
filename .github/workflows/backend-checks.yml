@@ -192,6 +192,18 @@ jobs:
         shell: bash
         run: python3 -m unittest tests.test_backend_supabase_standby_reconcile
 
+      - name: Validate backend-to-Supabase sync relay guardrails
+        shell: bash
+        run: python3 scripts/validate_backend_supabase_sync_relay.py
+
+      - name: Validate backend-to-Supabase sync relay offline mode
+        shell: bash
+        run: python3 scripts/backend_supabase_sync_relay.py --offline --enforce
+
+      - name: Run backend-to-Supabase sync relay tests
+        shell: bash
+        run: python3 -m unittest tests.test_backend_supabase_sync_relay
+
       - name: Report migration drift gate status
         shell: bash
         run: python3 scripts/check_supabase_migration_drift.py

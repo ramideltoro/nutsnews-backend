@@ -41,12 +41,16 @@ WORKER_MAX_ATTEMPTS = 4
 STAGE_PAYLOAD_SCHEMA_VERSION = 1
 STAGE_PAYLOAD_SCHEMA_IDS = {
     "enrichment_result": "nutsnews.worker.payload.enrichment-result.v1",
+    "persistence_command": "nutsnews.worker.payload.persistence-command.v1",
+    "publication_readiness": "nutsnews.worker.payload.publication-readiness.v1",
     "translation_task": "nutsnews.worker.payload.translation-task.v1",
 }
 SMOKE_TARGET_LANGUAGES = ["fr", "ja", "de-CH", "de", "el"]
 SERVICE_HTTP_PORTS = {"approval": 18085, "translation": 18086}
 SERVICE_DATABASE_ENV_KEYS = {
     "approval": "NUTSNEWS_APPROVAL_DATABASE_URL",
+    "persistence": "NUTSNEWS_PERSISTENCE_DATABASE_URL",
+    "publication": "NUTSNEWS_PUBLICATION_DATABASE_URL",
     "translation": "NUTSNEWS_TRANSLATION_DATABASE_URL",
 }
 
@@ -667,6 +671,45 @@ where article_identity_hash = {article}
 """
 
 
+def final_shadow_smoke_query(article_id: str) -> str:
+    article = sql_literal(article_id)
+    publication_routing = sql_literal("nutsnews.worker.publication.v1")
+    return f"""
+select 'final_shadow_aggregate=' || count(*)::text
+from worker_uplift_final.article_shadow_aggregates
+where article_identity_hash = {article}
+  and aggregate_version = 1
+  and publication_status = 'ready'
+union all
+select 'persistence_publication_outbox=' || count(*)::text
+from worker_uplift_persistence.outbox
+where entity_id = {article}
+  and destination_stage = 'publication'
+  and routing_key = {publication_routing}
+  and status = 'confirmed';
+"""
+
+
+def publication_smoke_query(article_id: str) -> str:
+    article = sql_literal(article_id)
+    return f"""
+select 'publication_readiness=' || count(*)::text
+from worker_uplift_publication.publication_readiness
+where article_identity_hash = {article}
+  and readiness_version = 1
+  and approved is true
+  and translations_complete is true
+  and status = 'ready'
+union all
+select 'publication_shadow_comparison=' || count(*)::text
+from worker_uplift_publication.publication_decisions
+where article_identity_hash = {article}
+  and decision_version = 1
+  and backend_api_operation = 'shadow-publication-comparison'
+  and decision in ('refresh_snapshot', 'block');
+"""
+
+
 def build_smoke_publication(args: argparse.Namespace, service: dict[str, Any], article_id: str, fixture: str) -> dict[str, Any]:
     occurred_at = smoke_now()
     if service["name"] == "approval":
@@ -688,7 +731,7 @@ def build_smoke_publication(args: argparse.Namespace, service: dict[str, Any], a
     }
 
 
-def run_approval_smoke(args: argparse.Namespace, service: dict[str, Any], report: dict[str, Any]) -> None:
+def run_approval_smoke(args: argparse.Namespace, manifest: dict[str, Any], service: dict[str, Any], report: dict[str, Any]) -> None:
     env = service_env(args, service)
     db_url = service_database_url(args, service)
     accepted_article_id = smoke_id("approval-accepted")
@@ -725,6 +768,46 @@ def run_approval_smoke(args: argparse.Namespace, service: dict[str, Any], report
     if not ok:
         report["status"] = "fail"
         report["errors"].append("approval smoke did not observe expected accepted/rejected shadow state")
+        return
+
+    try:
+        persistence_service = require_service(manifest, "persistence")
+        publication_service = require_service(manifest, "publication")
+        persistence_db_url = service_database_url(args, persistence_service)
+        publication_db_url = service_database_url(args, publication_service)
+    except RuntimeErrorWithReport as exc:
+        report["status"] = "fail"
+        report["errors"].append(f"approval downstream final-shadow smoke prerequisites failed: {exc}")
+        return
+
+    final_values, final_ok = wait_for_psql_values(
+        persistence_db_url,
+        final_shadow_smoke_query(accepted_article_id),
+        {
+            "final_shadow_aggregate": "1",
+            "persistence_publication_outbox": "1",
+        },
+        timeout_seconds=240,
+        interval_seconds=5.0,
+    )
+    publication_values, publication_ok = wait_for_psql_values(
+        publication_db_url,
+        publication_smoke_query(accepted_article_id),
+        {
+            "publication_readiness": "1",
+            "publication_shadow_comparison": "1",
+        },
+        timeout_seconds=240,
+        interval_seconds=5.0,
+    )
+    report["smoke"]["downstream_db_checks"] = {
+        "accepted_article_id": accepted_article_id,
+        "persistence": final_values,
+        "publication": publication_values,
+    }
+    if not (final_ok and publication_ok):
+        report["status"] = "fail"
+        report["errors"].append("approval smoke did not observe downstream final-shadow materialization and publication comparison")
 
 
 def run_translation_smoke(args: argparse.Namespace, service: dict[str, Any], report: dict[str, Any]) -> None:
@@ -765,7 +848,7 @@ def run_translation_smoke(args: argparse.Namespace, service: dict[str, Any], rep
         report["errors"].append("translation smoke did not observe expected per-language shadow state")
 
 
-def run_service_smoke(args: argparse.Namespace, service: dict[str, Any], report: dict[str, Any]) -> None:
+def run_service_smoke(args: argparse.Namespace, manifest: dict[str, Any], service: dict[str, Any], report: dict[str, Any]) -> None:
     if args.dry_run:
         report["status"] = "dry_run"
         report["summary"] = "Runtime smoke would publish sanitized service fixtures and verify redacted shadow state."
@@ -776,7 +859,7 @@ def run_service_smoke(args: argparse.Namespace, service: dict[str, Any], report:
         }
         return
     if service["name"] == "approval":
-        run_approval_smoke(args, service, report)
+        run_approval_smoke(args, manifest, service, report)
         return
     if service["name"] == "translation":
         run_translation_smoke(args, service, report)
@@ -879,7 +962,7 @@ def build_report(args: argparse.Namespace, manifest: dict[str, Any]) -> dict[str
         if not args.dry_run:
             report["errors"].append("reconciliation requires a later approved service-specific reconciler")
     elif args.action == "smoke":
-        run_service_smoke(args, service, report)
+        run_service_smoke(args, manifest, service, report)
 
     if report["commands"] and any(item["returncode"] != 0 for item in report["commands"]):
         report["status"] = "fail"

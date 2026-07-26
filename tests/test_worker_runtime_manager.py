@@ -262,6 +262,17 @@ class WorkerRuntimeManagerTests(unittest.TestCase):
         self.assertIn("approval accepted/rejected", report["smoke"]["fixtures"])
         self.assertEqual(report["smoke"]["expected_target_languages"], ["fr", "ja", "de-CH", "de", "el"])
 
+    def test_approval_smoke_queries_downstream_final_shadow_state(self):
+        manager = load_manager()
+        final_query = manager.final_shadow_smoke_query("article-001")
+        publication_query = manager.publication_smoke_query("article-001")
+        self.assertIn("worker_uplift_final.article_shadow_aggregates", final_query)
+        self.assertIn("worker_uplift_persistence.outbox", final_query)
+        self.assertIn("nutsnews.worker.publication.v1", final_query)
+        self.assertIn("worker_uplift_publication.publication_readiness", publication_query)
+        self.assertIn("worker_uplift_publication.publication_decisions", publication_query)
+        self.assertIn("shadow-publication-comparison", publication_query)
+
 
 if __name__ == "__main__":
     unittest.main()

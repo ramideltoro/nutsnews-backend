@@ -116,6 +116,7 @@ def manifest_for_manager() -> dict:
 def validate() -> list[str]:
     errors: list[str] = []
     defaults = read(DEFAULTS)
+    manager = read(MANAGER_PATH)
     protected = read(PROTECTED_APPLY)
     checks = read(CHECKS_WORKFLOW)
     runbook = read(RUNBOOK)
@@ -194,6 +195,21 @@ def validate() -> list[str]:
             "NUTSNEWS_PERSISTENCE_PRODUCTION_WRITES_ENABLED: \"false\"",
             "worker_uplift_final",
             "worker_uplift_views",
+        ),
+        errors,
+    )
+    require(
+        "worker runtime final smoke",
+        manager,
+        (
+            "final_shadow_smoke_query",
+            "publication_smoke_query",
+            "downstream_db_checks",
+            "worker_uplift_final.article_shadow_aggregates",
+            "worker_uplift_persistence.outbox",
+            "worker_uplift_publication.publication_readiness",
+            "worker_uplift_publication.publication_decisions",
+            "shadow-publication-comparison",
         ),
         errors,
     )

@@ -238,7 +238,8 @@ select 'worker_api_final_grant=' || r.rolname
   || ':receipt_select=' || case when to_regclass('{FINAL_SCHEMA}.api_command_receipts') is null then 'missing_table' else has_table_privilege(r.rolname, '{FINAL_SCHEMA}.api_command_receipts', 'SELECT')::text end
   || ':receipt_insert=' || case when to_regclass('{FINAL_SCHEMA}.api_command_receipts') is null then 'missing_table' else has_table_privilege(r.rolname, '{FINAL_SCHEMA}.api_command_receipts', 'INSERT')::text end
   || ':receipt_update=' || case when to_regclass('{FINAL_SCHEMA}.api_command_receipts') is null then 'missing_table' else has_table_privilege(r.rolname, '{FINAL_SCHEMA}.api_command_receipts', 'UPDATE')::text end
-  || ':sequence_usage=' || has_sequence_privilege(r.rolname, '{FINAL_SCHEMA}.article_shadow_aggregates_id_seq', 'USAGE')::text
+  || ':aggregate_sequence_usage=' || case when to_regclass('{FINAL_SCHEMA}.article_shadow_aggregates_id_seq') is null then 'missing_sequence' else has_sequence_privilege(r.rolname, '{FINAL_SCHEMA}.article_shadow_aggregates_id_seq', 'USAGE')::text end
+  || ':receipt_sequence_usage=' || case when to_regclass('{FINAL_SCHEMA}.api_command_receipts_id_seq') is null then 'missing_sequence' else has_sequence_privilege(r.rolname, '{FINAL_SCHEMA}.api_command_receipts_id_seq', 'USAGE')::text end
 from pg_roles r
 where r.rolname = '{WORKER_API_ROLE}';
 """
@@ -307,7 +308,7 @@ def check_live_catalog(db_url: str, stages: list[tuple[str, str, str]]) -> list[
             payload = line.split("=", 1)[1]
             parts = payload.split(":")
             values = [part.split("=", 1)[1] for part in parts[1:]]
-            if not values or any(value == "missing_table" or not parse_bool_token(value) for value in values):
+            if not values or any(value.startswith("missing_") or not parse_bool_token(value) for value in values):
                 worker_api_final_grant_failures.append(parts[0])
 
     failures = {

@@ -84,6 +84,7 @@ class WorkerUpliftShadowModelTests(unittest.TestCase):
         self.assertIn("GRANT SELECT, INSERT, UPDATE ON TABLE %I.article_shadow_aggregates", template)
         self.assertIn("GRANT SELECT, INSERT, UPDATE ON TABLE %I.api_command_receipts", template)
         self.assertIn("GRANT SELECT ON TABLE %I.stage_health_projections", template)
+        self.assertIn("api_command_receipts_id_seq", template)
         self.assertIn("worker_api_role", template)
         self.assertIn("CREATE OR REPLACE VIEW %I.enrichment_projection", template)
         self.assertIn("canonical_url_hash AS article_identity_hash", template)
@@ -117,6 +118,7 @@ class WorkerUpliftShadowModelTests(unittest.TestCase):
         self.assertIn("WORKER_API_ROLE = \"nutsnews_worker_api\"", check_script)
         self.assertIn("worker_api_final_grant=", check_script)
         self.assertIn("worker_api_final_grant_failures", check_script)
+        self.assertIn("receipt_sequence_usage", check_script)
 
     def test_offline_validator_passes_and_reports_safe_metadata(self):
         proc = subprocess.run(

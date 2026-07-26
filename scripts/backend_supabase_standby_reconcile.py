@@ -657,9 +657,19 @@ def apply_table_backfill(
         update_sql = f"update {relation.sql} as t set {update_assignments}"
     else:
         update_sql = ""
+    temp_table = quote_ident(f"standby_backfill_{relation.name}")
     match_predicate = " and ".join(
         f"t.{quote_ident(column)} is not distinct from s.{quote_ident(column)}" for column in match_key
     )
+    pk_predicate = " and ".join(
+        f"t.{quote_ident(column)} is not distinct from s.{quote_ident(column)}" for column in primary_key
+    )
+    delete_collision_sql = ""
+    if match_key != primary_key:
+        delete_collision_sql = (
+            f"delete from {relation.sql} as t using {temp_table} as s "
+            f"where {pk_predicate} and not ({match_predicate});"
+        )
     select_sql = f"select {quoted_columns} from {relation.sql} order by {quoted_pk}"
     source_count_text, source_count_error = query_value(source_db_url, count_sql(relation))
     if source_count_error:
@@ -670,7 +680,6 @@ def apply_table_backfill(
 
     csv_path = workdir / f"{relation.name}.csv"
     script_path = workdir / f"{relation.name}.sql"
-    temp_table = quote_ident(f"standby_backfill_{relation.name}")
     copy_query = f"copy ({select_sql}) to stdout with (format csv)"
     export_error = run_psql_to_file(source_db_url, copy_query, csv_path)
     if export_error:
@@ -681,6 +690,7 @@ def apply_table_backfill(
             "begin;",
             f"create temp table {temp_table} (like {relation.sql} including defaults) on commit drop;",
             f"\\copy {temp_table} ({quoted_columns}) from {psql_meta_literal(str(csv_path))} with (format csv)",
+            *([delete_collision_sql] if delete_collision_sql else []),
             *([f"{update_sql} from {temp_table} as s where {match_predicate};"] if update_sql else []),
             f"insert into {relation.sql} ({quoted_columns})",
             f"select {temp_select_columns}",

@@ -670,6 +670,10 @@ def apply_table_backfill(
             f"delete from {relation.sql} as t using {temp_table} as s "
             f"where {pk_predicate} and not ({match_predicate});"
         )
+    delete_missing_sql = (
+        f"delete from {relation.sql} as t "
+        f"where not exists (select 1 from {temp_table} as s where {match_predicate});"
+    )
     select_sql = f"select {quoted_columns} from {relation.sql} order by {quoted_pk}"
     source_count_text, source_count_error = query_value(source_db_url, count_sql(relation))
     if source_count_error:
@@ -690,12 +694,15 @@ def apply_table_backfill(
             "begin;",
             f"create temp table {temp_table} (like {relation.sql} including defaults) on commit drop;",
             f"\\copy {temp_table} ({quoted_columns}) from {psql_meta_literal(str(csv_path))} with (format csv)",
+            f"alter table {relation.sql} disable trigger user;",
             *([delete_collision_sql] if delete_collision_sql else []),
+            delete_missing_sql,
             *([f"{update_sql} from {temp_table} as s where {match_predicate};"] if update_sql else []),
             f"insert into {relation.sql} ({quoted_columns})",
             f"select {temp_select_columns}",
             f"from {temp_table} as s",
             f"where not exists (select 1 from {relation.sql} as t where {match_predicate});",
+            f"alter table {relation.sql} enable trigger user;",
             "commit;",
             "",
         ]
@@ -712,6 +719,8 @@ def apply_table_backfill(
         "batches": max(1, (source_count + batch_size - 1) // batch_size) if source_count else 0,
         "column_count": len(columns),
         "backfill_key": match_key,
+        "mirror_delete_absent_target_rows": True,
+        "user_triggers_disabled_during_apply": True,
         "sensitivity": "counts_only",
     }
 

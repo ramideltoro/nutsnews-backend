@@ -132,6 +132,9 @@ Queue backlog or no consumers:
 Inspect the canary metrics, RabbitMQ queue metrics, and worker service state.
 Do not purge production queues. For canary backlog, run the canary once to
 consume the dedicated probe queue.
+The protected apply canary has three bounded attempts with a short delay so a
+single transient AMQP or management queue timeout does not fail an otherwise
+healthy apply; all attempts must still succeed before the workflow can pass.
 
 Poison message or DLQ replay:
 Use the production DLQ replay procedure only after preserving the DLQ evidence.

@@ -628,6 +628,8 @@ def apply_table_backfill(
 ) -> dict[str, Any]:
     relation = parse_relation(str(table["name"]))
     primary_key = [str(column) for column in table.get("primary_key", [])]
+    if not primary_key:
+        raise ReconcileError("missing_primary_key")
     for column in primary_key:
         if not IDENTIFIER_RE.fullmatch(column):
             raise ReconcileError("invalid_primary_key")
@@ -636,14 +638,19 @@ def apply_table_backfill(
     if not columns:
         raise ReconcileError("missing_apply_columns")
     quoted_columns = ", ".join(quote_ident(column) for column in columns)
+    temp_select_columns = ", ".join(f"s.{quote_ident(column)}" for column in columns)
     quoted_pk = ", ".join(quote_ident(column) for column in primary_key)
     non_pk_columns = [column for column in columns if column not in primary_key]
     if non_pk_columns:
-        update_sql = "do update set " + ", ".join(
-            f"{quote_ident(column)} = excluded.{quote_ident(column)}" for column in non_pk_columns
+        update_assignments = ", ".join(
+            f"{quote_ident(column)} = s.{quote_ident(column)}" for column in non_pk_columns
         )
+        update_sql = f"update {relation.sql} as t set {update_assignments}"
     else:
-        update_sql = "do nothing"
+        update_sql = ""
+    key_predicate = " and ".join(
+        f"t.{quote_ident(column)} is not distinct from s.{quote_ident(column)}" for column in primary_key
+    )
     select_sql = f"select {quoted_columns} from {relation.sql} order by {quoted_pk}"
     source_count_text, source_count_error = query_value(source_db_url, count_sql(relation))
     if source_count_error:
@@ -665,10 +672,11 @@ def apply_table_backfill(
             "begin;",
             f"create temp table {temp_table} (like {relation.sql} including defaults) on commit drop;",
             f"\\copy {temp_table} ({quoted_columns}) from {psql_meta_literal(str(csv_path))} with (format csv)",
+            *([f"{update_sql} from {temp_table} as s where {key_predicate};"] if update_sql else []),
             f"insert into {relation.sql} ({quoted_columns})",
-            f"select {quoted_columns}",
-            f"from {temp_table}",
-            f"on conflict ({quoted_pk}) {update_sql};",
+            f"select {temp_select_columns}",
+            f"from {temp_table} as s",
+            f"where not exists (select 1 from {relation.sql} as t where {key_predicate});",
             "commit;",
             "",
         ]
@@ -676,7 +684,7 @@ def apply_table_backfill(
     script_path.write_text(target_insert_sql, encoding="utf-8")
     import_error = run_psql_script(target_db_url, script_path)
     if import_error:
-        raise ReconcileError(import_error)
+        raise ReconcileError(f"{import_error}:{relation.id}")
 
     return {
         "table": relation.id,

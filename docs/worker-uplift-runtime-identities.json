@@ -409,8 +409,8 @@
       "id": "reconciliation_confirmation",
       "secret": "NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN",
       "owner": "ramideltoro/nutsnews-backend",
-      "purpose": "Protected reconciliation confirmation for shadow/proof workflows.",
-      "runtime_service_injection": false
+      "purpose": "Bearer authorization for protected backend-to-service reconciliation calls. Apply still requires the protected workflow confirmation body and apply gate.",
+      "runtime_service_injection": true
     }
   ],
   "telemetry_policy": {

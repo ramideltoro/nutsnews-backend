@@ -301,7 +301,11 @@ class WorkerRuntimeManagerTests(unittest.TestCase):
             manifest_path.write_text(json.dumps(valid_manifest()), encoding="utf-8")
             service_dir = root / "services"
             service_dir.mkdir()
-            (service_dir / "fetcher.env").write_text("NUTSNEWS_FETCHER_DATABASE_URL=postgresql://example\n", encoding="utf-8")
+            (service_dir / "fetcher.env").write_text(
+                "NUTSNEWS_FETCHER_DATABASE_URL=postgresql://example\n"
+                "NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN=test-reconcile-token\n",
+                encoding="utf-8",
+            )
             args = manager.parse_args(
                 [
                     "reconciliation",
@@ -315,7 +319,23 @@ class WorkerRuntimeManagerTests(unittest.TestCase):
                     "--confirm-action",
                 ]
             )
-            with mock.patch.object(manager, "psql_key_values", return_value=values) as psql:
+            service_response = {
+                "status": "received",
+                "http_status": 409,
+                "body": {
+                    "service": "fetcher",
+                    "status": "failed_closed",
+                    "selectedCount": 0,
+                    "replayedCount": 0,
+                    "writesPerformed": False,
+                    "productionVisibilityEnabled": False,
+                    "legacyRuntimeRequired": False,
+                },
+            }
+            with (
+                mock.patch.object(manager, "psql_key_values", return_value=values) as psql,
+                mock.patch.object(manager, "http_post_json_local", return_value=service_response) as post,
+            ):
                 report = manager.build_report(args, manager.load_json(manifest_path))
         self.assertEqual(report["status"], "dry_run")
         self.assertTrue(report["reconciliation"]["safe_metadata_only"])
@@ -324,9 +344,13 @@ class WorkerRuntimeManagerTests(unittest.TestCase):
         self.assertEqual(report["reconciliation"]["schema"], "worker_uplift_fetcher")
         self.assertEqual(report["reconciliation"]["values"]["unconfirmed_outbox"], "3")
         self.assertIn("service-owned-outbox-republish", [item["id"] for item in report["reconciliation"]["planned_actions"]])
+        self.assertEqual(report["reconciliation"]["service_invocation"]["service_report"]["status"], "failed_closed")
+        self.assertEqual(report["reconciliation"]["service_invocation"]["request"]["mode"], "dry-run")
         self.assertEqual(psql.call_count, 1)
+        self.assertEqual(post.call_count, 1)
+        self.assertNotIn("test-reconcile-token", json.dumps(report))
 
-    def test_reconciliation_apply_fails_closed_but_keeps_plan(self):
+    def test_reconciliation_apply_invokes_service_replayer(self):
         manager = load_manager()
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -334,7 +358,11 @@ class WorkerRuntimeManagerTests(unittest.TestCase):
             manifest_path.write_text(json.dumps(valid_manifest()), encoding="utf-8")
             service_dir = root / "services"
             service_dir.mkdir()
-            (service_dir / "fetcher.env").write_text("NUTSNEWS_FETCHER_DATABASE_URL=postgresql://example\n", encoding="utf-8")
+            (service_dir / "fetcher.env").write_text(
+                "NUTSNEWS_FETCHER_DATABASE_URL=postgresql://example\n"
+                "NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN=test-reconcile-token\n",
+                encoding="utf-8",
+            )
             args = manager.parse_args(
                 [
                     "reconciliation",
@@ -347,11 +375,75 @@ class WorkerRuntimeManagerTests(unittest.TestCase):
                     "--confirm-action",
                 ]
             )
-            with mock.patch.object(manager, "psql_key_values", return_value={}):
+            service_response = {
+                "status": "received",
+                "http_status": 200,
+                "body": {
+                    "service": "fetcher",
+                    "status": "applied",
+                    "selectedCount": 0,
+                    "replayedCount": 0,
+                    "writesPerformed": False,
+                    "productionVisibilityEnabled": False,
+                    "legacyRuntimeRequired": False,
+                },
+            }
+            with (
+                mock.patch.object(manager, "psql_key_values", return_value={}),
+                mock.patch.object(manager, "http_post_json_local", return_value=service_response) as post,
+            ):
                 report = manager.build_report(args, manager.load_json(manifest_path))
-        self.assertEqual(report["status"], "blocked")
-        self.assertIn("reconciliation requires a later approved service-specific reconciler", report["errors"])
+        self.assertEqual(report["status"], "pass")
         self.assertEqual(report["reconciliation"]["planned_actions"][0]["id"], "no-op")
+        request_payload = post.call_args.args[2]
+        self.assertEqual(request_payload["mode"], "apply")
+        self.assertEqual(request_payload["protectedConfirmation"], "fetcher:fail-closed:v1")
+
+    def test_reconciliation_apply_fails_when_selected_candidates_cannot_hydrate(self):
+        manager = load_manager()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            manifest_path = root / "services.json"
+            manifest_path.write_text(json.dumps(valid_manifest()), encoding="utf-8")
+            service_dir = root / "services"
+            service_dir.mkdir()
+            (service_dir / "fetcher.env").write_text(
+                "NUTSNEWS_FETCHER_DATABASE_URL=postgresql://example\n"
+                "NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN=test-reconcile-token\n",
+                encoding="utf-8",
+            )
+            args = manager.parse_args(
+                [
+                    "reconciliation",
+                    "--manifest",
+                    str(manifest_path),
+                    "--compose",
+                    str(root / "compose.yml"),
+                    "--service-name",
+                    "fetcher",
+                    "--confirm-action",
+                ]
+            )
+            service_response = {
+                "status": "received",
+                "http_status": 409,
+                "body": {
+                    "service": "fetcher",
+                    "status": "failed_closed",
+                    "selectedCount": 1,
+                    "replayedCount": 0,
+                    "writesPerformed": False,
+                    "productionVisibilityEnabled": False,
+                    "legacyRuntimeRequired": False,
+                },
+            }
+            with (
+                mock.patch.object(manager, "psql_key_values", return_value={}),
+                mock.patch.object(manager, "http_post_json_local", return_value=service_response),
+            ):
+                report = manager.build_report(args, manager.load_json(manifest_path))
+        self.assertEqual(report["status"], "fail")
+        self.assertIn("failed_closed", report["summary"])
 
     def test_ai_smoke_dry_run_has_fixed_fixture_contract(self):
         manager = load_manager()

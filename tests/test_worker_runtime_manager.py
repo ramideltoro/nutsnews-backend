@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 MANAGER_PATH = Path("ansible/roles/backend_worker_runtime/files/nutsnews_worker_runtime.py")
@@ -278,6 +279,79 @@ class WorkerRuntimeManagerTests(unittest.TestCase):
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["queues"][0]["queue"], "nutsnews.worker.fetch.v1")
         self.assertEqual(report["queues"][0]["status"], "not_configured")
+
+    def test_reconciliation_dry_run_emits_safe_stage_plan(self):
+        manager = load_manager()
+        values = {
+            "received_inbox": "2",
+            "stale_unprocessed_inbox": "1",
+            "failed_or_parked_inbox": "0",
+            "unconfirmed_outbox": "3",
+            "stale_unconfirmed_outbox": "2",
+            "dead_lettered_outbox": "0",
+            "oldest_unconfirmed_outbox_age_seconds": "1200",
+            "watermark_rows": "1",
+            "watermark_lag_total": "0",
+            "sample_pipeline_count": "1",
+            "sample_outbox_pipeline_count": "2",
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            manifest_path = root / "services.json"
+            manifest_path.write_text(json.dumps(valid_manifest()), encoding="utf-8")
+            service_dir = root / "services"
+            service_dir.mkdir()
+            (service_dir / "fetcher.env").write_text("NUTSNEWS_FETCHER_DATABASE_URL=postgresql://example\n", encoding="utf-8")
+            args = manager.parse_args(
+                [
+                    "reconciliation",
+                    "--manifest",
+                    str(manifest_path),
+                    "--compose",
+                    str(root / "compose.yml"),
+                    "--service-name",
+                    "fetcher",
+                    "--dry-run",
+                    "--confirm-action",
+                ]
+            )
+            with mock.patch.object(manager, "psql_key_values", return_value=values) as psql:
+                report = manager.build_report(args, manager.load_json(manifest_path))
+        self.assertEqual(report["status"], "dry_run")
+        self.assertTrue(report["reconciliation"]["safe_metadata_only"])
+        self.assertFalse(report["reconciliation"]["writes_performed"])
+        self.assertFalse(report["reconciliation"]["legacy_runtime_required"])
+        self.assertEqual(report["reconciliation"]["schema"], "worker_uplift_fetcher")
+        self.assertEqual(report["reconciliation"]["values"]["unconfirmed_outbox"], "3")
+        self.assertIn("service-owned-outbox-republish", [item["id"] for item in report["reconciliation"]["planned_actions"]])
+        self.assertEqual(psql.call_count, 1)
+
+    def test_reconciliation_apply_fails_closed_but_keeps_plan(self):
+        manager = load_manager()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            manifest_path = root / "services.json"
+            manifest_path.write_text(json.dumps(valid_manifest()), encoding="utf-8")
+            service_dir = root / "services"
+            service_dir.mkdir()
+            (service_dir / "fetcher.env").write_text("NUTSNEWS_FETCHER_DATABASE_URL=postgresql://example\n", encoding="utf-8")
+            args = manager.parse_args(
+                [
+                    "reconciliation",
+                    "--manifest",
+                    str(manifest_path),
+                    "--compose",
+                    str(root / "compose.yml"),
+                    "--service-name",
+                    "fetcher",
+                    "--confirm-action",
+                ]
+            )
+            with mock.patch.object(manager, "psql_key_values", return_value={}):
+                report = manager.build_report(args, manager.load_json(manifest_path))
+        self.assertEqual(report["status"], "blocked")
+        self.assertIn("reconciliation requires a later approved service-specific reconciler", report["errors"])
+        self.assertEqual(report["reconciliation"]["planned_actions"][0]["id"], "no-op")
 
     def test_ai_smoke_dry_run_has_fixed_fixture_contract(self):
         manager = load_manager()

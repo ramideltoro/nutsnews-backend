@@ -90,6 +90,7 @@
     "safe_evidence_only": true,
     "deletes_target_extra_rows": true,
     "mirrors_primary_key_values": true,
+    "repairs_check_constraints_from_source": true,
     "table_order": [
       "public.articles",
       "public.rss_feeds",

@@ -164,6 +164,7 @@ jobs:
             --project nutsnews-worker-uplift
             --queue-kind "$QUEUE_KIND"
             --tail "$TAIL"
+            --fixture-host "$NUTSNEWS_BACKEND_HOST"
             --report "$report"
           )
 

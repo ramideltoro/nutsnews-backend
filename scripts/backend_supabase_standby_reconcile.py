@@ -33,6 +33,7 @@ DEFAULT_BATCH_SIZE = 500
 PSQL_TIMEOUT_SECONDS = 120
 DEFAULT_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 IDENTIFIER_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
+SCHEMA_DIFF_LIMIT = 50
 
 
 class ReconcileError(Exception):
@@ -361,6 +362,98 @@ def schema_fingerprint_sql(table_names: list[str]) -> str:
     """
 
 
+def schema_item_key(section: str, item: dict[str, Any]) -> str | None:
+    schema = item.get("schema")
+    table = item.get("table")
+    if not isinstance(schema, str) or not isinstance(table, str):
+        return None
+    if section == "columns":
+        column = item.get("column")
+        return f"{schema}.{table}.{column}" if isinstance(column, str) else None
+    if section == "constraints":
+        constraint = item.get("constraint")
+        return f"{schema}.{table}.{constraint}" if isinstance(constraint, str) else None
+    if section == "indexes":
+        index = item.get("index")
+        return f"{schema}.{table}.{index}" if isinstance(index, str) else None
+    return None
+
+
+def safe_schema_item(section: str, item: dict[str, Any]) -> dict[str, Any]:
+    if section == "columns":
+        fields = ("position", "type", "not_null", "generated", "identity", "default_md5")
+    elif section == "constraints":
+        fields = ("type", "definition_md5")
+    elif section == "indexes":
+        fields = ("definition_md5",)
+    else:
+        fields = ()
+    return {field: item.get(field) for field in fields}
+
+
+def schema_section_by_key(schema: dict[str, Any], section: str) -> dict[str, dict[str, Any]]:
+    keyed: dict[str, dict[str, Any]] = {}
+    raw_items = schema.get(section, [])
+    if not isinstance(raw_items, list):
+        raise ReconcileError("invalid_schema_metadata")
+    for item in raw_items:
+        if not isinstance(item, dict):
+            raise ReconcileError("invalid_schema_metadata")
+        key = schema_item_key(section, item)
+        if not key:
+            raise ReconcileError("invalid_schema_metadata")
+        keyed[key] = safe_schema_item(section, item)
+    return keyed
+
+
+def diff_keyed_metadata(source: dict[str, dict[str, Any]], target: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    source_keys = set(source)
+    target_keys = set(target)
+    missing_in_target = sorted(source_keys - target_keys)
+    extra_in_target = sorted(target_keys - source_keys)
+    different = sorted(key for key in source_keys & target_keys if source[key] != target[key])
+    return {
+        "missing_in_target_count": len(missing_in_target),
+        "extra_in_target_count": len(extra_in_target),
+        "different_count": len(different),
+        "missing_in_target": missing_in_target[:SCHEMA_DIFF_LIMIT],
+        "extra_in_target": extra_in_target[:SCHEMA_DIFF_LIMIT],
+        "different": [
+            {
+                "key": key,
+                "source": source[key],
+                "target": target[key],
+            }
+            for key in different[:SCHEMA_DIFF_LIMIT]
+        ],
+        "truncated": (
+            len(missing_in_target) > SCHEMA_DIFF_LIMIT
+            or len(extra_in_target) > SCHEMA_DIFF_LIMIT
+            or len(different) > SCHEMA_DIFF_LIMIT
+        ),
+    }
+
+
+def schema_diff_summary(source_schema: str, target_schema: str) -> dict[str, Any]:
+    try:
+        source = json.loads(source_schema)
+        target = json.loads(target_schema)
+        if not isinstance(source, dict) or not isinstance(target, dict):
+            raise ReconcileError("invalid_schema_metadata")
+        return {
+            section: diff_keyed_metadata(
+                schema_section_by_key(source, section),
+                schema_section_by_key(target, section),
+            )
+            for section in ("columns", "constraints", "indexes")
+        }
+    except (json.JSONDecodeError, ReconcileError):
+        return {
+            "status": "unavailable",
+            "reason": "invalid_schema_metadata",
+        }
+
+
 def migration_contract_sql() -> str:
     return """
     select coalesce(jsonb_agg(jsonb_build_object(
@@ -371,6 +464,45 @@ def migration_contract_sql() -> str:
     ) order by migration_head), '[]'::jsonb)::text
     from public.nutsnews_migration_schema_contract()
     """
+
+
+def migration_contract_key(item: dict[str, Any]) -> str | None:
+    legacy_schema_version = item.get("legacy_schema_version")
+    migration_head = item.get("migration_head")
+    if not isinstance(legacy_schema_version, str) or not isinstance(migration_head, str):
+        return None
+    return f"{legacy_schema_version}:{migration_head}"
+
+
+def migration_contract_by_key(contract_text: str) -> dict[str, dict[str, Any]]:
+    contract = json.loads(contract_text)
+    if not isinstance(contract, list):
+        raise ReconcileError("invalid_migration_contract_metadata")
+    keyed: dict[str, dict[str, Any]] = {}
+    for item in contract:
+        if not isinstance(item, dict):
+            raise ReconcileError("invalid_migration_contract_metadata")
+        key = migration_contract_key(item)
+        if not key:
+            raise ReconcileError("invalid_migration_contract_metadata")
+        keyed[key] = {
+            "expected_schema_fingerprint": item.get("expected_schema_fingerprint"),
+            "actual_schema_fingerprint": item.get("actual_schema_fingerprint"),
+        }
+    return keyed
+
+
+def migration_contract_diff_summary(source_contract: str, target_contract: str) -> dict[str, Any]:
+    try:
+        return diff_keyed_metadata(
+            migration_contract_by_key(source_contract),
+            migration_contract_by_key(target_contract),
+        )
+    except (json.JSONDecodeError, ReconcileError):
+        return {
+            "status": "unavailable",
+            "reason": "invalid_migration_contract_metadata",
+        }
 
 
 def sequence_state_sql(sequence: Relation) -> str:
@@ -433,7 +565,7 @@ def validate_schema(manifest: dict[str, Any], source_db_url: str, target_db_url:
     source_contract_hash = sha256_text(source_contract)
     target_contract_hash = sha256_text(target_contract)
     status = "pass" if source_schema_hash == target_schema_hash and source_contract_hash == target_contract_hash else "fail"
-    return {
+    result = {
         "id": "schema-fingerprint",
         "status": status,
         "source_schema_sha256": source_schema_hash,
@@ -445,6 +577,10 @@ def validate_schema(manifest: dict[str, Any], source_db_url: str, target_db_url:
         "manifest_schema_fingerprint": manifest.get("manifest_schema_fingerprint"),
         "sensitivity": "metadata_hash_only",
     }
+    if status == "fail":
+        result["schema_diff"] = schema_diff_summary(source_schema, target_schema)
+        result["migration_contract_diff"] = migration_contract_diff_summary(source_contract, target_contract)
+    return result
 
 
 def validate_table(table: dict[str, Any], source_db_url: str, target_db_url: str) -> dict[str, Any]:

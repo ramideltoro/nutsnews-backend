@@ -97,6 +97,8 @@ It proves:
 
 The smoke report is safe metadata only. It must not print database URLs,
 passwords, Supabase host/project metadata, PostgreSQL errors, or row values.
+The smoke script forces `PGSSLMODE=require` when connecting to Supabase. A
+target URL may omit `sslmode`, but an explicit non-`require` value fails closed.
 
 This relay does not approve failover. Later issues still gate failover on lag,
 parity, schema, sequence safety, writer pause, and split-brain checks.

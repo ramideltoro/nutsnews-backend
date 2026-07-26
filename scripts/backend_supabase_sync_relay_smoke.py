@@ -73,7 +73,9 @@ def parse_db_url(db_url: str) -> ParsedDbUrl:
     username = unquote(parsed.username or "")
     password = unquote(parsed.password or "")
     query = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=False)
-    sslmode = query.get("sslmode", [None])[0]
+    # Protected secrets may omit sslmode; force required TLS through PGSSLMODE.
+    sslmode_values = query.get("sslmode", [])
+    sslmode = sslmode_values[0] if sslmode_values else "require"
     if not database or not username or not password:
         raise SmokeError("target_database_url_invalid")
     if str(port) != "5432":

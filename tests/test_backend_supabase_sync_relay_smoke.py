@@ -12,6 +12,7 @@ from scripts import backend_supabase_sync_relay_smoke as smoke
 
 
 TARGET_DB_URL = "postgresql://target:pw@db.abcdefghijklmnopqrst.supabase.co:5432/postgres?sslmode=require"
+TARGET_DB_URL_WITHOUT_SSLMODE = "postgresql://target:pw@db.abcdefghijklmnopqrst.supabase.co:5432/postgres"
 
 
 class BackendSupabaseSyncRelaySmokeTests(unittest.TestCase):
@@ -39,6 +40,19 @@ class BackendSupabaseSyncRelaySmokeTests(unittest.TestCase):
         self.assertNotIn(TARGET_DB_URL, captured_argv)
         self.assertNotIn("pw", " ".join(captured_argv))
         self.assertEqual("/usr/bin/psql", captured_argv[0])
+
+    def test_target_url_without_sslmode_still_forces_pgsslmode_require(self) -> None:
+        env = smoke.target_psql_env(TARGET_DB_URL_WITHOUT_SSLMODE)
+
+        self.assertEqual("require", env["PGSSLMODE"])
+        self.assertEqual("db.abcdefghijklmnopqrst.supabase.co", env["PGHOST"])
+        self.assertEqual("5432", env["PGPORT"])
+
+    def test_rejects_explicit_non_required_sslmode(self) -> None:
+        with self.assertRaisesRegex(smoke.SmokeError, "target_database_sslmode_required"):
+            smoke.target_psql_env(
+                "postgresql://target:pw@db.abcdefghijklmnopqrst.supabase.co:5432/postgres?sslmode=prefer"
+            )
 
     def test_proves_insert_update_delete_catchup_with_safe_metadata(self) -> None:
         observed_source_sql: list[str] = []

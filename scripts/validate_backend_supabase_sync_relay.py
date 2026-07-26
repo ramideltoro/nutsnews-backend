@@ -252,6 +252,8 @@ def main() -> int:
         require(token in smoke_script, f"smoke script missing token: {token}", errors)
     for token in (
         "test_target_query_does_not_place_database_url_in_argv",
+        "test_target_url_without_sslmode_still_forces_pgsslmode_require",
+        "test_rejects_explicit_non_required_sslmode",
         "test_proves_insert_update_delete_catchup_with_safe_metadata",
         "test_main_output_omits_database_url_when_blocked",
     ):

@@ -184,6 +184,8 @@ jobs:
           ssh -i "$HOME/.ssh/nutsnews_backend" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=20 \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST" \

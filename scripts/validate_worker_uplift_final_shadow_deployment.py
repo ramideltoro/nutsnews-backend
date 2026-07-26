@@ -13,6 +13,7 @@ MANAGER_PATH = ROOT / "ansible" / "roles" / "backend_worker_runtime" / "files" /
 DEFAULTS = ROOT / "ansible" / "roles" / "backend_worker_runtime" / "defaults" / "main.yml"
 PROTECTED_APPLY = ROOT / ".github" / "workflows" / "protected-backend-ansible-apply.yml"
 CHECKS_WORKFLOW = ROOT / ".github" / "workflows" / "backend-checks.yml"
+RUNTIME_WORKFLOW = ROOT / ".github" / "workflows" / "backend-worker-runtime-operations.yml"
 RUNBOOK = ROOT / "runbooks" / "WORKER_UPLIFT_SERVICE_RUNTIME.md"
 RABBITMQ_TOPOLOGY = ROOT / "ansible" / "roles" / "backend_rabbitmq" / "templates" / "worker-uplift-topology.json.j2"
 SHADOW_MODEL = ROOT / "ansible" / "roles" / "backend_baseline" / "templates" / "worker-uplift-shadow-data-model.sql.j2"
@@ -119,6 +120,7 @@ def validate() -> list[str]:
     manager = read(MANAGER_PATH)
     protected = read(PROTECTED_APPLY)
     checks = read(CHECKS_WORKFLOW)
+    runtime_workflow = read(RUNTIME_WORKFLOW)
     runbook = read(RUNBOOK)
     rabbitmq_topology = read(RABBITMQ_TOPOLOGY)
     shadow_model = read(SHADOW_MODEL)
@@ -204,12 +206,25 @@ def validate() -> list[str]:
         (
             "final_shadow_smoke_query",
             "publication_smoke_query",
+            "persistence_smoke_diagnostic_query",
+            "publication_smoke_diagnostic_query",
             "downstream_db_checks",
+            "downstream_diagnostics",
             "worker_uplift_final.article_shadow_aggregates",
             "worker_uplift_persistence.outbox",
+            "worker_uplift_persistence.inbox",
             "worker_uplift_publication.publication_readiness",
             "worker_uplift_publication.publication_decisions",
             "shadow-publication-comparison",
+        ),
+        errors,
+    )
+    require(
+        "worker runtime workflow",
+        runtime_workflow,
+        (
+            "ServerAliveInterval=30",
+            "ServerAliveCountMax=20",
         ),
         errors,
     )

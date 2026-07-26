@@ -273,6 +273,17 @@ class WorkerRuntimeManagerTests(unittest.TestCase):
         self.assertIn("worker_uplift_publication.publication_decisions", publication_query)
         self.assertIn("shadow-publication-comparison", publication_query)
 
+    def test_approval_smoke_diagnostics_include_downstream_failure_context(self):
+        manager = load_manager()
+        persistence_query = manager.persistence_smoke_diagnostic_query("article-001")
+        publication_query = manager.publication_smoke_diagnostic_query("article-001")
+        self.assertIn("worker_uplift_persistence.inbox", persistence_query)
+        self.assertIn("sanitized_error_code", persistence_query)
+        self.assertIn("worker_uplift_final.api_command_receipts", persistence_query)
+        self.assertIn("worker_uplift_final.article_shadow_aggregates", persistence_query)
+        self.assertIn("worker_uplift_publication.publication_readiness", publication_query)
+        self.assertIn("worker_uplift_publication.publication_decisions", publication_query)
+
 
 if __name__ == "__main__":
     unittest.main()

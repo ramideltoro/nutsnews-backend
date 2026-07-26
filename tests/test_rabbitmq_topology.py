@@ -52,6 +52,22 @@ class FakeReadOnlyClient:
         return None
 
 
+class FakeMutableClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, dict | None]] = []
+
+    def request(self, method: str, path: str, payload=None, ignored_statuses=()):
+        del ignored_statuses
+        self.calls.append((method, path, payload))
+        if "/bindings/" in path and method == "GET":
+            return []
+        return None
+
+    def get_or_none(self, path: str):
+        self.calls.append(("GET", path, None))
+        return None
+
+
 class RabbitMQTopologyTests(unittest.TestCase):
     def test_definition_builds_exact_contract_topology_with_classic_limits(self):
         definition = load_definition()
@@ -202,6 +218,24 @@ class RabbitMQTopologyTests(unittest.TestCase):
         self.assertEqual(report["non_empty_queue_behavior"], "skip_without_mutating_existing_messages")
         self.assertEqual(report["skipped_queues"], [])
         self.assertEqual(len(report["skipped_consumers"]), len(definition["routes"]) * 3)
+
+    def test_repair_canary_only_deletes_and_recreates_canary_queue(self):
+        definition = load_definition()
+        users = topology.user_records(definition, credential_env())
+        client = FakeMutableClient()
+        args = SimpleNamespace(timeout_seconds=1)
+
+        with patch.object(topology, "wait_for_management", return_value={}), patch("builtins.print") as print_report:
+            result = topology.action_repair_canary(args, client, definition, users)
+
+        self.assertEqual(result, 0)
+        delete_paths = [path for method, path, _payload in client.calls if method == "DELETE"]
+        self.assertEqual(delete_paths, ["/api/queues/nutsnews-worker-uplift/worker.uplift.canary.v1"])
+        self.assertFalse(any("nutsnews.worker.fetch.v1" in path for _method, path, _payload in client.calls))
+        report = json.loads(print_report.call_args.args[0])
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["scope"], "canary_queue_only")
+        self.assertFalse(report["production_queues_touched"])
 
 
 if __name__ == "__main__":

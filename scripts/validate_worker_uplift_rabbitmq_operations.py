@@ -122,6 +122,7 @@ def validate() -> list[str]:
             "backend_rabbitmq_smoke_report_path",
             "Install RabbitMQ private canary service",
             "Install RabbitMQ private canary timer",
+            "Repair RabbitMQ private canary queue before apply canary",
             "Run RabbitMQ private canary once after topology bootstrap",
             "backend_rabbitmq_canary_metrics_path",
             "retries: 3",

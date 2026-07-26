@@ -135,6 +135,9 @@ consume the dedicated probe queue.
 The protected apply canary has three bounded attempts with a short delay so a
 single transient AMQP or management queue timeout does not fail an otherwise
 healthy apply; all attempts must still succeed before the workflow can pass.
+Protected apply repairs only the dedicated `worker.uplift.canary.v1` queue
+immediately before the canary. This can delete stale canary probe messages, but
+it never deletes or recreates production worker queues.
 
 Poison message or DLQ replay:
 Use the production DLQ replay procedure only after preserving the DLQ evidence.

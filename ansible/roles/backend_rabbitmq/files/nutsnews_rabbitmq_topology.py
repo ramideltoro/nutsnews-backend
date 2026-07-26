@@ -557,6 +557,17 @@ def ensure_binding(client: RabbitMQClient, definition: dict[str, Any], binding: 
         report["changes"].append(f"created_binding:{binding['queue']}")
 
 
+def canary_queue_and_binding(definition: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    canary_queues = [queue for queue in expected_queues(definition) if queue.get("kind") == "canary"]
+    if len(canary_queues) != 1:
+        raise SystemExit("topology definition must declare exactly one canary queue")
+    queue = canary_queues[0]
+    canary_bindings = [binding for binding in expected_bindings(definition) if binding.get("queue") == queue["name"]]
+    if len(canary_bindings) != 1:
+        raise SystemExit("topology definition must declare exactly one canary binding")
+    return queue, canary_bindings[0]
+
+
 def ensure_policy(client: RabbitMQClient, definition: dict[str, Any], policy: dict[str, Any], report: dict[str, Any]) -> None:
     vhost = definition["vhost"]
     current = client.get_or_none(api_path("api", "policies", vhost, policy["name"]))
@@ -888,6 +899,33 @@ def action_permissions(args: argparse.Namespace, client: RabbitMQClient, definit
     return 0 if not errors else 1
 
 
+def action_repair_canary(args: argparse.Namespace, client: RabbitMQClient, definition: dict[str, Any], users: list[dict[str, Any]]) -> int:
+    del users
+    wait_for_management(args, client)
+    queue, binding = canary_queue_and_binding(definition)
+    vhost = definition["vhost"]
+    report: dict[str, Any] = {
+        "status": "pass",
+        "changed": True,
+        "changes": [],
+        "drift": [],
+        "scope": "canary_queue_only",
+        "queue": queue["name"],
+        "production_queues_touched": False,
+        "safe_metadata_only": True,
+    }
+    client.request("DELETE", api_path("api", "queues", vhost, queue["name"]), ignored_statuses=(404,))
+    report["changes"].append("deleted_canary_queue")
+    ensure_queue(client, definition, queue, report)
+    ensure_binding(client, definition, binding, report)
+    if report["drift"]:
+        report["status"] = "fail"
+        print(json.dumps(redact_report(report), sort_keys=True))
+        return 1
+    print(json.dumps(redact_report(report), sort_keys=True))
+    return 0
+
+
 def action_probe_transfers(args: argparse.Namespace, client: RabbitMQClient, definition: dict[str, Any], users: list[dict[str, Any]]) -> int:
     del users
     wait_for_management(args, client)
@@ -998,7 +1036,7 @@ def redact_report(report: dict[str, Any]) -> dict[str, Any]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("bootstrap", "check", "permissions", "probe-transfers"))
+    parser.add_argument("action", choices=("bootstrap", "check", "permissions", "repair-canary", "probe-transfers"))
     parser.add_argument("--env", type=Path, required=True, help="Root-only RabbitMQ admin env file.")
     parser.add_argument("--credentials-env", type=Path, required=True, help="Root-only topology user env file.")
     parser.add_argument("--definition", type=Path, required=True, help="Source-controlled topology definition JSON.")
@@ -1029,6 +1067,8 @@ def main() -> int:
             return action_check(args, client, definition, users)
         if args.action == "permissions":
             return action_permissions(args, client, definition, users)
+        if args.action == "repair-canary":
+            return action_repair_canary(args, client, definition, users)
         return action_probe_transfers(args, client, definition, users)
     except (RuntimeError, urllib.error.URLError, json.JSONDecodeError, OSError) as exc:
         print(str(exc), file=sys.stderr)

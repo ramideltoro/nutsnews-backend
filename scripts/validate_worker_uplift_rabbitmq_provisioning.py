@@ -181,6 +181,8 @@ def main() -> int:
         "Verify RabbitMQ worker topology drift",
         "Verify RabbitMQ least-privilege permissions",
         "Probe RabbitMQ retry and DLQ transfer routing",
+        "Repair RabbitMQ private canary queue before apply canary",
+        "repair-canary",
         "backend_rabbitmq_topology_bootstrap.stdout | from_json",
         "not ansible_check_mode",
     ):
@@ -241,8 +243,11 @@ def main() -> int:
     for required in (
         "def live_drift",
         "def permission_matrix",
+        "def action_repair_canary",
         "def action_probe_transfers",
         "ensure_guest_deleted",
+        '"scope": "canary_queue_only"',
+        "production_queues_touched",
         "x-overflow",
         "reject-publish",
         "x-message-ttl",

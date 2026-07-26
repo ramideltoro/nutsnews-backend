@@ -484,6 +484,24 @@
     - backend_rabbitmq_topology_transfer_probe_enabled | bool
     - not ansible_check_mode
 
+- name: Repair RabbitMQ private canary queue before apply canary
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_rabbitmq_topology_path }}"
+      - repair-canary
+      - --env
+      - "{{ backend_rabbitmq_env_path }}"
+      - --credentials-env
+      - "{{ backend_rabbitmq_topology_env_path }}"
+      - --definition
+      - "{{ backend_rabbitmq_topology_definition_path }}"
+  register: backend_rabbitmq_canary_repair
+  changed_when: (backend_rabbitmq_canary_repair.stdout | from_json).changed | bool
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - backend_rabbitmq_topology_enabled | bool
+    - not ansible_check_mode
+
 - name: Run RabbitMQ private canary once after topology bootstrap
   ansible.builtin.command:
     argv:

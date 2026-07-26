@@ -258,7 +258,7 @@ def validate() -> list[str]:
             "#91",
             "Backend RabbitMQ Smoke",
             "Backend RabbitMQ Canary",
-            "worker.uplift.canary.v1",
+            "worker.uplift.canary.v2",
             "rabbitmq-canary.prom",
             "rabbitmq_drift",
             "last-smoke.json",

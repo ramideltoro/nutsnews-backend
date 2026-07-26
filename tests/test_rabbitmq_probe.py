@@ -281,11 +281,11 @@ class RabbitMQProbeTests(unittest.TestCase):
             definition.write_text(
                 json.dumps(
                     {
-                        "exchanges": [{"id": "canary", "name": "worker.uplift.canary.v1"}],
+                        "exchanges": [{"id": "canary", "name": "worker.uplift.canary.v2"}],
                         "canary": {
                             "exchange_id": "canary",
-                            "routing_key": "worker.uplift.canary.v1",
-                            "queue": {"name": "worker.uplift.canary.v1"},
+                            "routing_key": "worker.uplift.canary.v2",
+                            "queue": {"name": "worker.uplift.canary.v2"},
                         },
                     }
                 ),

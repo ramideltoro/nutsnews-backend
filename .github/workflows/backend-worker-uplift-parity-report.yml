@@ -1,0 +1,191 @@
+name: Backend Worker-Uplift Parity Report
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Run offline validation or live read-only primary-shadow parity report.
+        required: true
+        default: offline
+        type: choice
+        options:
+          - offline
+          - live-read-only
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-worker-uplift-parity-report
+  cancel-in-progress: false
+
+jobs:
+  parity-report:
+    name: Worker-uplift parity report
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate inputs
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            offline|live-read-only) ;;
+            *) echo "Unsupported mode: $MODE" >&2; exit 1 ;;
+          esac
+
+      - name: Run offline parity report
+        if: inputs.mode == 'offline'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/backend_worker_uplift_parity_report.py \
+            --offline \
+            --enforce \
+            --output "$RUNNER_TEMP/backend-worker-uplift-parity-report.json"
+
+      - name: Validate protected live report secrets
+        if: inputs.mode == 'live-read-only'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing required production-backend secret: $name" >&2
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Prepare SSH material
+        if: inputs.mode == 'live-read-only'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F "$NUTSNEWS_BACKEND_HOST" -f "$HOME/.ssh/known_hosts" > /dev/null
+
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh \
+            -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" true
+
+      - name: Run protected live read-only parity report
+        if: inputs.mode == 'live-read-only'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
+          NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE || 'nutsnews_primary_shadow' }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE" != "nutsnews_primary_shadow" ]]; then
+            echo "Worker-uplift parity report is fixed to nutsnews_primary_shadow." >&2
+            exit 1
+          fi
+
+          db_url="$(python3 - <<'PY'
+          import os
+          from urllib.parse import quote
+
+          user = quote("nutsnews_migration_validation", safe="")
+          password = quote(os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD"], safe="")
+          database = quote(os.environ["NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE"], safe="")
+          print(f"postgresql://{user}:{password}@127.0.0.1:5432/{database}")
+          PY
+          )"
+          echo "::add-mask::$db_url"
+
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          remote_dir="/tmp/nutsnews-worker-uplift-parity-report-${GITHUB_RUN_ID}"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "install -m 0700 -d '$remote_dir/scripts' '$remote_dir/docs'"
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            scripts/backend_worker_uplift_parity_report.py \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/scripts/"
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            docs/worker-uplift-legacy-to-shadow-parity-report.json \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/docs/"
+          set +e
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "cd '$remote_dir' && NUTSNEWS_WORKER_UPLIFT_PARITY_DB_URL='$db_url' python3 scripts/backend_worker_uplift_parity_report.py --manifest docs/worker-uplift-legacy-to-shadow-parity-report.json --smoke-report /var/lib/nutsnews/worker-uplift-runtime/reports/last-smoke.json --enforce --output '$remote_dir/backend-worker-uplift-parity-report.json'"
+          rc="$?"
+          set -e
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/backend-worker-uplift-parity-report.json" \
+            "$RUNNER_TEMP/backend-worker-uplift-parity-report.json" || true
+          exit "$rc"
+
+      - name: Summarize safe metadata
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Backend worker-uplift parity report"
+            echo
+            echo "- Mode: \`${{ inputs.mode }}\`"
+            echo "- Report artifact contains safe metadata only."
+            echo "- Database URLs, passwords, tokens, article payloads, prompts, and model outputs are not printed."
+            echo "- This report cannot authorize cutover."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload worker-uplift parity report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-worker-uplift-parity-report
+          path: ${{ runner.temp }}/backend-worker-uplift-parity-report.json
+          if-no-files-found: warn

@@ -1,0 +1,117 @@
+{
+  "report_id": "worker-uplift-legacy-to-shadow-parity",
+  "version": 1,
+  "tracking_issue": 122,
+  "tracking_repo": "ramideltoro/nutsnews-worker",
+  "implementation_repo": "ramideltoro/nutsnews-backend",
+  "status": "shadow_read_only_report",
+  "depends_on": [
+    "docs/worker-uplift-legacy-parity-baseline.md",
+    "docs/worker-uplift-api-admin-compatibility-contract.json",
+    "ansible/roles/backend_worker_runtime/files/nutsnews_worker_runtime.py"
+  ],
+  "source_labels": {
+    "legacy": "live Cloudflare shard behavior captured in docs/worker-uplift-legacy-parity-baseline.md",
+    "uplift": "backend PostgreSQL primary shadow worker-uplift schemas plus latest protected scheduler smoke artifact"
+  },
+  "comparison_window_policy": {
+    "default_window": "latest protected scheduler shadow smoke fixture",
+    "live_legacy_owner": "legacy_shards",
+    "writes_allowed": false,
+    "production_cutover_authorized": false
+  },
+  "approved_tolerances": {
+    "synthetic_fixture_final_shadow_results": {
+      "expected": 1,
+      "mode": "exact"
+    },
+    "translation_languages": {
+      "expected": [
+        "fr",
+        "ja",
+        "de-CH",
+        "de",
+        "el"
+      ],
+      "mode": "exact_set"
+    },
+    "dlq_growth": {
+      "expected": 0,
+      "mode": "exact"
+    },
+    "failed_shadow_api_requests": {
+      "expected": 0,
+      "mode": "exact"
+    }
+  },
+  "required_sections": [
+    {
+      "id": "legacy_baseline_requirements",
+      "category": "legacy_baseline",
+      "requirement_refs": [
+        "#68"
+      ],
+      "contract_refs": [
+        "#140"
+      ],
+      "sensitivity": "source_control_metadata_only"
+    },
+    {
+      "id": "stage_flow_counts",
+      "category": "stage_flow",
+      "requirement_refs": [
+        "#68",
+        "#120"
+      ],
+      "contract_refs": [
+        "#73",
+        "#140"
+      ],
+      "sensitivity": "aggregate_only"
+    },
+    {
+      "id": "translation_policy",
+      "category": "translation",
+      "requirement_refs": [
+        "#68"
+      ],
+      "contract_refs": [
+        "#140"
+      ],
+      "sensitivity": "aggregate_only"
+    },
+    {
+      "id": "final_shadow_and_api_compatibility",
+      "category": "backend_api_admin_public",
+      "requirement_refs": [
+        "#116",
+        "#120",
+        "#145",
+        "#146"
+      ],
+      "contract_refs": [
+        "#140"
+      ],
+      "sensitivity": "aggregate_only"
+    },
+    {
+      "id": "queue_retry_dlq_versions",
+      "category": "runtime_observability",
+      "requirement_refs": [
+        "#87",
+        "#88",
+        "#120"
+      ],
+      "contract_refs": [
+        "#78"
+      ],
+      "sensitivity": "safe_runtime_metadata_only"
+    }
+  ],
+  "guardrails": [
+    "Report queries must be SELECT-only and aggregate/key-status oriented.",
+    "Report artifacts must not include article body, prompt text, model output, credentials, database URLs, or bearer tokens.",
+    "Comparison evidence cannot authorize cutover.",
+    "Legacy remains the production ingestion owner until a later cutover issue changes ownership."
+  ]
+}

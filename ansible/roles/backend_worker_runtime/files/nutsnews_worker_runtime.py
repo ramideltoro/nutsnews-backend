@@ -12,10 +12,15 @@ import argparse
 import base64
 import datetime as dt
 import hashlib
+import html
+import http.server
 import json
+import os
 import re
+import socketserver
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -40,18 +45,52 @@ WORKER_ENVELOPE_SCHEMA_ID = "nutsnews.worker.envelope.v1"
 WORKER_MAX_ATTEMPTS = 4
 STAGE_PAYLOAD_SCHEMA_VERSION = 1
 STAGE_PAYLOAD_SCHEMA_IDS = {
+    "feed_fetch_request": "nutsnews.worker.payload.feed-fetch-request.v1",
     "enrichment_result": "nutsnews.worker.payload.enrichment-result.v1",
     "persistence_command": "nutsnews.worker.payload.persistence-command.v1",
     "publication_readiness": "nutsnews.worker.payload.publication-readiness.v1",
     "translation_task": "nutsnews.worker.payload.translation-task.v1",
 }
 SMOKE_TARGET_LANGUAGES = ["fr", "ja", "de-CH", "de", "el"]
-SERVICE_HTTP_PORTS = {"approval": 18085, "translation": 18086}
+SMOKE_PIPELINE_TIMEOUT_SECONDS = 420
+SERVICE_HTTP_PORTS = {
+    "scheduler": 18081,
+    "fetcher": 18082,
+    "canonicalizer": 18083,
+    "enrichment": 18084,
+    "approval": 18085,
+    "translation": 18086,
+    "persistence": 18087,
+    "publication": 18088,
+}
 SERVICE_DATABASE_ENV_KEYS = {
+    "scheduler": "NUTSNEWS_SCHEDULER_DATABASE_URL",
+    "fetcher": "NUTSNEWS_FETCHER_DATABASE_URL",
+    "canonicalizer": "NUTSNEWS_CANONICALIZER_DATABASE_URL",
+    "enrichment": "NUTSNEWS_ENRICHMENT_DATABASE_URL",
     "approval": "NUTSNEWS_APPROVAL_DATABASE_URL",
     "persistence": "NUTSNEWS_PERSISTENCE_DATABASE_URL",
     "publication": "NUTSNEWS_PUBLICATION_DATABASE_URL",
     "translation": "NUTSNEWS_TRANSLATION_DATABASE_URL",
+}
+PIPELINE_SMOKE_STAGES = ["fetcher", "canonicalizer", "enrichment", "approval", "translation", "persistence", "publication"]
+TRACKING_QUERY_PARAMETER_NAMES = {
+    "cmp",
+    "cmpid",
+    "dclid",
+    "fbclid",
+    "gclid",
+    "igshid",
+    "mc_cid",
+    "mc_eid",
+    "msclkid",
+    "oly_anon_id",
+    "oly_enc_id",
+    "ref",
+    "ref_src",
+    "spm",
+    "twclid",
+    "vero_id",
 }
 
 
@@ -451,6 +490,69 @@ def declared_queues(service: dict[str, Any], kind: str) -> list[str]:
     return []
 
 
+def queue_messages(queue: dict[str, Any]) -> int:
+    metrics = queue.get("metrics", {})
+    if not isinstance(metrics, dict):
+        return 0
+    value = metrics.get("messages")
+    return int(value) if isinstance(value, int) else 0
+
+
+def queue_consumers(queue: dict[str, Any]) -> int:
+    metrics = queue.get("metrics", {})
+    if not isinstance(metrics, dict):
+        return 0
+    value = metrics.get("consumers")
+    return int(value) if isinstance(value, int) else 0
+
+
+def stage_queue_snapshot(args: argparse.Namespace, manifest: dict[str, Any], stages: list[str], kind: str) -> dict[str, Any]:
+    services = service_map(manifest)
+    items: dict[str, Any] = {}
+    for stage in stages:
+        service = services.get(stage)
+        if service is None:
+            items[stage] = {"status": "missing_service"}
+            continue
+        queues = declared_queues(service, kind)
+        items[stage] = [rabbitmq_get_json(args, queue) for queue in queues]
+    return items
+
+
+def missing_pipeline_consumers(queue_snapshot: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    for stage, queues in queue_snapshot.items():
+        if not isinstance(queues, list) or not queues:
+            missing.append(stage)
+            continue
+        for queue in queues:
+            if queue.get("status") != "healthy" or queue_consumers(queue) < 1:
+                missing.append(stage)
+                break
+    return missing
+
+
+def dlq_growth(before: dict[str, Any], after: dict[str, Any]) -> dict[str, int]:
+    growth: dict[str, int] = {}
+    for stage, after_queues in after.items():
+        if not isinstance(after_queues, list):
+            continue
+        before_queues = before.get(stage, [])
+        before_by_name = {
+            item.get("queue"): queue_messages(item)
+            for item in before_queues
+            if isinstance(item, dict)
+        } if isinstance(before_queues, list) else {}
+        for queue in after_queues:
+            name = queue.get("queue")
+            if not isinstance(name, str):
+                continue
+            delta = queue_messages(queue) - int(before_by_name.get(name, 0))
+            if delta > 0:
+                growth[name] = delta
+    return growth
+
+
 def smoke_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
@@ -469,6 +571,235 @@ def sha256_json(value: Any) -> str:
 
 def payload_size(payload: dict[str, Any]) -> int:
     return len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+
+
+class PipelineFixtureServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+    fixture: dict[str, str]
+    hits: dict[str, int]
+
+
+class PipelineFixtureHandler(http.server.BaseHTTPRequestHandler):
+    server: PipelineFixtureServer
+
+    def do_GET(self) -> None:
+        token = self.server.fixture["token"]
+        base_path = f"/worker-uplift-shadow-smoke/{token}"
+        if self.path == f"{base_path}/feed.xml":
+            self.server.hits["feed"] = self.server.hits.get("feed", 0) + 1
+            self.write_response("application/rss+xml; charset=utf-8", self.server.fixture["feed_xml"].encode("utf-8"))
+            return
+        if self.path == f"{base_path}/article.html":
+            self.server.hits["article"] = self.server.hits.get("article", 0) + 1
+            self.write_response("text/html; charset=utf-8", self.server.fixture["article_html"].encode("utf-8"))
+            return
+        if self.path == f"{base_path}/image.png":
+            self.server.hits["image"] = self.server.hits.get("image", 0) + 1
+            self.write_response("image/png", base64.b64decode(self.server.fixture["image_png_base64"]))
+            return
+        self.send_response(404)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def write_response(self, content_type: str, body: bytes) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format: str, *args: Any) -> None:
+        return
+
+
+def xml_escape(value: str) -> str:
+    return html.escape(value, quote=True)
+
+
+def advertised_fixture_host(args: argparse.Namespace) -> str:
+    value = (args.fixture_host or os.environ.get("NUTSNEWS_WORKER_SMOKE_FIXTURE_HOST") or "").strip()
+    return value or "65.75.201.18"
+
+
+def start_pipeline_fixture_server(args: argparse.Namespace, fixture_id: str) -> tuple[PipelineFixtureServer, threading.Thread, dict[str, str]]:
+    server = PipelineFixtureServer(("0.0.0.0", 0), PipelineFixtureHandler)
+    port = server.server_address[1]
+    host = advertised_fixture_host(args)
+    token = hashlib.sha256(f"{fixture_id}:{uuid.uuid4().hex}".encode("utf-8")).hexdigest()[:24]
+    base_url = f"http://{host}:{port}/worker-uplift-shadow-smoke/{token}"
+    feed_url = f"{base_url}/feed.xml"
+    article_url = f"{base_url}/article.html"
+    image_url = f"{base_url}/image.png"
+    title = "Community volunteers restore a school library after weekend flood damage"
+    description = "A deterministic NutsNews shadow fixture about neighbors repairing shelves, donating books, and reopening a school library."
+    published_at = "2026-07-26T12:00:00.000Z"
+    source_item_id = f"shadow-smoke-{fixture_id}"
+    feed_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+  <channel>
+    <title>NutsNews Worker Shadow Smoke</title>
+    <link>{xml_escape(base_url)}</link>
+    <description>Deterministic local worker-uplift feed fixture.</description>
+    <item>
+      <guid isPermaLink="false">{xml_escape(source_item_id)}</guid>
+      <title>{xml_escape(title)}</title>
+      <link>{xml_escape(article_url)}</link>
+      <description>{xml_escape(description)}</description>
+      <pubDate>Sun, 26 Jul 2026 12:00:00 GMT</pubDate>
+      <enclosure url="{xml_escape(image_url)}" length="67" type="image/png" />
+      <media:thumbnail url="{xml_escape(image_url)}" width="1200" height="675" />
+    </item>
+  </channel>
+</rss>
+"""
+    article_html = f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>{xml_escape(title)}</title>
+    <meta name="description" content="{xml_escape(description)}">
+    <meta property="og:title" content="{xml_escape(title)}">
+    <meta property="og:description" content="{xml_escape(description)}">
+    <meta property="og:image" content="{xml_escape(image_url)}">
+    <meta property="og:type" content="article">
+    <link rel="canonical" href="{xml_escape(article_url)}">
+  </head>
+  <body>
+    <article>
+      <h1>{xml_escape(title)}</h1>
+      <p>{xml_escape(description)}</p>
+      <p>Students and parents returned Monday to a dry, safe reading room with new donated books.</p>
+      <img src="{xml_escape(image_url)}" width="1200" height="675" alt="Restored school library">
+    </article>
+  </body>
+</html>
+"""
+    fixture = {
+        "token": token,
+        "feed_id": f"worker-shadow-smoke-{fixture_id}",
+        "feed_url": feed_url,
+        "article_url": article_url,
+        "image_url": image_url,
+        "source_item_id": source_item_id,
+        "title": title,
+        "description": description,
+        "published_at": published_at,
+        "feed_xml": feed_xml,
+        "article_html": article_html,
+        "image_png_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+    }
+    server.fixture = fixture
+    server.hits = {}
+    thread = threading.Thread(target=server.serve_forever, name="pipeline-fixture-http", daemon=True)
+    thread.start()
+    return server, thread, fixture
+
+
+def normalize_article_url(value: str) -> str:
+    url = parse.urlsplit(value)
+    scheme = url.scheme.lower()
+    hostname = (url.hostname or "").lower()
+    netloc = hostname
+    if url.port is not None and not ((scheme == "https" and url.port == 443) or (scheme == "http" and url.port == 80)):
+        netloc = f"{netloc}:{url.port}"
+    path = url.path or "/"
+    while len(path) > 1 and path.endswith("/"):
+        path = path[:-1]
+    retained: list[tuple[str, str]] = []
+    for key, item_value in parse.parse_qsl(url.query, keep_blank_values=True):
+        normalized_key = key.lower()
+        if normalized_key.startswith("utm_") or normalized_key in TRACKING_QUERY_PARAMETER_NAMES:
+            continue
+        retained.append((key, item_value))
+    retained.sort()
+    query = parse.urlencode(retained)
+    return parse.urlunsplit((scheme, netloc, path, query, ""))
+
+
+def stable_article_id(article_url: str) -> str:
+    normalized = normalize_article_url(article_url)
+    return "article_" + hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:32]
+
+
+def pipeline_fetch_payload(fixture: dict[str, str], fixture_id: str, occurred_at: str) -> dict[str, Any]:
+    message_id = smoke_uuid(["worker-runtime-pipeline-smoke", fixture_id, "fetch-message"])
+    idempotency_key = f"smoke:pipeline:feed:{fixture_id}"
+    return {
+        "schemaId": STAGE_PAYLOAD_SCHEMA_IDS["feed_fetch_request"],
+        "schemaVersion": STAGE_PAYLOAD_SCHEMA_VERSION,
+        "pipelineRunId": smoke_uuid(["worker-runtime-pipeline-smoke", fixture_id, "pipeline"]),
+        "stageExecutionId": smoke_uuid(["worker-runtime-pipeline-smoke", fixture_id, "scheduler-stage"]),
+        "sourceMessageId": message_id,
+        "idempotencyKey": idempotency_key,
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "producedAt": occurred_at,
+        "feedId": fixture["feed_id"],
+        "feedUrl": fixture["feed_url"],
+        "shardIndex": 0,
+        "shardCount": 1,
+        "fetchReason": "scheduled",
+        "limits": {
+            "timeoutMs": 15000,
+            "maxItems": 1,
+            "scheduleWindowStart": "2026-07-26T12:00:00.000Z",
+            "scheduleWindowEnd": "2026-07-26T12:05:00.000Z",
+            "priority": "shadow-smoke",
+        },
+    }
+
+
+def pipeline_fetch_envelope(fixture: dict[str, str], fixture_id: str, payload: dict[str, Any], occurred_at: str) -> dict[str, Any]:
+    idempotency_key = str(payload["idempotencyKey"])
+    message_id = str(payload["sourceMessageId"])
+    return {
+        "schemaId": WORKER_ENVELOPE_SCHEMA_ID,
+        "schemaVersion": 1,
+        "route": "fetch",
+        "messageId": message_id,
+        "causationId": message_id,
+        "correlationId": smoke_uuid(["worker-runtime-pipeline-smoke", fixture_id, "correlation"]),
+        "traceparent": str(payload["traceparent"]),
+        "idempotencyKey": idempotency_key,
+        "aggregate": {
+            "type": "feed",
+            "id": fixture["feed_id"],
+            "version": 1,
+        },
+        "occurredAt": occurred_at,
+        "attempt": {
+            "count": 1,
+            "max": WORKER_MAX_ATTEMPTS,
+            "firstAttemptAt": occurred_at,
+        },
+        "producer": {
+            "name": "scheduler",
+            "version": "0.1.0",
+            "instanceId": "backend-worker-runtime-smoke",
+        },
+        "payloadRef": {
+            "kind": "backend-record",
+            "uri": f"backend://worker-uplift/scheduler/{parse.quote(idempotency_key, safe='')}",
+            "mediaType": "application/json",
+            "sizeBytes": payload_size(payload),
+            "digest": sha256_json(payload),
+        },
+    }
+
+
+def build_pipeline_fetch_publication(args: argparse.Namespace, fixture: dict[str, str], fixture_id: str, occurred_at: str) -> dict[str, Any]:
+    payload = pipeline_fetch_payload(fixture, fixture_id, occurred_at)
+    envelope = pipeline_fetch_envelope(fixture, fixture_id, payload, occurred_at)
+    publish = rabbitmq_publish(args, envelope, payload, "nutsnews.worker.fetch.v1")
+    return {
+        "fixture": "scheduler-feed-fetch-request",
+        "message_id": envelope["messageId"],
+        "correlation_id": envelope["correlationId"],
+        "pipeline_run_id": payload["pipelineRunId"],
+        "idempotency_key": payload["idempotencyKey"],
+        "routing_key": "nutsnews.worker.fetch.v1",
+        "publish": publish,
+    }
 
 
 def smoke_envelope(
@@ -710,6 +1041,50 @@ where article_identity_hash = {article}
 """
 
 
+def pipeline_approval_smoke_query(article_id: str) -> str:
+    article = sql_literal(article_id)
+    translation_routing = sql_literal("nutsnews.worker.translation.v1")
+    return f"""
+select 'approved_decision=' || count(*)::text
+from worker_uplift_approval.approval_decisions
+where article_identity_hash = {article}
+  and decision = 'approved'
+  and ai_provider = 'local_ai'
+union all
+select 'rejected_decision=' || count(*)::text
+from worker_uplift_approval.approval_decisions
+where article_identity_hash = {article}
+  and decision = 'rejected'
+union all
+select 'translation_outbox=' || count(*)::text
+from worker_uplift_approval.outbox
+where entity_id = {article}
+  and destination_stage = 'translation'
+  and routing_key = {translation_routing}
+  and status = 'confirmed'
+union all
+select 'processed_inbox=' || count(*)::text
+from worker_uplift_approval.inbox
+where entity_id = {article}
+  and status = 'processed';
+"""
+
+
+def pipeline_api_audit_query(article_id: str) -> str:
+    article = sql_literal(article_id)
+    return f"""
+select 'shadow_api_requests=' || count(*)::text
+from worker_uplift_persistence.write_requests
+where article_identity_hash = {article}
+  and status = 'accepted'
+union all
+select 'failed_api_requests=' || count(*)::text
+from worker_uplift_persistence.write_requests
+where article_identity_hash = {article}
+  and status = 'failed';
+"""
+
+
 def persistence_smoke_diagnostic_query(article_id: str) -> str:
     article = sql_literal(article_id)
     return f"""
@@ -914,15 +1289,236 @@ def run_translation_smoke(args: argparse.Namespace, service: dict[str, Any], rep
         report["errors"].append("translation smoke did not observe expected per-language shadow state")
 
 
+def pipeline_approval_diagnostic_query(article_id: str) -> str:
+    article = sql_literal(article_id)
+    return f"""
+select 'approval_decisions=' || coalesce(jsonb_agg(to_jsonb(row) order by row.reviewed_at desc), '[]'::jsonb)::text
+from (
+  select article_identity_hash, decision, ai_provider, ai_model, diagnostic_metadata, reviewed_at
+  from worker_uplift_approval.approval_decisions
+  where article_identity_hash = {article}
+  order by reviewed_at desc
+  limit 10
+) row
+union all
+select 'approval_inbox=' || coalesce(jsonb_agg(to_jsonb(row) order by row.received_at desc), '[]'::jsonb)::text
+from (
+  select idempotency_key, status, sanitized_error_code, sanitized_error_message, diagnostic_metadata, received_at, processed_at
+  from worker_uplift_approval.inbox
+  where entity_id = {article}
+  order by received_at desc
+  limit 10
+) row
+union all
+select 'approval_outbox=' || coalesce(jsonb_agg(to_jsonb(row) order by row.created_at desc), '[]'::jsonb)::text
+from (
+  select idempotency_key, destination_stage, routing_key, status, sanitized_error_code, sanitized_error_message, diagnostic_metadata, created_at, confirmed_at
+  from worker_uplift_approval.outbox
+  where entity_id = {article}
+  order by created_at desc
+  limit 10
+) row;
+"""
+
+
+def run_pipeline_shadow_smoke(args: argparse.Namespace, manifest: dict[str, Any], service: dict[str, Any], report: dict[str, Any]) -> None:
+    required_services: dict[str, dict[str, Any]] = {"scheduler": service}
+    for name in ["approval", "translation", "persistence", "publication", *PIPELINE_SMOKE_STAGES]:
+        if name in required_services:
+            continue
+        try:
+            required_services[name] = require_service(manifest, name)
+        except RuntimeErrorWithReport as exc:
+            report["status"] = "fail"
+            report["errors"].append(f"pipeline smoke prerequisite failed: {exc}")
+            return
+
+    try:
+        approval_db_url = service_database_url(args, required_services["approval"])
+        translation_db_url = service_database_url(args, required_services["translation"])
+        persistence_db_url = service_database_url(args, required_services["persistence"])
+        publication_db_url = service_database_url(args, required_services["publication"])
+    except RuntimeErrorWithReport as exc:
+        report["status"] = "fail"
+        report["errors"].append(f"pipeline smoke database prerequisite failed: {exc}")
+        return
+
+    fixture_id = smoke_id("pipeline")
+    fixture_server: PipelineFixtureServer | None = None
+    fixture_thread: threading.Thread | None = None
+    fixture: dict[str, str] = {}
+    try:
+        fixture_server, fixture_thread, fixture = start_pipeline_fixture_server(args, fixture_id)
+        article_id = stable_article_id(fixture["article_url"])
+        queue_before = stage_queue_snapshot(args, manifest, PIPELINE_SMOKE_STAGES, "main")
+        dlq_before = stage_queue_snapshot(args, manifest, PIPELINE_SMOKE_STAGES, "dlq")
+        missing_consumers = missing_pipeline_consumers(queue_before)
+        report["smoke"] = {
+            "service": service["name"],
+            "contract": "scheduler-feed-to-final-shadow-v1",
+            "trigger": "scheduler-compatible-feed-fetch-request",
+            "legacy_ingestion_endpoints_invoked": False,
+            "timeout_seconds": SMOKE_PIPELINE_TIMEOUT_SECONDS,
+            "fixture": {
+                "fixture_id": fixture_id,
+                "feed_id": fixture["feed_id"],
+                "feed_url": fixture["feed_url"],
+                "article_url": fixture["article_url"],
+                "article_id": article_id,
+                "source_item_id": fixture["source_item_id"],
+            },
+            "versions": {
+                name: {
+                    "image": required_services[name].get("image"),
+                    "contract_version": required_services[name].get("contract_version"),
+                    "runtime_package_version": required_services[name].get("runtime_package_version"),
+                    "runtime_mode": required_services[name].get("runtime_mode"),
+                }
+                for name in ["scheduler", *PIPELINE_SMOKE_STAGES]
+                if name in required_services or name == "scheduler"
+            },
+            "guardrails": {
+                name: smoke_guardrails(required_services[name], service_env(args, required_services[name]))
+                for name in PIPELINE_SMOKE_STAGES
+                if name in required_services
+            },
+            "health": {
+                name: http_get_local("/ready", SERVICE_HTTP_PORTS[name])
+                for name in ["scheduler", *PIPELINE_SMOKE_STAGES]
+                if name in SERVICE_HTTP_PORTS
+            },
+            "queues_before": queue_before,
+            "dlqs_before": dlq_before,
+            "missing_consumers": missing_consumers,
+        }
+        if missing_consumers:
+            report["status"] = "fail"
+            report["errors"].append("pipeline smoke preflight found RabbitMQ stages without active consumers")
+            return
+
+        fetch_occurred_at = smoke_now()
+        first = build_pipeline_fetch_publication(args, fixture, fixture_id, fetch_occurred_at)
+        second = build_pipeline_fetch_publication(args, fixture, fixture_id, fetch_occurred_at)
+        report["smoke"]["fixtures"] = [first, second]
+        if first["publish"]["status"] != "healthy":
+            report["status"] = "fail"
+            report["errors"].append("pipeline smoke initial fetch publish failed")
+            return
+        if second["publish"]["status"] != "healthy":
+            report["status"] = "fail"
+            report["errors"].append("pipeline smoke duplicate fetch publish failed")
+            return
+
+        approval_values, approval_ok = wait_for_psql_values(
+            approval_db_url,
+            pipeline_approval_smoke_query(article_id),
+            {
+                "approved_decision": "1",
+                "rejected_decision": "0",
+                "translation_outbox": "1",
+                "processed_inbox": "1",
+            },
+            timeout_seconds=SMOKE_PIPELINE_TIMEOUT_SECONDS,
+            interval_seconds=5.0,
+        )
+        translation_values, translation_ok = wait_for_psql_values(
+            translation_db_url,
+            translation_smoke_query(article_id),
+            {
+                "accepted_language_records": str(len(SMOKE_TARGET_LANGUAGES)),
+                "distinct_languages": str(len(SMOKE_TARGET_LANGUAGES)),
+                "persistence_outbox": str(len(SMOKE_TARGET_LANGUAGES) + 1),
+                "processed_inbox": "1",
+                "provider_metadata": str(len(SMOKE_TARGET_LANGUAGES)),
+            },
+            timeout_seconds=SMOKE_PIPELINE_TIMEOUT_SECONDS,
+            interval_seconds=5.0,
+        )
+        final_values, final_ok = wait_for_psql_values(
+            persistence_db_url,
+            final_shadow_smoke_query(article_id),
+            {
+                "final_shadow_aggregate": "1",
+                "persistence_publication_outbox": "1",
+            },
+            timeout_seconds=SMOKE_PIPELINE_TIMEOUT_SECONDS,
+            interval_seconds=5.0,
+        )
+        publication_values, publication_ok = wait_for_psql_values(
+            publication_db_url,
+            publication_smoke_query(article_id),
+            {
+                "publication_readiness": "1",
+                "publication_shadow_comparison": "1",
+            },
+            timeout_seconds=SMOKE_PIPELINE_TIMEOUT_SECONDS,
+            interval_seconds=5.0,
+        )
+        api_audit = psql_diagnostics(persistence_db_url, pipeline_api_audit_query(article_id))
+        time.sleep(10)
+        queue_after = stage_queue_snapshot(args, manifest, PIPELINE_SMOKE_STAGES, "main")
+        dlq_after = stage_queue_snapshot(args, manifest, PIPELINE_SMOKE_STAGES, "dlq")
+        growth = dlq_growth(dlq_before, dlq_after)
+        report["smoke"]["db_checks"] = {
+            "approval": approval_values,
+            "translation": translation_values,
+            "persistence": final_values,
+            "publication": publication_values,
+            "api_audit": api_audit,
+        }
+        report["smoke"]["idempotency"] = {
+            "duplicate_publish_idempotency_key": second["idempotency_key"],
+            "expected_single_final_shadow_result": "1",
+            "observed_after_duplicate": {
+                "approval": psql_diagnostics(approval_db_url, pipeline_approval_smoke_query(article_id)),
+                "translation": psql_diagnostics(translation_db_url, translation_smoke_query(article_id)),
+                "persistence": psql_diagnostics(persistence_db_url, final_shadow_smoke_query(article_id)),
+                "publication": psql_diagnostics(publication_db_url, publication_smoke_query(article_id)),
+            },
+        }
+        report["smoke"]["queues_after"] = queue_after
+        report["smoke"]["dlqs_after"] = dlq_after
+        report["smoke"]["dlq_growth"] = growth
+        report["smoke"]["fixture_hits"] = dict(fixture_server.hits)
+        if not (approval_ok and translation_ok and final_ok and publication_ok) or growth:
+            report["status"] = "fail"
+            if not (approval_ok and translation_ok and final_ok and publication_ok):
+                report["errors"].append("pipeline smoke did not observe the expected policy-valid final shadow result")
+            if growth:
+                report["errors"].append("pipeline smoke increased one or more DLQs")
+            report["smoke"]["diagnostics"] = {
+                "approval": psql_diagnostics(approval_db_url, pipeline_approval_diagnostic_query(article_id)),
+                "persistence": psql_diagnostics(persistence_db_url, persistence_smoke_diagnostic_query(article_id)),
+                "publication": psql_diagnostics(publication_db_url, publication_smoke_diagnostic_query(article_id)),
+            }
+            return
+
+        if api_audit.get("failed_api_requests") not in {None, "0"}:
+            report["status"] = "fail"
+            report["errors"].append("pipeline smoke observed a failed backend API shadow request")
+    finally:
+        if fixture_server is not None:
+            fixture_server.shutdown()
+            fixture_server.server_close()
+        if fixture_thread is not None:
+            fixture_thread.join(timeout=2)
+
+
 def run_service_smoke(args: argparse.Namespace, manifest: dict[str, Any], service: dict[str, Any], report: dict[str, Any]) -> None:
     if args.dry_run:
         report["status"] = "dry_run"
         report["summary"] = "Runtime smoke would publish sanitized service fixtures and verify redacted shadow state."
         report["smoke"] = {
             "service": service["name"],
-            "fixtures": ["approval accepted/rejected"] if service["name"] == "approval" else ["translation per-language task"],
+            "fixtures": ["approval accepted/rejected"] if service["name"] == "approval" else (
+                ["translation per-language task"] if service["name"] == "translation" else ["scheduler-compatible feed-to-final pipeline fixture"]
+            ),
             "expected_target_languages": SMOKE_TARGET_LANGUAGES if service["name"] in {"approval", "translation"} else [],
+            "pipeline_stages": PIPELINE_SMOKE_STAGES if service["name"] == "scheduler" else [],
         }
+        return
+    if service["name"] == "scheduler":
+        run_pipeline_shadow_smoke(args, manifest, service, report)
         return
     if service["name"] == "approval":
         run_approval_smoke(args, manifest, service, report)
@@ -1047,6 +1643,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--queue-kind", choices=("main", "retry", "dlq"), default="main")
     parser.add_argument("--rabbitmq-env", type=Path, default=Path("/etc/nutsnews-rabbitmq/rabbitmq.env"))
     parser.add_argument("--vhost", default="nutsnews-worker-uplift")
+    parser.add_argument("--fixture-host", default="")
     parser.add_argument("--confirm-action", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--report", type=Path)

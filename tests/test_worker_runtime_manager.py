@@ -141,6 +141,47 @@ def ai_manifest() -> dict:
     return manifest
 
 
+def scheduler_manifest() -> dict:
+    manifest = valid_manifest()
+    digest = "sha256:" + ("d" * 64)
+    manifest["allowed_image_repositories"] = [
+        "ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler",
+    ]
+    manifest["allowed_source_repositories"] = [
+        "ramideltoro/nutsnews-worker-feed-scheduler",
+    ]
+    manifest["allowed_stages"] = ["scheduler"]
+    manifest["services"] = [
+        {
+            "name": "scheduler",
+            "stage": "scheduler",
+            "image": f"ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler@{digest}",
+            "runtime_mode": "shadow",
+            "network_mode": "host",
+            "replicas": 1,
+            "resources": {"memory": "256m", "cpus": "0.35"},
+            "healthcheck": {"test": ["CMD", "node", "-e", "fetch('http://127.0.0.1:18081/ready')"]},
+            "provenance": {
+                "required": True,
+                "signed": True,
+                "subject_digest": digest,
+                "source_repository": "ramideltoro/nutsnews-worker-feed-scheduler",
+            },
+            "env": {
+                "NUTSNEWS_SCHEDULER_DEPENDENCY_MODE": "production",
+                "NUTSNEWS_SCHEDULER_SHADOW_MODE": "true",
+            },
+            "secret_env": [
+                {"name": "scheduler-database-url", "env_key": "NUTSNEWS_SCHEDULER_DATABASE_URL"},
+                {"name": "scheduler-rabbitmq-url", "env_key": "NUTSNEWS_SCHEDULER_RABBITMQ_URL"},
+            ],
+            "queues": {"main": "nutsnews.worker.fetch.v1", "retry": [], "dlq": "nutsnews.worker.fetch.v1.dlq"},
+            "postgres": {"production_write_path": False},
+        }
+    ]
+    return manifest
+
+
 class WorkerRuntimeManagerTests(unittest.TestCase):
     def test_valid_manifest_passes(self):
         manager = load_manager()
@@ -283,6 +324,63 @@ class WorkerRuntimeManagerTests(unittest.TestCase):
         self.assertNotIn("worker_uplift_final.api_command_receipts", persistence_query)
         self.assertIn("worker_uplift_publication.publication_readiness", publication_query)
         self.assertIn("worker_uplift_publication.publication_decisions", publication_query)
+
+    def test_scheduler_smoke_dry_run_has_pipeline_contract(self):
+        manager = load_manager()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / "services.json"
+            manifest_path.write_text(json.dumps(scheduler_manifest()), encoding="utf-8")
+            args = manager.parse_args(
+                [
+                    "smoke",
+                    "--manifest",
+                    str(manifest_path),
+                    "--compose",
+                    str(Path(tmpdir) / "compose.yml"),
+                    "--service-name",
+                    "scheduler",
+                    "--dry-run",
+                    "--confirm-action",
+                ]
+            )
+            report = manager.build_report(args, manager.load_json(manifest_path))
+        self.assertEqual(report["status"], "dry_run")
+        self.assertEqual(report["smoke"]["service"], "scheduler")
+        self.assertIn("scheduler-compatible feed-to-final pipeline fixture", report["smoke"]["fixtures"])
+        self.assertEqual(report["smoke"]["pipeline_stages"], ["fetcher", "canonicalizer", "enrichment", "approval", "translation", "persistence", "publication"])
+
+    def test_pipeline_fetch_payload_and_envelope_match_scheduler_contract(self):
+        manager = load_manager()
+        fixture = {
+            "feed_id": "worker-shadow-smoke-pipeline-001",
+            "feed_url": "http://65.75.201.18:49152/worker-uplift-shadow-smoke/token/feed.xml",
+        }
+        occurred_at = "2026-07-26T12:00:00.000Z"
+        payload = manager.pipeline_fetch_payload(fixture, "pipeline-001", occurred_at)
+        envelope = manager.pipeline_fetch_envelope(fixture, "pipeline-001", payload, occurred_at)
+        self.assertEqual(payload["schemaId"], "nutsnews.worker.payload.feed-fetch-request.v1")
+        self.assertEqual(payload["fetchReason"], "scheduled")
+        self.assertEqual(payload["limits"]["maxItems"], 1)
+        self.assertEqual(envelope["schemaId"], "nutsnews.worker.envelope.v1")
+        self.assertEqual(envelope["route"], "fetch")
+        self.assertEqual(envelope["aggregate"], {"type": "feed", "id": fixture["feed_id"], "version": 1})
+        self.assertEqual(envelope["payloadRef"]["digest"], manager.sha256_json(payload))
+
+    def test_pipeline_article_id_uses_canonicalizer_normalization_seed(self):
+        manager = load_manager()
+        article_url = "HTTP://Example.COM:80/news/story/?utm_source=x&b=2&a=1#fragment"
+        self.assertEqual(manager.normalize_article_url(article_url), "http://example.com/news/story?a=1&b=2")
+        self.assertTrue(manager.stable_article_id(article_url).startswith("article_"))
+        self.assertEqual(len(manager.stable_article_id(article_url)), len("article_") + 32)
+
+    def test_pipeline_queries_cover_shadow_final_and_api_receipts(self):
+        manager = load_manager()
+        approval_query = manager.pipeline_approval_smoke_query("article-001")
+        api_query = manager.pipeline_api_audit_query("article-001")
+        self.assertIn("worker_uplift_approval.approval_decisions", approval_query)
+        self.assertIn("decision = 'approved'", approval_query)
+        self.assertIn("worker_uplift_persistence.write_requests", api_query)
+        self.assertIn("failed_api_requests", api_query)
 
 
 if __name__ == "__main__":

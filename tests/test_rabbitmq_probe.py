@@ -327,6 +327,100 @@ class RabbitMQProbeTests(unittest.TestCase):
             self.assertIn('failure_mode="none"', metrics)
             self.assertNotIn("not-a-real", json.dumps(report) + metrics)
 
+    def test_canary_drains_stale_canary_messages_before_publish(self):
+        class FakeMethod:
+            def __init__(self, delivery_tag: int) -> None:
+                self.delivery_tag = delivery_tag
+
+        class FakeBasicProperties:
+            def __init__(self, **kwargs) -> None:
+                self.kwargs = kwargs
+
+        class FakeChannel:
+            def __init__(self) -> None:
+                self.messages = [
+                    b'{"probe":"nutsnews-rabbitmq-canary","message_id":"stale-1"}',
+                    b'{"probe":"nutsnews-rabbitmq-canary","message_id":"stale-2"}',
+                ]
+                self.acked: list[int] = []
+                self.published = 0
+
+            def confirm_delivery(self) -> None:
+                return None
+
+            def basic_get(self, queue: str, auto_ack: bool = False):
+                self.last_queue = queue
+                self.last_auto_ack = auto_ack
+                if not self.messages:
+                    return None, None, None
+                delivery_tag = len(self.acked) + 1
+                return FakeMethod(delivery_tag), None, self.messages.pop(0)
+
+            def basic_ack(self, delivery_tag: int) -> None:
+                self.acked.append(delivery_tag)
+
+            def basic_publish(self, *, exchange: str, routing_key: str, body: bytes, properties, mandatory: bool) -> None:
+                self.last_publish = {
+                    "exchange": exchange,
+                    "routing_key": routing_key,
+                    "properties": properties,
+                    "mandatory": mandatory,
+                }
+                self.published += 1
+                self.messages.append(body)
+
+        class FakeConnection:
+            def __init__(self) -> None:
+                self.channel_instance = FakeChannel()
+                self.closed = False
+
+            def channel(self) -> FakeChannel:
+                return self.channel_instance
+
+            def close(self) -> None:
+                self.closed = True
+
+        class FakePika:
+            BasicProperties = FakeBasicProperties
+
+            class exceptions:
+                class UnroutableError(Exception):
+                    pass
+
+                class NackError(Exception):
+                    pass
+
+            def __init__(self, connection: FakeConnection) -> None:
+                self.connection = connection
+
+            def BlockingConnection(self, _parameters):
+                return self.connection
+
+        fake_connection = FakeConnection()
+        fake_pika = FakePika(fake_connection)
+        args = SimpleNamespace(amqp_host="127.0.0.1", amqp_port=5672, timeout_seconds=1)
+        route = {"exchange": "worker.uplift.canary.v2", "routing_key": "worker.uplift.canary.v2", "queue": "worker.uplift.canary.v2"}
+
+        with (
+            patch.object(probe, "import_pika", return_value=fake_pika),
+            patch.object(probe, "amqp_connection_parameters", return_value=object()),
+        ):
+            result = probe.amqp_canary_roundtrip(
+                args,
+                username="monitor",
+                password="not-a-real-monitor-password",
+                vhost="nutsnews-worker-uplift",
+                route=route,
+                failure_mode="none",
+            )
+
+        self.assertFalse(result["expected_failure"])
+        self.assertEqual(result["preflight_drained"], 2)
+        self.assertEqual(result["cleanup_drained"], 0)
+        self.assertEqual(fake_connection.channel_instance.published, 1)
+        self.assertEqual(fake_connection.channel_instance.acked, [1, 2, 3])
+        self.assertTrue(fake_connection.closed)
+
     def test_canary_failure_fixture_returns_expected_failure_metric(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)

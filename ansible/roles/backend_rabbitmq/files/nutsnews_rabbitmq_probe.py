@@ -314,6 +314,7 @@ def amqp_canary_roundtrip(
     connection = pika.BlockingConnection(amqp_connection_parameters(args, username, password, vhost))
     channel = connection.channel()
     channel.confirm_delivery()
+    preflight_drained = 0
     cleanup_drained = 0
     message_id = str(uuid.uuid4())
     payload = canary_payload(message_id)
@@ -335,6 +336,8 @@ def amqp_canary_roundtrip(
         body = json.dumps(payload, sort_keys=True).encode("utf-8")
         if failure_mode == "poison-message":
             body = b'{"probe":"nutsnews-rabbitmq-canary","poison":true}'
+
+        preflight_drained = drain_canary_queue(channel, route["queue"])
 
         publish_count = 1
         if failure_mode == "full-queue":
@@ -362,6 +365,7 @@ def amqp_canary_roundtrip(
                     "expected_failure": True,
                     "failure_class": "full-queue",
                     "message_id": message_id,
+                    "preflight_drained": preflight_drained,
                     "cleanup_drained": cleanup_drained,
                     "latency_seconds": time.monotonic() - started,
                 }
@@ -373,6 +377,7 @@ def amqp_canary_roundtrip(
                 "expected_failure": True,
                 "failure_class": "consumer-loss",
                 "message_id": message_id,
+                "preflight_drained": preflight_drained,
                 "cleanup_drained": cleanup_drained,
                 "latency_seconds": time.monotonic() - started,
             }
@@ -398,6 +403,7 @@ def amqp_canary_roundtrip(
             "message_id": message_id,
             "latency_seconds": finished - started,
             "message_age_seconds": max(0.0, time.time() - published_at),
+            "preflight_drained": preflight_drained,
             "cleanup_drained": cleanup_drained,
         }
     finally:
@@ -1138,6 +1144,7 @@ def build_canary_report(args: argparse.Namespace, failure_mode: str) -> dict[str
         report["message_id"] = result.get("message_id")
         report["latency_seconds"] = result.get("latency_seconds")
         report["message_age_seconds"] = result.get("message_age_seconds")
+        report["preflight_drained"] = result.get("preflight_drained", 0)
         report["cleanup_drained"] = result.get("cleanup_drained", 0)
         if result.get("expected_failure"):
             report["status"] = "expected_failure"

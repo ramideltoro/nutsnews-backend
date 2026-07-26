@@ -47,7 +47,7 @@
     - path: "{{ backend_supabase_sync_relay_state_dir }}"
       owner: "{{ backend_supabase_sync_relay_user }}"
       group: "{{ backend_supabase_sync_relay_group }}"
-      mode: "0750"
+      mode: "0755"
 
 - name: Install backend Supabase sync relay runner
   ansible.builtin.copy:
@@ -164,4 +164,5 @@
       interval_seconds: "{{ backend_supabase_sync_relay_interval_seconds }}"
       source_network_path: backend_host_loopback_postgresql
       target: existing_production_supabase_standby
+      safe_report_path: "{{ backend_supabase_sync_relay_state_dir }}/last-run.json"
       safety: app/worker services do not receive Supabase write credentials

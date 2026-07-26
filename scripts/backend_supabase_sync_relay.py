@@ -341,7 +341,9 @@ def main_args(argv: list[str] | None = None) -> int:
     text = json.dumps(report, indent=2, sort_keys=True)
     output = args.output if args is not None else ""
     if output:
-        Path(output).write_text(text + "\n", encoding="utf-8")
+        output_path = Path(output)
+        output_path.write_text(text + "\n", encoding="utf-8")
+        output_path.chmod(0o644)
     print(text)
     return exit_code
 

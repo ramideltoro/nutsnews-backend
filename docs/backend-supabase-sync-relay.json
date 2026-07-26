@@ -61,6 +61,8 @@
     "no_inbound_supabase_connection_to_backend_postgres": true,
     "service_env_file_owner": "root:nutsnews-standby-relay",
     "service_env_file_mode": "0640",
+    "safe_report_file_mode": "0644",
+    "safe_report_state_dir_mode": "0755",
     "service_user": "nutsnews-standby-relay",
     "failover_requires_later_gates": [
       "lag-seconds-lte-30",

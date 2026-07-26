@@ -136,6 +136,8 @@ def main() -> int:
     require(safety.get("app_worker_writes_to_supabase_before_failover") is False, "app/worker Supabase writes must stay disabled", errors)
     require(safety.get("no_inbound_supabase_connection_to_backend_postgres") is True, "Supabase must not connect inbound to backend Postgres", errors)
     require(safety.get("service_env_file_mode") == "0640", "relay env file mode must be 0640", errors)
+    require(safety.get("safe_report_file_mode") == "0644", "relay safe report file mode must be 0644", errors)
+    require(safety.get("safe_report_state_dir_mode") == "0755", "relay safe report state dir mode must be 0755", errors)
     for gate in ("lag-seconds-lte-30", "table-parity-match", "schema-fingerprint-match", "sequence-safety-verified", "primary-writers-paused", "split-brain-absence-verified"):
         require(gate in safety.get("failover_requires_later_gates", []), f"missing failover gate: {gate}", errors)
 
@@ -210,6 +212,8 @@ def main() -> int:
         "EnvironmentFile={{ backend_supabase_sync_relay_env_path }}",
         "--mode sync-once",
         "--enforce",
+        "mode: \"0755\"",
+        "safe_report_path",
         "NoNewPrivileges=true",
         "app/worker services do not receive Supabase write credentials",
     ):

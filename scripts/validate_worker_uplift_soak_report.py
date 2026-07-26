@@ -87,6 +87,8 @@ def main() -> int:
         "nutsnews_primary_shadow",
         "backend-worker-uplift-soak-report",
         "--require-window",
+        "runtime-status.json",
+        "chown",
     ):
         if required not in workflow:
             errors.append(f"soak workflow missing required fragment: {required}")

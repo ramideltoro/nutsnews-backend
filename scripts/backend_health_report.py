@@ -35,6 +35,8 @@ PRIVATE_KEY_RE = re.compile(
 )
 URL_SECRET_RE = re.compile(r"([a-z][a-z0-9+.-]*://[^:/\s]+:)([^@\s]+)(@)", re.IGNORECASE)
 EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+SUPABASE_SYNC_RELAY_REPORT_PATH = "/var/lib/nutsnews/supabase-sync-relay/last-run.json"
+SUPABASE_SYNC_RELAY_LAG_CRITICAL_SECONDS = 30
 
 
 REMOTE_COMMANDS: dict[str, str] = {
@@ -121,6 +123,27 @@ REMOTE_COMMANDS: dict[str, str] = {
     "postgres_replication_health": (
         "if test -r /var/lib/nutsnews/postgres/replication-health.json; then "
         "cat /var/lib/nutsnews/postgres/replication-health.json; "
+        "else echo not_configured; fi"
+    ),
+    "supabase_sync_relay_unit_states": (
+        "for unit in nutsnews-supabase-sync-relay.timer nutsnews-supabase-sync-relay.service; do "
+        "active=$(systemctl is-active \"$unit\" 2>/dev/null || true); "
+        "enabled=$(systemctl is-enabled \"$unit\" 2>/dev/null || true); "
+        "load_state=$(systemctl show \"$unit\" -p LoadState --value 2>/dev/null || true); "
+        "sub_state=$(systemctl show \"$unit\" -p SubState --value 2>/dev/null || true); "
+        "result=$(systemctl show \"$unit\" -p Result --value 2>/dev/null || true); "
+        "last_trigger=$(systemctl show \"$unit\" -p LastTriggerUSec --value 2>/dev/null || true); "
+        "printf '%s.active=%s\\n' \"$unit\" \"${active:-unavailable}\"; "
+        "printf '%s.enabled=%s\\n' \"$unit\" \"${enabled:-unavailable}\"; "
+        "printf '%s.load_state=%s\\n' \"$unit\" \"${load_state:-unavailable}\"; "
+        "printf '%s.sub_state=%s\\n' \"$unit\" \"${sub_state:-unavailable}\"; "
+        "printf '%s.result=%s\\n' \"$unit\" \"${result:-unavailable}\"; "
+        "printf '%s.last_trigger=%s\\n' \"$unit\" \"${last_trigger:-unavailable}\"; "
+        "done"
+    ),
+    "supabase_sync_relay_status": (
+        f"if test -r {SUPABASE_SYNC_RELAY_REPORT_PATH}; then "
+        f"cat {SUPABASE_SYNC_RELAY_REPORT_PATH}; "
         "else echo not_configured; fi"
     ),
     "recent_errors": "journalctl -p err..alert -n 25 --no-pager 2>/dev/null || true",
@@ -227,6 +250,23 @@ def parse_json_object(text: str) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def parse_utc_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+    except ValueError:
+        return None
+
+
+def seconds_since(now_utc: str | None, earlier_utc: str | None) -> int | None:
+    now = parse_utc_datetime(now_utc)
+    earlier = parse_utc_datetime(earlier_utc)
+    if now is None or earlier is None:
+        return None
+    return max(0, int((now - earlier).total_seconds()))
+
+
 def load_previous_report(path: str) -> dict[str, Any]:
     if not path:
         return {}
@@ -270,6 +310,133 @@ def status_from_replication(replication: dict[str, Any]) -> str:
     if lag_status in {"healthy"}:
         return "healthy"
     return "not_configured"
+
+
+def relay_failed_table_count(relay_report: dict[str, Any]) -> int | None:
+    post_sync = relay_report.get("post_sync", {})
+    checks = post_sync.get("checks") if isinstance(post_sync, dict) else None
+    if isinstance(checks, list):
+        return sum(
+            1
+            for check in checks
+            if isinstance(check, dict)
+            and str(check.get("id", "")).startswith("table.")
+            and str(check.get("status", "unknown")) != "pass"
+        )
+
+    sync = relay_report.get("sync", {})
+    tables = sync.get("tables") if isinstance(sync, dict) else None
+    if isinstance(tables, list):
+        return sum(
+            1
+            for table in tables
+            if isinstance(table, dict)
+            and str(table.get("status", "unknown")) not in {"applied", "pass"}
+        )
+    return None
+
+
+def relay_safe_last_error(relay_report: dict[str, Any]) -> str:
+    direct_error = relay_report.get("error")
+    if isinstance(direct_error, str) and direct_error.strip():
+        return direct_error.strip()
+
+    for section_name in ("preflight", "sync", "post_sync"):
+        section = relay_report.get(section_name, {})
+        if not isinstance(section, dict):
+            continue
+        reason = section.get("reason")
+        if isinstance(reason, str) and reason.strip():
+            return reason.strip()
+        failed = section.get("failed_required_checks")
+        if isinstance(failed, list) and failed:
+            return f"{section_name}_failed_required_checks:{len(failed)}"
+    return "none"
+
+
+def classify_supabase_sync_relay(report: dict[str, Any]) -> dict[str, Any]:
+    unit_states = parse_key_values(command_stdout(report, "supabase_sync_relay_unit_states"))
+    timer_unit = "nutsnews-supabase-sync-relay.timer"
+    service_unit = "nutsnews-supabase-sync-relay.service"
+    timer_active = unit_states.get(f"{timer_unit}.active", "unavailable")
+    timer_enabled = unit_states.get(f"{timer_unit}.enabled", "unavailable")
+    service_active = unit_states.get(f"{service_unit}.active", "unavailable")
+    service_enabled = unit_states.get(f"{service_unit}.enabled", "unavailable")
+    service_result = unit_states.get(f"{service_unit}.result", "unavailable")
+
+    raw_report = command_stdout(report, "supabase_sync_relay_status").strip()
+    blockers: list[str] = []
+    last_applied_at = "unknown"
+    lag_seconds: int | None = None
+    failed_table_count: int | None = None
+    last_error = "none"
+
+    if timer_active != "active":
+        blockers.append("relay_timer_stopped")
+    if timer_enabled not in {"enabled", "static"}:
+        blockers.append("relay_timer_not_enabled")
+    if service_result not in {"success", "", "unavailable"}:
+        blockers.append("relay_service_last_result_failed")
+
+    if not raw_report or raw_report == "not_configured":
+        blockers.append("relay_report_missing")
+    else:
+        try:
+            relay_report = json.loads(raw_report)
+        except json.JSONDecodeError:
+            relay_report = {}
+            blockers.append("relay_report_invalid")
+
+        if isinstance(relay_report, dict) and relay_report:
+            relay_status = str(relay_report.get("status") or "unknown")
+            if relay_status != "pass":
+                blockers.append("relay_last_run_not_pass")
+            if relay_report.get("safe_metadata_only") is not True:
+                blockers.append("relay_report_not_marked_safe_metadata_only")
+
+            last_applied = (
+                relay_report.get("last_applied_at_utc")
+                or relay_report.get("completed_at_utc")
+                or relay_report.get("checked_at_utc")
+            )
+            last_applied_at = str(last_applied or "unknown")
+            lag_seconds = seconds_since(str(report.get("last_report_run_at") or ""), last_applied_at)
+            if lag_seconds is None:
+                blockers.append("relay_lag_unknown")
+            elif lag_seconds > SUPABASE_SYNC_RELAY_LAG_CRITICAL_SECONDS:
+                blockers.append("relay_lag_exceeds_threshold")
+
+            failed_table_count = relay_failed_table_count(relay_report)
+            if failed_table_count is None:
+                blockers.append("relay_failed_table_count_unknown")
+            elif failed_table_count > 0:
+                blockers.append("relay_failed_tables_present")
+            last_error = relay_safe_last_error(relay_report)
+
+    summary = (
+        f"timer={timer_active} timer_enabled={timer_enabled} "
+        f"service={service_active} service_enabled={service_enabled} service_result={service_result} "
+        f"last_applied_at={last_applied_at} "
+        f"lag_seconds={lag_seconds if lag_seconds is not None else 'unknown'} "
+        f"failed_tables={failed_table_count if failed_table_count is not None else 'unknown'} "
+        f"last_error={last_error} "
+        f"standby_failover_blocked={str(bool(blockers)).lower()}"
+    )
+    return {
+        "name": "supabase_sync_relay_health",
+        "status": "critical" if blockers else "healthy",
+        "summary": summary,
+        "blockers": blockers,
+        "lag_seconds": lag_seconds,
+        "lag_critical_seconds": SUPABASE_SYNC_RELAY_LAG_CRITICAL_SECONDS,
+        "last_applied_at_utc": last_applied_at,
+        "failed_table_count": failed_table_count,
+        "last_error": last_error,
+        "timer_state": timer_active,
+        "service_state": service_active,
+        "service_result": service_result,
+        "safe_metadata_only": True,
+    }
 
 
 def run_ssh_command(host: str, user: str, key: str, known_hosts: str, command: str, timeout: int) -> dict[str, Any]:
@@ -616,6 +783,7 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
             ),
         }
     )
+    checks.append(classify_supabase_sync_relay(report))
 
     sudo_state = command_stdout(report, "sudo_nopasswd").strip()
     checks.append(
@@ -797,6 +965,14 @@ def failure_class_for_check(check: dict[str, Any]) -> str:
         return name
     if name == "postgres_replication_health":
         return "replication_health"
+    if name == "supabase_sync_relay_health":
+        blockers = check.get("blockers", [])
+        if isinstance(blockers, list):
+            if "relay_lag_exceeds_threshold" in blockers:
+                return "supabase_sync_relay_lag"
+            if "relay_timer_stopped" in blockers or "relay_report_missing" in blockers:
+                return "supabase_sync_relay_stopped"
+        return "supabase_sync_relay_health"
     if "disk" in name or "inode" in name:
         return "disk_pressure"
     if name.startswith("service_"):

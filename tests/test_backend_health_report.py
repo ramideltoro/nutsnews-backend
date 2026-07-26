@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
@@ -12,6 +13,48 @@ from scripts import backend_health_report
 
 def command(stdout: str, returncode: int = 0) -> dict[str, object]:
     return {"stdout": stdout, "stderr": "", "returncode": returncode}
+
+
+def relay_unit_states(
+    *,
+    timer_active: str = "active",
+    timer_enabled: str = "enabled",
+    service_active: str = "inactive",
+    service_enabled: str = "static",
+    service_result: str = "success",
+) -> str:
+    return (
+        f"nutsnews-supabase-sync-relay.timer.active={timer_active}\n"
+        f"nutsnews-supabase-sync-relay.timer.enabled={timer_enabled}\n"
+        "nutsnews-supabase-sync-relay.timer.load_state=loaded\n"
+        "nutsnews-supabase-sync-relay.timer.sub_state=waiting\n"
+        "nutsnews-supabase-sync-relay.timer.result=success\n"
+        "nutsnews-supabase-sync-relay.timer.last_trigger=Thu 2026-07-16 11:59:45 UTC\n"
+        f"nutsnews-supabase-sync-relay.service.active={service_active}\n"
+        f"nutsnews-supabase-sync-relay.service.enabled={service_enabled}\n"
+        "nutsnews-supabase-sync-relay.service.load_state=loaded\n"
+        "nutsnews-supabase-sync-relay.service.sub_state=dead\n"
+        f"nutsnews-supabase-sync-relay.service.result={service_result}\n"
+        "nutsnews-supabase-sync-relay.service.last_trigger=\n"
+    )
+
+
+def relay_last_run(**overrides) -> str:
+    report = {
+        "status": "pass",
+        "checked_at_utc": "2026-07-16T11:59:45Z",
+        "last_applied_at_utc": "2026-07-16T11:59:45Z",
+        "safe_metadata_only": True,
+        "post_sync": {
+            "checks": [
+                {"id": "table.public.articles", "status": "pass"},
+                {"id": "table.public.rss_feeds", "status": "pass"},
+                {"id": "sequence.public.rss_feeds_id_seq", "status": "pass"},
+            ]
+        },
+    }
+    report.update(overrides)
+    return json.dumps(report) + "\n"
 
 
 def fixture_report(**overrides):
@@ -46,6 +89,9 @@ def fixture_report(**overrides):
         "cleanup_status": command("not_configured\n"),
         "recovery_status": command("not_configured\n"),
         "postgres_status": command("not_configured\n"),
+        "postgres_replication_health": command("not_configured\n"),
+        "supabase_sync_relay_unit_states": command(relay_unit_states()),
+        "supabase_sync_relay_status": command(relay_last_run()),
         "sudo_nopasswd": command("no\n"),
     }
     commands.update(overrides)
@@ -143,6 +189,73 @@ class BackendHealthReportTests(unittest.TestCase):
         by_name = {item["name"]: item for item in checks}
         self.assertEqual(by_name["postgres_replication_health"]["status"], "healthy")
         self.assertEqual(backend_health_report.current_alerts_from_checks([by_name["postgres_replication_health"]]), [])
+
+    def test_supabase_sync_relay_health_is_healthy_when_recent_and_timer_active(self):
+        checks, _ = backend_health_report.classify(fixture_report())
+        by_name = {item["name"]: item for item in checks}
+        relay = by_name["supabase_sync_relay_health"]
+        self.assertEqual(relay["status"], "healthy")
+        self.assertEqual(relay["lag_seconds"], 15)
+        self.assertEqual(relay["failed_table_count"], 0)
+        self.assertIn("timer=active", relay["summary"])
+        self.assertIn("lag_seconds=15", relay["summary"])
+        self.assertIn("standby_failover_blocked=false", relay["summary"])
+
+    def test_supabase_sync_relay_lag_over_30_seconds_is_critical_alert(self):
+        checks, _ = backend_health_report.classify(
+            fixture_report(
+                supabase_sync_relay_status=command(
+                    relay_last_run(checked_at_utc="2026-07-16T11:58:00Z", last_applied_at_utc="2026-07-16T11:58:00Z")
+                )
+            )
+        )
+        by_name = {item["name"]: item for item in checks}
+        relay = by_name["supabase_sync_relay_health"]
+        self.assertEqual(relay["status"], "critical")
+        self.assertEqual(relay["lag_seconds"], 120)
+        self.assertIn("relay_lag_exceeds_threshold", relay["blockers"])
+        alerts = backend_health_report.current_alerts_from_checks([relay])
+        self.assertEqual(alerts[0]["failure_class"], "supabase_sync_relay_lag")
+        self.assertIn("standby_failover_blocked=true", alerts[0]["message"])
+
+    def test_supabase_sync_relay_missing_or_stopped_is_critical_alert(self):
+        checks, _ = backend_health_report.classify(
+            fixture_report(
+                supabase_sync_relay_unit_states=command(relay_unit_states(timer_active="inactive", timer_enabled="disabled")),
+                supabase_sync_relay_status=command("not_configured\n"),
+            )
+        )
+        by_name = {item["name"]: item for item in checks}
+        relay = by_name["supabase_sync_relay_health"]
+        self.assertEqual(relay["status"], "critical")
+        self.assertIn("relay_timer_stopped", relay["blockers"])
+        self.assertIn("relay_report_missing", relay["blockers"])
+        alerts = backend_health_report.current_alerts_from_checks([relay])
+        self.assertEqual(alerts[0]["failure_class"], "supabase_sync_relay_stopped")
+
+    def test_supabase_sync_relay_failed_table_count_is_critical(self):
+        checks, _ = backend_health_report.classify(
+            fixture_report(
+                supabase_sync_relay_status=command(
+                    relay_last_run(
+                        status="fail",
+                        post_sync={
+                            "failed_required_checks": ["table.public.articles"],
+                            "checks": [
+                                {"id": "table.public.articles", "status": "fail"},
+                                {"id": "table.public.rss_feeds", "status": "pass"},
+                            ],
+                        },
+                    )
+                )
+            )
+        )
+        by_name = {item["name"]: item for item in checks}
+        relay = by_name["supabase_sync_relay_health"]
+        self.assertEqual(relay["status"], "critical")
+        self.assertEqual(relay["failed_table_count"], 1)
+        self.assertIn("relay_failed_tables_present", relay["blockers"])
+        self.assertIn("last_error=post_sync_failed_required_checks:1", relay["summary"])
 
     def test_cleanup_status_is_exposed_when_present(self):
         checks, _ = backend_health_report.classify(

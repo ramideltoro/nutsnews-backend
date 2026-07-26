@@ -294,6 +294,10 @@ def build_report(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
 
     sync_result = apply_sync_once(contract, source_db_url, target_db_url, batch_size=args.batch_size)
     post_sync = reconcile.validate_standby(contract, source_db_url, target_db_url)
+    completed_at_utc = reconcile.utc_now()
+    report["completed_at_utc"] = completed_at_utc
+    if post_sync["status"] == "pass":
+        report["last_applied_at_utc"] = completed_at_utc
     report["sync"] = sync_result
     report["post_sync"] = post_sync
     report["status"] = post_sync["status"]

@@ -1,0 +1,241 @@
+name: Backend Supabase Standby Reconciliation
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Report safe parity metadata or apply the protected backend-to-Supabase backfill.
+        required: true
+        default: report
+        type: choice
+        options:
+          - report
+          - apply-backfill
+      confirmation:
+        description: Type report-existing-production-supabase-standby for report mode, or backfill-existing-production-supabase-from-backend-primary for apply mode.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-supabase-standby-reconciliation
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Backend primary to existing Supabase standby reconciliation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          GITHUB_REF_NAME_SAFE: ${{ github.ref }}
+          MODE: ${{ inputs.mode }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF_NAME_SAFE" != "refs/heads/main" ]]; then
+            echo "This protected reconciliation workflow must run from main." >&2
+            exit 1
+          fi
+
+          case "$MODE" in
+            report)
+              if [[ "$CONFIRMATION" != "report-existing-production-supabase-standby" ]]; then
+                echo "Report mode requires confirmation report-existing-production-supabase-standby." >&2
+                exit 1
+              fi
+              ;;
+            apply-backfill)
+              if [[ "$CONFIRMATION" != "backfill-existing-production-supabase-from-backend-primary" ]]; then
+                echo "Apply mode requires confirmation backfill-existing-production-supabase-from-backend-primary." >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Unsupported reconciliation mode." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Validate workflow contract
+        shell: bash
+        run: python3 scripts/validate_backend_supabase_standby_reconciliation.py
+
+      - name: Validate protected material
+        shell: bash
+        env:
+          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
+          NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in \
+            NUTSNEWS_PRODUCTION_SUPABASE_DB_URL \
+            NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD \
+            NUTSNEWS_BACKEND_SSH_PRIVATE_KEY \
+            NUTSNEWS_BACKEND_KNOWN_HOSTS
+          do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing required production-backend secret: $name" >&2
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Prepare backend SSH
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+        run: |
+          set -euo pipefail
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F "$NUTSNEWS_BACKEND_HOST" -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Run reconciliation from backend host
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
+          NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
+          NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE || vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE || 'nutsnews_primary_shadow' }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL"
+
+          source_url="$(python3 - <<'PY'
+          import os
+          from urllib.parse import quote
+
+          user = quote("nutsnews_migration_validation", safe="")
+          password = quote(os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD"], safe="")
+          database = quote(os.environ["NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE"], safe="")
+          print(f"postgresql://{user}:{password}@127.0.0.1:5432/{database}")
+          PY
+          )"
+          echo "::add-mask::$source_url"
+
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh_base=(
+            ssh
+            -i "$HOME/.ssh/nutsnews_backend"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+            -o ClearAllForwardings=yes
+            -o RequestTTY=no
+            -o ConnectTimeout=10
+            -o ConnectionAttempts=1
+            -o ServerAliveInterval=10
+            -o ServerAliveCountMax=2
+          )
+          scp_base=(
+            scp
+            -i "$HOME/.ssh/nutsnews_backend"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+          )
+
+          remote_dir=""
+          source_file=""
+          target_file=""
+          # shellcheck disable=SC2329
+          cleanup() {
+            rm -f "$source_file" "$target_file"
+            if [[ -n "$remote_dir" ]]; then
+              "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "rm -rf '$remote_dir'" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
+
+          remote_dir="$("${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" 'mktemp -d')"
+          if [[ "$remote_dir" != /tmp/* && "$remote_dir" != /var/tmp/* ]]; then
+            echo "Refusing unexpected remote temp dir." >&2
+            exit 1
+          fi
+          "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "install -m 0700 -d '$remote_dir/scripts' '$remote_dir/docs'"
+          "${scp_base[@]}" \
+            scripts/backend_supabase_standby_reconcile.py \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/scripts/"
+          "${scp_base[@]}" \
+            docs/backend-supabase-standby-reconciliation.json \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/docs/"
+
+          source_file="$RUNNER_TEMP/backend-primary-db-url"
+          target_file="$RUNNER_TEMP/production-supabase-db-url"
+          printf '%s' "$source_url" > "$source_file"
+          printf '%s' "$NUTSNEWS_PRODUCTION_SUPABASE_DB_URL" > "$target_file"
+          chmod 0600 "$source_file" "$target_file"
+          "${scp_base[@]}" "$source_file" "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/source-db-url"
+          "${scp_base[@]}" "$target_file" "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/target-db-url"
+          "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "chmod 0600 '$remote_dir/source-db-url' '$remote_dir/target-db-url' '$remote_dir/scripts/backend_supabase_standby_reconcile.py'"
+
+          set +e
+          "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "set -euo pipefail
+          cd '$remote_dir'
+          export NUTSNEWS_BACKEND_PRIMARY_DB_URL=\"\$(cat source-db-url)\"
+          export NUTSNEWS_PRODUCTION_SUPABASE_DB_URL=\"\$(cat target-db-url)\"
+          export NUTSNEWS_STANDBY_RECONCILE_CONFIRMATION='$CONFIRMATION'
+          python3 scripts/backend_supabase_standby_reconcile.py \
+            --manifest docs/backend-supabase-standby-reconciliation.json \
+            --mode '$MODE' \
+            --enforce \
+            --output backend-supabase-standby-reconciliation.json"
+          rc=$?
+          set -e
+
+          if "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "test -f '$remote_dir/backend-supabase-standby-reconciliation.json'"; then
+            "${scp_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/backend-supabase-standby-reconciliation.json" \
+              "$RUNNER_TEMP/backend-supabase-standby-reconciliation.json"
+          fi
+          exit "$rc"
+
+      - name: Summarize safe metadata
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Backend to Supabase standby reconciliation"
+            echo
+            echo "- Mode: \`${{ inputs.mode }}\`"
+            echo "- Source: backend PostgreSQL primary."
+            echo "- Target: existing production Supabase standby."
+            echo "- Report policy: safe metadata only."
+            echo "- App and worker Supabase writes remain disabled until a later approved failover workflow."
+            echo "- Database URLs, passwords, tokens, service-role keys, PostgreSQL errors, and row data are not printed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload reconciliation report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-supabase-standby-reconciliation
+          path: ${{ runner.temp }}/backend-supabase-standby-reconciliation.json
+          if-no-files-found: ignore

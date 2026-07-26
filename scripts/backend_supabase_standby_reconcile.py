@@ -649,10 +649,9 @@ def apply_table_backfill(
     quoted_columns = ", ".join(quote_ident(column) for column in columns)
     temp_select_columns = ", ".join(f"s.{quote_ident(column)}" for column in columns)
     quoted_pk = ", ".join(quote_ident(column) for column in primary_key)
-    non_pk_columns = [column for column in columns if column not in primary_key]
-    if non_pk_columns:
+    if columns:
         update_assignments = ", ".join(
-            f"{quote_ident(column)} = s.{quote_ident(column)}" for column in non_pk_columns
+            f"{quote_ident(column)} = s.{quote_ident(column)}" for column in columns
         )
         update_sql = f"update {relation.sql} as t set {update_assignments}"
     else:
@@ -720,6 +719,7 @@ def apply_table_backfill(
         "column_count": len(columns),
         "backfill_key": match_key,
         "mirror_delete_absent_target_rows": True,
+        "primary_key_values_mirrored": True,
         "user_triggers_disabled_during_apply": True,
         "sensitivity": "counts_only",
     }

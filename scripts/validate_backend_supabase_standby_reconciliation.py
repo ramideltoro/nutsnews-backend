@@ -136,7 +136,8 @@ def main() -> int:
     backfill = manifest.get("backfill", {})
     require(backfill.get("mode") == "protected_workflow_only", "backfill must be protected-workflow only", errors)
     require(backfill.get("confirmation") == "backfill-existing-production-supabase-from-backend-primary", "backfill confirmation is incorrect", errors)
-    require(backfill.get("deletes_target_extra_rows") is False, "backfill must not delete target rows", errors)
+    require(backfill.get("deletes_target_extra_rows") is True, "backfill must delete target rows absent from the backend source snapshot", errors)
+    require(backfill.get("mirrors_primary_key_values") is True, "backfill must mirror primary key values for checksum parity", errors)
     require(set(backfill.get("table_order", [])) == REQUIRED_TABLES, "backfill table order must cover each table exactly once", errors)
     require(backfill.get("table_order", []).index("public.articles") < backfill.get("table_order", []).index("public.article_summaries"), "articles must backfill before article_summaries", errors)
     require(backfill.get("table_order", []).index("public.staging_fixture_runs") < backfill.get("table_order", []).index("public.staging_fixture_users"), "fixture runs must backfill before fixture users", errors)
@@ -193,7 +194,12 @@ def main() -> int:
         "python3 -m unittest tests.test_backend_supabase_standby_reconcile",
     ):
         require(token in checks, f"backend checks missing {token}", errors)
-    for token in ("NUTSNEWS_STANDBY_RECONCILE_CONFIRMATION", "safe_metadata_only", "app_worker_writes_to_supabase_before_failover"):
+    for token in (
+        "NUTSNEWS_STANDBY_RECONCILE_CONFIRMATION",
+        "primary_key_values_mirrored",
+        "safe_metadata_only",
+        "app_worker_writes_to_supabase_before_failover",
+    ):
         require(token in script, f"script missing safety token: {token}", errors)
     for token in ("row_checksum_mismatch", "target_next_value_not_above_source_max_id", "apply_confirmation_missing"):
         require(token in tests, f"tests missing coverage token: {token}", errors)

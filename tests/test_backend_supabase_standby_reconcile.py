@@ -289,6 +289,7 @@ class BackendSupabaseStandbyReconcileTests(unittest.TestCase):
         self.assertEqual(12, result["tables"][0]["rows_seen"])
         self.assertEqual(3, result["tables"][0]["batches"])
         self.assertTrue(result["tables"][0]["mirror_delete_absent_target_rows"])
+        self.assertTrue(result["tables"][0]["primary_key_values_mirrored"])
         self.assertTrue(result["tables"][0]["user_triggers_disabled_during_apply"])
         copy_to_file.assert_called_once()
         run_script.assert_called_once()
@@ -297,6 +298,7 @@ class BackendSupabaseStandbyReconcileTests(unittest.TestCase):
         self.assertIn("delete from \"public\".\"worker_runs\" as t where not exists", scripts[0])
         self.assertIn("alter table \"public\".\"worker_runs\" enable trigger user", scripts[0])
         self.assertIn("update \"public\".\"worker_runs\" as t set", scripts[0])
+        self.assertIn('"id" = s."id"', scripts[0])
         self.assertIn("where not exists", scripts[0])
         self.assertNotIn("on conflict", scripts[0].lower())
 

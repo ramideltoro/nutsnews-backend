@@ -62,6 +62,9 @@ class BackendPostgresMigrationAccessPreflightTests(unittest.TestCase):
         self.assertIn("excluded.role_name = r.rolname", source)
         self.assertIn("worker_api_final_grant=", source)
         self.assertIn("worker_api_final_shadow_grant", source)
+        self.assertIn("WORKER_API_FINAL_ROLES", source)
+        self.assertIn("APP_ROLE = \"nutsnews_app\"", source)
+        self.assertIn("missing_worker_api_final_grant_row", source)
         self.assertIn("api_command_receipts", source)
         self.assertIn("receipt_sequence_usage", source)
 

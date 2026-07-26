@@ -32,6 +32,8 @@ STAGES = [
 FINAL_SCHEMA = "worker_uplift_final"
 VIEWS_SCHEMA = "worker_uplift_views"
 WORKER_API_ROLE = "nutsnews_worker_api"
+APP_ROLE = "nutsnews_app"
+WORKER_API_FINAL_ROLES = [WORKER_API_ROLE, APP_ROLE]
 PUBLIC_DOMAIN_TABLES = [
     "public.articles",
     "public.article_ai_reviews",
@@ -174,6 +176,7 @@ def live_catalog_query(stages: list[tuple[str, str, str]]) -> str:
         table_values.append(f"('{FINAL_SCHEMA}','{table}')")
     role_schema_values = ",".join(f"('{stage}','{role}','{schema}')" for stage, role, schema in stages)
     role_csv = ",".join(role for _stage, role, _schema in stages)
+    worker_api_final_role_csv = ",".join(WORKER_API_FINAL_ROLES)
     domain_table_values = ",".join(f"('{table}')" for table in PUBLIC_DOMAIN_TABLES)
     return f"""
 select 'schema=' || n.nspname
@@ -241,7 +244,8 @@ select 'worker_api_final_grant=' || r.rolname
   || ':aggregate_sequence_usage=' || case when to_regclass('{FINAL_SCHEMA}.article_shadow_aggregates_id_seq') is null then 'missing_sequence' else has_sequence_privilege(r.rolname, '{FINAL_SCHEMA}.article_shadow_aggregates_id_seq', 'USAGE')::text end
   || ':receipt_sequence_usage=' || case when to_regclass('{FINAL_SCHEMA}.api_command_receipts_id_seq') is null then 'missing_sequence' else has_sequence_privilege(r.rolname, '{FINAL_SCHEMA}.api_command_receipts_id_seq', 'USAGE')::text end
 from pg_roles r
-where r.rolname = '{WORKER_API_ROLE}';
+where r.rolname = any(string_to_array('{worker_api_final_role_csv}', ','))
+order by r.rolname;
 """
 
 
@@ -274,6 +278,7 @@ def check_live_catalog(db_url: str, stages: list[tuple[str, str, str]]) -> list[
     public_write_failures = []
     final_grant_failures = []
     worker_api_final_grant_failures = []
+    worker_api_final_grant_roles = set()
 
     for line in stdout.splitlines():
         if line.startswith("unique="):
@@ -307,9 +312,14 @@ def check_live_catalog(db_url: str, stages: list[tuple[str, str, str]]) -> list[
         elif line.startswith("worker_api_final_grant="):
             payload = line.split("=", 1)[1]
             parts = payload.split(":")
+            worker_api_final_grant_roles.add(parts[0])
             values = [part.split("=", 1)[1] for part in parts[1:]]
             if not values or any(value.startswith("missing_") or not parse_bool_token(value) for value in values):
                 worker_api_final_grant_failures.append(parts[0])
+    worker_api_final_grant_failures.extend(
+        f"{role}:missing_worker_api_final_grant_row"
+        for role in sorted(set(WORKER_API_FINAL_ROLES) - worker_api_final_grant_roles)
+    )
 
     failures = {
         "missing_schemas": sorted(expected_schemas - schemas),

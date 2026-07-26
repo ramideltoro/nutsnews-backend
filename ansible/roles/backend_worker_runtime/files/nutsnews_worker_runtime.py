@@ -710,6 +710,78 @@ where article_identity_hash = {article}
 """
 
 
+def persistence_smoke_diagnostic_query(article_id: str) -> str:
+    article = sql_literal(article_id)
+    return f"""
+select 'persistence_inbox=' || coalesce(jsonb_agg(to_jsonb(row) order by row.received_at desc), '[]'::jsonb)::text
+from (
+  select idempotency_key, status, sanitized_error_code, sanitized_error_message, diagnostic_metadata, received_at, processed_at
+  from worker_uplift_persistence.inbox
+  where entity_id = {article}
+  order by received_at desc
+  limit 20
+) row
+union all
+select 'persistence_outbox=' || coalesce(jsonb_agg(to_jsonb(row) order by row.created_at desc), '[]'::jsonb)::text
+from (
+  select idempotency_key, destination_stage, routing_key, status, sanitized_error_code, sanitized_error_message, diagnostic_metadata, created_at, confirmed_at
+  from worker_uplift_persistence.outbox
+  where entity_id = {article}
+  order by created_at desc
+  limit 20
+) row
+union all
+select 'final_shadow_aggregates=' || coalesce(jsonb_agg(to_jsonb(row) order by row.updated_at desc), '[]'::jsonb)::text
+from (
+  select article_identity_hash, aggregate_version, publication_status, diagnostic_metadata, created_at, updated_at
+  from worker_uplift_final.article_shadow_aggregates
+  where article_identity_hash = {article}
+  order by updated_at desc
+  limit 5
+) row
+union all
+select 'api_command_receipts=' || coalesce(jsonb_agg(to_jsonb(row) order by row.created_at desc), '[]'::jsonb)::text
+from (
+  select idempotency_key, operation, provider_mode, actor_service, auth_scope, status, diagnostic_metadata, created_at, updated_at
+  from worker_uplift_final.api_command_receipts
+  where expected_article_version = 1
+    and (response_json->>'idempotencyKey' like {sql_literal('%' + article_id + '%')} or idempotency_key like {sql_literal('%' + article_id + '%')})
+  order by created_at desc
+  limit 10
+) row;
+"""
+
+
+def publication_smoke_diagnostic_query(article_id: str) -> str:
+    article = sql_literal(article_id)
+    return f"""
+select 'publication_readiness_rows=' || coalesce(jsonb_agg(to_jsonb(row) order by row.checked_at desc), '[]'::jsonb)::text
+from (
+  select article_identity_hash, readiness_version, approved, translations_complete, shadow_aggregate_version, status, diagnostic_metadata, checked_at
+  from worker_uplift_publication.publication_readiness
+  where article_identity_hash = {article}
+  order by checked_at desc
+  limit 10
+) row
+union all
+select 'publication_decision_rows=' || coalesce(jsonb_agg(to_jsonb(row) order by row.decided_at desc), '[]'::jsonb)::text
+from (
+  select article_identity_hash, decision_version, decision, reason_code, backend_api_operation, diagnostic_metadata, decided_at
+  from worker_uplift_publication.publication_decisions
+  where article_identity_hash = {article}
+  order by decided_at desc
+  limit 10
+) row;
+"""
+
+
+def psql_diagnostics(db_url: str, query: str) -> dict[str, str]:
+    try:
+        return psql_key_values(db_url, query)
+    except RuntimeErrorWithReport as exc:
+        return {"diagnostic_error": str(exc)}
+
+
 def build_smoke_publication(args: argparse.Namespace, service: dict[str, Any], article_id: str, fixture: str) -> dict[str, Any]:
     occurred_at = smoke_now()
     if service["name"] == "approval":
@@ -806,6 +878,10 @@ def run_approval_smoke(args: argparse.Namespace, manifest: dict[str, Any], servi
         "publication": publication_values,
     }
     if not (final_ok and publication_ok):
+        report["smoke"]["downstream_diagnostics"] = {
+            "persistence": psql_diagnostics(persistence_db_url, persistence_smoke_diagnostic_query(accepted_article_id)),
+            "publication": psql_diagnostics(publication_db_url, publication_smoke_diagnostic_query(accepted_article_id)),
+        }
         report["status"] = "fail"
         report["errors"].append("approval smoke did not observe downstream final-shadow materialization and publication comparison")
 

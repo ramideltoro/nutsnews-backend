@@ -94,7 +94,7 @@ jobs:
           chmod 0600 "$HOME/.ssh/known_hosts"
 
           ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend_lag_gate" > /dev/null
-          ssh-keygen -F "$NUTSNEWS_BACKEND_HOST" -f "$HOME/.ssh/known_hosts" > /dev/null
+          ssh-keygen -F "$NUTSNEWS_BACKEND_HOST" -f "$HOME/.ssh/known_hosts" > /dev/null 2>&1
 
       - name: Collect fresh relay health telemetry
         shell: bash

@@ -119,6 +119,7 @@ def main() -> int:
         "runs-on: ubuntu-latest",
         "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
         "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+        "ssh-keygen -F \"$NUTSNEWS_BACKEND_HOST\" -f \"$HOME/.ssh/known_hosts\" > /dev/null 2>&1",
         "python3 scripts/backend_health_report.py",
         "> \"$RUNNER_TEMP/backend-health-report.stdout\"",
         "python3 scripts/backend_supabase_standby_lag_gate.py",

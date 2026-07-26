@@ -833,6 +833,13 @@ def queue_message_count(client: RabbitMQClient, definition: dict[str, Any], queu
     return int(result.get("messages", 0) or 0)
 
 
+def queue_consumer_count(client: RabbitMQClient, definition: dict[str, Any], queue: str) -> int:
+    result = client.request("GET", api_path("api", "queues", definition["vhost"], queue))
+    if not isinstance(result, dict):
+        raise RuntimeError(f"could not inspect queue {queue}")
+    return int(result.get("consumers", 0) or 0)
+
+
 def action_bootstrap(args: argparse.Namespace, client: RabbitMQClient, definition: dict[str, Any], users: list[dict[str, Any]]) -> int:
     wait_for_management(args, client)
     report: dict[str, Any] = {"status": "pass", "changed": False, "changes": [], "drift": []}
@@ -890,15 +897,20 @@ def action_probe_transfers(args: argparse.Namespace, client: RabbitMQClient, def
     probed_stages: list[str] = []
     skipped_stages: list[str] = []
     skipped_queues: list[dict[str, str]] = []
+    skipped_consumers: list[dict[str, str]] = []
     skip_non_empty = bool(getattr(args, "skip_non_empty", False))
     for route in definition["routes"]:
         queues_to_probe = [route["main_queue"], route["retry_queues"][0]["name"], route["terminal_dlq"]["name"]]
         non_empty_queues = [queue for queue in queues_to_probe if queue_message_count(client, definition, queue) != 0]
-        if non_empty_queues:
+        active_consumer_queues = [queue for queue in queues_to_probe if queue_consumer_count(client, definition, queue) != 0]
+        if non_empty_queues or active_consumer_queues:
             if skip_non_empty:
                 skipped_stages.append(route["stage"])
                 skipped_queues.extend({"stage": route["stage"], "queue": queue} for queue in non_empty_queues)
+                skipped_consumers.extend({"stage": route["stage"], "queue": queue} for queue in active_consumer_queues)
                 continue
+            if active_consumer_queues:
+                raise SystemExit(f"refusing transfer probe because queue has active consumers: {active_consumer_queues[0]}")
             raise SystemExit(f"refusing transfer probe because queue is non-empty: {non_empty_queues[0]}")
 
         source_message_id = str(uuid.uuid4())
@@ -964,6 +976,7 @@ def action_probe_transfers(args: argparse.Namespace, client: RabbitMQClient, def
         "probed_stages": probed_stages,
         "skipped_stages": skipped_stages,
         "skipped_queues": skipped_queues,
+        "skipped_consumers": skipped_consumers,
         "non_empty_queue_behavior": "skip_without_mutating_existing_messages" if skip_non_empty else "fail_closed",
         "unroutable_target_behavior": "source_message_visible_until_confirmed_target_publish",
         "full_target_behavior": "all_queues_use_reject-publish_overflow_and_application_ack_requires_confirmed_target_publish",

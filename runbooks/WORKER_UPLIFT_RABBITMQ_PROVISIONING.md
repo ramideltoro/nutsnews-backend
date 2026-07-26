@@ -156,10 +156,11 @@ sudo -n /usr/local/sbin/nutsnews-rabbitmq-topology permissions \
 ```
 
 Manual `probe-transfers` runs are fail-closed and refuse to publish probes when
-any stage queue is non-empty. Protected applies run
-`probe-transfers --skip-non-empty` so a shadow backlog does not get mutated by a
-deployment check. The JSON report records `skipped_stages` and `skipped_queues`
-for any route skipped due to existing messages; empty routes are still probed.
+any stage queue is non-empty or has active consumers. Protected applies run
+`probe-transfers --skip-non-empty` so a shadow backlog or live consumer does not
+get mutated by a deployment check. The JSON report records `skipped_stages`,
+`skipped_queues`, and `skipped_consumers` for any route skipped due to existing
+messages or consumers; empty idle routes are still probed.
 For probed routes, it publishes and cleans up probe messages, verifies retry and
 DLQ routing, and verifies an unroutable retry target leaves the source message
 visible until a confirmed target publish succeeds.

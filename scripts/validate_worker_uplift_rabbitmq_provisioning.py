@@ -247,8 +247,10 @@ def main() -> int:
         "x-dead-letter-exchange",
         "x-dead-letter-routing-key",
         "refusing transfer probe because queue is non-empty",
+        "refusing transfer probe because queue has active consumers",
         "--skip-non-empty",
         "skipped_stages",
+        "skipped_consumers",
         "skip_without_mutating_existing_messages",
     ):
         if required not in topology_script:
@@ -338,8 +340,8 @@ def main() -> int:
         errors.append("RabbitMQ provisioning runbook must route host restart verification through controlled maintenance")
     if "legacy Cloudflare Worker" not in runbook:
         errors.append("RabbitMQ provisioning runbook must keep legacy Worker guardrail visible")
-    if "--skip-non-empty" not in runbook or "skipped_stages" not in runbook:
-        errors.append("RabbitMQ provisioning runbook must document non-empty transfer-probe skip reporting")
+    if "--skip-non-empty" not in runbook or "skipped_stages" not in runbook or "skipped_consumers" not in runbook:
+        errors.append("RabbitMQ provisioning runbook must document non-empty and active-consumer transfer-probe skip reporting")
 
     if probe.count("RABBITMQ_DEFAULT_PASS") < 1:
         errors.append("RabbitMQ probe must read credentials from env file")

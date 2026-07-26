@@ -40,6 +40,14 @@ class BackendSupabaseSyncRelaySmokeTests(unittest.TestCase):
         self.assertNotIn("pw", " ".join(captured_argv))
         self.assertEqual("/usr/bin/psql", captured_argv[0])
 
+    def test_target_url_may_omit_sslmode_because_env_forces_require(self) -> None:
+        env = smoke.target_psql_env("postgresql://target:pw@db.abcdefghijklmnopqrst.supabase.co:5432/postgres")
+
+        self.assertEqual("require", env["PGSSLMODE"])
+
+        with self.assertRaisesRegex(smoke.SmokeError, "target_database_sslmode_not_require"):
+            smoke.target_psql_env("postgresql://target:pw@db.abcdefghijklmnopqrst.supabase.co:5432/postgres?sslmode=disable")
+
     def test_proves_insert_update_delete_catchup_with_safe_metadata(self) -> None:
         observed_source_sql: list[str] = []
         namespace = "nutsnews-test-relay-123456-1"

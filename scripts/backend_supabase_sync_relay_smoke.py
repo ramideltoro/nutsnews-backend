@@ -82,8 +82,8 @@ def parse_db_url(db_url: str) -> ParsedDbUrl:
         raise SmokeError("target_database_not_supabase_direct_host")
     if "pooler.supabase.com" in parsed.hostname:
         raise SmokeError("target_database_url_is_pooler")
-    if sslmode != "require":
-        raise SmokeError("target_database_sslmode_required")
+    if sslmode and sslmode != "require":
+        raise SmokeError("target_database_sslmode_not_require")
     return ParsedDbUrl(
         host=parsed.hostname,
         port=str(port),

@@ -3,7 +3,9 @@
 This runbook covers tracking issue `ramideltoro/nutsnews-worker#85`.
 It also records the non-AI shadow deployment from
 `ramideltoro/nutsnews-worker#117` and the approval/translation shadow deployment
-preparation from `ramideltoro/nutsnews-worker#118`.
+preparation from `ramideltoro/nutsnews-worker#118`, plus the
+persistence/publication final-shadow deployment from
+`ramideltoro/nutsnews-worker#119`.
 
 ## Scope
 
@@ -40,6 +42,13 @@ The #118 deployment preparation adds the AI-backed shadow services:
 No persistence or publication container is deployed by #118. A successful
 translation fixture may reach `nutsnews.worker.persistence.v1`, where it must
 stop until the persistence deployment is reviewed.
+
+The #119 deployment preparation adds the final-shadow services:
+
+| Service | Image source | Health endpoint | Shadow input/output |
+| --- | --- | --- | --- |
+| `persistence` | `ramideltoro/nutsnews-worker-article-persistence` | `127.0.0.1:18087/ready` | consumes persistence, writes final shadow aggregate state, publishes publication readiness |
+| `publication` | `ramideltoro/nutsnews-worker-article-publication` | `127.0.0.1:18088/ready` | consumes publication readiness, records shadow comparison decisions only |
 
 ## Source-Controlled Contract
 
@@ -135,6 +144,12 @@ production-backend secrets:
 - Approval and translation receive Qwen base URL/API key values only from
   production-backend `LOCAL_AI_URL` and `LOCAL_AI_API_KEY`. Protected apply fails
   closed when `LOCAL_AI_API_KEY` is absent.
+- Persistence and publication receive separate scoped Worker API tokens only
+  when `NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED=true`. The
+  persistence service receives `NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN`
+  and the publication service receives
+  `NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN`; both must be distinct from
+  `NUTSNEWS_BACKEND_API_TOKEN`.
 
 ## Fixed Operations
 
@@ -245,6 +260,43 @@ For model outage, drain only the affected AI service, inspect its queue/DLQ, and
 leave non-AI services running unless queue backpressure requires a wider pause.
 Rotate `LOCAL_AI_API_KEY` in production-backend, rerun protected check/apply,
 then restart `approval` and `translation` through fixed runtime operations.
+
+## #119 Final Shadow Verification
+
+Before applying #119, confirm these production-backend variables/secrets exist:
+
+```text
+NUTSNEWS_BACKEND_WORKER_API_ENABLED=true
+NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED=true
+NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN
+NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN
+```
+
+After protected check/apply:
+
+```bash
+sudo -n /usr/local/sbin/nutsnews-worker-runtime status
+sudo -n /usr/local/sbin/nutsnews-worker-runtime queue-inspect --service-name persistence
+sudo -n /usr/local/sbin/nutsnews-worker-runtime queue-inspect --service-name publication
+sudo -n /usr/local/sbin/nutsnews-worker-runtime logs --service-name persistence --tail 200
+sudo -n /usr/local/sbin/nutsnews-worker-runtime logs --service-name publication --tail 200
+```
+
+Expected state:
+
+- persistence and publication are healthy and independently restartable;
+- persistence uses the persistence database role, persistence RabbitMQ consumer,
+  and `worker-uplift-persistence` backend API identity;
+- publication uses the publication database role, publication RabbitMQ consumer,
+  and `worker-uplift-publication` backend API identity;
+- publication remains in `shadow_comparison` mode and receives no
+  production-write confirmation value;
+- persistence production writes remain disabled and final aggregates stay in
+  worker-uplift shadow state;
+- permission checks continue to deny direct public schema writes and unrelated
+  backend API operations;
+- legacy Cloudflare ingestion remains the only production writer and public
+  visibility/snapshot state is unchanged.
 
 ## Queue, DLQ, Drain, And Reconciliation
 

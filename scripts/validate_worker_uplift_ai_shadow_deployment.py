@@ -189,8 +189,6 @@ def validate() -> list[str]:
     for forbidden in (
         "NUTSNEWS_APPROVAL_OPENAI_FALLBACK_ENABLED: \"true\"",
         "OPENAI_API_KEY",
-        "name: persistence\n    stage: persistence\n",
-        "name: publication\n    stage: publication\n",
         "production_write_path: true",
     ):
         if forbidden in defaults:

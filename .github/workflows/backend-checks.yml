@@ -240,6 +240,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_worker_uplift_ai_shadow_deployment.py
 
+      - name: Validate worker uplift final shadow deployment
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_final_shadow_deployment.py
+
       - name: Validate worker uplift RabbitMQ metrics
         shell: bash
         run: python3 scripts/validate_worker_uplift_rabbitmq_metrics.py

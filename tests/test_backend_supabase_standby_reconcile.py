@@ -267,9 +267,15 @@ class BackendSupabaseStandbyReconcileTests(unittest.TestCase):
             ("12", None),
             ("13", None),
         ]
+        scripts: list[str] = []
+
+        def capture_script(_db_url: str, script_path: Path) -> None:
+            scripts.append(script_path.read_text(encoding="utf-8"))
+            return None
+
         with mock.patch.object(reconcile, "query_value", side_effect=query_results):
             with mock.patch.object(reconcile, "run_psql_to_file", return_value=None) as copy_to_file:
-                with mock.patch.object(reconcile, "run_psql_script", return_value=None) as run_script:
+                with mock.patch.object(reconcile, "run_psql_script", side_effect=capture_script) as run_script:
                     result = reconcile.apply_backfill(
                         manifest(),
                         "postgresql://source:pw@127.0.0.1/postgres",
@@ -284,6 +290,10 @@ class BackendSupabaseStandbyReconcileTests(unittest.TestCase):
         self.assertEqual(3, result["tables"][0]["batches"])
         copy_to_file.assert_called_once()
         run_script.assert_called_once()
+        self.assertEqual(1, len(scripts))
+        self.assertIn("update \"public\".\"worker_runs\" as t set", scripts[0])
+        self.assertIn("where not exists", scripts[0])
+        self.assertNotIn("on conflict", scripts[0].lower())
 
 
 if __name__ == "__main__":

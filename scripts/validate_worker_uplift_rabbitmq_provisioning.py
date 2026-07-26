@@ -205,10 +205,10 @@ def main() -> int:
     if len(topology.get("exchanges", [])) != 4:
         errors.append("RabbitMQ topology must define main, retry, DLQ, and private canary exchanges")
     canary = topology.get("canary", {})
-    if not isinstance(canary, dict) or canary.get("routing_key") != "worker.uplift.canary.v1":
+    if not isinstance(canary, dict) or canary.get("routing_key") != "worker.uplift.canary.v2":
         errors.append("RabbitMQ topology must define the isolated worker-uplift canary route")
     canary_queue = canary.get("queue", {}) if isinstance(canary, dict) else {}
-    if not isinstance(canary_queue, dict) or canary_queue.get("name") != "worker.uplift.canary.v1":
+    if not isinstance(canary_queue, dict) or canary_queue.get("name") != "worker.uplift.canary.v2":
         errors.append("RabbitMQ topology must define the isolated worker-uplift canary queue")
     if canary_queue.get("arguments", {}).get("x-max-length") != 10:
         errors.append("RabbitMQ canary queue must stay tightly bounded")
@@ -247,7 +247,9 @@ def main() -> int:
         "def action_probe_transfers",
         "ensure_guest_deleted",
         '"scope": "canary_queue_only"',
+        '"operation": "ensure_and_purge"',
         "production_queues_touched",
+        "purged_canary_queue",
         "x-overflow",
         "reject-publish",
         "x-message-ttl",

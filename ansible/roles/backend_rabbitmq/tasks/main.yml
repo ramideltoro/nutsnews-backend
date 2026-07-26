@@ -496,7 +496,12 @@
       - --definition
       - "{{ backend_rabbitmq_topology_definition_path }}"
   register: backend_rabbitmq_canary_repair
-  changed_when: (backend_rabbitmq_canary_repair.stdout | from_json).changed | bool
+  failed_when: backend_rabbitmq_canary_repair.rc != 0
+  changed_when: >-
+    {{
+      backend_rabbitmq_canary_repair.rc == 0 and
+      (backend_rabbitmq_canary_repair.stdout | from_json).changed | bool
+    }}
   when:
     - backend_rabbitmq_runtime_manageable | bool
     - backend_rabbitmq_topology_enabled | bool

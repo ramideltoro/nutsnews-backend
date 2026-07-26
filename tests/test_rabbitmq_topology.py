@@ -97,7 +97,7 @@ class RabbitMQTopologyTests(unittest.TestCase):
         fetch_dlq = next(queue for queue in queues if queue["name"] == "nutsnews.worker.fetch.v1.dlq")
         self.assertEqual(fetch_dlq["arguments"]["x-message-ttl"], 1209600000)
 
-        canary_queue = next(queue for queue in queues if queue["name"] == "worker.uplift.canary.v1")
+        canary_queue = next(queue for queue in queues if queue["name"] == "worker.uplift.canary.v2")
         self.assertEqual(canary_queue["kind"], "canary")
         self.assertEqual(canary_queue["arguments"]["x-max-length"], 10)
         self.assertEqual(canary_queue["arguments"]["x-overflow"], "reject-publish")
@@ -120,8 +120,8 @@ class RabbitMQTopologyTests(unittest.TestCase):
         self.assertFalse(topology.regex_allows(scheduler["permissions"]["read"], "nutsnews.worker.fetch.v1"))
 
         canary = next(user for user in users if user["id"] == "monitoring_canary")
-        self.assertTrue(topology.regex_allows(canary["permissions"]["write"], "worker.uplift.canary.v1"))
-        self.assertTrue(topology.regex_allows(canary["permissions"]["read"], "worker.uplift.canary.v1"))
+        self.assertTrue(topology.regex_allows(canary["permissions"]["write"], "worker.uplift.canary.v2"))
+        self.assertTrue(topology.regex_allows(canary["permissions"]["read"], "worker.uplift.canary.v2"))
         self.assertFalse(topology.regex_allows(canary["permissions"]["write"], "nutsnews.worker.v1"))
         self.assertFalse(topology.regex_allows(canary["permissions"]["read"], "nutsnews.worker.fetch.v1"))
 
@@ -219,7 +219,7 @@ class RabbitMQTopologyTests(unittest.TestCase):
         self.assertEqual(report["skipped_queues"], [])
         self.assertEqual(len(report["skipped_consumers"]), len(definition["routes"]) * 3)
 
-    def test_repair_canary_only_deletes_and_recreates_canary_queue(self):
+    def test_repair_canary_only_ensures_and_purges_canary_queue(self):
         definition = load_definition()
         users = topology.user_records(definition, credential_env())
         client = FakeMutableClient()
@@ -230,11 +230,12 @@ class RabbitMQTopologyTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         delete_paths = [path for method, path, _payload in client.calls if method == "DELETE"]
-        self.assertEqual(delete_paths, ["/api/queues/nutsnews-worker-uplift/worker.uplift.canary.v1"])
+        self.assertEqual(delete_paths, ["/api/queues/nutsnews-worker-uplift/worker.uplift.canary.v2/contents"])
         self.assertFalse(any("nutsnews.worker.fetch.v1" in path for _method, path, _payload in client.calls))
         report = json.loads(print_report.call_args.args[0])
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["scope"], "canary_queue_only")
+        self.assertEqual(report["operation"], "ensure_and_purge")
         self.assertFalse(report["production_queues_touched"])
 
 

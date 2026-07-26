@@ -7,8 +7,8 @@ This runbook covers `ramideltoro/nutsnews-worker#91`.
 The private canary proves the loopback AMQP path before worker-uplift traffic
 depends on it. It uses the existing `RABBITMQ_MONITORING_USERNAME` identity as
 a least-privilege canary principal. That identity can only write the dedicated
-`worker.uplift.canary.v1` exchange and read the dedicated
-`worker.uplift.canary.v1` queue. It cannot configure broker resources and
+`worker.uplift.canary.v2` exchange and read the dedicated
+`worker.uplift.canary.v2` queue. It cannot configure broker resources and
 cannot publish to or consume from production worker queues.
 
 The canary does not use Grafana Cloud Synthetic Monitoring for private AMQP and
@@ -135,9 +135,9 @@ consume the dedicated probe queue.
 The protected apply canary has three bounded attempts with a short delay so a
 single transient AMQP or management queue timeout does not fail an otherwise
 healthy apply; all attempts must still succeed before the workflow can pass.
-Protected apply repairs only the dedicated `worker.uplift.canary.v1` queue
-immediately before the canary. This can delete stale canary probe messages, but
-it never deletes or recreates production worker queues.
+Protected apply ensures and purges only the dedicated `worker.uplift.canary.v2`
+queue immediately before the canary. This can delete stale canary probe messages,
+but it never deletes or recreates production worker queues.
 
 Poison message or DLQ replay:
 Use the production DLQ replay procedure only after preserving the DLQ evidence.

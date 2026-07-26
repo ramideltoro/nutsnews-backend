@@ -906,18 +906,20 @@ def action_repair_canary(args: argparse.Namespace, client: RabbitMQClient, defin
     vhost = definition["vhost"]
     report: dict[str, Any] = {
         "status": "pass",
-        "changed": True,
+        "changed": False,
         "changes": [],
         "drift": [],
         "scope": "canary_queue_only",
+        "operation": "ensure_and_purge",
         "queue": queue["name"],
         "production_queues_touched": False,
         "safe_metadata_only": True,
     }
-    client.request("DELETE", api_path("api", "queues", vhost, queue["name"]), ignored_statuses=(404,))
-    report["changes"].append("deleted_canary_queue")
     ensure_queue(client, definition, queue, report)
     ensure_binding(client, definition, binding, report)
+    client.request("DELETE", api_path("api", "queues", vhost, queue["name"], "contents"), ignored_statuses=(404,))
+    report["changed"] = True
+    report["changes"].append("purged_canary_queue")
     if report["drift"]:
         report["status"] = "fail"
         print(json.dumps(redact_report(report), sort_keys=True))

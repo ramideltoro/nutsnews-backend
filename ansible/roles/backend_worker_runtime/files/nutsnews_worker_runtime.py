@@ -73,7 +73,19 @@ SERVICE_DATABASE_ENV_KEYS = {
     "publication": "NUTSNEWS_PUBLICATION_DATABASE_URL",
     "translation": "NUTSNEWS_TRANSLATION_DATABASE_URL",
 }
+STAGE_SCHEMAS = {
+    "scheduler": "worker_uplift_scheduler",
+    "fetcher": "worker_uplift_fetcher",
+    "canonicalizer": "worker_uplift_canonicalizer",
+    "enrichment": "worker_uplift_enrichment",
+    "approval": "worker_uplift_approval",
+    "translation": "worker_uplift_translation",
+    "persistence": "worker_uplift_persistence",
+    "publication": "worker_uplift_publication",
+}
 PIPELINE_SMOKE_STAGES = ["fetcher", "canonicalizer", "enrichment", "approval", "translation", "persistence", "publication"]
+RECONCILIATION_STALE_AFTER_SECONDS = 900
+RECONCILIATION_MAX_CANDIDATES = 100
 TRACKING_QUERY_PARAMETER_NAMES = {
     "cmp",
     "cmpid",
@@ -312,6 +324,10 @@ def sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def sql_identifier(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
+
+
 def psql_key_values(db_url: str, query: str, timeout: int = 30) -> dict[str, str]:
     try:
         completed = subprocess.run(
@@ -335,6 +351,145 @@ def psql_key_values(db_url: str, query: str, timeout: int = 30) -> dict[str, str
         if separator:
             values[key] = value
     return values
+
+
+def reconciliation_plan_query(schema: str) -> str:
+    stage_schema = sql_identifier(schema)
+    stale_after = f"{RECONCILIATION_STALE_AFTER_SECONDS} seconds"
+    return f"""
+select 'received_inbox=' || count(*)::text
+from {stage_schema}.inbox
+where status in ('received', 'processing')
+union all
+select 'stale_unprocessed_inbox=' || count(*)::text
+from {stage_schema}.inbox
+where status in ('received', 'processing')
+  and received_at < now() - interval {sql_literal(stale_after)}
+union all
+select 'failed_or_parked_inbox=' || count(*)::text
+from {stage_schema}.inbox
+where status in ('failed', 'parked')
+union all
+select 'unconfirmed_outbox=' || count(*)::text
+from {stage_schema}.outbox
+where status in ('pending', 'published', 'retrying')
+  and confirmed_at is null
+union all
+select 'stale_unconfirmed_outbox=' || count(*)::text
+from {stage_schema}.outbox
+where status in ('pending', 'published', 'retrying')
+  and confirmed_at is null
+  and created_at < now() - interval {sql_literal(stale_after)}
+union all
+select 'dead_lettered_outbox=' || count(*)::text
+from {stage_schema}.outbox
+where status = 'dead_lettered'
+union all
+select 'oldest_unconfirmed_outbox_age_seconds=' || coalesce(floor(extract(epoch from now() - min(created_at)))::bigint, 0)::text
+from {stage_schema}.outbox
+where status in ('pending', 'published', 'retrying')
+  and confirmed_at is null
+union all
+select 'watermark_rows=' || count(*)::text
+from {stage_schema}.reconciliation_watermarks
+union all
+select 'watermark_lag_total=' || coalesce(sum(lag_count), 0)::text
+from {stage_schema}.reconciliation_watermarks
+union all
+select 'sample_pipeline_count=' || count(distinct pipeline_run_id)::text
+from (
+  select pipeline_run_id
+  from {stage_schema}.inbox
+  where status in ('received', 'processing', 'failed', 'parked')
+  order by received_at asc
+  limit {RECONCILIATION_MAX_CANDIDATES}
+) candidate_inbox
+union all
+select 'sample_outbox_pipeline_count=' || count(distinct pipeline_run_id)::text
+from (
+  select pipeline_run_id
+  from {stage_schema}.outbox
+  where status in ('pending', 'published', 'retrying', 'dead_lettered')
+    and confirmed_at is null
+  order by created_at asc
+  limit {RECONCILIATION_MAX_CANDIDATES}
+) candidate_outbox;
+"""
+
+
+def int_value(values: dict[str, str], key: str) -> int:
+    try:
+        return int(values.get(key, "0"))
+    except ValueError:
+        return 0
+
+
+def reconciliation_planned_actions(values: dict[str, str]) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+    if int_value(values, "stale_unprocessed_inbox") > 0:
+        actions.append({
+            "id": "service-owned-inbox-reconcile",
+            "reason": "stale received/processing inbox rows exist",
+            "candidate_count": int_value(values, "stale_unprocessed_inbox"),
+            "apply_status": "blocked_until_service_reconciler_exists",
+        })
+    if int_value(values, "stale_unconfirmed_outbox") > 0 or int_value(values, "unconfirmed_outbox") > 0:
+        actions.append({
+            "id": "service-owned-outbox-republish",
+            "reason": "unconfirmed outbox rows exist",
+            "candidate_count": int_value(values, "unconfirmed_outbox"),
+            "apply_status": "blocked_until_service_replayer_exists",
+        })
+    if int_value(values, "failed_or_parked_inbox") > 0 or int_value(values, "dead_lettered_outbox") > 0:
+        actions.append({
+            "id": "operator-review-failure-bucket",
+            "reason": "failed, parked, or dead-lettered rows require bounded replay policy review",
+            "candidate_count": int_value(values, "failed_or_parked_inbox") + int_value(values, "dead_lettered_outbox"),
+            "apply_status": "manual_review_required",
+        })
+    if int_value(values, "watermark_lag_total") > 0:
+        actions.append({
+            "id": "watermark-verification",
+            "reason": "reconciliation watermark lag is non-zero",
+            "candidate_count": int_value(values, "watermark_lag_total"),
+            "apply_status": "blocked_until_watermark_owner_signoff",
+        })
+    if not actions:
+        actions.append({
+            "id": "no-op",
+            "reason": "no stale inbox, unconfirmed outbox, failure bucket, or watermark lag candidates found",
+            "candidate_count": 0,
+            "apply_status": "not_required",
+        })
+    return actions
+
+
+def build_reconciliation_plan(args: argparse.Namespace, service: dict[str, Any]) -> dict[str, Any]:
+    stage = str(service.get("stage") or service.get("name") or "")
+    schema = STAGE_SCHEMAS.get(stage)
+    if not schema:
+        raise RuntimeErrorWithReport(f"no reconciliation schema is registered for stage {stage}")
+    query = reconciliation_plan_query(schema)
+    values = psql_key_values(service_database_url(args, service), query, timeout=45)
+    return {
+        "stage": stage,
+        "schema": schema,
+        "safe_metadata_only": True,
+        "writes_performed": False,
+        "production_visibility_enabled": False,
+        "legacy_runtime_required": False,
+        "stale_after_seconds": RECONCILIATION_STALE_AFTER_SECONDS,
+        "candidate_limit": RECONCILIATION_MAX_CANDIDATES,
+        "query_sha256": hashlib.sha256(query.encode("utf-8")).hexdigest(),
+        "values": values,
+        "planned_actions": reconciliation_planned_actions(values),
+        "apply_requirements": [
+            "service-owned reconciler/replayer entry point",
+            "service-owned payload_ref hydration",
+            "new message IDs with preserved idempotency, causation, correlation, and audit metadata",
+            "bounded protected confirmation and stop switch",
+        ],
+    }
 
 
 def wait_for_psql_values(
@@ -1619,8 +1774,15 @@ def build_report(args: argparse.Namespace, manifest: dict[str, Any]) -> dict[str
         if not args.dry_run:
             report["errors"].append("dlq-replay currently fails closed unless --dry-run is set")
     elif args.action == "reconciliation":
+        try:
+            report["reconciliation"] = build_reconciliation_plan(args, service)
+        except RuntimeErrorWithReport as exc:
+            report["status"] = "fail"
+            report["summary"] = "Reconciliation dry-run planning could not read safe stage metadata."
+            report["errors"].append(str(exc))
+            return report
         report["status"] = "dry_run" if args.dry_run else "blocked"
-        report["summary"] = "Reconciliation command is reserved for stage outbox/watermark services; no legacy checkout is used."
+        report["summary"] = "Reconciliation dry-run plans safe stage metadata only; protected apply remains fail-closed until service-owned replayers exist."
         if not args.dry_run:
             report["errors"].append("reconciliation requires a later approved service-specific reconciler")
     elif args.action == "smoke":

@@ -534,10 +534,12 @@
         "owner_files": [
           "docs/worker-uplift-architecture-adr.json",
           "docs/worker-uplift-api-admin-compatibility-contract.json",
-          "docs/backend-production-cutover-plan.json"
+          "docs/backend-production-cutover-plan.json",
+          "ansible/roles/backend_worker_runtime/files/nutsnews_worker_runtime.py",
+          ".github/workflows/backend-worker-runtime-operations.yml"
         ],
         "workflow": "future backend reconciliation workflow and Backend Production Cutover",
-        "status": "approved_owner_not_implemented_yet"
+        "status": "dry_run_planner_implemented_apply_blocked_until_service_replayers"
       },
       "classification": "future_backend_owner",
       "copyable_behavior": [

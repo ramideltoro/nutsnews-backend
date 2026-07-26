@@ -1,0 +1,124 @@
+{
+  "gate_id": "supabase_standby_required_table_parity",
+  "version": 1,
+  "issue": "ramideltoro/nutsnews#523",
+  "epic": "ramideltoro/nutsnews#521",
+  "parent_prerequisites": [
+    "ramideltoro/nutsnews#497",
+    "ramideltoro/nutsnews#499"
+  ],
+  "goal": "Emit an independent, fail-closed required-table data parity gate for the existing production Supabase standby.",
+  "input": {
+    "authoritative_telemetry": "Backend Health Report supabase_sync_relay_status command output",
+    "comparison_source": "relay post_sync table checks",
+    "contract": "docs/backend-supabase-sync-relay.json",
+    "forbidden_inputs": [
+      "database URLs",
+      "caller-supplied SQL",
+      "raw row data",
+      "hostnames",
+      "Supabase project refs",
+      "Supabase keys"
+    ]
+  },
+  "thresholds": {
+    "max_telemetry_age_seconds": 300,
+    "result_ttl_seconds": 300
+  },
+  "result_schema": {
+    "required_fields": [
+      "status",
+      "gate",
+      "failover_attempt_id",
+      "manifest_fingerprint",
+      "relay_contract_fingerprint",
+      "source_fingerprint",
+      "target_fingerprint",
+      "measured_at_utc",
+      "expires_at_utc",
+      "relay_checked_at_utc",
+      "relay_comparison_age_seconds",
+      "tables",
+      "blockers",
+      "safe_metadata_only"
+    ],
+    "per_table_fields": [
+      "name",
+      "status",
+      "source_count",
+      "target_count",
+      "source_row_checksum",
+      "target_row_checksum",
+      "target_lag_rows",
+      "blockers"
+    ],
+    "status_values": [
+      "PASS",
+      "FAIL"
+    ],
+    "safe_metadata_only": true
+  },
+  "pass_conditions": [
+    "all required manifest tables are present in post_sync checks",
+    "every required table has status pass",
+    "source and target row counts match for every table",
+    "source and target aggregate row checksums match for every table",
+    "target_lag_rows is zero for every table",
+    "source fingerprint matches the sync relay contract",
+    "target fingerprint matches the sync relay contract",
+    "health report telemetry is fresh",
+    "relay post-sync comparison telemetry is fresh",
+    "backend PostgreSQL remains primary and app/worker Supabase writes remain blocked before approved failover"
+  ],
+  "fail_closed_blockers": [
+    "invalid_failover_attempt_id",
+    "manifest_tables_missing",
+    "manifest_tables_malformed",
+    "source_policy_mismatch",
+    "target_policy_mismatch",
+    "target_existing_production_supabase_not_confirmed",
+    "new_supabase_project_not_forbidden",
+    "nutsnews_standby_database_not_forbidden",
+    "backend_primary_policy_mismatch",
+    "app_worker_supabase_writes_not_blocked",
+    "telemetry_unavailable",
+    "telemetry_malformed",
+    "relay_telemetry_malformed",
+    "relay_telemetry_unavailable",
+    "relay_telemetry_not_safe_metadata",
+    "telemetry_measurement_time_malformed",
+    "telemetry_measurement_time_from_future",
+    "telemetry_stale",
+    "relay_comparison_time_malformed",
+    "relay_comparison_time_from_future",
+    "relay_comparison_stale",
+    "source_fingerprint_mismatch",
+    "target_fingerprint_mismatch",
+    "comparison_checks_missing",
+    "table_parity_failed"
+  ],
+  "per_table_blockers": [
+    "table_comparison_missing",
+    "table_status_not_pass",
+    "table_count_missing",
+    "row_count_mismatch",
+    "table_checksum_missing",
+    "row_checksum_mismatch",
+    "target_lag_rows_missing",
+    "target_lag_rows_nonzero",
+    "checksum_query_error"
+  ],
+  "workflow": {
+    "path": ".github/workflows/backend-supabase-standby-parity-gate.yml",
+    "runs_on": "ubuntu-latest",
+    "environment": "production-backend",
+    "default_enforce": false,
+    "artifact": "backend-supabase-standby-parity-gate"
+  },
+  "validation": {
+    "validator": "python3 scripts/validate_backend_supabase_standby_parity_gate.py",
+    "unit_tests": "python3 -m unittest tests.test_backend_supabase_standby_parity_gate",
+    "workflow_lint": "actionlint .github/workflows/backend-supabase-standby-parity-gate.yml"
+  },
+  "scope": "Required-table row data parity only. Schema compatibility, sequence safety, writer pause, split-brain fencing, and the combined decision are separate gates."
+}

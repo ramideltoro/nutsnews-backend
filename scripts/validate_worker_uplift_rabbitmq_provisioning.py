@@ -138,6 +138,8 @@ def main() -> int:
     data_tree_task = tasks.split("Repair RabbitMQ persistent data tree ownership", 1)[-1].split("- name:", 1)[0]
     if "recurse: true" not in data_tree_task or 'mode: "u+rwX"' not in data_tree_task:
         errors.append("RabbitMQ role must recursively repair broker data ownership and owner write bits before runtime probes")
+    if "notify:" in data_tree_task or "Restart RabbitMQ" in data_tree_task:
+        errors.append("RabbitMQ data-tree ownership repair must not restart RabbitMQ before live transfer probes")
     if "backend_rabbitmq_data_tree_permissions is changed" not in tasks:
         errors.append("RabbitMQ durable probe must run after broker data ownership repairs")
     if "backend_rabbitmq_legacy_probe_state_file is changed" not in tasks:

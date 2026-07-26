@@ -5,6 +5,7 @@ DECLARE
   validation_role constant text := '{{ backend_postgres_validation_user }}';
   readonly_role constant text := '{{ backend_postgres_readonly_user }}';
   worker_api_role constant text := '{{ backend_postgres_worker_api_user }}';
+  app_role constant text := '{{ backend_postgres_app_user }}';
 BEGIN
 {% for item in backend_worker_uplift_postgres_stage_roles %}
   EXECUTE format('CREATE SCHEMA IF NOT EXISTS %I', '{{ item.schema }}');
@@ -424,13 +425,13 @@ BEGIN
   EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', final_schema, '{{ backend_worker_uplift_postgres_persistence_user }}');
   EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.article_shadow_aggregates TO %I', final_schema, '{{ backend_worker_uplift_postgres_persistence_user }}');
   EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', final_schema, '{{ backend_worker_uplift_postgres_persistence_user }}');
-  EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', final_schema, worker_api_role);
-  EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.article_shadow_aggregates TO %I', final_schema, worker_api_role);
-  EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.api_command_receipts TO %I', final_schema, worker_api_role);
-  EXECUTE format('GRANT SELECT ON TABLE %I.stage_health_projections TO %I', final_schema, worker_api_role);
-  EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', final_schema, worker_api_role);
-  EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %I.%I TO %I', final_schema, 'article_shadow_aggregates_id_seq', worker_api_role);
-  EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %I.%I TO %I', final_schema, 'api_command_receipts_id_seq', worker_api_role);
+  EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I, %I', final_schema, worker_api_role, app_role);
+  EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.article_shadow_aggregates TO %I, %I', final_schema, worker_api_role, app_role);
+  EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.api_command_receipts TO %I, %I', final_schema, worker_api_role, app_role);
+  EXECUTE format('GRANT SELECT ON TABLE %I.stage_health_projections TO %I, %I', final_schema, worker_api_role, app_role);
+  EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I, %I', final_schema, worker_api_role, app_role);
+  EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %I.%I TO %I, %I', final_schema, 'article_shadow_aggregates_id_seq', worker_api_role, app_role);
+  EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %I.%I TO %I, %I', final_schema, 'api_command_receipts_id_seq', worker_api_role, app_role);
   EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I, %I', final_schema, validation_role, readonly_role);
   EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO %I, %I', final_schema, validation_role, readonly_role);
 
@@ -445,13 +446,13 @@ BEGIN
   EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', final_schema, '{{ backend_worker_uplift_postgres_persistence_user }}');
   EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.article_shadow_aggregates TO %I', final_schema, '{{ backend_worker_uplift_postgres_persistence_user }}');
   EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', final_schema, '{{ backend_worker_uplift_postgres_persistence_user }}');
-  EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', final_schema, worker_api_role);
-  EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.article_shadow_aggregates TO %I', final_schema, worker_api_role);
-  EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.api_command_receipts TO %I', final_schema, worker_api_role);
-  EXECUTE format('GRANT SELECT ON TABLE %I.stage_health_projections TO %I', final_schema, worker_api_role);
-  EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', final_schema, worker_api_role);
-  EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %I.%I TO %I', final_schema, 'article_shadow_aggregates_id_seq', worker_api_role);
-  EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %I.%I TO %I', final_schema, 'api_command_receipts_id_seq', worker_api_role);
+  EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I, %I', final_schema, worker_api_role, app_role);
+  EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.article_shadow_aggregates TO %I, %I', final_schema, worker_api_role, app_role);
+  EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.api_command_receipts TO %I, %I', final_schema, worker_api_role, app_role);
+  EXECUTE format('GRANT SELECT ON TABLE %I.stage_health_projections TO %I, %I', final_schema, worker_api_role, app_role);
+  EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I, %I', final_schema, worker_api_role, app_role);
+  EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %I.%I TO %I, %I', final_schema, 'article_shadow_aggregates_id_seq', worker_api_role, app_role);
+  EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %I.%I TO %I, %I', final_schema, 'api_command_receipts_id_seq', worker_api_role, app_role);
 
   EXECUTE format($ddl$
     CREATE SCHEMA IF NOT EXISTS %I

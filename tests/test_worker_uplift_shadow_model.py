@@ -86,6 +86,8 @@ class WorkerUpliftShadowModelTests(unittest.TestCase):
         self.assertIn("GRANT SELECT ON TABLE %I.stage_health_projections", template)
         self.assertIn("api_command_receipts_id_seq", template)
         self.assertIn("worker_api_role", template)
+        self.assertIn("app_role", template)
+        self.assertIn("worker_api_role, app_role", template)
         self.assertIn("CREATE OR REPLACE VIEW %I.enrichment_projection", template)
         self.assertIn("canonical_url_hash AS article_identity_hash", template)
         self.assertIn("diagnostic_metadata->>'sourceFeedUrl' AS source_feed_url", template)
@@ -116,8 +118,11 @@ class WorkerUpliftShadowModelTests(unittest.TestCase):
         self.assertIn("No database URL, password, token, payload, article body, prompt, or provider response is printed.", proof_workflow)
         self.assertIn("backend_worker_uplift_shadow_model_check.py --offline --enforce", backend_checks)
         self.assertIn("WORKER_API_ROLE = \"nutsnews_worker_api\"", check_script)
+        self.assertIn("APP_ROLE = \"nutsnews_app\"", check_script)
+        self.assertIn("WORKER_API_FINAL_ROLES", check_script)
         self.assertIn("worker_api_final_grant=", check_script)
         self.assertIn("worker_api_final_grant_failures", check_script)
+        self.assertIn("missing_worker_api_final_grant_row", check_script)
         self.assertIn("receipt_sequence_usage", check_script)
 
     def test_offline_validator_passes_and_reports_safe_metadata(self):

@@ -16,15 +16,28 @@ def successful_smoke() -> dict:
     return {
         "status": "pass",
         "generated_at_utc": "2026-07-26T12:46:02Z",
-        "smoke": {
-            "contract": "scheduler-feed-to-final-shadow-v1",
-            "fixture": {"fixture_id": "pipeline-test"},
-            "missing_consumers": [],
-            "dlq_growth": {},
-            "legacy_ingestion_endpoints_invoked": False,
-            "idempotency": {
-                "expected_single_final_shadow_result": "1",
-                "duplicate_publish_idempotency_key": "smoke:pipeline:feed:pipeline-test",
+            "smoke": {
+                "contract": "scheduler-feed-to-final-shadow-v1",
+                "trigger": "scheduler-compatible-feed-fetch-request",
+                "fixture": {"fixture_id": "pipeline-test"},
+                "fixture_hits": {"feed": 1, "article": 1},
+                "missing_consumers": [],
+                "dlq_growth": {},
+                "legacy_ingestion_endpoints_invoked": False,
+                "db_checks": {
+                    "approval": {"processed_inbox": "1"},
+                    "translation": {"processed_inbox": "1", "distinct_languages": "5"},
+                    "persistence": {"final_shadow_aggregate": "1"},
+                    "publication": {"publication_readiness": "1", "publication_shadow_comparison": "1"},
+                    "api_audit": {"failed_api_requests": "0"},
+                },
+                "health": {
+                    stage: {"status": "healthy"}
+                    for stage in ("fetcher", "canonicalizer", "enrichment", *backend_worker_uplift_parity_report.STAGES[3:])
+                },
+                "idempotency": {
+                    "expected_single_final_shadow_result": "1",
+                    "duplicate_publish_idempotency_key": "smoke:pipeline:feed:pipeline-test",
             },
             "versions": {"fetcher": {"image": "ghcr.io/example/fetcher@sha256:" + "a" * 64}},
             "queues_after": {
@@ -69,10 +82,10 @@ def query_output(_db_url: str, query: str) -> tuple[str, None]:
         return (
             "\n".join(
                 [
-                    "fetch_versions=1",
-                    "feed_health_projections=1",
-                    "article_identities=1",
-                    "enrichment_records=1",
+                    "fetch_versions=0",
+                    "feed_health_projections=0",
+                    "article_identities=0",
+                    "enrichment_records=0",
                 ]
             ),
             None,
@@ -81,8 +94,8 @@ def query_output(_db_url: str, query: str) -> tuple[str, None]:
     for stage in backend_worker_uplift_parity_report.STAGES:
         values.extend(
             [
-                f"{stage}_processed_inbox=1",
-                f"{stage}_failed_inbox=0",
+                f"{stage}_processed_inbox={0 if stage in ('fetcher', 'canonicalizer', 'enrichment') else 1}",
+                f"{stage}_failed_inbox={1 if stage in ('translation', 'persistence') else 0}",
                 f"{stage}_pending_outbox=0",
                 f"{stage}_confirmed_outbox=1",
             ]

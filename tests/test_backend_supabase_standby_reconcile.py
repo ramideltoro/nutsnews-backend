@@ -295,6 +295,39 @@ class BackendSupabaseStandbyReconcileTests(unittest.TestCase):
         self.assertIn("where not exists", scripts[0])
         self.assertNotIn("on conflict", scripts[0].lower())
 
+    def test_apply_backfill_natural_key_deletes_only_primary_key_collisions(self) -> None:
+        manifest_data = manifest()
+        manifest_data["tables"][0]["backfill_key"] = ["updated_at"]
+        query_results = [
+            (COLUMN_METADATA, None),
+            ("12", None),
+            (json.dumps({"last_value": 12, "is_called": True, "increment_by": 1}), None),
+            ("12", None),
+            ("12", None),
+            ("13", None),
+        ]
+        scripts: list[str] = []
+
+        def capture_script(_db_url: str, script_path: Path) -> None:
+            scripts.append(script_path.read_text(encoding="utf-8"))
+            return None
+
+        with mock.patch.object(reconcile, "query_value", side_effect=query_results):
+            with mock.patch.object(reconcile, "run_psql_to_file", return_value=None):
+                with mock.patch.object(reconcile, "run_psql_script", side_effect=capture_script):
+                    result = reconcile.apply_backfill(
+                        manifest_data,
+                        "postgresql://source:pw@127.0.0.1/postgres",
+                        "postgresql://target:pw@127.0.0.1/postgres",
+                        batch_size=5,
+                    )
+
+        self.assertEqual("applied", result["status"])
+        self.assertEqual(["updated_at"], result["tables"][0]["backfill_key"])
+        self.assertIn("delete from \"public\".\"worker_runs\" as t using", scripts[0])
+        self.assertIn('where t."id" is not distinct from s."id"', scripts[0])
+        self.assertIn('not (t."updated_at" is not distinct from s."updated_at")', scripts[0])
+
 
 if __name__ == "__main__":
     unittest.main()

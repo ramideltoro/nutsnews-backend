@@ -11,6 +11,7 @@
     "schema_fingerprint": "9f8cffa694100f438abaddbf6e00db13ff969572e8c16fd4b8ee4afa5087088f",
     "policy": "backend-postgres-primary-to-existing-production-supabase-standby"
   },
+  "manifest_schema_fingerprint": "9f8cffa694100f438abaddbf6e00db13ff969572e8c16fd4b8ee4afa5087088f",
   "source": {
     "label": "backend_postgres_primary",
     "role": "normal production read/write primary",

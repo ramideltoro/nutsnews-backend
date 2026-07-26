@@ -236,7 +236,7 @@ class BackendSupabaseStandbyReconcileTests(unittest.TestCase):
                 {
                     "legacy_schema_version": "1",
                     "migration_head": "abc",
-                    "expected_schema_fingerprint": "expected",
+                    "expected_schema_fingerprint": "target-expected",
                     "actual_schema_fingerprint": "target-actual",
                 }
             ]

@@ -98,7 +98,21 @@ class AnsibleCheckModeGuardTests(unittest.TestCase):
         self.assertIn("register: backend_rabbitmq_data_tree_permissions", data_tree_task)
         self.assertNotIn("notify:", data_tree_task)
         self.assertNotIn("Restart RabbitMQ", data_tree_task)
+        self.assertIn("Repair RabbitMQ persistent data tree ownership from container namespace", tasks)
+        container_repair_task = tasks.split("Repair RabbitMQ persistent data tree ownership from container namespace", 1)[1].split("- name:", 1)[0]
+        self.assertIn("--user", container_repair_task)
+        self.assertIn("root", container_repair_task)
+        self.assertIn("/var/lib/rabbitmq", container_repair_task)
+        self.assertIn("safe_metadata_only", container_repair_task)
+        self.assertIn("register: backend_rabbitmq_container_data_tree_permissions", container_repair_task)
+        self.assertNotIn("notify:", container_repair_task)
+        self.assertNotIn("Restart RabbitMQ", container_repair_task)
+        self.assertLess(
+            tasks.index("Repair RabbitMQ persistent data tree ownership from container namespace"),
+            tasks.index("Bootstrap RabbitMQ worker topology"),
+        )
         self.assertIn("backend_rabbitmq_data_tree_permissions is changed", tasks)
+        self.assertIn("backend_rabbitmq_container_data_tree_permissions is changed", tasks)
         self.assertIn("Remove legacy probe state from RabbitMQ broker data directory", tasks)
         self.assertIn("backend_rabbitmq_legacy_probe_state_file is changed", tasks)
 

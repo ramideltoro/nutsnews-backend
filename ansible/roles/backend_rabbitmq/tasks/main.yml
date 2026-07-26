@@ -418,6 +418,35 @@
     - backend_rabbitmq_runtime_manageable | bool
     - not ansible_check_mode
 
+- name: Repair RabbitMQ persistent data tree ownership from container namespace
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - --user
+      - root
+      - "{{ backend_rabbitmq_container_name }}"
+      - sh
+      - -eu
+      - -c
+      - |
+        changed=false
+        if find /var/lib/rabbitmq \( ! -user rabbitmq -o ! -group rabbitmq -o ! -perm -u+rw -o \( -type d ! -perm -u+x \) \) -print -quit | read _path; then
+          changed=true
+        fi
+        chown -R rabbitmq:rabbitmq /var/lib/rabbitmq
+        chmod -R u+rwX /var/lib/rabbitmq
+        printf '{"changed":%s,"scope":"rabbitmq_data_mount","safe_metadata_only":true}\n' "$changed"
+  register: backend_rabbitmq_container_data_tree_permissions
+  changed_when: >-
+    {{
+      backend_rabbitmq_container_data_tree_permissions.rc == 0 and
+      (backend_rabbitmq_container_data_tree_permissions.stdout | from_json).changed | bool
+    }}
+  when:
+    - backend_rabbitmq_runtime_manageable | bool
+    - not ansible_check_mode
+
 - name: Bootstrap RabbitMQ worker topology
   ansible.builtin.command:
     argv: "{{ [backend_rabbitmq_topology_path, 'bootstrap', '--env', backend_rabbitmq_env_path, '--credentials-env', backend_rabbitmq_topology_env_path, '--definition', backend_rabbitmq_topology_definition_path] + (backend_rabbitmq_topology_rotate_passwords | bool | ternary(['--rotate-passwords'], [])) }}"
@@ -568,6 +597,7 @@
           backend_rabbitmq_compose_file is changed or
           backend_rabbitmq_unit_file is changed or
           backend_rabbitmq_data_tree_permissions is changed or
+          backend_rabbitmq_container_data_tree_permissions is changed or
           backend_rabbitmq_legacy_probe_state_file is changed or
           backend_rabbitmq_probe_file is changed
         )

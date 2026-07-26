@@ -140,8 +140,27 @@ def main() -> int:
         errors.append("RabbitMQ role must recursively repair broker data ownership and owner write bits before runtime probes")
     if "notify:" in data_tree_task or "Restart RabbitMQ" in data_tree_task:
         errors.append("RabbitMQ data-tree ownership repair must not restart RabbitMQ before live transfer probes")
+    container_data_tree_task = tasks.split("Repair RabbitMQ persistent data tree ownership from container namespace", 1)[-1].split("- name:", 1)[0]
+    for required in ("docker", "exec", "--user", "root", "/var/lib/rabbitmq", "chown -R rabbitmq:rabbitmq", "safe_metadata_only"):
+        if required not in container_data_tree_task:
+            errors.append(f"RabbitMQ container-namespace data repair missing: {required}")
+    if "notify:" in container_data_tree_task or "Restart RabbitMQ" in container_data_tree_task:
+        errors.append("RabbitMQ container-namespace data repair must not restart RabbitMQ before live transfer probes")
+    if (
+        "Wait for RabbitMQ diagnostics to pass" in tasks
+        and "Repair RabbitMQ persistent data tree ownership from container namespace" in tasks
+        and "Bootstrap RabbitMQ worker topology" in tasks
+        and not (
+            tasks.index("Wait for RabbitMQ diagnostics to pass")
+            < tasks.index("Repair RabbitMQ persistent data tree ownership from container namespace")
+            < tasks.index("Bootstrap RabbitMQ worker topology")
+        )
+    ):
+        errors.append("RabbitMQ container-namespace data repair must run after diagnostics and before topology bootstrap")
     if "backend_rabbitmq_data_tree_permissions is changed" not in tasks:
         errors.append("RabbitMQ durable probe must run after broker data ownership repairs")
+    if "backend_rabbitmq_container_data_tree_permissions is changed" not in tasks:
+        errors.append("RabbitMQ durable probe must run after container-namespace broker data ownership repairs")
     if "backend_rabbitmq_legacy_probe_state_file is changed" not in tasks:
         errors.append("RabbitMQ durable probe must run after removing legacy broker-data probe state")
     if "Remove legacy probe state from RabbitMQ broker data directory" not in tasks:

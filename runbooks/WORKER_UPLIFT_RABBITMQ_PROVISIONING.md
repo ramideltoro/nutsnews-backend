@@ -101,9 +101,13 @@ The protected apply path pulls the pinned RabbitMQ image before starting or
 restarting the service. The systemd unit uses the already-pulled image so a host
 restart does not depend on registry availability.
 
-The broker data mount is `/var/lib/nutsnews/rabbitmq`. The role recursively
-repairs this tree to the RabbitMQ container UID/GID before runtime probes, so
-queue files remain writable after restores, partial applies, or ownership drift.
+The broker data mount is `/var/lib/nutsnews/rabbitmq`. The role first repairs
+this tree from the host to the RabbitMQ container UID/GID, then repairs the same
+mount from inside the running container as `root` to `rabbitmq:rabbitmq` after
+RabbitMQ diagnostics pass. Both repairs are metadata-only ownership/mode
+repairs scoped to `/var/lib/rabbitmq`; they do not publish, consume, purge, or
+delete production worker queues. This keeps queue files writable after restores,
+partial applies, user-namespace mapping differences, or ownership drift.
 Root-run probe state lives outside the broker mount in
 `/var/lib/nutsnews/rabbitmq-probes`.
 

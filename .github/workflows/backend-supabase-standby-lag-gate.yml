@@ -69,7 +69,6 @@ jobs:
       - name: Prepare read-only SSH material
         shell: bash
         env:
-          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
           NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
           NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
         run: |
@@ -94,18 +93,15 @@ jobs:
           chmod 0600 "$HOME/.ssh/known_hosts"
 
           ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend_lag_gate" > /dev/null
-          ssh-keygen -F "$NUTSNEWS_BACKEND_HOST" -f "$HOME/.ssh/known_hosts" > /dev/null 2>&1
 
       - name: Collect fresh relay health telemetry
         shell: bash
         env:
-          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
           NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
         run: |
           set -euo pipefail
 
           python3 scripts/backend_health_report.py \
-            --ssh-host "$NUTSNEWS_BACKEND_HOST" \
             --ssh-user "${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}" \
             --ssh-key "$HOME/.ssh/nutsnews_backend_lag_gate" \
             --known-hosts "$HOME/.ssh/known_hosts" \

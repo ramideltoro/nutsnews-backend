@@ -119,8 +119,8 @@ def main() -> int:
         "runs-on: ubuntu-latest",
         "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
         "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
-        "ssh-keygen -F \"$NUTSNEWS_BACKEND_HOST\" -f \"$HOME/.ssh/known_hosts\" > /dev/null 2>&1",
         "python3 scripts/backend_health_report.py",
+        "--ssh-key \"$HOME/.ssh/nutsnews_backend_lag_gate\"",
         "> \"$RUNNER_TEMP/backend-health-report.stdout\"",
         "python3 scripts/backend_supabase_standby_lag_gate.py",
         "backend-supabase-standby-lag-gate",
@@ -128,7 +128,7 @@ def main() -> int:
     ):
         require_token(token, workflow, "lag gate workflow", errors)
 
-    for forbidden in ("NUTSNEWS_PRODUCTION_SUPABASE_DB_URL", "PGPASSWORD", "postgresql://", "postgres://"):
+    for forbidden in ("NUTSNEWS_BACKEND_HOST", "NUTSNEWS_PRODUCTION_SUPABASE_DB_URL", "PGPASSWORD", "postgresql://", "postgres://"):
         require(forbidden not in workflow, f"lag gate workflow must not contain credential marker: {forbidden}", errors)
 
     for token in (

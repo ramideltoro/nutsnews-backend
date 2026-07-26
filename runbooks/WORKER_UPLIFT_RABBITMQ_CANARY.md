@@ -135,9 +135,10 @@ consume the dedicated probe queue.
 The protected apply canary has three bounded attempts with a short delay so a
 single transient AMQP or management queue timeout does not fail an otherwise
 healthy apply; all attempts must still succeed before the workflow can pass.
-Protected apply ensures and purges only the dedicated `worker.uplift.canary.v2`
-queue immediately before the canary. This can delete stale canary probe messages,
-but it never deletes or recreates production worker queues.
+Protected apply ensures only the dedicated `worker.uplift.canary.v2` queue
+immediately before the canary. The canary then drains a bounded number of stale
+messages from that dedicated canary queue over AMQP before publishing its own
+probe message; it never deletes or recreates production worker queues.
 Before topology or canary work, protected apply also repairs RabbitMQ broker data
 ownership/mode metadata from inside the running container. That repair is scoped
 to `/var/lib/rabbitmq` and does not publish, consume, purge, or delete production

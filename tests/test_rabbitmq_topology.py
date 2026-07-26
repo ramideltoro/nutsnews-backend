@@ -219,7 +219,7 @@ class RabbitMQTopologyTests(unittest.TestCase):
         self.assertEqual(report["skipped_queues"], [])
         self.assertEqual(len(report["skipped_consumers"]), len(definition["routes"]) * 3)
 
-    def test_repair_canary_only_ensures_and_purges_canary_queue(self):
+    def test_repair_canary_only_ensures_canary_queue(self):
         definition = load_definition()
         users = topology.user_records(definition, credential_env())
         client = FakeMutableClient()
@@ -230,12 +230,12 @@ class RabbitMQTopologyTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         delete_paths = [path for method, path, _payload in client.calls if method == "DELETE"]
-        self.assertEqual(delete_paths, ["/api/queues/nutsnews-worker-uplift/worker.uplift.canary.v2/contents"])
+        self.assertEqual(delete_paths, [])
         self.assertFalse(any("nutsnews.worker.fetch.v1" in path for _method, path, _payload in client.calls))
         report = json.loads(print_report.call_args.args[0])
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["scope"], "canary_queue_only")
-        self.assertEqual(report["operation"], "ensure_and_purge")
+        self.assertEqual(report["operation"], "ensure_only")
         self.assertFalse(report["production_queues_touched"])
 
 

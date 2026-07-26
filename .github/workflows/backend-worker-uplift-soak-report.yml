@@ -1,0 +1,232 @@
+name: Backend Worker-Uplift Soak Capacity Report
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Run offline validation or live read-only shadow soak/capacity report.
+        required: true
+        default: offline
+        type: choice
+        options:
+          - offline
+          - live-read-only
+      require_complete_window:
+        description: Fail the live report unless the configured soak window is complete.
+        required: true
+        default: false
+        type: boolean
+      min_window_hours:
+        description: Minimum observed shadow event window required for completion.
+        required: true
+        default: "48"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-worker-uplift-soak-report
+  cancel-in-progress: false
+
+jobs:
+  soak-report:
+    name: Worker-uplift soak/capacity report
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate inputs
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          MIN_WINDOW_HOURS: ${{ inputs.min_window_hours }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            offline|live-read-only) ;;
+            *) echo "Unsupported mode: $MODE" >&2; exit 1 ;;
+          esac
+          python3 - <<'PY'
+          import os
+          value = float(os.environ["MIN_WINDOW_HOURS"])
+          if value <= 0 or value > 168:
+              raise SystemExit("min_window_hours must be > 0 and <= 168")
+          PY
+
+      - name: Run offline soak/capacity report
+        if: inputs.mode == 'offline'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/backend_worker_uplift_soak_report.py \
+            --offline \
+            --enforce \
+            --output "$RUNNER_TEMP/backend-worker-uplift-soak-report.json"
+
+      - name: Validate protected live report secrets
+        if: inputs.mode == 'live-read-only'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing required production-backend secret: $name" >&2
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Prepare SSH material
+        if: inputs.mode == 'live-read-only'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F "$NUTSNEWS_BACKEND_HOST" -f "$HOME/.ssh/known_hosts" > /dev/null
+
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh \
+            -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" true
+
+      - name: Run protected live read-only soak/capacity report
+        if: inputs.mode == 'live-read-only'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
+          NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE || 'nutsnews_primary_shadow' }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          REQUIRE_COMPLETE_WINDOW: ${{ inputs.require_complete_window }}
+          MIN_WINDOW_HOURS: ${{ inputs.min_window_hours }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE" != "nutsnews_primary_shadow" ]]; then
+            echo "Worker-uplift soak report is fixed to nutsnews_primary_shadow." >&2
+            exit 1
+          fi
+
+          db_url="$(python3 - <<'PY'
+          import os
+          from urllib.parse import quote
+
+          user = quote("nutsnews_migration_validation", safe="")
+          password = quote(os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD"], safe="")
+          database = quote(os.environ["NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE"], safe="")
+          scheme = "postgresql"
+          print(f"{scheme}://{user}:{password}@127.0.0.1:5432/{database}")
+          PY
+          )"
+          echo "::add-mask::$db_url"
+
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          remote_dir="/tmp/nutsnews-worker-uplift-soak-report-${GITHUB_RUN_ID}"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "install -m 0700 -d '$remote_dir/scripts' '$remote_dir/docs'"
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            scripts/backend_worker_uplift_soak_report.py \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/scripts/"
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            docs/worker-uplift-shadow-soak-capacity-report.json \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/docs/"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "if sudo -n test -r /var/lib/nutsnews/worker-uplift-runtime/reports/last-smoke.json; then sudo -n cat /var/lib/nutsnews/worker-uplift-runtime/reports/last-smoke.json > '$remote_dir/last-smoke.json'; elif test -r /var/lib/nutsnews/worker-uplift-runtime/reports/last-smoke.json; then cat /var/lib/nutsnews/worker-uplift-runtime/reports/last-smoke.json > '$remote_dir/last-smoke.json'; else printf '{}\n' > '$remote_dir/last-smoke.json'; fi"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "if sudo -n test -x /usr/local/sbin/nutsnews-worker-runtime; then sudo -n /usr/local/sbin/nutsnews-worker-runtime status --manifest /etc/nutsnews-worker-uplift/services.json --compose /opt/nutsnews-worker-uplift/compose.yml --project nutsnews-worker-uplift --queue-kind main --tail 0 --report '$remote_dir/runtime-status.json' >/dev/null || printf '{}\n' > '$remote_dir/runtime-status.json'; elif test -x /usr/local/sbin/nutsnews-worker-runtime; then /usr/local/sbin/nutsnews-worker-runtime status --manifest /etc/nutsnews-worker-uplift/services.json --compose /opt/nutsnews-worker-uplift/compose.yml --project nutsnews-worker-uplift --queue-kind main --tail 0 --report '$remote_dir/runtime-status.json' >/dev/null || printf '{}\n' > '$remote_dir/runtime-status.json'; else printf '{}\n' > '$remote_dir/runtime-status.json'; fi"
+
+          require_flag=""
+          if [[ "$REQUIRE_COMPLETE_WINDOW" == "true" ]]; then
+            require_flag="--require-window"
+          fi
+          set +e
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "cd '$remote_dir' && NUTSNEWS_WORKER_UPLIFT_SOAK_DB_URL='$db_url' python3 scripts/backend_worker_uplift_soak_report.py --manifest docs/worker-uplift-shadow-soak-capacity-report.json --smoke-report '$remote_dir/last-smoke.json' --runtime-status-report '$remote_dir/runtime-status.json' --min-window-hours '$MIN_WINDOW_HOURS' --enforce $require_flag --output '$remote_dir/backend-worker-uplift-soak-report.json'"
+          rc="$?"
+          set -e
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/backend-worker-uplift-soak-report.json" \
+            "$RUNNER_TEMP/backend-worker-uplift-soak-report.json" || true
+          exit "$rc"
+
+      - name: Summarize safe metadata
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Backend worker-uplift soak/capacity report"
+            echo
+            echo "- Mode: \`${{ inputs.mode }}\`"
+            echo "- Complete-window enforcement: \`${{ inputs.require_complete_window }}\`"
+            echo "- Minimum window hours: \`${{ inputs.min_window_hours }}\`"
+            echo "- Report artifact contains safe metadata only."
+            echo "- Database URLs, passwords, tokens, article payloads, prompts, and model outputs are not printed."
+            echo "- This report cannot authorize cutover or production publication visibility."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload worker-uplift soak/capacity report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-worker-uplift-soak-report
+          path: ${{ runner.temp }}/backend-worker-uplift-soak-report.json
+          if-no-files-found: warn

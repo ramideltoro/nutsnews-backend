@@ -365,6 +365,8 @@ class BackendSupabaseStandbyReconcileTests(unittest.TestCase):
         query_results = [
             (COLUMN_METADATA, None),
             ("12", None),
+            ("[]", None),
+            ("[]", None),
             (json.dumps({"last_value": 12, "is_called": True, "increment_by": 1}), None),
             ("12", None),
             ("12", None),
@@ -389,6 +391,7 @@ class BackendSupabaseStandbyReconcileTests(unittest.TestCase):
         self.assertEqual("applied", result["status"])
         self.assertEqual(1, result["table_count"])
         self.assertEqual(1, result["sequence_count"])
+        self.assertEqual("not_required", result["schema_repair"]["status"])
         self.assertEqual(12, result["tables"][0]["rows_seen"])
         self.assertEqual(3, result["tables"][0]["batches"])
         self.assertTrue(result["tables"][0]["mirror_delete_absent_target_rows"])
@@ -411,6 +414,8 @@ class BackendSupabaseStandbyReconcileTests(unittest.TestCase):
         query_results = [
             (COLUMN_METADATA, None),
             ("12", None),
+            ("[]", None),
+            ("[]", None),
             (json.dumps({"last_value": 12, "is_called": True, "increment_by": 1}), None),
             ("12", None),
             ("12", None),
@@ -437,6 +442,54 @@ class BackendSupabaseStandbyReconcileTests(unittest.TestCase):
         self.assertIn("delete from \"public\".\"worker_runs\" as t using", scripts[0])
         self.assertIn('where t."id" is not distinct from s."id"', scripts[0])
         self.assertIn('not (t."updated_at" is not distinct from s."updated_at")', scripts[0])
+
+    def test_apply_backfill_repairs_check_constraints_without_reporting_definitions(self) -> None:
+        source_constraints = json.dumps(
+            [
+                {
+                    "schema": "public",
+                    "table": "worker_runs",
+                    "constraint": "worker_runs_updated_at_not_null",
+                    "type": "c",
+                    "definition": "CHECK ((updated_at IS NOT NULL))",
+                    "definition_md5": "source-definition",
+                }
+            ]
+        )
+        query_results = [
+            (COLUMN_METADATA, None),
+            ("12", None),
+            (source_constraints, None),
+            ("[]", None),
+            (json.dumps({"last_value": 12, "is_called": True, "increment_by": 1}), None),
+            ("12", None),
+            ("12", None),
+            ("13", None),
+        ]
+        scripts: list[str] = []
+
+        def capture_script(_db_url: str, script_path: Path) -> None:
+            scripts.append(script_path.read_text(encoding="utf-8"))
+            return None
+
+        with mock.patch.object(reconcile, "query_value", side_effect=query_results):
+            with mock.patch.object(reconcile, "run_psql_to_file", return_value=None):
+                with mock.patch.object(reconcile, "run_psql_script", side_effect=capture_script):
+                    result = reconcile.apply_backfill(
+                        manifest(),
+                        "postgresql://source:pw@127.0.0.1/postgres",
+                        "postgresql://target:pw@127.0.0.1/postgres",
+                        batch_size=5,
+                    )
+
+        self.assertEqual("applied", result["schema_repair"]["status"])
+        self.assertEqual(1, result["schema_repair"]["missing_in_target_count"])
+        self.assertEqual(1, result["schema_repair"]["check_constraints_synced"])
+        self.assertFalse(result["schema_repair"]["definition_values_printed"])
+        self.assertEqual(2, len(scripts))
+        self.assertIn("add constraint \"worker_runs_updated_at_not_null\"", scripts[1])
+        self.assertIn("validate constraint \"worker_runs_updated_at_not_null\"", scripts[1])
+        self.assertNotIn("CHECK", json.dumps(result))
 
 
 if __name__ == "__main__":

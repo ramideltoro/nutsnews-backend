@@ -505,6 +505,139 @@ def migration_contract_diff_summary(source_contract: str, target_contract: str) 
         }
 
 
+def check_constraints_sql(table_names: list[str]) -> str:
+    table_literals = ", ".join(sql_literal(parse_relation(table).name) for table in table_names)
+    return f"""
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'schema', n.nspname,
+      'table', c.relname,
+      'constraint', con.conname,
+      'type', con.contype,
+      'definition', pg_get_constraintdef(con.oid),
+      'definition_md5', md5(pg_get_constraintdef(con.oid))
+    ) order by n.nspname, c.relname, con.conname), '[]'::jsonb)::text
+    from pg_constraint con
+    join pg_class c on c.oid = con.conrelid
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public'
+      and con.contype = 'c'
+      and c.relname in ({table_literals})
+    """
+
+
+def check_constraint_key(item: dict[str, Any]) -> str:
+    schema = item.get("schema")
+    table = item.get("table")
+    constraint = item.get("constraint")
+    if not isinstance(schema, str) or not isinstance(table, str) or not isinstance(constraint, str):
+        raise ReconcileError("invalid_check_constraint_metadata")
+    if not IDENTIFIER_RE.fullmatch(schema) or not IDENTIFIER_RE.fullmatch(table) or not IDENTIFIER_RE.fullmatch(constraint):
+        raise ReconcileError("invalid_check_constraint_metadata")
+    return f"{schema}.{table}.{constraint}"
+
+
+def check_constraints_by_key(metadata_text: str) -> dict[str, dict[str, Any]]:
+    try:
+        metadata = json.loads(metadata_text)
+    except json.JSONDecodeError as exc:
+        raise ReconcileError("invalid_check_constraint_metadata") from exc
+    if not isinstance(metadata, list):
+        raise ReconcileError("invalid_check_constraint_metadata")
+    keyed: dict[str, dict[str, Any]] = {}
+    for item in metadata:
+        if not isinstance(item, dict):
+            raise ReconcileError("invalid_check_constraint_metadata")
+        if item.get("type") != "c":
+            raise ReconcileError("invalid_check_constraint_metadata")
+        definition = item.get("definition")
+        definition_md5 = item.get("definition_md5")
+        if not isinstance(definition, str) or not isinstance(definition_md5, str):
+            raise ReconcileError("invalid_check_constraint_metadata")
+        keyed[check_constraint_key(item)] = item
+    return keyed
+
+
+def schema_constraint_repair_script(
+    source_constraints: dict[str, dict[str, Any]],
+    target_constraints: dict[str, dict[str, Any]],
+) -> tuple[str, dict[str, Any]]:
+    statements = ["begin;"]
+    missing_in_target = 0
+    different = 0
+    extra_in_target = 0
+
+    for key in sorted(set(source_constraints) - set(target_constraints)):
+        item = source_constraints[key]
+        relation = Relation(schema=str(item["schema"]), name=str(item["table"]))
+        constraint = quote_ident(str(item["constraint"]))
+        definition = str(item["definition"])
+        statements.append(f"alter table {relation.sql} add constraint {constraint} {definition} not valid;")
+        statements.append(f"alter table {relation.sql} validate constraint {constraint};")
+        missing_in_target += 1
+
+    for key in sorted(set(source_constraints) & set(target_constraints)):
+        source = source_constraints[key]
+        target = target_constraints[key]
+        if source.get("definition_md5") == target.get("definition_md5"):
+            continue
+        relation = Relation(schema=str(source["schema"]), name=str(source["table"]))
+        constraint = quote_ident(str(source["constraint"]))
+        definition = str(source["definition"])
+        statements.append(f"alter table {relation.sql} drop constraint {constraint};")
+        statements.append(f"alter table {relation.sql} add constraint {constraint} {definition} not valid;")
+        statements.append(f"alter table {relation.sql} validate constraint {constraint};")
+        different += 1
+
+    for key in sorted(set(target_constraints) - set(source_constraints)):
+        item = target_constraints[key]
+        relation = Relation(schema=str(item["schema"]), name=str(item["table"]))
+        constraint = quote_ident(str(item["constraint"]))
+        statements.append(f"alter table {relation.sql} drop constraint {constraint};")
+        extra_in_target += 1
+
+    statements.append("commit;")
+    statements.append("")
+    return "\n".join(statements), {
+        "status": "not_required" if len(statements) == 3 else "applied",
+        "missing_in_target_count": missing_in_target,
+        "different_count": different,
+        "extra_in_target_count": extra_in_target,
+        "check_constraints_synced": missing_in_target + different + extra_in_target,
+        "definition_values_printed": False,
+        "safe_metadata_only": True,
+    }
+
+
+def apply_schema_constraint_repair(
+    manifest: dict[str, Any],
+    source_db_url: str,
+    target_db_url: str,
+    *,
+    workdir: Path,
+) -> dict[str, Any]:
+    table_names = [table["name"] for table in manifest.get("tables", [])]
+    constraints_query = check_constraints_sql(table_names)
+    source_constraints_text, source_constraints_error = query_value(source_db_url, constraints_query)
+    target_constraints_text, target_constraints_error = query_value(target_db_url, constraints_query)
+    if source_constraints_error or target_constraints_error:
+        raise ReconcileError("check_constraint_metadata_unavailable")
+    if source_constraints_text is None or target_constraints_text is None:
+        raise ReconcileError("check_constraint_metadata_unavailable")
+
+    source_constraints = check_constraints_by_key(source_constraints_text)
+    target_constraints = check_constraints_by_key(target_constraints_text)
+    repair_sql, result = schema_constraint_repair_script(source_constraints, target_constraints)
+    if result["status"] == "not_required":
+        return result
+
+    script_path = workdir / "schema-check-constraints.sql"
+    script_path.write_text(repair_sql, encoding="utf-8")
+    repair_error = run_psql_script(target_db_url, script_path)
+    if repair_error:
+        raise ReconcileError("check_constraint_repair_failed")
+    return result
+
+
 def sequence_state_sql(sequence: Relation) -> str:
     return f"""
     select jsonb_build_object(
@@ -902,6 +1035,7 @@ def apply_backfill(manifest: dict[str, Any], source_db_url: str, target_db_url: 
             for name in ordered_names
             if name in table_by_name
         ]
+        schema_repair = apply_schema_constraint_repair(manifest, source_db_url, target_db_url, workdir=workdir)
         sequence_results = [
             apply_sequence_safety(source_db_url, target_db_url, sequence)
             for sequence in manifest.get("sequences", [])
@@ -910,6 +1044,7 @@ def apply_backfill(manifest: dict[str, Any], source_db_url: str, target_db_url: 
         "status": "applied",
         "table_count": len(table_results),
         "sequence_count": len(sequence_results),
+        "schema_repair": schema_repair,
         "tables": table_results,
         "sequences": sequence_results,
         "safe_metadata_only": True,

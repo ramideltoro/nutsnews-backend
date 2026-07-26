@@ -139,6 +139,7 @@ def main() -> int:
     require(backfill.get("confirmation") == "backfill-existing-production-supabase-from-backend-primary", "backfill confirmation is incorrect", errors)
     require(backfill.get("deletes_target_extra_rows") is True, "backfill must delete target rows absent from the backend source snapshot", errors)
     require(backfill.get("mirrors_primary_key_values") is True, "backfill must mirror primary key values for checksum parity", errors)
+    require(backfill.get("repairs_check_constraints_from_source") is True, "backfill must repair check constraints from the backend source", errors)
     require(set(backfill.get("table_order", [])) == REQUIRED_TABLES, "backfill table order must cover each table exactly once", errors)
     require(backfill.get("table_order", []).index("public.articles") < backfill.get("table_order", []).index("public.article_summaries"), "articles must backfill before article_summaries", errors)
     require(backfill.get("table_order", []).index("public.staging_fixture_runs") < backfill.get("table_order", []).index("public.staging_fixture_users"), "fixture runs must backfill before fixture users", errors)
@@ -198,6 +199,7 @@ def main() -> int:
     for token in (
         "NUTSNEWS_STANDBY_RECONCILE_CONFIRMATION",
         "primary_key_values_mirrored",
+        "check_constraint_repair_failed",
         "schema_diff",
         "safe_metadata_only",
         "app_worker_writes_to_supabase_before_failover",

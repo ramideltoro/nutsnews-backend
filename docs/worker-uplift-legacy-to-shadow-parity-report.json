@@ -113,5 +113,22 @@
     "Report artifacts must not include article body, prompt text, model output, credentials, database URLs, or bearer tokens.",
     "Comparison evidence cannot authorize cutover.",
     "Legacy remains the production ingestion owner until a later cutover issue changes ownership."
+  ],
+  "intentional_differences": [
+    {
+      "id": "early_stage_state_uses_runtime_smoke_window",
+      "requirement_refs": [
+        "#68",
+        "#120"
+      ],
+      "reason": "Fetcher, canonicalizer, and enrichment workers keep implementation-local shadow state during this window; the protected scheduler smoke fixture measures their live fetch/article hits, health, queue consumers, and downstream stage outputs instead of requiring durable primary-shadow rows for those early stages."
+    },
+    {
+      "id": "legacy_remains_active_ingestion_owner",
+      "requirement_refs": [
+        "#146"
+      ],
+      "reason": "The report includes active-ingestion-owner evidence but keeps production ownership unchanged; parity evidence cannot authorize cutover."
+    }
   ]
 }

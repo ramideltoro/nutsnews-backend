@@ -177,15 +177,27 @@ def smoke_summary(smoke_report: dict[str, Any] | None) -> dict[str, Any]:
                 if isinstance(metrics, dict):
                     consumers[stage] = int(metrics.get("consumers") or 0)
     idempotency = smoke.get("idempotency", {})
+    db_checks = smoke.get("db_checks", {})
+    health = smoke.get("health", {})
+    health_statuses: dict[str, str] = {}
+    if isinstance(health, dict):
+        for service, value in health.items():
+            if isinstance(value, dict):
+                health_statuses[service] = str(value.get("status", "unknown"))
+    fixture_hits = smoke.get("fixture_hits", {})
     return {
         "status": smoke_report.get("status"),
         "generated_at_utc": smoke_report.get("generated_at_utc"),
         "contract": smoke.get("contract"),
+        "trigger": smoke.get("trigger"),
         "fixture_id": smoke.get("fixture", {}).get("fixture_id") if isinstance(smoke.get("fixture"), dict) else None,
         "missing_consumers": smoke.get("missing_consumers", []),
         "dlq_growth": smoke.get("dlq_growth", {}),
         "legacy_ingestion_endpoints_invoked": smoke.get("legacy_ingestion_endpoints_invoked"),
         "queue_consumers_after": consumers,
+        "fixture_hits": fixture_hits if isinstance(fixture_hits, dict) else {},
+        "db_checks": db_checks if isinstance(db_checks, dict) else {},
+        "health_statuses": health_statuses,
         "versions": smoke.get("versions", {}),
         "idempotency": {
             "expected_single_final_shadow_result": idempotency.get("expected_single_final_shadow_result") if isinstance(idempotency, dict) else None,
@@ -197,15 +209,43 @@ def smoke_summary(smoke_report: dict[str, Any] | None) -> dict[str, Any]:
 def check_status(check_id: str, values: dict[str, str], smoke: dict[str, Any]) -> tuple[str, list[str]]:
     reasons: list[str] = []
     if check_id == "legacy_baseline_requirements":
-        for key in ("fetch_versions", "feed_health_projections", "article_identities", "enrichment_records"):
-            if parse_int(values, key) < 1:
-                reasons.append(f"{key}_missing")
+        fixture_hits = smoke.get("fixture_hits", {})
+        if smoke.get("status") != "pass":
+            reasons.append("latest_smoke_not_pass")
+        if smoke.get("contract") != "scheduler-feed-to-final-shadow-v1":
+            reasons.append("unexpected_smoke_contract")
+        if smoke.get("trigger") != "scheduler-compatible-feed-fetch-request":
+            reasons.append("unexpected_smoke_trigger")
+        if not isinstance(fixture_hits, dict) or int(fixture_hits.get("feed", 0) or 0) < 1:
+            reasons.append("feed_fixture_hit_missing")
+        if not isinstance(fixture_hits, dict) or int(fixture_hits.get("article", 0) or 0) < 1:
+            reasons.append("article_fixture_hit_missing")
     elif check_id == "stage_flow_counts":
-        for stage in STAGES:
-            if parse_int(values, f"{stage}_processed_inbox") < 1:
-                reasons.append(f"{stage}_processed_inbox_missing")
-            if parse_int(values, f"{stage}_failed_inbox") > 0:
-                reasons.append(f"{stage}_failed_inbox_nonzero")
+        consumers = smoke.get("queue_consumers_after", {})
+        health = smoke.get("health_statuses", {})
+        db_checks = smoke.get("db_checks", {})
+        if smoke.get("status") != "pass":
+            reasons.append("latest_smoke_not_pass")
+        if not isinstance(consumers, dict) or any(int(consumers.get(stage, 0) or 0) < 1 for stage in STAGES):
+            reasons.append("not_all_stage_consumers_active")
+        if not isinstance(health, dict) or any(health.get(stage) != "healthy" for stage in ("fetcher", "canonicalizer", "enrichment", *STAGES[3:])):
+            reasons.append("not_all_stage_health_checks_healthy")
+        if not isinstance(db_checks, dict):
+            reasons.append("smoke_db_checks_missing")
+        else:
+            expected = {
+                ("approval", "processed_inbox"): "1",
+                ("translation", "processed_inbox"): "1",
+                ("translation", "distinct_languages"): str(len(TARGET_LANGUAGES)),
+                ("persistence", "final_shadow_aggregate"): "1",
+                ("publication", "publication_readiness"): "1",
+                ("publication", "publication_shadow_comparison"): "1",
+                ("api_audit", "failed_api_requests"): "0",
+            }
+            for (section, key), expected_value in expected.items():
+                section_values = db_checks.get(section, {})
+                if not isinstance(section_values, dict) or str(section_values.get(key)) != expected_value:
+                    reasons.append(f"smoke_{section}_{key}_unexpected")
     elif check_id == "translation_policy":
         if parse_int(values, "approval_approved") < 1:
             reasons.append("approval_approved_missing")

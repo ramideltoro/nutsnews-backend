@@ -40,6 +40,7 @@ The workflow renders `/etc/nutsnews-supabase-sync-relay/relay.env` as
 - Timer: `nutsnews-supabase-sync-relay.timer`
 - Default interval: 30 seconds
 - Last safe report: `/var/lib/nutsnews/supabase-sync-relay/last-run.json`
+  with mode `0644`
 
 Useful backend-host checks:
 

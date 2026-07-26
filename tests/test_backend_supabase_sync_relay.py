@@ -89,6 +89,28 @@ class BackendSupabaseSyncRelayTests(unittest.TestCase):
         self.assertFalse(report["app_worker_supabase_write_credentials_injected"])
         self.assertNotIn("postgresql://", json.dumps(report).lower())
 
+    def test_output_report_is_world_readable_safe_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            contract_path = Path(tmpdir) / "relay.json"
+            output_path = Path(tmpdir) / "report.json"
+            contract_path.write_text(json.dumps(contract()), encoding="utf-8")
+            with mock.patch.dict("os.environ", {}, clear=True):
+                with redirect_stdout(StringIO()):
+                    exit_code = relay.main_args(
+                        [
+                            "--contract",
+                            str(contract_path),
+                            "--output",
+                            str(output_path),
+                            "--offline",
+                            "--enforce",
+                        ]
+                    )
+                mode = output_path.stat().st_mode & 0o777
+
+        self.assertEqual(0, exit_code)
+        self.assertEqual(0o644, mode)
+
     def test_dry_run_passes_when_schema_and_identity_pass(self) -> None:
         side_effect = [
             (SCHEMA_JSON, None),

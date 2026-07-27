@@ -227,7 +227,7 @@ def main() -> int:
     if not isinstance(canary, dict) or canary.get("routing_key") != "worker.uplift.canary.v4":
         errors.append("RabbitMQ topology must define the isolated worker-uplift canary route")
     canary_queue = canary.get("queue", {}) if isinstance(canary, dict) else {}
-    if not isinstance(canary_queue, dict) or canary_queue.get("name") != "worker.uplift.canary.runtime.v4":
+    if not isinstance(canary_queue, dict) or canary_queue.get("name") != "worker.uplift.canary.queue.v4":
         errors.append("RabbitMQ topology must define the isolated worker-uplift canary queue")
     if canary_queue.get("runtime_declared") is not True or canary_queue.get("exclusive") is not True or canary_queue.get("auto_delete") is not True:
         errors.append("RabbitMQ canary queue must be runtime-declared, exclusive, and auto-delete")

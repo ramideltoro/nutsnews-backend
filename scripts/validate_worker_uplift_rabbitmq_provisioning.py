@@ -224,11 +224,13 @@ def main() -> int:
     if len(topology.get("exchanges", [])) != 4:
         errors.append("RabbitMQ topology must define main, retry, DLQ, and private canary exchanges")
     canary = topology.get("canary", {})
-    if not isinstance(canary, dict) or canary.get("routing_key") != "worker.uplift.canary.v2":
+    if not isinstance(canary, dict) or canary.get("routing_key") != "worker.uplift.canary.v3":
         errors.append("RabbitMQ topology must define the isolated worker-uplift canary route")
     canary_queue = canary.get("queue", {}) if isinstance(canary, dict) else {}
-    if not isinstance(canary_queue, dict) or canary_queue.get("name") != "worker.uplift.canary.v2":
+    if not isinstance(canary_queue, dict) or canary_queue.get("name") != "worker.uplift.canary.v3":
         errors.append("RabbitMQ topology must define the isolated worker-uplift canary queue")
+    if canary_queue.get("durable") is not False:
+        errors.append("RabbitMQ canary queue must be transient; durable persistence is covered by the separate durable restart probe")
     if canary_queue.get("arguments", {}).get("x-max-length") != 10:
         errors.append("RabbitMQ canary queue must stay tightly bounded")
     if len(topology.get("routes", [])) != 7:

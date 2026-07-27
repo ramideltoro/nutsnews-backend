@@ -59,7 +59,7 @@
     },
     {
       "id": "canary",
-      "name": "worker.uplift.canary.v2",
+      "name": "worker.uplift.canary.v3",
       "type": "direct",
       "durable": true,
       "arguments": {}
@@ -67,10 +67,10 @@
   ],
   "canary": {
     "exchange_id": "canary",
-    "routing_key": "worker.uplift.canary.v2",
+    "routing_key": "worker.uplift.canary.v3",
     "queue": {
-      "name": "worker.uplift.canary.v2",
-      "durable": true,
+      "name": "worker.uplift.canary.v3",
+      "durable": false,
       "auto_delete": false,
       "arguments": {
         "x-queue-type": "classic",
@@ -359,8 +359,8 @@
       "tags": ["monitoring"],
       "permissions": {
         "configure": "^$",
-        "write": "^worker\\.uplift\\.canary\\.v2$",
-        "read": "^worker\\.uplift\\.canary\\.v2$"
+        "write": "^worker\\.uplift\\.canary\\.v3$",
+        "read": "^worker\\.uplift\\.canary\\.v3$"
       }
     },
     {

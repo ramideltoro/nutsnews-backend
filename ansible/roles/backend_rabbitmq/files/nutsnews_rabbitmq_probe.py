@@ -326,7 +326,7 @@ def amqp_canary_roundtrip(
                     exchange=route["exchange"],
                     routing_key=f"{route['routing_key']}.unroutable",
                     body=json.dumps(payload, sort_keys=True).encode("utf-8"),
-                    properties=pika.BasicProperties(content_type="application/json", delivery_mode=2, message_id=message_id),
+                    properties=pika.BasicProperties(content_type="application/json", delivery_mode=1, message_id=message_id),
                     mandatory=True,
                 )
             except (pika.exceptions.UnroutableError, pika.exceptions.NackError):
@@ -351,7 +351,7 @@ def amqp_canary_roundtrip(
                     exchange=route["exchange"],
                     routing_key=route["routing_key"],
                     body=body if index == 0 else json.dumps(canary_payload(current_id), sort_keys=True).encode("utf-8"),
-                    properties=pika.BasicProperties(content_type="application/json", delivery_mode=2, message_id=current_id),
+                    properties=pika.BasicProperties(content_type="application/json", delivery_mode=1, message_id=current_id),
                     mandatory=True,
                 )
             except (pika.exceptions.UnroutableError, pika.exceptions.NackError) as exc:

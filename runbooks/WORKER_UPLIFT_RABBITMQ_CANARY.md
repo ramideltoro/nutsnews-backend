@@ -8,8 +8,9 @@ The private canary proves the loopback AMQP path before worker-uplift traffic
 depends on it. It uses the existing `RABBITMQ_MONITORING_USERNAME` identity as
 a least-privilege canary principal. That identity can only write the dedicated
 `worker.uplift.canary.exchange.v4` exchange and dedicated
-`worker.uplift.canary.queue.v4` runtime queue. It can configure and read only
-that queue and cannot publish to or consume from production worker queues.
+`worker.uplift.canary.queue.v4` runtime queue. It can configure only that queue,
+can read only that exchange and queue, and cannot publish to or consume from
+production worker queues.
 
 The canary does not use Grafana Cloud Synthetic Monitoring for private AMQP and
 does not expose a public RabbitMQ listener.

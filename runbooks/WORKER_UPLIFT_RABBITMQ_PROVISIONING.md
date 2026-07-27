@@ -183,9 +183,9 @@ queue: worker.uplift.canary.queue.v4 (runtime-declared exclusive auto-delete)
 ```
 
 It cannot configure production resources and cannot write to or consume from
-production worker queues. The queue-scoped write permission is limited to the
-runtime canary queue because RabbitMQ checks that permission during private
-canary route setup.
+production worker queues. The exchange-scoped read permission and queue-scoped
+write permission are limited to the private canary resources because RabbitMQ
+checks those permissions during private canary route setup.
 
 ## Verification
 

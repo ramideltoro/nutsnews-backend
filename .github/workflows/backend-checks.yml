@@ -188,6 +188,10 @@ jobs:
         shell: bash
         run: python3 scripts/backend_supabase_standby_reconcile.py --offline --enforce
 
+      - name: Run backend-to-Supabase standby reconciliation report tests
+        shell: bash
+        run: python3 -m unittest tests.test_backend_supabase_standby_reconciliation_report
+
       - name: Run backend-to-Supabase standby reconciliation tests
         shell: bash
         run: python3 -m unittest tests.test_backend_supabase_standby_reconcile

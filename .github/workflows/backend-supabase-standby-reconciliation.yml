@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Report safe parity metadata or apply the protected backend-to-Supabase backfill.
+        description: Aggregate safe standby gate metadata or apply the protected backend-to-Supabase backfill.
         required: true
         default: report
         type: choice
@@ -15,6 +15,17 @@ on:
         description: Type report-existing-production-supabase-standby for report mode, or backfill-existing-production-supabase-from-backend-primary for apply mode.
         required: true
         type: string
+      reconciliation_attempt_id:
+        description: Optional stable attempt identifier. Defaults to this workflow run.
+        required: false
+        type: string
+      enforce:
+        description: Return non-zero when the aggregate report is FAIL.
+        required: true
+        default: false
+        type: boolean
+  schedule:
+    - cron: "37 */6 * * *"
 
 permissions:
   contents: read
@@ -36,12 +47,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Validate dispatch inputs
+      - name: Resolve reconciliation request
         shell: bash
         env:
           GITHUB_REF_NAME_SAFE: ${{ github.ref }}
-          MODE: ${{ inputs.mode }}
-          CONFIRMATION: ${{ inputs.confirmation }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_CONFIRMATION: ${{ inputs.confirmation }}
+          INPUT_ATTEMPT_ID: ${{ inputs.reconciliation_attempt_id }}
+          INPUT_ENFORCE: ${{ inputs.enforce }}
         run: |
           set -euo pipefail
 
@@ -50,15 +64,34 @@ jobs:
             exit 1
           fi
 
-          case "$MODE" in
+          mode="${INPUT_MODE:-report}"
+          confirmation="${INPUT_CONFIRMATION:-}"
+          enforce="${INPUT_ENFORCE:-false}"
+          attempt_id="${INPUT_ATTEMPT_ID:-reconcile-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}}"
+
+          if [[ "$EVENT_NAME" == "schedule" ]]; then
+            mode="report"
+            confirmation="scheduled-existing-production-supabase-standby-reconciliation"
+            enforce="false"
+            attempt_id="scheduled-reconcile-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          fi
+
+          case "$mode" in
             report)
-              if [[ "$CONFIRMATION" != "report-existing-production-supabase-standby" ]]; then
-                echo "Report mode requires confirmation report-existing-production-supabase-standby." >&2
+              case "$confirmation" in
+                report-existing-production-supabase-standby|scheduled-existing-production-supabase-standby-reconciliation) ;;
+                *)
+                  echo "Report mode requires confirmation report-existing-production-supabase-standby." >&2
+                  exit 1
+                  ;;
+              esac
+              if [[ "$confirmation" == "scheduled-existing-production-supabase-standby-reconciliation" && "$EVENT_NAME" != "schedule" ]]; then
+                echo "Scheduled report confirmation is only valid for schedule events." >&2
                 exit 1
               fi
               ;;
             apply-backfill)
-              if [[ "$CONFIRMATION" != "backfill-existing-production-supabase-from-backend-primary" ]]; then
+              if [[ "$confirmation" != "backfill-existing-production-supabase-from-backend-primary" ]]; then
                 echo "Apply mode requires confirmation backfill-existing-production-supabase-from-backend-primary." >&2
                 exit 1
               fi
@@ -69,11 +102,33 @@ jobs:
               ;;
           esac
 
+          case "$enforce" in
+            true|false) ;;
+            *) echo "Unsupported enforce value." >&2; exit 1 ;;
+          esac
+
+          if ! [[ "$attempt_id" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then
+            echo "Invalid reconciliation_attempt_id." >&2
+            exit 1
+          fi
+
+          {
+            echo "RECONCILIATION_MODE=$mode"
+            echo "RECONCILIATION_CONFIRMATION=$confirmation"
+            echo "RECONCILIATION_ATTEMPT_ID=$attempt_id"
+            echo "RECONCILIATION_ENFORCE=$enforce"
+          } >> "$GITHUB_ENV"
+
       - name: Validate workflow contract
         shell: bash
-        run: python3 scripts/validate_backend_supabase_standby_reconciliation.py
+        run: |
+          set -euo pipefail
 
-      - name: Validate protected material
+          python3 scripts/validate_backend_supabase_standby_reconciliation.py
+          python3 -m unittest tests.test_backend_supabase_standby_reconciliation_report
+
+      - name: Validate apply-backfill protected material
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'apply-backfill'
         shell: bash
         env:
           NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
@@ -112,11 +167,62 @@ jobs:
           ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
           ssh-keygen -F "$NUTSNEWS_BACKEND_HOST" -f "$HOME/.ssh/known_hosts" > /dev/null
 
-      - name: Run reconciliation from backend host
+      - name: Run scheduled or manual safe reconciliation report
+        if: github.event_name == 'schedule' || inputs.mode == 'report'
         shell: bash
         env:
-          MODE: ${{ inputs.mode }}
-          CONFIRMATION: ${{ inputs.confirmation }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+
+          python3 scripts/backend_health_report.py \
+            --ssh-user "${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}" \
+            --ssh-key "$HOME/.ssh/nutsnews_backend" \
+            --known-hosts "$HOME/.ssh/known_hosts" \
+            --output "$RUNNER_TEMP/backend-health-report.json" \
+            > "$RUNNER_TEMP/backend-health-report.stdout"
+
+          python3 scripts/backend_supabase_standby_parity_gate.py \
+            --health-report "$RUNNER_TEMP/backend-health-report.json" \
+            --failover-attempt-id "$RECONCILIATION_ATTEMPT_ID" \
+            --output "$RUNNER_TEMP/backend-supabase-standby-parity-gate.json" \
+            > "$RUNNER_TEMP/backend-supabase-standby-parity-gate.stdout"
+
+          python3 scripts/backend_supabase_standby_schema_gate.py \
+            --health-report "$RUNNER_TEMP/backend-health-report.json" \
+            --candidate-application-revision "$GITHUB_SHA" \
+            --expected-application-revision "$GITHUB_SHA" \
+            --repository-revision "$GITHUB_SHA" \
+            --failover-attempt-id "$RECONCILIATION_ATTEMPT_ID" \
+            --output "$RUNNER_TEMP/backend-supabase-standby-schema-gate.json" \
+            > "$RUNNER_TEMP/backend-supabase-standby-schema-gate.stdout"
+
+          python3 scripts/backend_supabase_standby_sequence_gate.py \
+            --health-report "$RUNNER_TEMP/backend-health-report.json" \
+            --repository-revision "$GITHUB_SHA" \
+            --failover-attempt-id "$RECONCILIATION_ATTEMPT_ID" \
+            --output "$RUNNER_TEMP/backend-supabase-standby-sequence-gate.json" \
+            > "$RUNNER_TEMP/backend-supabase-standby-sequence-gate.stdout"
+
+          aggregate_args=(
+            --parity-gate "$RUNNER_TEMP/backend-supabase-standby-parity-gate.json"
+            --schema-gate "$RUNNER_TEMP/backend-supabase-standby-schema-gate.json"
+            --sequence-gate "$RUNNER_TEMP/backend-supabase-standby-sequence-gate.json"
+            --reconciliation-attempt-id "$RECONCILIATION_ATTEMPT_ID"
+            --repository-revision "$GITHUB_SHA"
+            --output "$RUNNER_TEMP/backend-supabase-standby-reconciliation.json"
+            --summary "$GITHUB_STEP_SUMMARY"
+          )
+          if [[ "$RECONCILIATION_ENFORCE" == "true" ]]; then
+            aggregate_args+=(--enforce)
+          fi
+
+          python3 scripts/backend_supabase_standby_reconciliation_report.py "${aggregate_args[@]}"
+
+      - name: Run protected backfill from backend host
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'apply-backfill'
+        shell: bash
+        env:
           NUTSNEWS_PRODUCTION_SUPABASE_DB_URL: ${{ secrets.NUTSNEWS_PRODUCTION_SUPABASE_DB_URL }}
           NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE || vars.NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE || 'nutsnews_primary_shadow' }}
@@ -201,10 +307,10 @@ jobs:
           cd '$remote_dir'
           export NUTSNEWS_BACKEND_PRIMARY_DB_URL=\"\$(cat source-db-url)\"
           export NUTSNEWS_PRODUCTION_SUPABASE_DB_URL=\"\$(cat target-db-url)\"
-          export NUTSNEWS_STANDBY_RECONCILE_CONFIRMATION='$CONFIRMATION'
+          export NUTSNEWS_STANDBY_RECONCILE_CONFIRMATION='$RECONCILIATION_CONFIRMATION'
           python3 scripts/backend_supabase_standby_reconcile.py \
             --manifest docs/backend-supabase-standby-reconciliation.json \
-            --mode '$MODE' \
+            --mode '$RECONCILIATION_MODE' \
             --enforce \
             --output backend-supabase-standby-reconciliation.json"
           rc=$?
@@ -224,13 +330,25 @@ jobs:
           {
             echo "## Backend to Supabase standby reconciliation"
             echo
-            echo "- Mode: \`${{ inputs.mode }}\`"
+            echo "- Mode: \`${RECONCILIATION_MODE:-unknown}\`"
             echo "- Source: backend PostgreSQL primary."
             echo "- Target: existing production Supabase standby."
             echo "- Report policy: safe metadata only."
             echo "- App and worker Supabase writes remain disabled until a later approved failover workflow."
             echo "- Database URLs, passwords, tokens, service-role keys, PostgreSQL errors, and row data are not printed."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload reconciliation gate reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-supabase-standby-reconciliation-gates
+          path: |
+            ${{ runner.temp }}/backend-supabase-standby-parity-gate.json
+            ${{ runner.temp }}/backend-supabase-standby-schema-gate.json
+            ${{ runner.temp }}/backend-supabase-standby-sequence-gate.json
+            ${{ runner.temp }}/backend-health-report.json
+          if-no-files-found: ignore
 
       - name: Upload reconciliation report
         if: always()

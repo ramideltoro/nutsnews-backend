@@ -1,9 +1,11 @@
 {
   "contract_id": "backend-supabase-standby-reconciliation",
-  "version": 1,
-  "issue": "ramideltoro/nutsnews#498",
+  "version": 2,
+  "issue": "ramideltoro/nutsnews#501",
+  "bootstrap_issue": "ramideltoro/nutsnews#498",
   "epic": "ramideltoro/nutsnews#223",
-  "updated_at_utc": "2026-07-26",
+  "gate_epic": "ramideltoro/nutsnews#521",
+  "updated_at_utc": "2026-07-27",
   "source_manifest": {
     "repository": "ramideltoro/nutsnews",
     "path": "supabase/standby_manifest.json",
@@ -40,6 +42,12 @@
       "primary-writers-paused",
       "split-brain-absence-verified"
     ],
+    "scheduled_report_consumes_existing_gates": [
+      "ramideltoro/nutsnews#523",
+      "ramideltoro/nutsnews#524",
+      "ramideltoro/nutsnews#525"
+    ],
+    "scheduled_report_mutates_supabase": false,
     "forbidden_evidence": [
       "database URLs",
       "passwords",
@@ -52,6 +60,7 @@
   "manifest_schema_fingerprint": "9f8cffa694100f438abaddbf6e00db13ff969572e8c16fd4b8ee4afa5087088f",
   "required_checks": [
     "schema-fingerprint",
+    "required-object-list",
     "migration-contract-fingerprint",
     "table-row-count-parity",
     "table-row-checksum-parity",
@@ -112,17 +121,38 @@
   },
   "workflow": {
     "path": ".github/workflows/backend-supabase-standby-reconciliation.yml",
-    "trigger": "workflow_dispatch",
+    "triggers": ["workflow_dispatch", "schedule"],
+    "schedule_cron": "37 */6 * * *",
     "environment": "production-backend",
     "runs_on": "ubuntu-latest",
     "modes": ["report", "apply-backfill"],
     "report_confirmation": "report-existing-production-supabase-standby",
+    "scheduled_report_confirmation": "scheduled-existing-production-supabase-standby-reconciliation",
     "apply_confirmation": "backfill-existing-production-supabase-from-backend-primary",
     "artifact": "backend-supabase-standby-reconciliation",
+    "gate_artifact": "backend-supabase-standby-reconciliation-gates",
     "app_worker_failover_changes": false
+  },
+  "report": {
+    "mode": "safe_metadata_gate_aggregate",
+    "script": "scripts/backend_supabase_standby_reconciliation_report.py",
+    "consumed_gate_artifacts": [
+      "backend-supabase-standby-parity-gate",
+      "backend-supabase-standby-schema-gate",
+      "backend-supabase-standby-sequence-gate"
+    ],
+    "required_gate_issues": [
+      "ramideltoro/nutsnews#523",
+      "ramideltoro/nutsnews#524",
+      "ramideltoro/nutsnews#525"
+    ],
+    "mutates": false,
+    "safe_evidence_only": true
   },
   "validation": {
     "local_validator": "python3 scripts/validate_backend_supabase_standby_reconciliation.py",
+    "report_aggregator": "python3 scripts/backend_supabase_standby_reconciliation_report.py",
+    "report_unit_tests": "python3 -m unittest tests.test_backend_supabase_standby_reconciliation_report",
     "offline_validator": "python3 scripts/backend_supabase_standby_reconcile.py --offline --enforce",
     "unit_tests": "python3 -m unittest tests.test_backend_supabase_standby_reconcile"
   }

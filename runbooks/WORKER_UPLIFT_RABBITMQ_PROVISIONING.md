@@ -32,7 +32,7 @@ This provisions RabbitMQ as a persistent Docker Compose service on
 `backend.nutsnews.com` through the protected backend Ansible workflow. It also
 bootstraps the worker-uplift vhost, exchanges, durable classic queues, retry
 queues, DLQs, policies, route-scoped users, and permissions from source control.
-It also creates the isolated `worker.uplift.canary.v3` exchange and transient queue used
+It also creates the isolated `worker.uplift.canary.v4` exchange used
 by the private AMQP canary.
 It does not change the active legacy Cloudflare Worker code, schedules,
 bindings, secrets, or deployment.
@@ -177,11 +177,11 @@ The topology grants the monitoring identity access only to the private canary
 route:
 
 ```text
-exchange: worker.uplift.canary.v3
-queue: worker.uplift.canary.v3
+exchange: worker.uplift.canary.v4
+queue: worker.uplift.canary.runtime.v4 (runtime-declared exclusive auto-delete)
 ```
 
-It cannot configure resources and cannot publish to or consume from production
+It cannot configure production resources and cannot publish to or consume from production
 worker queues.
 
 ## Verification

@@ -439,10 +439,8 @@
         printf '{"changed":%s,"scope":"rabbitmq_data_mount","safe_metadata_only":true}\n' "$changed"
   register: backend_rabbitmq_container_data_tree_permissions
   changed_when: >-
-    {{
-      backend_rabbitmq_container_data_tree_permissions.rc == 0 and
-      (backend_rabbitmq_container_data_tree_permissions.stdout | from_json).changed | bool
-    }}
+    backend_rabbitmq_container_data_tree_permissions.rc == 0 and
+    (backend_rabbitmq_container_data_tree_permissions.stdout | from_json).changed | bool
   when:
     - backend_rabbitmq_runtime_manageable | bool
     - not ansible_check_mode
@@ -451,7 +449,9 @@
   ansible.builtin.command:
     argv: "{{ [backend_rabbitmq_topology_path, 'bootstrap', '--env', backend_rabbitmq_env_path, '--credentials-env', backend_rabbitmq_topology_env_path, '--definition', backend_rabbitmq_topology_definition_path] + (backend_rabbitmq_topology_rotate_passwords | bool | ternary(['--rotate-passwords'], [])) }}"
   register: backend_rabbitmq_topology_bootstrap
-  changed_when: (backend_rabbitmq_topology_bootstrap.stdout | from_json).changed | bool
+  changed_when: >-
+    backend_rabbitmq_topology_bootstrap.rc == 0 and
+    (backend_rabbitmq_topology_bootstrap.stdout | from_json).changed | bool
   when:
     - backend_rabbitmq_runtime_manageable | bool
     - backend_rabbitmq_topology_enabled | bool
@@ -527,10 +527,8 @@
   register: backend_rabbitmq_canary_repair
   failed_when: backend_rabbitmq_canary_repair.rc != 0
   changed_when: >-
-    {{
-      backend_rabbitmq_canary_repair.rc == 0 and
-      (backend_rabbitmq_canary_repair.stdout | from_json).changed | bool
-    }}
+    backend_rabbitmq_canary_repair.rc == 0 and
+    (backend_rabbitmq_canary_repair.stdout | from_json).changed | bool
   when:
     - backend_rabbitmq_runtime_manageable | bool
     - backend_rabbitmq_topology_enabled | bool

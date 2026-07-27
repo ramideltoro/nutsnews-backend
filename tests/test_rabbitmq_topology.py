@@ -78,8 +78,8 @@ class RabbitMQTopologyTests(unittest.TestCase):
         self.assertEqual(definition["source"]["contracts_commit"], "396d94dba76e3773ede50783463419501853b107")
         self.assertEqual(definition["queue_type"], "classic")
         self.assertEqual(len(definition["routes"]), 7)
-        self.assertEqual(len(queues), 36)
-        self.assertEqual(len(bindings), 36)
+        self.assertEqual(len(queues), 35)
+        self.assertEqual(len(bindings), 35)
         self.assertEqual(len(policies), 3)
 
         fetch_main = next(queue for queue in queues if queue["name"] == "nutsnews.worker.fetch.v1")
@@ -97,8 +97,13 @@ class RabbitMQTopologyTests(unittest.TestCase):
         fetch_dlq = next(queue for queue in queues if queue["name"] == "nutsnews.worker.fetch.v1.dlq")
         self.assertEqual(fetch_dlq["arguments"]["x-message-ttl"], 1209600000)
 
-        canary_queue = next(queue for queue in queues if queue["name"] == "worker.uplift.canary.v3")
-        self.assertEqual(canary_queue["kind"], "canary")
+        self.assertFalse(any(queue["kind"] == "canary" for queue in queues))
+        self.assertFalse(any(binding["queue"] == "worker.uplift.canary.runtime.v4" for binding in bindings))
+        canary_queue = definition["canary"]["queue"]
+        self.assertEqual(canary_queue["name"], "worker.uplift.canary.runtime.v4")
+        self.assertTrue(canary_queue["runtime_declared"])
+        self.assertTrue(canary_queue["exclusive"])
+        self.assertTrue(canary_queue["auto_delete"])
         self.assertFalse(canary_queue["durable"])
         self.assertEqual(canary_queue["arguments"]["x-max-length"], 10)
         self.assertEqual(canary_queue["arguments"]["x-overflow"], "reject-publish")
@@ -121,8 +126,11 @@ class RabbitMQTopologyTests(unittest.TestCase):
         self.assertFalse(topology.regex_allows(scheduler["permissions"]["read"], "nutsnews.worker.fetch.v1"))
 
         canary = next(user for user in users if user["id"] == "monitoring_canary")
-        self.assertTrue(topology.regex_allows(canary["permissions"]["write"], "worker.uplift.canary.v3"))
-        self.assertTrue(topology.regex_allows(canary["permissions"]["read"], "worker.uplift.canary.v3"))
+        self.assertTrue(topology.regex_allows(canary["permissions"]["configure"], "worker.uplift.canary.runtime.v4"))
+        self.assertFalse(topology.regex_allows(canary["permissions"]["configure"], "worker.uplift.canary.v4"))
+        self.assertTrue(topology.regex_allows(canary["permissions"]["write"], "worker.uplift.canary.v4"))
+        self.assertTrue(topology.regex_allows(canary["permissions"]["read"], "worker.uplift.canary.runtime.v4"))
+        self.assertFalse(topology.regex_allows(canary["permissions"]["configure"], "nutsnews.worker.fetch.v1"))
         self.assertFalse(topology.regex_allows(canary["permissions"]["write"], "nutsnews.worker.v1"))
         self.assertFalse(topology.regex_allows(canary["permissions"]["read"], "nutsnews.worker.fetch.v1"))
 
@@ -220,7 +228,7 @@ class RabbitMQTopologyTests(unittest.TestCase):
         self.assertEqual(report["skipped_queues"], [])
         self.assertEqual(len(report["skipped_consumers"]), len(definition["routes"]) * 3)
 
-    def test_repair_canary_only_ensures_canary_queue(self):
+    def test_repair_canary_only_ensures_runtime_canary_exchange(self):
         definition = load_definition()
         users = topology.user_records(definition, credential_env())
         client = FakeMutableClient()
@@ -235,16 +243,12 @@ class RabbitMQTopologyTests(unittest.TestCase):
         self.assertFalse(any("nutsnews.worker.fetch.v1" in path for _method, path, _payload in client.calls))
         report = json.loads(print_report.call_args.args[0])
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["scope"], "canary_queue_only")
-        self.assertEqual(report["operation"], "ensure_only")
+        self.assertEqual(report["scope"], "canary_runtime_route_only")
+        self.assertEqual(report["operation"], "ensure_exchange_runtime_queue")
         self.assertFalse(report["production_queues_touched"])
 
-        canary_puts = [
-            payload
-            for method, path, payload in client.calls
-            if method == "PUT" and path == "/api/queues/nutsnews-worker-uplift/worker.uplift.canary.v3"
-        ]
-        self.assertEqual(canary_puts, [{"durable": False, "auto_delete": False, "arguments": {"x-max-length": 10, "x-max-length-bytes": 1048576, "x-overflow": "reject-publish", "x-queue-type": "classic"}}])
+        queue_puts = [path for method, path, _payload in client.calls if method == "PUT" and "/api/queues/" in path]
+        self.assertEqual(queue_puts, [])
 
 
 if __name__ == "__main__":

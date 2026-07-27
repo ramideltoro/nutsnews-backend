@@ -16,6 +16,13 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parents[1]
 PLAN_PATH = ROOT / "docs" / "backend-postgres-logical-replication-plan.json"
 IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
+CLEANUP_SCOPE = "obsolete_supabase_to_backend_migration_logical_replication_only"
+PRESERVED_HOT_STANDBY_RESOURCES = [
+    "existing_production_supabase_standby",
+    "supabase-standby_environment_and_NUTSNEWS_STANDBY_SUPABASE_secrets",
+    "backend_to_supabase_sync_relay_service_timer_env_contract_reports",
+    "standby_manifest_and_failover_approval_guardrails",
+]
 
 
 def utc_now() -> str:
@@ -272,6 +279,9 @@ drop publication if exists {quote_ident(publication)};
         "publication_count": publication_count,
         "slot_status": slot_status,
         "slot_count": slot_count,
+        "cleanup_scope": CLEANUP_SCOPE if args.operation in {"teardown-dry-run", "teardown"} else "not_cleanup",
+        "allowed_cleanup_resource_prefix": "nutsnews_backend_migration_",
+        "preserved_hot_standby_resources": PRESERVED_HOT_STANDBY_RESOURCES,
         "teardown_actions": teardown_actions,
         "checks": checks,
         "blockers": blockers,

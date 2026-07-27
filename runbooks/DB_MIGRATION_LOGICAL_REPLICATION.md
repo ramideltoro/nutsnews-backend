@@ -86,9 +86,39 @@ When the parity manifest adds or removes required tables:
 ## Rollback
 
 1. Disable or drop the backend subscription.
-2. Drop the Supabase replication slot after confirming no subscriber needs it.
-3. Drop the Supabase publication only after no migration path depends on it.
-4. Remove or rotate migration-only replication credentials.
+2. Drop only the obsolete Supabase-to-backend migration replication slot after
+   confirming no subscriber needs it.
+3. Drop only the obsolete Supabase-to-backend migration publication after no
+   migration path depends on it.
+4. Remove or rotate migration-only replication credentials only after the
+   backend-to-Supabase standby relay credentials remain valid.
+
+## Post-Cutover Cleanup Retention
+
+Issue #506 changes the post-cutover cleanup policy: existing production
+Supabase is retained as the hot standby, not retired. The protected logical
+replication teardown workflow may only clean up obsolete migration resources
+with the `nutsnews_backend_migration_` prefix.
+
+Policy statement: existing production Supabase is retained as the hot standby.
+Every accepted cleanup record must link #505 acceptance evidence and this #506
+retention policy.
+
+Do not remove:
+
+- the `supabase-standby` GitHub Environment or `NUTSNEWS_STANDBY_SUPABASE_*`
+  secrets;
+- the backend-to-Supabase standby sync relay service, timer, environment file,
+  contract, or last-run report;
+- `supabase/standby_manifest.json` or standby readiness/reconciliation/failover
+  guardrails;
+- existing production Supabase schema, sequence, or credential material needed
+  for the accepted standby path.
+
+Production teardown still requires a protected teardown dry-run, inactive
+source slot evidence, safe metadata only, and explicit #114 or later
+owner-approved cleanup approval. A cleanup run must link the #505 acceptance
+evidence and this #506 retention policy.
 
 ## Monitoring And Alerts
 

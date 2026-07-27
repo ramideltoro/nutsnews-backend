@@ -13,6 +13,7 @@
   ],
   "issue": 109,
   "extends_for_issue": 213,
+  "cleanup_retention_policy": "docs/backend-supabase-cleanup-retention-policy.json",
   "live_blockers": [
     "#211 protected provisioning must prove nutsnews_primary_shadow before production subscription setup",
     "#212 protected restore must prove the production snapshot in nutsnews_primary_shadow before subscription setup",
@@ -50,9 +51,10 @@
   "rollback": [
     "run protected teardown-dry-run before destructive cleanup",
     "disable or drop backend subscription",
-    "drop Supabase replication slot after confirming no subscriber needs it",
-    "drop Supabase publication only after production cutover path no longer depends on it",
-    "remove migration-only replication credentials after rehearsal or retirement"
+    "drop only the obsolete Supabase-to-backend migration replication slot after confirming no subscriber needs it",
+    "drop only the obsolete Supabase-to-backend migration publication after production cutover path no longer depends on it",
+    "remove migration-only replication credentials only after standby relay credentials remain valid",
+    "retain existing production Supabase as hot standby"
   ],
   "safe_metadata_only": true,
   "slot_risk_checks": [
@@ -100,15 +102,25 @@
   },
   "post_cutover_teardown": {
     "issue": 114,
+    "cleanup_policy_issue": "ramideltoro/nutsnews#506",
     "dry_run_operation": "environment_name=production operation=teardown-dry-run",
     "apply_operation": "environment_name=production operation=teardown confirmation=teardown-production-logical-replication",
+    "allowed_teardown_scope": "obsolete_supabase_to_backend_migration_logical_replication_only",
+    "allowed_resource_prefix": "nutsnews_backend_migration_",
     "requires_before_apply": [
       "post-cutover observation-window reconciliation pass",
       "rollback owner coverage through the rollback window",
-      "Supabase archive or retirement decision",
+      "standby acceptance #505 GO evidence",
+      "Supabase hot-standby retention policy #506",
       "explicit issue #114 teardown approval"
     ],
     "source_slot_must_be_inactive": true,
+    "must_preserve": [
+      "existing production Supabase hot standby",
+      "supabase-standby GitHub Environment and NUTSNEWS_STANDBY_SUPABASE_* secrets",
+      "backend-to-Supabase standby sync relay service, timer, environment file, contract, and reports",
+      "standby manifest and failover approval guardrails"
+    ],
     "safe_metadata_artifact": "backend-postgres-logical-replication"
   },
   "status": "post_cutover_teardown_ready_pending_114_approval",

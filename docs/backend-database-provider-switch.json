@@ -1,7 +1,7 @@
 {
   "contract_id": "backend-database-provider-switch",
   "issue": 117,
-  "status": "production_primary_cutover_complete_post_cutover_retirement_pending",
+  "status": "production_primary_cutover_complete_supabase_hot_standby_retained",
   "depends_on": [
     "docs/backend-api-compatibility-contract.json",
     "docs/backend-supabase-standby-promotion-decision.json",
@@ -77,7 +77,7 @@
     "staging rehearsal with rollback",
     "protected production cutover workflow",
     "observation window",
-    "post-cutover Supabase credential retirement"
+    "post-cutover migration-only Supabase writer credential cleanup while retaining standby credentials"
   ],
   "rollback": {
     "target_mode": "supabase_primary",
@@ -97,7 +97,7 @@
   "validation": {
     "local_validator": "python3 scripts/validate_backend_database_provider_switch.py",
     "dry_run_workflow": ".github/workflows/backend-database-provider-switch-dry-run.yml",
-    "live_status": "app and worker provider modes implemented; protected cutover completed after provider switch owner approval and final go/no-go; production backend_postgres_primary is live and Supabase retirement remains blocked on issue #114 approval"
+    "live_status": "app and worker provider modes implemented; protected cutover completed after provider switch owner approval and final go/no-go; production backend_postgres_primary is live and existing production Supabase is retained as the hot standby after #505/#506"
   },
   "supabase_standby_promotion_decision": {
     "issue": "ramideltoro/nutsnews#528",
@@ -126,7 +126,8 @@
   "post_cutover_status": {
     "recorded_at_utc": "2026-07-20T05:31:00Z",
     "cutover_issue": 119,
-    "retirement_issue": 114,
+    "cleanup_issue": 114,
+    "standby_retention_issue": "ramideltoro/nutsnews#506",
     "production_provider_mode": "backend_postgres_primary",
     "production_writes_paused": false,
     "public_readiness": [
@@ -141,11 +142,16 @@
       "production_parity_validation": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29719283886",
       "backend_health_report": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29719066640"
     },
-    "retirement_pending": [
+    "migration_cleanup_pending": [
       "rollback-window retention owner approval",
-      "Supabase write credential rotation or removal",
-      "logical replication resource cleanup",
-      "Supabase archive or retirement decision"
+      "migration-only Supabase write credential rotation or removal",
+      "obsolete Supabase-to-backend logical replication resource cleanup"
+    ],
+    "retained_standby": [
+      "existing production Supabase project and database",
+      "supabase-standby GitHub Environment and NUTSNEWS_STANDBY_SUPABASE_* secrets",
+      "backend-to-Supabase standby sync relay resources",
+      "standby failover approval guardrails"
     ]
   }
 }

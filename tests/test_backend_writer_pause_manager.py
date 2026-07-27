@@ -122,6 +122,8 @@ class BackendWriterPauseManagerTests(unittest.TestCase):
             if argv[:2] == ["systemctl", "show"]:
                 return command_result("loaded\n")
             if argv[:4] == ["docker", "compose", "-f", str(compose)] and argv[-3:] == ["ps", "--format", "json"]:
+                if any("--scale" in call and "fetcher=1" in call for call in calls):
+                    return command_result(json.dumps([{"Service": "fetcher", "State": "running"}]))
                 return command_result("")
             return command_result("")
 
@@ -134,7 +136,7 @@ class BackendWriterPauseManagerTests(unittest.TestCase):
             manifest = root / "services.json"
             compose = root / "compose.yml"
             inventory_path.write_text(json.dumps(inventory()), encoding="utf-8")
-            env_path.write_text("NUTSNEWS_WORKER_DB_API_WRITES_ENABLED=false\n", encoding="utf-8")
+            env_path.write_text("NUTSNEWS_WORKER_DB_API_WRITES_ENABLED=true\n", encoding="utf-8")
             manifest.write_text(json.dumps({"services": [{"name": "fetcher", "replicas": 1}]}), encoding="utf-8")
             compose.write_text("services: {}\n", encoding="utf-8")
             dropin.parent.mkdir(parents=True)
@@ -147,7 +149,13 @@ class BackendWriterPauseManagerTests(unittest.TestCase):
                         "attempt_id": "failover-20260726T220500Z",
                         "pause_started_at_utc": "2026-07-26T22:05:00Z",
                         "writer_inventory_fingerprint": "sha256:test",
-                        "worker_api": {"before": {"active": "active", "enabled": "enabled"}},
+                        "worker_api": {
+                            "before": {
+                                "active": "active",
+                                "enabled": "enabled",
+                                "paused": False,
+                            }
+                        },
                         "worker_runtime": {
                             "before": {
                                 "services": [
@@ -184,12 +192,94 @@ class BackendWriterPauseManagerTests(unittest.TestCase):
             dropin_exists = dropin.exists()
             active_state_exists = (state_dir / "active-pause.json").exists()
             last_resume_exists = (state_dir / "last-resume.json").exists()
+            report = json.loads((state_dir / "last-report.json").read_text(encoding="utf-8"))
 
         self.assertEqual(exit_code, 0)
         self.assertFalse(dropin_exists)
         self.assertFalse(active_state_exists)
         self.assertTrue(last_resume_exists)
         self.assertTrue(any("--scale" in call and "fetcher=1" in call for call in calls))
+        self.assertEqual("pass", report["resume_verification"]["status"])
+        self.assertEqual([], report["resume_verification"]["blockers"])
+
+    def test_resume_fails_closed_when_runtime_replica_is_not_restored(self):
+        manager = load_manager()
+
+        def fake_run(argv: list[str], *, timeout: int = 120):
+            if argv[:2] == ["systemctl", "is-active"]:
+                return command_result("active\n")
+            if argv[:2] == ["systemctl", "is-enabled"]:
+                return command_result("enabled\n")
+            if argv[:2] == ["systemctl", "show"]:
+                return command_result("loaded\n")
+            if argv[:4] == ["docker", "compose", "-f", str(compose)] and argv[-3:] == ["ps", "--format", "json"]:
+                return command_result("")
+            return command_result("")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            inventory_path = root / "inventory.json"
+            env_path = root / "worker.env"
+            dropin = root / "systemd" / "50-writer-pause.conf"
+            state_dir = root / "state"
+            manifest = root / "services.json"
+            compose = root / "compose.yml"
+            inventory_path.write_text(json.dumps(inventory()), encoding="utf-8")
+            env_path.write_text("NUTSNEWS_WORKER_DB_API_WRITES_ENABLED=true\n", encoding="utf-8")
+            manifest.write_text(json.dumps({"services": [{"name": "fetcher", "replicas": 1}]}), encoding="utf-8")
+            compose.write_text("services: {}\n", encoding="utf-8")
+            dropin.parent.mkdir(parents=True)
+            dropin.write_text("[Service]\nEnvironment=NUTSNEWS_WORKER_DB_API_WRITES_ENABLED=false\n", encoding="utf-8")
+            state_dir.mkdir()
+            (state_dir / "active-pause.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "attempt_id": "failover-20260726T220500Z",
+                        "pause_started_at_utc": "2026-07-26T22:05:00Z",
+                        "writer_inventory_fingerprint": "sha256:test",
+                        "worker_api": {"before": {"active": "active", "enabled": "enabled", "paused": False}},
+                        "worker_runtime": {
+                            "before": {
+                                "services": [
+                                    {"name": "fetcher", "running_replicas": 1},
+                                ]
+                            }
+                        },
+                        "safe_metadata_only": True,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(manager, "run_command", side_effect=fake_run), redirect_stdout(StringIO()) as stdout:
+                exit_code = manager.main(
+                    [
+                        "resume",
+                        "--inventory",
+                        str(inventory_path),
+                        "--state-dir",
+                        str(state_dir),
+                        "--worker-api-env",
+                        str(env_path),
+                        "--worker-api-dropin",
+                        str(dropin),
+                        "--worker-runtime-manifest",
+                        str(manifest),
+                        "--worker-runtime-compose",
+                        str(compose),
+                        "--failover-attempt-id",
+                        "failover-20260726T220500Z",
+                        "--confirm-action",
+                    ]
+                )
+            report = json.loads(stdout.getvalue())
+            active_state_exists = (state_dir / "active-pause.json").exists()
+
+        self.assertEqual(exit_code, 1)
+        self.assertTrue(active_state_exists)
+        self.assertTrue(report["active_pause_state"])
+        self.assertEqual("fail", report["resume_verification"]["status"])
+        self.assertIn("worker_runtime_service_resume_mismatch", report["errors"])
 
     def test_status_fails_when_pause_state_is_missing(self):
         manager = load_manager()

@@ -112,7 +112,9 @@ gh workflow run backend-supabase-standby-writer-pause-gate.yml \
 ```
 
 This recovery action resumes only the writer state recorded by the fixed pause
-manager. It is not a provider switch and is not used after a completed failover.
+manager. The resume report includes a safe `resume_verification` block that
+compares observed post-resume state with the recorded pre-pause writer state.
+It is not a provider switch and is not used after a completed failover.
 
 ## Local Validation
 
@@ -130,7 +132,8 @@ Required fixture coverage:
   and observed-write fixtures fail;
 - incomplete inventory, active writer workflow, missing manual freeze, and stale
   evidence fail;
-- the fixed manager can resume original writers after an aborted attempt;
+- the fixed manager can resume original writers after an aborted attempt and
+  fails closed when recorded runtime replicas are not restored;
 - artifact output remains safe metadata only.
 
 ## Acceptance Evidence

@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "drill_id": "backend-supabase-standby-staging-failover-drill",
+  "tracking_issue": "ramideltoro/nutsnews#503",
+  "epic": "ramideltoro/nutsnews#521",
+  "goal": "Rehearse backend PostgreSQL unavailable and Supabase standby provider promotion in a staging-only drill before production acceptance.",
+  "depends_on": [
+    "docs/backend-supabase-standby-failover-workflow.json",
+    "docs/backend-supabase-standby-recovery-boundaries.json",
+    "docs/backend-database-provider-switch.json"
+  ],
+  "source_before_drill": {
+    "label": "backend_postgres_primary",
+    "role": "normal production read/write primary until approved production failover"
+  },
+  "target_after_drill": {
+    "label": "existing_production_supabase_standby",
+    "role": "staging drill target and protected production standby target",
+    "existing_production_supabase_project": true,
+    "create_new_supabase_project": false,
+    "create_nutsnews_standby_database": false
+  },
+  "protected_failover_dry_run": {
+    "workflow_id": "backend-supabase-standby-failover",
+    "issue": "ramideltoro/nutsnews#502",
+    "operation": "dry-run",
+    "accepted_blocker_without_go": "missing_supabase_standby_promotion_decision",
+    "mutation_performed": false,
+    "provider_switch_performed_by_this_workflow": false
+  },
+  "staging_apply": {
+    "operation": "staging-apply",
+    "environment": "staging",
+    "required_confirmation": "execute-staging-supabase-failover-drill",
+    "target_database_provider_mode": "supabase_primary",
+    "production_writes_paused": true,
+    "backend_postgres_unavailable_simulated": true,
+    "staging_only": true,
+    "production_mutation_performed": false
+  },
+  "required_smoke_results": [
+    {
+      "id": "public_reads_use_supabase",
+      "required_status": "PASS",
+      "target_database_provider_mode": "supabase_primary"
+    },
+    {
+      "id": "controlled_writes_use_supabase",
+      "required_status": "PASS",
+      "target_database_provider_mode": "supabase_primary"
+    },
+    {
+      "id": "backend_postgres_receives_no_writes_after_failover",
+      "required_status": "PASS",
+      "required_backend_postgres_write_delta": 0
+    },
+    {
+      "id": "no_split_brain",
+      "required_status": "PASS",
+      "required_write_eligible_provider_count": 1,
+      "eligible_provider": "existing_production_supabase_standby"
+    },
+    {
+      "id": "write_pause_preserved",
+      "required_status": "PASS",
+      "production_writes_paused": true
+    },
+    {
+      "id": "negative_backend_postgres_unavailable_path",
+      "required_status": "PASS",
+      "backend_postgres_unavailable_simulated": true
+    }
+  ],
+  "failure_policy": {
+    "missing_failover_dry_run": "blocked",
+    "malformed_failover_dry_run": "blocked",
+    "failover_dry_run_mutated": "blocked",
+    "backend_postgres_available": "blocked",
+    "provider_mode_not_supabase_primary": "blocked",
+    "write_pause_missing": "blocked",
+    "public_read_smoke_failed": "blocked",
+    "controlled_write_smoke_failed": "blocked",
+    "backend_postgres_write_delta_nonzero": "blocked",
+    "split_brain_detected": "blocked",
+    "unsafe_metadata": "blocked"
+  },
+  "safety": {
+    "protected_environment": "production-backend",
+    "runs_from": "main",
+    "requires_typed_confirmation_for_staging_apply": true,
+    "dry_run_by_default": true,
+    "safe_metadata_only": true,
+    "staging_only": true,
+    "production_mutation_performed": false,
+    "backend_postgresql_remains_primary_until_approved_production_failover": true,
+    "target_is_existing_production_supabase": true,
+    "create_new_supabase_project": false,
+    "create_nutsnews_standby_database": false,
+    "app_worker_writes_to_supabase_before_approved_failover": false
+  },
+  "workflow": {
+    "path": ".github/workflows/backend-supabase-standby-staging-failover-drill.yml",
+    "protected_environment": "production-backend",
+    "artifact": "backend-supabase-standby-staging-failover-drill",
+    "default_operation": "dry-run"
+  },
+  "validation": {
+    "local_validator": "python3 scripts/validate_backend_supabase_standby_staging_failover_drill.py",
+    "drill_runner": "python3 scripts/backend_supabase_standby_staging_failover_drill.py --operation staging-apply --fixture-pass",
+    "unit_tests": "python3 -m unittest tests.test_backend_supabase_standby_staging_failover_drill",
+    "live_status": "staging-only drill contract added; protected main evidence must pass before #505 production acceptance"
+  }
+}

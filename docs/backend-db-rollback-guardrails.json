@@ -9,7 +9,8 @@
   ],
   "depends_on": [
     "docs/backend-api-compatibility-contract.json",
-    "docs/backend-database-provider-switch.json"
+    "docs/backend-database-provider-switch.json",
+    "docs/backend-supabase-standby-recovery-boundaries.json"
   ],
   "sync_back_to_supabase_supported": false,
   "sync_back_reason": "Bidirectional sync is not proven safe for the current Supabase/PostgREST application model and could create write conflicts.",
@@ -82,6 +83,26 @@
       "backend PostgreSQL accepted authoritative writes that are not proven in Supabase",
       "sync-back evidence is missing",
       "writer pause cannot prove no concurrent writes"
+    ]
+  },
+  "supabase_standby_failover_recovery": {
+    "tracking_issue": "ramideltoro/nutsnews#504",
+    "post_failover_authoritative_provider": "existing_production_supabase_standby",
+    "backend_postgres_reuse_policy": "blocked_until_rebuilt_or_reconciled_from_supabase",
+    "backend_postgres_may_resume_primary": false,
+    "switch_back_requires": [
+      "backend PostgreSQL rebuild or reconciliation from authoritative Supabase",
+      "required-table parity from Supabase to backend PostgreSQL",
+      "backend PostgreSQL sequence safety",
+      "no-split-brain evidence proving one write-eligible provider",
+      "app worker scheduler and admin writer pause evidence",
+      "staging drill recovery evidence",
+      "explicit owner approval"
+    ],
+    "abort_before_provider_switch": [
+      "confirm #502 provider switch did not run",
+      "resume backend writers only through #526 resume verification",
+      "confirm app and worker Supabase writes were never enabled"
     ]
   },
   "cutover_blockers": [

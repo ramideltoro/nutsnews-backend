@@ -228,6 +228,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backend_supabase_standby_promotion_decision.py
 
+      - name: Validate backend-supabase-standby-recovery-boundaries guardrails
+        shell: bash
+        run: python3 scripts/validate_backend_supabase_standby_recovery_boundaries.py
+
       - name: Validate backend-to-Supabase sync relay offline mode
         shell: bash
         run: python3 scripts/backend_supabase_sync_relay.py --offline --enforce
@@ -267,6 +271,10 @@ jobs:
       - name: Run Supabase standby promotion decision tests
         shell: bash
         run: python3 -m unittest tests.test_backend_supabase_standby_promotion_decision
+
+      - name: Run Supabase standby recovery boundary tests
+        shell: bash
+        run: python3 -m unittest tests.test_backend_supabase_standby_recovery_boundaries
 
       - name: Run backend writer pause manager tests
         shell: bash

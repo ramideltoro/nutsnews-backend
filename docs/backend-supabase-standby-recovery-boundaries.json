@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "contract_id": "backend-supabase-standby-recovery-boundaries",
+  "tracking_issue": "ramideltoro/nutsnews#504",
+  "epic": "ramideltoro/nutsnews#521",
+  "goal": "Define abort, forward-recovery, and switch-back boundaries after a protected failover from backend PostgreSQL primary to the existing production Supabase standby.",
+  "source_before_failover": {
+    "label": "backend_postgres_primary",
+    "role": "normal production read/write primary until approved failover",
+    "writes_allowed_before_approved_failover": true
+  },
+  "target_after_failover": {
+    "label": "existing_production_supabase_standby",
+    "role": "authoritative provider after approved Supabase standby failover",
+    "existing_production_supabase_project": true,
+    "create_new_supabase_project": false,
+    "create_nutsnews_standby_database": false
+  },
+  "safety": {
+    "safe_metadata_only": true,
+    "mutates_production": false,
+    "provider_switch_performed_by_this_contract": false,
+    "backend_postgresql_remains_primary_until_approved_failover": true,
+    "app_worker_writes_to_supabase_before_approved_failover": false,
+    "post_failover_supabase_is_authoritative": true,
+    "backend_postgres_reuse_blocked_until_rebuilt_or_reconciled_from_supabase": true,
+    "no_bidirectional_writes_without_reviewed_reconciliation": true
+  },
+  "boundaries": [
+    {
+      "id": "pre_switch_abort",
+      "description": "Abort is allowed before #502 switches provider mode to Supabase. Backend PostgreSQL is still authoritative, and paused writers may resume only through the writer-pause resume proof.",
+      "provider_switch_performed": false,
+      "authoritative_provider": "backend_postgres_primary",
+      "backend_postgres_reuse_allowed": true,
+      "supabase_is_authoritative": false,
+      "requires": [
+        "confirm #502 provider switch did not run",
+        "run #526 resume verification before production writers resume",
+        "confirm app and worker Supabase writes were never enabled",
+        "release or expire the split-brain fence epoch after abort approval"
+      ],
+      "blocked_when": [
+        "provider switch already completed",
+        "writer resume proof is missing",
+        "Supabase app or worker writes were enabled"
+      ]
+    },
+    {
+      "id": "post_supabase_failover_forward_recovery",
+      "description": "After #502 switches provider mode to Supabase, the existing production Supabase database is authoritative. Backend PostgreSQL must not resume primary from its old state.",
+      "provider_switch_performed": true,
+      "authoritative_provider": "existing_production_supabase_standby",
+      "backend_postgres_reuse_allowed": false,
+      "supabase_is_authoritative": true,
+      "requires": [
+        "keep backend PostgreSQL fenced from production writes",
+        "treat backend PostgreSQL as stale until rebuilt or reconciled from Supabase",
+        "run production smoke checks against Supabase provider mode",
+        "record owner decision for forward recovery on Supabase"
+      ],
+      "blocked_when": [
+        "backend PostgreSQL writes are re-enabled without rebuild or reconciliation",
+        "Supabase smoke checks fail",
+        "split-brain fence cannot prove one write-eligible provider"
+      ]
+    },
+    {
+      "id": "switch_back_to_backend_postgres",
+      "description": "Switch-back to backend PostgreSQL is a new protected promotion from authoritative Supabase to a rebuilt or reconciled backend PostgreSQL candidate.",
+      "provider_switch_performed": true,
+      "authoritative_provider_before_switch": "existing_production_supabase_standby",
+      "authoritative_provider_after_switch": "backend_postgres_primary_after_rebuild_or_reconciliation",
+      "backend_postgres_reuse_allowed": "only_after_rebuild_or_reconciliation_from_supabase",
+      "supabase_is_authoritative_until_switch_back": true,
+      "requires_gate_ids": [
+        "backend_rebuild_or_reconciliation_from_supabase",
+        "supabase_to_backend_parity",
+        "backend_sequence_safety",
+        "no_split_brain_fence",
+        "writer_pause",
+        "owner_approval",
+        "staging_drill_evidence"
+      ],
+      "blocked_when": [
+        "backend PostgreSQL was not rebuilt or reconciled from authoritative Supabase",
+        "required-table parity from Supabase to backend PostgreSQL is missing or failing",
+        "backend PostgreSQL sequence safety is missing or failing",
+        "no-split-brain evidence is missing or failing",
+        "writer-pause evidence is missing or failing",
+        "owner approval or staging drill evidence is missing"
+      ]
+    }
+  ],
+  "switch_back_gates": [
+    {
+      "id": "backend_rebuild_or_reconciliation_from_supabase",
+      "required_status": "PASS",
+      "purpose": "Prove backend PostgreSQL candidate was rebuilt or reconciled from authoritative Supabase after failover."
+    },
+    {
+      "id": "supabase_to_backend_parity",
+      "required_status": "PASS",
+      "purpose": "Prove required-table row counts and checksums match from authoritative Supabase to backend PostgreSQL candidate."
+    },
+    {
+      "id": "backend_sequence_safety",
+      "required_status": "PASS",
+      "purpose": "Prove backend PostgreSQL sequences are safe for the next write after Supabase-origin reconciliation."
+    },
+    {
+      "id": "no_split_brain_fence",
+      "required_status": "PASS",
+      "purpose": "Prove exactly one provider can be write-eligible before switch-back."
+    },
+    {
+      "id": "writer_pause",
+      "required_status": "PASS",
+      "purpose": "Prove app, worker, scheduler, and admin writers are paused before switch-back."
+    },
+    {
+      "id": "owner_approval",
+      "required_status": "PASS",
+      "purpose": "Record explicit owner approval for switch-back and rollback boundary acceptance."
+    },
+    {
+      "id": "staging_drill_evidence",
+      "required_status": "PASS",
+      "purpose": "Record staging rehearsal evidence for failover recovery and switch-back negative paths."
+    }
+  ],
+  "failure_policy": {
+    "missing_evidence": "blocked",
+    "malformed_evidence": "blocked",
+    "failing_evidence": "blocked",
+    "unsafe_metadata": "blocked",
+    "provider_switch_state_mismatch": "blocked",
+    "target_mismatch": "blocked",
+    "split_brain_risk": "blocked"
+  },
+  "workflow": {
+    "path": ".github/workflows/backend-supabase-standby-recovery-boundaries.yml",
+    "protected_environment": "production-backend",
+    "mutates_production_by_default": false,
+    "artifact": "backend-supabase-standby-recovery-boundaries"
+  },
+  "validation": {
+    "local_validator": "python3 scripts/validate_backend_supabase_standby_recovery_boundaries.py",
+    "boundary_renderer": "python3 scripts/backend_supabase_standby_recovery_boundaries.py --boundary switch_back_to_backend_postgres --provider-switch-performed true",
+    "unit_tests": "python3 -m unittest tests.test_backend_supabase_standby_recovery_boundaries",
+    "live_status": "accepted boundary definition only; switch-back remains blocked until backend PostgreSQL is rebuilt or reconciled from authoritative Supabase, parity passes, sequence safety passes, no-split-brain evidence passes, writer pause passes, staging drill evidence is recorded, and owner approval is attached"
+  }
+}

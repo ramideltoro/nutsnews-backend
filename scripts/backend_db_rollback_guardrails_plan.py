@@ -45,6 +45,7 @@ def main_args(argv: list[str] | None = None) -> int:
         "split_brain_check": phase["split_brain_check"],
         "writer_pause_verification": guardrails["writer_pause_verification"],
         "rollback_window": guardrails["rollback_window"],
+        "supabase_standby_failover_recovery": guardrails.get("supabase_standby_failover_recovery", {}),
         "mutation_performed": False,
         "blockers": blockers,
     }

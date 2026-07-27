@@ -35,6 +35,7 @@ def main() -> int:
     for dependency in (
         "docs/backend-api-compatibility-contract.json",
         "docs/backend-database-provider-switch.json",
+        "docs/backend-supabase-standby-recovery-boundaries.json",
     ):
         if dependency not in guardrails.get("depends_on", []):
             errors.append(f"missing dependency: {dependency}")
@@ -69,6 +70,20 @@ def main() -> int:
         errors.append("rollback safe_when must include concrete requirements")
     if len(rollback.get("forward_recovery_required_when", [])) < 3:
         errors.append("forward recovery boundary must include concrete requirements")
+
+    standby_recovery = guardrails.get("supabase_standby_failover_recovery", {})
+    if standby_recovery.get("tracking_issue") != "ramideltoro/nutsnews#504":
+        errors.append("standby failover recovery must point to #504")
+    if standby_recovery.get("post_failover_authoritative_provider") != "existing_production_supabase_standby":
+        errors.append("standby failover recovery must treat Supabase as authoritative")
+    if standby_recovery.get("backend_postgres_reuse_policy") != "blocked_until_rebuilt_or_reconciled_from_supabase":
+        errors.append("backend PostgreSQL reuse must be blocked until Supabase-origin reconciliation")
+    if standby_recovery.get("backend_postgres_may_resume_primary") is not False:
+        errors.append("backend PostgreSQL must not resume primary from stale state")
+    switch_back_requires = "\n".join(standby_recovery.get("switch_back_requires", []))
+    for required in ("parity", "sequence safety", "no-split-brain", "writer pause", "owner approval"):
+        if required not in switch_back_requires:
+            errors.append(f"standby switch-back requirements must include {required}")
 
     blockers = "\n".join(guardrails.get("cutover_blockers", []))
     for required in ("No phase may allow writes to both", "writer pause verification", "Staging rehearsal"):

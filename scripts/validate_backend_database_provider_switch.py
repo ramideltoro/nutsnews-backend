@@ -39,6 +39,8 @@ def main() -> int:
         errors.append("provider switch must depend on the backend API compatibility contract")
     if "docs/backend-supabase-standby-promotion-decision.json" not in switch.get("depends_on", []):
         errors.append("provider switch must depend on the Supabase standby promotion decision")
+    if "docs/backend-supabase-standby-recovery-boundaries.json" not in switch.get("depends_on", []):
+        errors.append("provider switch must depend on the Supabase standby recovery boundaries")
     if api_contract.get("production_cutover_blocker") is not True:
         errors.append("API compatibility contract must remain a production cutover blocker")
 
@@ -113,12 +115,28 @@ def main() -> int:
     if standby_decision.get("ttl_seconds") != 300:
         errors.append("provider switch decision TTL must be 300 seconds")
 
+    standby_recovery = switch.get("supabase_standby_recovery_boundaries", {})
+    if standby_recovery.get("issue") != "ramideltoro/nutsnews#504":
+        errors.append("provider switch must point to #504 standby recovery boundaries")
+    if standby_recovery.get("required_before_production_supabase_switch") is not True:
+        errors.append("production Supabase switch must require #504 recovery boundaries")
+    if standby_recovery.get("post_failover_authoritative_provider") != "existing_production_supabase_standby":
+        errors.append("post-failover authoritative provider must be existing production Supabase")
+    if standby_recovery.get("backend_postgres_reuse_policy") != "blocked_until_rebuilt_or_reconciled_from_supabase":
+        errors.append("backend PostgreSQL reuse policy must block reuse until Supabase-origin reconciliation")
+    switch_back_requires = "\n".join(standby_recovery.get("switch_back_requires", []))
+    for required in ("parity", "sequence safety", "no-split-brain", "owner approval"):
+        if required not in switch_back_requires:
+            errors.append(f"switch-back requirements must include {required}")
+
     for token in (
         "missing_supabase_standby_promotion_decision",
         "supabase_standby_promotion_decision_not_go",
         "supabase_standby_promotion_decision_already_consumed",
         "supabase_standby_promotion_decision_expired",
         "promotion_decision_required",
+        "validate_recovery_boundaries_contract",
+        "recovery_boundaries_required",
     ):
         if token not in (ROOT / "scripts" / "backend_database_provider_switch_plan.py").read_text(encoding="utf-8"):
             errors.append(f"provider switch plan missing decision guard: {token}")

@@ -11,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SWITCH_PATH = ROOT / "docs" / "backend-database-provider-switch.json"
+RECOVERY_BOUNDARIES_PATH = ROOT / "docs" / "backend-supabase-standby-recovery-boundaries.json"
 
 
 def utc_now() -> str:
@@ -116,6 +117,56 @@ def validate_promotion_decision(args: argparse.Namespace, blockers: list[str]) -
     return {"decision_id": decision_id, "would_consume": bool(decision_id)}
 
 
+def validate_recovery_boundaries_contract(path: str, blockers: list[str]) -> dict:
+    recovery = load_json(path or str(RECOVERY_BOUNDARIES_PATH), "supabase_standby_recovery_boundaries", blockers)
+    if recovery is None:
+        return {
+            "contract_id": None,
+            "post_failover_authoritative_provider": None,
+            "backend_postgres_reuse_policy": None,
+        }
+
+    if recovery.get("contract_id") != "backend-supabase-standby-recovery-boundaries":
+        blockers.append("supabase_standby_recovery_boundaries_contract_mismatch")
+    if recovery.get("tracking_issue") != "ramideltoro/nutsnews#504":
+        blockers.append("supabase_standby_recovery_boundaries_issue_mismatch")
+
+    target = recovery.get("target_after_failover", {})
+    safety = recovery.get("safety", {})
+    if not isinstance(target, dict) or target.get("label") != "existing_production_supabase_standby":
+        blockers.append("supabase_standby_recovery_boundaries_target_mismatch")
+    if not isinstance(target, dict) or target.get("existing_production_supabase_project") is not True:
+        blockers.append("supabase_standby_recovery_boundaries_existing_target_not_confirmed")
+    if not isinstance(target, dict) or target.get("create_new_supabase_project") is not False:
+        blockers.append("supabase_standby_recovery_boundaries_new_project_not_forbidden")
+    if not isinstance(target, dict) or target.get("create_nutsnews_standby_database") is not False:
+        blockers.append("supabase_standby_recovery_boundaries_standby_database_not_forbidden")
+    if not isinstance(safety, dict) or safety.get("safe_metadata_only") is not True:
+        blockers.append("supabase_standby_recovery_boundaries_not_safe_metadata")
+    if not isinstance(safety, dict) or safety.get("post_failover_supabase_is_authoritative") is not True:
+        blockers.append("supabase_standby_recovery_boundaries_authority_missing")
+    if not isinstance(safety, dict) or safety.get("backend_postgres_reuse_blocked_until_rebuilt_or_reconciled_from_supabase") is not True:
+        blockers.append("supabase_standby_recovery_boundaries_backend_reuse_not_blocked")
+
+    boundaries = {
+        item.get("id"): item
+        for item in recovery.get("boundaries", [])
+        if isinstance(item, dict)
+    }
+    switch_back = boundaries.get("switch_back_to_backend_postgres", {})
+    post_failover = boundaries.get("post_supabase_failover_forward_recovery", {})
+    if not isinstance(post_failover, dict) or post_failover.get("authoritative_provider") != "existing_production_supabase_standby":
+        blockers.append("supabase_standby_recovery_boundaries_post_failover_authority_mismatch")
+    if not isinstance(switch_back, dict) or switch_back.get("backend_postgres_reuse_allowed") != "only_after_rebuild_or_reconciliation_from_supabase":
+        blockers.append("supabase_standby_recovery_boundaries_switch_back_policy_mismatch")
+
+    return {
+        "contract_id": recovery.get("contract_id"),
+        "post_failover_authoritative_provider": post_failover.get("authoritative_provider") if isinstance(post_failover, dict) else None,
+        "backend_postgres_reuse_policy": "blocked_until_rebuilt_or_reconciled_from_supabase",
+    }
+
+
 def main_args(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", default="supabase_primary")
@@ -123,6 +174,7 @@ def main_args(argv: list[str] | None = None) -> int:
     parser.add_argument("--confirmation", default="")
     parser.add_argument("--promotion-decision", default="")
     parser.add_argument("--decision-consumption-ledger", default="")
+    parser.add_argument("--recovery-boundaries", default=str(RECOVERY_BOUNDARIES_PATH))
     parser.add_argument("--failover-attempt-id", default="")
     parser.add_argument("--candidate-application-revision", default="")
     parser.add_argument("--fence-epoch", default="")
@@ -142,7 +194,13 @@ def main_args(argv: list[str] | None = None) -> int:
     if args.environment == "production" and args.mode != "supabase_primary":
         blockers.append("production_switch_requires_protected_cutover_workflow")
     promotion = {"decision_id": None, "would_consume": False}
+    recovery = {
+        "contract_id": None,
+        "post_failover_authoritative_provider": None,
+        "backend_postgres_reuse_policy": None,
+    }
     if args.environment == "production":
+        recovery = validate_recovery_boundaries_contract(args.recovery_boundaries, blockers)
         promotion = validate_promotion_decision(args, blockers)
 
     report = {
@@ -161,6 +219,10 @@ def main_args(argv: list[str] | None = None) -> int:
         "promotion_decision_required": args.environment == "production",
         "promotion_decision_id": promotion["decision_id"],
         "would_consume_promotion_decision": promotion["would_consume"] and not blockers,
+        "recovery_boundaries_required": args.environment == "production",
+        "recovery_boundaries_contract_id": recovery["contract_id"],
+        "post_failover_authoritative_provider": recovery["post_failover_authoritative_provider"],
+        "backend_postgres_reuse_policy": recovery["backend_postgres_reuse_policy"],
     }
     text = json.dumps(report, indent=2, sort_keys=True)
     if args.output:

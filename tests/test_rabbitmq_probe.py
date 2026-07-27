@@ -281,11 +281,11 @@ class RabbitMQProbeTests(unittest.TestCase):
             definition.write_text(
                 json.dumps(
                     {
-                        "exchanges": [{"id": "canary", "name": "worker.uplift.canary.v4"}],
+                        "exchanges": [{"id": "canary", "name": "worker.uplift.canary.exchange.v4"}],
                         "canary": {
                             "exchange_id": "canary",
                             "routing_key": "worker.uplift.canary.v4",
-                            "queue": {"name": "worker.uplift.canary.runtime.v4", "runtime_declared": True},
+                            "queue": {"name": "worker.uplift.canary.queue.v4", "runtime_declared": True},
                         },
                     }
                 ),
@@ -412,9 +412,9 @@ class RabbitMQProbeTests(unittest.TestCase):
         fake_pika = FakePika(fake_connection)
         args = SimpleNamespace(amqp_host="127.0.0.1", amqp_port=5672, timeout_seconds=1)
         route = {
-            "exchange": "worker.uplift.canary.v4",
+            "exchange": "worker.uplift.canary.exchange.v4",
             "routing_key": "worker.uplift.canary.v4",
-            "queue": "worker.uplift.canary.runtime.v4",
+            "queue": "worker.uplift.canary.queue.v4",
             "runtime_declared": True,
             "durable": False,
             "exclusive": True,
@@ -440,11 +440,11 @@ class RabbitMQProbeTests(unittest.TestCase):
         self.assertEqual(result["cleanup_drained"], 0)
         self.assertEqual(fake_connection.channel_instance.published, 1)
         self.assertEqual(fake_connection.channel_instance.acked, [1, 2, 3])
-        self.assertEqual(fake_connection.channel_instance.last_declare["queue"], "worker.uplift.canary.runtime.v4")
+        self.assertEqual(fake_connection.channel_instance.last_declare["queue"], "worker.uplift.canary.queue.v4")
         self.assertFalse(fake_connection.channel_instance.last_declare["durable"])
         self.assertTrue(fake_connection.channel_instance.last_declare["exclusive"])
         self.assertTrue(fake_connection.channel_instance.last_declare["auto_delete"])
-        self.assertEqual(fake_connection.channel_instance.last_bind["exchange"], "worker.uplift.canary.v4")
+        self.assertEqual(fake_connection.channel_instance.last_bind["exchange"], "worker.uplift.canary.exchange.v4")
         self.assertEqual(fake_connection.channel_instance.last_publish["properties"].kwargs["delivery_mode"], 1)
         self.assertTrue(fake_connection.closed)
 

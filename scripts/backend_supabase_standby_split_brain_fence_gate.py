@@ -68,6 +68,11 @@ def safe_fingerprint(kind: str, label: str, contract_id: str, version: Any) -> s
     return "sha256:" + hashlib.sha256(payload).hexdigest()[:24]
 
 
+def standby_binding_fingerprint(kind: str, label: str) -> str:
+    payload = f"supabase-standby-binding-v1|{kind}|{label}".encode("utf-8")
+    return "sha256:" + hashlib.sha256(payload).hexdigest()[:24]
+
+
 def load_json(path: Path, *, missing: str, malformed: str) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -121,6 +126,8 @@ def base_result(args: argparse.Namespace, measured_at: str | None = None) -> dic
         "max_evidence_age_seconds": args.max_evidence_age_seconds,
         "source_fingerprint": None,
         "target_fingerprint": None,
+        "source_binding_fingerprint": None,
+        "target_binding_fingerprint": None,
         "contract_fingerprint": None,
         "writer_pause_gate_fingerprint": None,
         "fence_evidence_fingerprint": None,
@@ -349,6 +356,8 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     result["contract_fingerprint"] = digest_object(contract)
     result["source_fingerprint"] = safe_fingerprint("source", source_label, contract_id, version)
     result["target_fingerprint"] = safe_fingerprint("target", target_label, contract_id, version)
+    result["source_binding_fingerprint"] = standby_binding_fingerprint("source", source_label)
+    result["target_binding_fingerprint"] = standby_binding_fingerprint("target", target_label)
     result["writer_pause_gate_fingerprint"] = digest_object(pause)
     result["fence_evidence_fingerprint"] = digest_object(evidence)
     result["writer_pause_measured_at_utc"] = pause.get("measured_at_utc") or pause.get("second_write_position_at_utc")

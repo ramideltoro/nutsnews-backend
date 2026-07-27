@@ -69,6 +69,11 @@ def safe_fingerprint(kind: str, label: str, contract_id: str, contract_version: 
     return "sha256:" + hashlib.sha256(payload).hexdigest()[:24]
 
 
+def standby_binding_fingerprint(kind: str, label: str) -> str:
+    payload = f"supabase-standby-binding-v1|{kind}|{label}".encode("utf-8")
+    return "sha256:" + hashlib.sha256(payload).hexdigest()[:24]
+
+
 def find_check(health_report: dict[str, Any], name: str) -> dict[str, Any] | None:
     checks = health_report.get("checks")
     if not isinstance(checks, list):
@@ -126,11 +131,18 @@ def base_result(args: argparse.Namespace, measured_at: str | None) -> dict[str, 
         "max_telemetry_age_seconds": args.max_telemetry_age_seconds,
         "source_fingerprint": None,
         "target_fingerprint": None,
+        "source_binding_fingerprint": None,
+        "target_binding_fingerprint": None,
         "observed_lag_seconds": None,
         "relay_health_status": "unknown",
         "relay_timer_state": "unknown",
         "relay_service_result": "unknown",
         "blockers": [],
+        "backend_postgresql_remains_primary": True,
+        "target_is_existing_production_supabase": True,
+        "create_new_supabase_project": False,
+        "create_nutsnews_standby_database": False,
+        "app_worker_writes_to_supabase_before_failover": False,
         "safe_metadata_only": True,
     }
 
@@ -145,6 +157,8 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     contract = load_json(Path(args.contract))
     expected_source_label = str(contract.get("source", {}).get("label") or "")
     expected_target_label = str(contract.get("target", {}).get("label") or "")
+    target = contract.get("target", {})
+    safety = contract.get("safety", {})
     contract_id = str(contract.get("contract_id") or "unknown")
     contract_version = contract.get("version", "unknown")
     expected_source_fingerprint = safe_fingerprint("source", expected_source_label, contract_id, contract_version)
@@ -155,7 +169,22 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     result = base_result(args, measured_at)
     result["source_fingerprint"] = expected_source_fingerprint
     result["target_fingerprint"] = expected_target_fingerprint
+    result["source_binding_fingerprint"] = standby_binding_fingerprint("source", expected_source_label)
+    result["target_binding_fingerprint"] = standby_binding_fingerprint("target", expected_target_label)
     blockers: list[str] = result["blockers"]
+
+    if not isinstance(target, dict) or target.get("existing_production_supabase_project") is not True:
+        blockers.append("target_existing_production_supabase_not_confirmed")
+    if not isinstance(target, dict) or target.get("create_new_supabase_project") is not False:
+        blockers.append("new_supabase_project_not_forbidden")
+    if not isinstance(target, dict) or target.get("create_nutsnews_standby_database") is not False:
+        blockers.append("nutsnews_standby_database_not_forbidden")
+    if not isinstance(safety, dict) or safety.get("backend_postgresql_remains_primary") is not True:
+        blockers.append("backend_primary_policy_mismatch")
+    if not isinstance(safety, dict) or safety.get("target_is_existing_production_supabase") is not True:
+        blockers.append("target_existing_production_supabase_not_confirmed")
+    if not isinstance(safety, dict) or safety.get("app_worker_writes_to_supabase_before_failover") is not False:
+        blockers.append("app_worker_supabase_writes_not_blocked")
 
     telemetry_age = seconds_between(args.now_utc, measured_at)
     if telemetry_age is None:

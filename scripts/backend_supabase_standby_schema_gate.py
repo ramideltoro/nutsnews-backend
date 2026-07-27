@@ -76,6 +76,11 @@ def safe_fingerprint(kind: str, label: str, contract_id: str, contract_version: 
     return "sha256:" + hashlib.sha256(payload).hexdigest()[:24]
 
 
+def standby_binding_fingerprint(kind: str, label: str) -> str:
+    payload = f"supabase-standby-binding-v1|{kind}|{label}".encode("utf-8")
+    return "sha256:" + hashlib.sha256(payload).hexdigest()[:24]
+
+
 def digest_object(value: Any) -> str:
     return "sha256:" + canonical_sha256(value)[:24]
 
@@ -413,6 +418,8 @@ def base_result(args: argparse.Namespace, measured_at: str | None) -> dict[str, 
         "max_telemetry_age_seconds": args.max_telemetry_age_seconds,
         "source_fingerprint": None,
         "target_fingerprint": None,
+        "source_binding_fingerprint": None,
+        "target_binding_fingerprint": None,
         "manifest_fingerprint": None,
         "candidate_manifest": None,
         "relay_contract_fingerprint": None,
@@ -471,6 +478,8 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     blockers: list[str] = result["blockers"]
     result["source_fingerprint"] = expected_source_fingerprint
     result["target_fingerprint"] = expected_target_fingerprint
+    result["source_binding_fingerprint"] = standby_binding_fingerprint("source", expected_source_label)
+    result["target_binding_fingerprint"] = standby_binding_fingerprint("target", expected_target_label)
     result["manifest_fingerprint"] = manifest_fingerprint
     result["candidate_manifest"] = candidate_manifest
     result["relay_contract_fingerprint"] = "sha256:" + canonical_sha256(contract)[:24]

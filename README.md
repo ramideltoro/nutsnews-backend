@@ -102,6 +102,7 @@ Use [runbooks/SUPABASE_STANDBY_PARITY_GATE.md](runbooks/SUPABASE_STANDBY_PARITY_
 Use [runbooks/SUPABASE_STANDBY_SCHEMA_GATE.md](runbooks/SUPABASE_STANDBY_SCHEMA_GATE.md) before evaluating or consuming the Supabase standby schema compatibility gate.
 Use [runbooks/SUPABASE_STANDBY_SEQUENCE_GATE.md](runbooks/SUPABASE_STANDBY_SEQUENCE_GATE.md) before evaluating or consuming the Supabase standby sequence safety gate.
 Use [runbooks/SUPABASE_STANDBY_WRITER_PAUSE_GATE.md](runbooks/SUPABASE_STANDBY_WRITER_PAUSE_GATE.md) before evaluating or consuming the Supabase standby writer pause and quiescence gate.
+Use [runbooks/SUPABASE_STANDBY_PROMOTION_DECISION.md](runbooks/SUPABASE_STANDBY_PROMOTION_DECISION.md) before evaluating or consuming the Supabase standby promotion `GO`/`NO-GO` decision.
 
 The current Ansible scaffold is intentionally narrow. It defines the host contract, runtime choice, validation commands, required secret boundaries, and rollback expectations that later issues will fill in through Ansible roles and protected workflows.
 

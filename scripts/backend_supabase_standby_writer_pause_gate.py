@@ -72,6 +72,11 @@ def safe_fingerprint(kind: str, label: str, inventory_id: str, inventory_version
     return "sha256:" + hashlib.sha256(payload).hexdigest()[:24]
 
 
+def standby_binding_fingerprint(kind: str, label: str) -> str:
+    payload = f"supabase-standby-binding-v1|{kind}|{label}".encode("utf-8")
+    return "sha256:" + hashlib.sha256(payload).hexdigest()[:24]
+
+
 def load_json(path: Path, *, missing: str, malformed: str) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -124,6 +129,8 @@ def base_result(args: argparse.Namespace, measured_at: str | None = None) -> dic
         "actual_quiet_window_seconds": None,
         "source_fingerprint": None,
         "target_fingerprint": None,
+        "source_binding_fingerprint": None,
+        "target_binding_fingerprint": None,
         "writer_inventory_fingerprint": None,
         "write_position_fingerprint": None,
         "pause_started_at_utc": None,
@@ -206,6 +213,8 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     blockers: list[str] = result["blockers"]
     result["source_fingerprint"] = source_fingerprint
     result["target_fingerprint"] = target_fingerprint
+    result["source_binding_fingerprint"] = standby_binding_fingerprint("source", source_label)
+    result["target_binding_fingerprint"] = standby_binding_fingerprint("target", target_label)
     result["writer_inventory_fingerprint"] = inventory_sha
     result["write_position_fingerprint"] = second.get("write_position_fingerprint")
     result["first_write_position_at_utc"] = first.get("checked_at_utc")

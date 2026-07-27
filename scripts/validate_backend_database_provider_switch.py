@@ -37,6 +37,8 @@ def main() -> int:
         errors.append("production primary confirmation must be explicit")
     if "docs/backend-api-compatibility-contract.json" not in switch.get("depends_on", []):
         errors.append("provider switch must depend on the backend API compatibility contract")
+    if "docs/backend-supabase-standby-promotion-decision.json" not in switch.get("depends_on", []):
+        errors.append("provider switch must depend on the Supabase standby promotion decision")
     if api_contract.get("production_cutover_blocker") is not True:
         errors.append("API compatibility contract must remain a production cutover blocker")
 
@@ -98,6 +100,28 @@ def main() -> int:
     for required in ("app and worker provider modes implemented", "protected cutover", "owner approval"):
         if required not in live_status:
             errors.append(f"live_status must record provider switch status: {required}")
+
+    standby_decision = switch.get("supabase_standby_promotion_decision", {})
+    if standby_decision.get("issue") != "ramideltoro/nutsnews#528":
+        errors.append("provider switch must point to #528 standby promotion decision")
+    if standby_decision.get("required_for_production_provider_switch") is not True:
+        errors.append("production provider switch must require the #528 decision")
+    if standby_decision.get("accepted_decision") != "GO":
+        errors.append("provider switch must consume only GO decisions")
+    if standby_decision.get("single_use") is not True:
+        errors.append("provider switch decision consumption must be single-use")
+    if standby_decision.get("ttl_seconds") != 300:
+        errors.append("provider switch decision TTL must be 300 seconds")
+
+    for token in (
+        "missing_supabase_standby_promotion_decision",
+        "supabase_standby_promotion_decision_not_go",
+        "supabase_standby_promotion_decision_already_consumed",
+        "supabase_standby_promotion_decision_expired",
+        "promotion_decision_required",
+    ):
+        if token not in (ROOT / "scripts" / "backend_database_provider_switch_plan.py").read_text(encoding="utf-8"):
+            errors.append(f"provider switch plan missing decision guard: {token}")
 
     if errors:
         for error in errors:

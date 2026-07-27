@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "gate_id": "backend-supabase-standby-promotion-decision",
+  "tracking_issue": "ramideltoro/nutsnews#528",
+  "epic": "ramideltoro/nutsnews#521",
+  "source": {
+    "label": "backend_postgres_primary",
+    "role": "normal production read/write primary until protected failover approval"
+  },
+  "target": {
+    "label": "existing_production_supabase_standby",
+    "role": "existing production Supabase hot-standby target",
+    "existing_production_supabase_project": true,
+    "create_new_supabase_project": false,
+    "create_nutsnews_standby_database": false
+  },
+  "required_gates": [
+    {
+      "id": "lag",
+      "issue": "ramideltoro/nutsnews#522",
+      "artifact": "backend-supabase-standby-lag-gate",
+      "gate": "supabase_standby_lag"
+    },
+    {
+      "id": "parity",
+      "issue": "ramideltoro/nutsnews#523",
+      "artifact": "backend-supabase-standby-parity-gate",
+      "gate": "supabase_standby_required_table_parity"
+    },
+    {
+      "id": "schema",
+      "issue": "ramideltoro/nutsnews#524",
+      "artifact": "backend-supabase-standby-schema-gate",
+      "gate": "supabase_standby_schema_compatibility"
+    },
+    {
+      "id": "sequence",
+      "issue": "ramideltoro/nutsnews#525",
+      "artifact": "backend-supabase-standby-sequence-gate",
+      "gate": "supabase_standby_sequence_safety"
+    },
+    {
+      "id": "writer_pause",
+      "issue": "ramideltoro/nutsnews#526",
+      "artifact": "backend-supabase-standby-writer-pause-gate",
+      "gate": "supabase_standby_writer_pause_quiescence"
+    },
+    {
+      "id": "split_brain_fence",
+      "issue": "ramideltoro/nutsnews#527",
+      "artifact": "backend-supabase-standby-split-brain-fence-gate",
+      "gate": "supabase_standby_split_brain_fence"
+    }
+  ],
+  "binding": {
+    "same_failover_attempt_id": true,
+    "same_source_binding_fingerprint": true,
+    "same_target_binding_fingerprint": true,
+    "same_candidate_application_revision": true,
+    "same_repository_revision_where_reported": true,
+    "same_fence_epoch": true
+  },
+  "decision": {
+    "go_value": "GO",
+    "no_go_value": "NO-GO",
+    "single_use": true,
+    "ttl_seconds": 300,
+    "go_requires_all_gates_pass": true,
+    "provider_switch_performed_by_this_workflow": false,
+    "consumed_by": "ramideltoro/nutsnews#502"
+  },
+  "failure_policy": {
+    "missing_evidence": "NO-GO",
+    "stale_evidence": "NO-GO",
+    "malformed_evidence": "NO-GO",
+    "duplicate_evidence": "NO-GO",
+    "replayed_decision": "NO-GO",
+    "mismatched_attempt": "NO-GO",
+    "mismatched_target": "NO-GO",
+    "mismatched_revision": "NO-GO",
+    "mismatched_epoch": "NO-GO",
+    "unavailable_evidence": "NO-GO",
+    "failing_gate": "NO-GO"
+  },
+  "result_contract": {
+    "artifact": "backend-supabase-standby-promotion-decision",
+    "safe_metadata_only": true,
+    "required_fields": [
+      "decision",
+      "decision_id",
+      "failover_attempt_id",
+      "candidate_application_revision",
+      "repository_revision",
+      "fence_epoch",
+      "source_binding_fingerprint",
+      "target_binding_fingerprint",
+      "gate_results",
+      "measured_at_utc",
+      "expires_at_utc",
+      "blockers",
+      "single_use",
+      "consumed"
+    ],
+    "forbidden_fields": [
+      "credentials",
+      "connection_strings",
+      "raw_sql",
+      "row_data",
+      "hostnames",
+      "project_refs"
+    ]
+  },
+  "safety": {
+    "backend_postgresql_remains_primary_until_approved_failover": true,
+    "target_is_existing_production_supabase": true,
+    "create_new_supabase_project": false,
+    "create_nutsnews_standby_database": false,
+    "app_worker_writes_to_supabase_before_failover": false,
+    "safe_metadata_only": true,
+    "sql_text_exposed": false,
+    "row_data_exposed": false,
+    "credentials_exposed": false
+  },
+  "workflow": {
+    "path": ".github/workflows/backend-supabase-standby-promotion-decision.yml",
+    "environment": "production-backend",
+    "runs_from": "main",
+    "default_enforce": false
+  },
+  "scope": "Combined GO/NO-GO decision only. Provider switching remains in #502 and must consume a fresh single-use GO decision."
+}

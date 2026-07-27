@@ -220,6 +220,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backend_supabase_standby_writer_pause_gate.py
 
+      - name: Validate Supabase standby split-brain fence gate guardrails
+        shell: bash
+        run: python3 scripts/validate_backend_supabase_standby_split_brain_fence_gate.py
+
       - name: Validate backend-to-Supabase sync relay offline mode
         shell: bash
         run: python3 scripts/backend_supabase_sync_relay.py --offline --enforce
@@ -251,6 +255,10 @@ jobs:
       - name: Run Supabase standby writer pause gate tests
         shell: bash
         run: python3 -m unittest tests.test_backend_supabase_standby_writer_pause_gate
+
+      - name: Run Supabase standby split-brain fence gate tests
+        shell: bash
+        run: python3 -m unittest tests.test_backend_supabase_standby_split_brain_fence_gate
 
       - name: Run backend writer pause manager tests
         shell: bash

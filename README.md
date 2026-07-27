@@ -4,6 +4,7 @@ Backend-owned operational runbooks include the zero-cost Supabase standby
 forced-command probe boundary for the protected app readiness workflow:
 
 - [Supabase Standby Forced-Command Probe](runbooks/SUPABASE_STANDBY_PROBE_BOUNDARY.md)
+- [Supabase Standby Split-Brain Fence Gate](runbooks/SUPABASE_STANDBY_SPLIT_BRAIN_FENCE_GATE.md)
 
 This supersedes the disposable IPv6 runner design. The old runner runbook is
 retired along with the obsolete runner workflow, Ansible role, playbook,

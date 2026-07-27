@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "gate_id": "backend-supabase-standby-split-brain-fence",
+  "tracking_issue": "ramideltoro/nutsnews#527",
+  "epic": "ramideltoro/nutsnews#521",
+  "source": {
+    "label": "backend_postgres_primary",
+    "role": "old production read/write primary before approved Supabase failover",
+    "normal_role_before_failover": "production read/write primary",
+    "must_be_fenced_before_target_write_eligibility": true
+  },
+  "target": {
+    "label": "existing_production_supabase_standby",
+    "role": "existing production Supabase hot-standby target",
+    "existing_production_supabase_project": true,
+    "create_new_supabase_project": false,
+    "create_nutsnews_standby_database": false
+  },
+  "safety": {
+    "backend_postgresql_remains_primary_until_approved_failover": true,
+    "target_is_existing_production_supabase": true,
+    "create_new_supabase_project": false,
+    "create_nutsnews_standby_database": false,
+    "app_worker_writes_to_supabase_before_failover": false,
+    "supabase_write_enablement_is_failover_only": true,
+    "safe_metadata_only": true,
+    "sql_text_exposed": false,
+    "row_data_exposed": false,
+    "credentials_exposed": false
+  },
+  "lease": {
+    "epoch_source": "protected_failover_attempt_generation",
+    "previous_holder": "backend_postgres_primary",
+    "target_holder": "existing_production_supabase_standby",
+    "exactly_one_provider_write_eligible": true,
+    "stale_processes_must_reject_previous_epochs": true,
+    "idempotent_retry_required": true
+  },
+  "required_backend_fence_controls": [
+    {
+      "id": "writer_pause_gate_passed",
+      "description": "The #526 writer-pause gate passed for the same failover attempt before split-brain fence evaluation."
+    },
+    {
+      "id": "backend_worker_database_api_writes_disabled",
+      "description": "The backend worker/app database API write guard rejects backend PostgreSQL writes."
+    },
+    {
+      "id": "worker_uplift_production_writes_disabled",
+      "description": "Worker-uplift production write approval remains disabled unless the current epoch explicitly allows it."
+    },
+    {
+      "id": "backend_postgres_application_write_routes_disabled",
+      "description": "Application, worker, scheduler, admin, and maintenance write routes no longer consider backend PostgreSQL write-eligible."
+    },
+    {
+      "id": "backend_postgres_database_roles_revoked_or_blocked",
+      "description": "Backend PostgreSQL write-capable roles are revoked, blocked, or guarded for production writes before Supabase eligibility is accepted."
+    },
+    {
+      "id": "stale_backend_writer_epoch_rejected",
+      "description": "A stale process carrying a prior epoch cannot resume backend PostgreSQL writes."
+    },
+    {
+      "id": "provider_epoch_mismatch_rejects_writes",
+      "description": "Provider/epoch mismatch rejects writes instead of falling back to either provider."
+    }
+  ],
+  "required_target_controls": [
+    {
+      "id": "supabase_write_eligibility_after_backend_fence",
+      "description": "Supabase write eligibility is accepted only after backend PostgreSQL write eligibility is false."
+    },
+    {
+      "id": "supabase_write_credentials_not_exposed_to_app_workers_before_failover",
+      "description": "Production app/worker traffic does not receive Supabase write credentials before approved failover."
+    },
+    {
+      "id": "supabase_write_enabled_only_for_current_epoch",
+      "description": "Supabase write eligibility is tied to the current failover epoch."
+    }
+  ],
+  "failure_policy": {
+    "ambiguous_ownership": "FAIL",
+    "simultaneous_write_eligibility": "FAIL",
+    "stale_epoch": "FAIL",
+    "stale_process": "FAIL",
+    "partial_fencing": "FAIL",
+    "retry_not_idempotent": "FAIL",
+    "verification_unavailable": "FAIL",
+    "writer_pause_missing_or_stale": "FAIL",
+    "mismatched_attempt": "FAIL",
+    "malformed_evidence": "FAIL",
+    "target_mismatch": "FAIL"
+  },
+  "result_contract": {
+    "status_values": [
+      "PASS",
+      "FAIL"
+    ],
+    "result_ttl_seconds": 300,
+    "required_fields": [
+      "failover_attempt_id",
+      "fence_epoch",
+      "source_fingerprint",
+      "target_fingerprint",
+      "write_eligible_provider_count",
+      "eligible_provider",
+      "measured_at_utc",
+      "expires_at_utc",
+      "blockers"
+    ],
+    "safe_metadata_only": true,
+    "forbidden_evidence": [
+      "database URLs",
+      "passwords",
+      "tokens",
+      "service-role keys",
+      "raw SQL text",
+      "raw row data",
+      "PostgreSQL error text",
+      "host project metadata"
+    ]
+  },
+  "scope": "Split-brain fencing only. Actual provider switching remains in #502, and the combined decision remains in #528."
+}

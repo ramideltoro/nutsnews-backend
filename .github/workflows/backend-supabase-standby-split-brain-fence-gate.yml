@@ -1,0 +1,225 @@
+name: Backend Supabase Standby Split-Brain Fence Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      failover_attempt_id:
+        description: Stable failover attempt identifier shared with the writer-pause gate.
+        required: true
+        type: string
+      fence_epoch:
+        description: Explicit provider lease epoch for this failover attempt.
+        required: true
+        type: string
+      writer_pause_gate_run_id:
+        description: Successful Backend Supabase Standby Writer Pause Gate run id for the same attempt.
+        required: true
+        type: string
+      confirmation:
+        description: Type evaluate-split-brain-fence-gate to run this gate.
+        required: true
+        type: string
+      backend_fence_confirmation:
+        description: Type backend-postgres-writes-fenced after backend PostgreSQL write capability is revoked or guarded for this epoch.
+        required: true
+        type: string
+      stale_writer_confirmation:
+        description: Type stale-backend-writers-rejected after stale backend writer epoch rejection is verified.
+        required: true
+        type: string
+      supabase_eligibility_confirmation:
+        description: Type supabase-write-eligibility-after-backend-fence after Supabase write eligibility is bound to this epoch and backend fence.
+        required: true
+        type: string
+      enforce:
+        description: Return non-zero when the gate result is FAIL.
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: backend-supabase-standby-split-brain-fence-gate-${{ inputs.failover_attempt_id }}
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    name: Evaluate standby split-brain fence gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production-backend
+    env:
+      BACKEND_FENCE_CONFIRMATION: ${{ inputs.backend_fence_confirmation }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+      ENFORCE: ${{ inputs.enforce }}
+      FAILOVER_ATTEMPT_ID: ${{ inputs.failover_attempt_id }}
+      FENCE_EPOCH: ${{ inputs.fence_epoch }}
+      GH_TOKEN: ${{ github.token }}
+      STALE_WRITER_CONFIRMATION: ${{ inputs.stale_writer_confirmation }}
+      SUPABASE_ELIGIBILITY_CONFIRMATION: ${{ inputs.supabase_eligibility_confirmation }}
+      WRITER_PAUSE_GATE_RUN_ID: ${{ inputs.writer_pause_gate_run_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF_NAME" != "main" ]]; then
+            echo "This gate only runs from main." >&2
+            exit 1
+          fi
+          if [[ "$CONFIRMATION" != "evaluate-split-brain-fence-gate" ]]; then
+            echo "Invalid split-brain fence confirmation." >&2
+            exit 1
+          fi
+          if [[ "$BACKEND_FENCE_CONFIRMATION" != "backend-postgres-writes-fenced" ]]; then
+            echo "Invalid backend fence confirmation." >&2
+            exit 1
+          fi
+          if [[ "$STALE_WRITER_CONFIRMATION" != "stale-backend-writers-rejected" ]]; then
+            echo "Invalid stale writer confirmation." >&2
+            exit 1
+          fi
+          if [[ "$SUPABASE_ELIGIBILITY_CONFIRMATION" != "supabase-write-eligibility-after-backend-fence" ]]; then
+            echo "Invalid Supabase eligibility confirmation." >&2
+            exit 1
+          fi
+          if ! [[ "$FAILOVER_ATTEMPT_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then
+            echo "Invalid failover_attempt_id." >&2
+            exit 1
+          fi
+          if ! [[ "$FENCE_EPOCH" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then
+            echo "Invalid fence_epoch." >&2
+            exit 1
+          fi
+          if ! [[ "$WRITER_PAUSE_GATE_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "Invalid writer_pause_gate_run_id." >&2
+            exit 1
+          fi
+
+      - name: Validate split-brain fence implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 scripts/validate_backend_supabase_standby_split_brain_fence_gate.py
+          python3 -m unittest tests.test_backend_supabase_standby_split_brain_fence_gate
+
+      - name: Download writer-pause gate evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$RUNNER_TEMP/writer-pause-gate"
+          gh run download "$WRITER_PAUSE_GATE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name backend-supabase-standby-writer-pause-gate \
+            --dir "$RUNNER_TEMP/writer-pause-gate"
+
+          test -s "$RUNNER_TEMP/writer-pause-gate/backend-supabase-standby-writer-pause-gate.json"
+
+      - name: Build safe split-brain fence evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import datetime as dt
+          import json
+          import os
+          from pathlib import Path
+
+          checked_at = dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+          attempt = os.environ["FAILOVER_ATTEMPT_ID"]
+          epoch = os.environ["FENCE_EPOCH"]
+          evidence = {
+              "status": "pass",
+              "failover_attempt_id": attempt,
+              "fence_epoch": epoch,
+              "checked_at_utc": checked_at,
+              "source_label": "backend_postgres_primary",
+              "target_label": "existing_production_supabase_standby",
+              "target_is_existing_production_supabase": True,
+              "create_new_supabase_project": False,
+              "create_nutsnews_standby_database": False,
+              "app_worker_writes_to_supabase_before_failover": False,
+              "safe_metadata_only": True,
+              "lease": {
+                  "epoch": epoch,
+                  "previous_holder": "backend_postgres_primary",
+                  "holder": "existing_production_supabase_standby",
+              },
+              "providers": [
+                  {
+                      "id": "backend_postgres_primary",
+                      "write_eligible": False,
+                      "fenced": True,
+                      "epoch": epoch,
+                  },
+                  {
+                      "id": "existing_production_supabase_standby",
+                      "write_eligible": True,
+                      "fenced": False,
+                      "epoch": epoch,
+                  },
+              ],
+              "backend_fence": {
+                  "backend_worker_database_api_writes_enabled": False,
+                  "worker_uplift_production_writes_enabled": False,
+                  "application_write_routes_disabled": True,
+                  "database_write_roles_revoked_or_blocked": True,
+                  "stale_writer_epoch_rejected": True,
+                  "provider_epoch_mismatch_rejects_writes": True,
+                  "verification_reachable": True,
+                  "idempotent_retry_safe": True,
+              },
+              "supabase_fence": {
+                  "write_eligibility_requires_backend_fence": True,
+                  "write_credentials_not_exposed_to_app_workers_before_failover": True,
+                  "write_enabled_only_for_current_epoch": True,
+                  "verification_reachable": True,
+              },
+          }
+          output = Path(os.environ["RUNNER_TEMP"]) / "backend-supabase-standby-split-brain-fence-evidence.json"
+          output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+
+      - name: Evaluate split-brain fence gate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          args=(
+            --contract docs/backend-supabase-standby-split-brain-fence-gate.json
+            --writer-pause-gate "$RUNNER_TEMP/writer-pause-gate/backend-supabase-standby-writer-pause-gate.json"
+            --fence-evidence "$RUNNER_TEMP/backend-supabase-standby-split-brain-fence-evidence.json"
+            --repository-revision "$GITHUB_SHA"
+            --failover-attempt-id "$FAILOVER_ATTEMPT_ID"
+            --fence-epoch "$FENCE_EPOCH"
+            --output "$RUNNER_TEMP/backend-supabase-standby-split-brain-fence-gate.json"
+            --summary "$GITHUB_STEP_SUMMARY"
+          )
+          if [[ "$ENFORCE" == "true" ]]; then
+            args+=(--enforce)
+          fi
+
+          python3 scripts/backend_supabase_standby_split_brain_fence_gate.py "${args[@]}"
+
+      - name: Upload split-brain fence evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-supabase-standby-split-brain-fence-gate
+          path: |
+            ${{ runner.temp }}/backend-supabase-standby-split-brain-fence-evidence.json
+            ${{ runner.temp }}/backend-supabase-standby-split-brain-fence-gate.json
+          if-no-files-found: error

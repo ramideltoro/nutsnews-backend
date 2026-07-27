@@ -7,8 +7,8 @@ This runbook covers `ramideltoro/nutsnews-worker#91`.
 The private canary proves the loopback AMQP path before worker-uplift traffic
 depends on it. It uses the existing `RABBITMQ_MONITORING_USERNAME` identity as
 a least-privilege canary principal. That identity can only write the dedicated
-`worker.uplift.canary.v3` exchange and read the dedicated
-`worker.uplift.canary.v3` queue. It cannot configure broker resources and
+`worker.uplift.canary.v4` exchange and declare/read the dedicated
+`worker.uplift.canary.runtime.v4` runtime queue. It can configure only that queue and
 cannot publish to or consume from production worker queues.
 
 The canary does not use Grafana Cloud Synthetic Monitoring for private AMQP and
@@ -135,10 +135,11 @@ consume the dedicated probe queue.
 The protected apply canary has three bounded attempts with a short delay so a
 single transient AMQP or management queue timeout does not fail an otherwise
 healthy apply; all attempts must still succeed before the workflow can pass.
-Protected apply ensures only the dedicated transient `worker.uplift.canary.v3` queue
-immediately before the canary. The canary then drains a bounded number of stale
-messages from that dedicated canary queue over AMQP before publishing its own
-probe message; it never deletes or recreates production worker queues.
+Protected apply ensures only the dedicated durable canary exchange immediately
+before the canary. The canary then declares an exclusive auto-delete
+`worker.uplift.canary.runtime.v4` queue at runtime, binds it to the canary exchange,
+drains a bounded number of stale canary messages over AMQP, and publishes its own
+transient probe message. It never deletes or recreates production worker queues.
 Before topology or canary work, protected apply also repairs RabbitMQ broker data
 ownership/mode metadata from inside the running container. That repair is scoped
 to `/var/lib/rabbitmq` and does not publish, consume, purge, or delete production

@@ -170,6 +170,11 @@ def load_canary_definition(path: Path) -> dict[str, Any]:
         "exchange": str(exchange["name"]),
         "routing_key": str(canary["routing_key"]),
         "queue": str(queue["name"]),
+        "runtime_declared": bool(queue.get("runtime_declared", False)),
+        "exclusive": bool(queue.get("exclusive", False)),
+        "auto_delete": bool(queue.get("auto_delete", False)),
+        "durable": bool(queue.get("durable", True)),
+        "arguments": queue.get("arguments", {}) if isinstance(queue.get("arguments", {}), dict) else {},
     }
 
 
@@ -336,6 +341,16 @@ def amqp_canary_roundtrip(
         body = json.dumps(payload, sort_keys=True).encode("utf-8")
         if failure_mode == "poison-message":
             body = b'{"probe":"nutsnews-rabbitmq-canary","poison":true}'
+
+        if route.get("runtime_declared"):
+            channel.queue_declare(
+                queue=route["queue"],
+                durable=bool(route.get("durable", False)),
+                exclusive=bool(route.get("exclusive", True)),
+                auto_delete=bool(route.get("auto_delete", True)),
+                arguments=route.get("arguments", {}),
+            )
+            channel.queue_bind(queue=route["queue"], exchange=route["exchange"], routing_key=route["routing_key"])
 
         preflight_drained = drain_canary_queue(channel, route["queue"])
 

@@ -59,7 +59,7 @@
     },
     {
       "id": "canary",
-      "name": "worker.uplift.canary.v3",
+      "name": "worker.uplift.canary.v4",
       "type": "direct",
       "durable": true,
       "arguments": {}
@@ -67,11 +67,13 @@
   ],
   "canary": {
     "exchange_id": "canary",
-    "routing_key": "worker.uplift.canary.v3",
+    "routing_key": "worker.uplift.canary.v4",
     "queue": {
-      "name": "worker.uplift.canary.v3",
+      "name": "worker.uplift.canary.runtime.v4",
+      "runtime_declared": true,
       "durable": false,
-      "auto_delete": false,
+      "exclusive": true,
+      "auto_delete": true,
       "arguments": {
         "x-queue-type": "classic",
         "x-max-length": 10,
@@ -358,9 +360,9 @@
       "password_variable": "RABBITMQ_MONITORING_PASSWORD",
       "tags": ["monitoring"],
       "permissions": {
-        "configure": "^$",
-        "write": "^worker\\.uplift\\.canary\\.v3$",
-        "read": "^worker\\.uplift\\.canary\\.v3$"
+        "configure": "^worker\\.uplift\\.canary\\.runtime\\.v4$",
+        "write": "^worker\\.uplift\\.canary\\.v4$",
+        "read": "^worker\\.uplift\\.canary\\.runtime\\.v4$"
       }
     },
     {

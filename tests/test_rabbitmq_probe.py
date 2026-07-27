@@ -281,11 +281,11 @@ class RabbitMQProbeTests(unittest.TestCase):
             definition.write_text(
                 json.dumps(
                     {
-                        "exchanges": [{"id": "canary", "name": "worker.uplift.canary.v3"}],
+                        "exchanges": [{"id": "canary", "name": "worker.uplift.canary.v4"}],
                         "canary": {
                             "exchange_id": "canary",
-                            "routing_key": "worker.uplift.canary.v3",
-                            "queue": {"name": "worker.uplift.canary.v3"},
+                            "routing_key": "worker.uplift.canary.v4",
+                            "queue": {"name": "worker.uplift.canary.runtime.v4", "runtime_declared": True},
                         },
                     }
                 ),
@@ -369,6 +369,18 @@ class RabbitMQProbeTests(unittest.TestCase):
                 self.published += 1
                 self.messages.append(body)
 
+            def queue_declare(self, *, queue: str, durable: bool, exclusive: bool, auto_delete: bool, arguments: dict) -> None:
+                self.last_declare = {
+                    "queue": queue,
+                    "durable": durable,
+                    "exclusive": exclusive,
+                    "auto_delete": auto_delete,
+                    "arguments": arguments,
+                }
+
+            def queue_bind(self, *, queue: str, exchange: str, routing_key: str) -> None:
+                self.last_bind = {"queue": queue, "exchange": exchange, "routing_key": routing_key}
+
         class FakeConnection:
             def __init__(self) -> None:
                 self.channel_instance = FakeChannel()
@@ -399,7 +411,16 @@ class RabbitMQProbeTests(unittest.TestCase):
         fake_connection = FakeConnection()
         fake_pika = FakePika(fake_connection)
         args = SimpleNamespace(amqp_host="127.0.0.1", amqp_port=5672, timeout_seconds=1)
-        route = {"exchange": "worker.uplift.canary.v3", "routing_key": "worker.uplift.canary.v3", "queue": "worker.uplift.canary.v3"}
+        route = {
+            "exchange": "worker.uplift.canary.v4",
+            "routing_key": "worker.uplift.canary.v4",
+            "queue": "worker.uplift.canary.runtime.v4",
+            "runtime_declared": True,
+            "durable": False,
+            "exclusive": True,
+            "auto_delete": True,
+            "arguments": {"x-max-length": 10},
+        }
 
         with (
             patch.object(probe, "import_pika", return_value=fake_pika),
@@ -419,6 +440,11 @@ class RabbitMQProbeTests(unittest.TestCase):
         self.assertEqual(result["cleanup_drained"], 0)
         self.assertEqual(fake_connection.channel_instance.published, 1)
         self.assertEqual(fake_connection.channel_instance.acked, [1, 2, 3])
+        self.assertEqual(fake_connection.channel_instance.last_declare["queue"], "worker.uplift.canary.runtime.v4")
+        self.assertFalse(fake_connection.channel_instance.last_declare["durable"])
+        self.assertTrue(fake_connection.channel_instance.last_declare["exclusive"])
+        self.assertTrue(fake_connection.channel_instance.last_declare["auto_delete"])
+        self.assertEqual(fake_connection.channel_instance.last_bind["exchange"], "worker.uplift.canary.v4")
         self.assertEqual(fake_connection.channel_instance.last_publish["properties"].kwargs["delivery_mode"], 1)
         self.assertTrue(fake_connection.closed)
 

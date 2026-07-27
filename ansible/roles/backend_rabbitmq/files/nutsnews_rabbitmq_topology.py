@@ -267,16 +267,17 @@ def expected_queues(definition: dict[str, Any]) -> list[dict[str, Any]]:
     canary = definition.get("canary")
     if isinstance(canary, dict) and isinstance(canary.get("queue"), dict):
         queue = canary["queue"]
-        queues.append(
-            {
-                "kind": "canary",
-                "stage": "canary",
-                "name": queue["name"],
-                "durable": bool(queue.get("durable", True)),
-                "auto_delete": bool(queue.get("auto_delete", False)),
-                "arguments": normalize_dict(queue.get("arguments", {})),
-            }
-        )
+        if not bool(queue.get("runtime_declared", False)):
+            queues.append(
+                {
+                    "kind": "canary",
+                    "stage": "canary",
+                    "name": queue["name"],
+                    "durable": bool(queue.get("durable", True)),
+                    "auto_delete": bool(queue.get("auto_delete", False)),
+                    "arguments": normalize_dict(queue.get("arguments", {})),
+                }
+            )
     return queues
 
 
@@ -313,14 +314,15 @@ def expected_bindings(definition: dict[str, Any]) -> list[dict[str, Any]]:
         )
     canary = definition.get("canary")
     if isinstance(canary, dict) and isinstance(canary.get("queue"), dict):
-        bindings.append(
-            {
-                "exchange": exchange_by_id(definition, canary["exchange_id"])["name"],
-                "queue": canary["queue"]["name"],
-                "routing_key": canary["routing_key"],
-                "arguments": {},
-            }
-        )
+        if not bool(canary["queue"].get("runtime_declared", False)):
+            bindings.append(
+                {
+                    "exchange": exchange_by_id(definition, canary["exchange_id"])["name"],
+                    "queue": canary["queue"]["name"],
+                    "routing_key": canary["routing_key"],
+                    "arguments": {},
+                }
+            )
     return bindings
 
 
@@ -772,6 +774,8 @@ def permission_matrix(definition: dict[str, Any], users: list[dict[str, Any]]) -
             if not canary_exchange or not canary_queue:
                 errors.append(f"{user_id} requires a declared canary exchange and queue")
                 continue
+            if not regex_allows(configure, canary_queue):
+                errors.append(f"{user_id} cannot configure the runtime canary queue")
             if not regex_allows(write, canary_exchange):
                 errors.append(f"{user_id} cannot write the canary exchange")
             if not regex_allows(read, canary_queue):
@@ -902,21 +906,28 @@ def action_permissions(args: argparse.Namespace, client: RabbitMQClient, definit
 def action_repair_canary(args: argparse.Namespace, client: RabbitMQClient, definition: dict[str, Any], users: list[dict[str, Any]]) -> int:
     del users
     wait_for_management(args, client)
-    queue, binding = canary_queue_and_binding(definition)
-    vhost = definition["vhost"]
+    canary = definition.get("canary") if isinstance(definition.get("canary"), dict) else {}
+    if not isinstance(canary.get("queue"), dict):
+        raise SystemExit("topology definition must declare a canary queue")
+    queue = canary["queue"]
+    exchange = exchange_by_id(definition, canary["exchange_id"])
+    runtime_declared = bool(queue.get("runtime_declared", False))
     report: dict[str, Any] = {
         "status": "pass",
         "changed": False,
         "changes": [],
         "drift": [],
-        "scope": "canary_queue_only",
-        "operation": "ensure_only",
+        "scope": "canary_runtime_route_only" if runtime_declared else "canary_queue_only",
+        "operation": "ensure_exchange_runtime_queue" if runtime_declared else "ensure_only",
         "queue": queue["name"],
         "production_queues_touched": False,
         "safe_metadata_only": True,
     }
-    ensure_queue(client, definition, queue, report)
-    ensure_binding(client, definition, binding, report)
+    ensure_exchange(client, definition, exchange, report)
+    if not runtime_declared:
+        queue, binding = canary_queue_and_binding(definition)
+        ensure_queue(client, definition, queue, report)
+        ensure_binding(client, definition, binding, report)
     if report["drift"]:
         report["status"] = "fail"
         print(json.dumps(redact_report(report), sort_keys=True))

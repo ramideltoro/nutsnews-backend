@@ -240,6 +240,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_backend_supabase_standby_staging_failover_drill.py
 
+      - name: Validate backend-supabase-standby-production-acceptance guardrails
+        shell: bash
+        run: python3 scripts/validate_backend_supabase_standby_production_acceptance.py
+
       - name: Validate backend-to-Supabase sync relay offline mode
         shell: bash
         run: python3 scripts/backend_supabase_sync_relay.py --offline --enforce
@@ -291,6 +295,10 @@ jobs:
       - name: Run Supabase standby staging failover drill tests
         shell: bash
         run: python3 -m unittest tests.test_backend_supabase_standby_staging_failover_drill
+
+      - name: Run Supabase standby production acceptance tests
+        shell: bash
+        run: python3 -m unittest tests.test_backend_supabase_standby_production_acceptance
 
       - name: Run backend writer pause manager tests
         shell: bash

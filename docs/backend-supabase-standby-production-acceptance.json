@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "acceptance_id": "backend-supabase-standby-production-acceptance",
+  "tracking_issue": "ramideltoro/nutsnews#505",
+  "epic": "ramideltoro/nutsnews#521",
+  "goal": "Record a fail-closed production readiness go/no-go decision for treating existing production Supabase as the official hot standby backup target.",
+  "depends_on": [
+    "docs/backend-supabase-sync-relay.json",
+    "docs/backend-supabase-standby-lag-gate.json",
+    "docs/backend-supabase-standby-parity-gate.json",
+    "docs/backend-supabase-standby-failover-workflow.json",
+    "docs/backend-supabase-standby-staging-failover-drill.json"
+  ],
+  "source_before_acceptance": {
+    "label": "backend_postgres_primary",
+    "role": "normal production read/write primary until approved failover"
+  },
+  "target_after_acceptance": {
+    "label": "existing_production_supabase_standby",
+    "role": "accepted production hot standby target, not active primary unless protected failover is later approved",
+    "existing_production_supabase_project": true,
+    "create_new_supabase_project": false,
+    "create_nutsnews_standby_database": false
+  },
+  "soak_requirements": {
+    "minimum_window_hours": 24,
+    "relay_health_status": "healthy",
+    "max_observed_lag_seconds": 30,
+    "critical_backend_health_count": 0,
+    "parity_status": "PASS",
+    "safe_metadata_only": true
+  },
+  "required_production_dry_run": {
+    "workflow_id": "backend-supabase-standby-failover",
+    "issue": "ramideltoro/nutsnews#502",
+    "operation": "dry-run",
+    "accepted_blocker_without_go": "missing_supabase_standby_promotion_decision",
+    "mutation_performed": false,
+    "provider_switch_performed_by_this_workflow": false
+  },
+  "required_staging_drill": {
+    "drill_id": "backend-supabase-standby-staging-failover-drill",
+    "issue": "ramideltoro/nutsnews#503",
+    "operation": "staging-apply",
+    "status": "PASS",
+    "target_database_provider_mode": "supabase_primary",
+    "production_writes_paused": true,
+    "backend_postgres_write_delta_after_failover": 0,
+    "write_eligible_provider_count": 1,
+    "eligible_provider": "existing_production_supabase_standby"
+  },
+  "decision_policy": {
+    "accepted_decision": "GO",
+    "rejected_decision": "NO-GO",
+    "requires_explicit_owner_decision": true,
+    "go_does_not_execute_failover": true,
+    "failover_execution_still_requires_fresh_528_go": true
+  },
+  "failure_policy": {
+    "soak_window_incomplete": "NO-GO",
+    "relay_unhealthy": "NO-GO",
+    "lag_exceeds_threshold": "NO-GO",
+    "critical_backend_health_present": "NO-GO",
+    "parity_not_pass": "NO-GO",
+    "missing_or_mutating_failover_dry_run": "NO-GO",
+    "missing_or_failing_staging_drill": "NO-GO",
+    "unsafe_metadata": "NO-GO",
+    "owner_no_go": "NO-GO"
+  },
+  "safety": {
+    "protected_environment": "production-backend",
+    "runs_from": "main",
+    "requires_typed_confirmation_for_acceptance": true,
+    "dry_run_by_default": true,
+    "safe_metadata_only": true,
+    "production_mutation_performed": false,
+    "provider_switch_performed": false,
+    "approved_for_production_provider_switch": false,
+    "backend_postgresql_remains_primary_until_approved_failover": true,
+    "target_is_existing_production_supabase": true,
+    "create_new_supabase_project": false,
+    "create_nutsnews_standby_database": false,
+    "app_worker_writes_to_supabase_before_approved_failover": false
+  },
+  "workflow": {
+    "path": ".github/workflows/backend-supabase-standby-production-acceptance.yml",
+    "protected_environment": "production-backend",
+    "artifact": "backend-supabase-standby-production-acceptance",
+    "default_operation": "dry-run"
+  },
+  "validation": {
+    "local_validator": "python3 scripts/validate_backend_supabase_standby_production_acceptance.py",
+    "acceptance_runner": "python3 scripts/backend_supabase_standby_production_acceptance.py --operation acceptance --confirmation record-production-standby-acceptance --owner-decision GO --fixture-pass",
+    "unit_tests": "python3 -m unittest tests.test_backend_supabase_standby_production_acceptance",
+    "live_status": "production acceptance gate added; protected main evidence must record an explicit GO or NO-GO on #223"
+  }
+}

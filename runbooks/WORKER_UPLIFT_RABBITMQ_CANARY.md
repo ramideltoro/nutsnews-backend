@@ -8,9 +8,9 @@ The private canary proves the loopback AMQP path before worker-uplift traffic
 depends on it. It uses the existing `RABBITMQ_MONITORING_USERNAME` identity as
 a least-privilege canary principal. That identity can only write the dedicated
 `worker.uplift.canary.exchange.v4` exchange and dedicated
-`worker.uplift.canary.queue.v4` runtime queue. It can configure only that queue,
-can read only that exchange and queue, and cannot publish to or consume from
-production worker queues.
+`worker.uplift.canary.queue.v4.<uuid>` runtime queues. It can configure only
+UUID-suffixed queues under that prefix, can read only that exchange and those
+queues, and cannot publish to or consume from production worker queues.
 
 The canary does not use Grafana Cloud Synthetic Monitoring for private AMQP and
 does not expose a public RabbitMQ listener.
@@ -137,10 +137,11 @@ The protected apply canary has three bounded attempts with a short delay so a
 single transient AMQP or management queue timeout does not fail an otherwise
 healthy apply; all attempts must still succeed before the workflow can pass.
 Protected apply ensures only the dedicated durable canary exchange immediately
-before the canary. The canary then declares an exclusive auto-delete
-`worker.uplift.canary.queue.v4` queue at runtime, binds it to the canary exchange,
-drains a bounded number of stale canary messages over AMQP, and publishes its own
-transient probe message. It never deletes or recreates production worker queues.
+before the canary. The canary then declares a per-run exclusive auto-delete queue
+under the `worker.uplift.canary.queue.v4.<uuid>` prefix at runtime, binds it to
+the canary exchange, drains a bounded number of stale canary messages over AMQP,
+and publishes its own transient probe message. It never deletes or recreates
+production worker queues.
 Before topology or canary work, protected apply also repairs RabbitMQ broker data
 ownership/mode metadata from inside the running container. That repair is scoped
 to `/var/lib/rabbitmq` and does not publish, consume, purge, or delete production

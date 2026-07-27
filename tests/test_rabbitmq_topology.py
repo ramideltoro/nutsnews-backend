@@ -101,6 +101,7 @@ class RabbitMQTopologyTests(unittest.TestCase):
         self.assertFalse(any(binding["queue"] == "worker.uplift.canary.queue.v4" for binding in bindings))
         canary_queue = definition["canary"]["queue"]
         self.assertEqual(canary_queue["name"], "worker.uplift.canary.queue.v4")
+        self.assertEqual(canary_queue["runtime_queue_prefix"], "worker.uplift.canary.queue.v4")
         self.assertTrue(canary_queue["runtime_declared"])
         self.assertTrue(canary_queue["exclusive"])
         self.assertTrue(canary_queue["auto_delete"])
@@ -126,12 +127,16 @@ class RabbitMQTopologyTests(unittest.TestCase):
         self.assertFalse(topology.regex_allows(scheduler["permissions"]["read"], "nutsnews.worker.fetch.v1"))
 
         canary = next(user for user in users if user["id"] == "monitoring_canary")
-        self.assertTrue(topology.regex_allows(canary["permissions"]["configure"], "worker.uplift.canary.queue.v4"))
+        runtime_queue = "worker.uplift.canary.queue.v4.0123456789abcdef0123456789abcdef"
+        self.assertFalse(topology.regex_allows(canary["permissions"]["configure"], "worker.uplift.canary.queue.v4"))
+        self.assertTrue(topology.regex_allows(canary["permissions"]["configure"], runtime_queue))
         self.assertFalse(topology.regex_allows(canary["permissions"]["configure"], "worker.uplift.canary.exchange.v4"))
         self.assertTrue(topology.regex_allows(canary["permissions"]["write"], "worker.uplift.canary.exchange.v4"))
-        self.assertTrue(topology.regex_allows(canary["permissions"]["write"], "worker.uplift.canary.queue.v4"))
+        self.assertFalse(topology.regex_allows(canary["permissions"]["write"], "worker.uplift.canary.queue.v4"))
+        self.assertTrue(topology.regex_allows(canary["permissions"]["write"], runtime_queue))
         self.assertTrue(topology.regex_allows(canary["permissions"]["read"], "worker.uplift.canary.exchange.v4"))
-        self.assertTrue(topology.regex_allows(canary["permissions"]["read"], "worker.uplift.canary.queue.v4"))
+        self.assertFalse(topology.regex_allows(canary["permissions"]["read"], "worker.uplift.canary.queue.v4"))
+        self.assertTrue(topology.regex_allows(canary["permissions"]["read"], runtime_queue))
         self.assertFalse(topology.regex_allows(canary["permissions"]["configure"], "nutsnews.worker.fetch.v1"))
         self.assertFalse(topology.regex_allows(canary["permissions"]["write"], "nutsnews.worker.v1"))
         self.assertFalse(topology.regex_allows(canary["permissions"]["write"], "nutsnews.worker.fetch.v1"))

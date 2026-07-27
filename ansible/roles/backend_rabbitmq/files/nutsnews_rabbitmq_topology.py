@@ -774,15 +774,27 @@ def permission_matrix(definition: dict[str, Any], users: list[dict[str, Any]]) -
             if not canary_exchange or not canary_queue:
                 errors.append(f"{user_id} requires a declared canary exchange and queue")
                 continue
-            if not regex_allows(configure, canary_queue):
+            queue_definition = definition["canary"]["queue"]
+            canary_runtime_queue = canary_queue
+            runtime_declared = bool(queue_definition.get("runtime_declared", False))
+            if runtime_declared:
+                prefix = str(queue_definition.get("runtime_queue_prefix") or canary_queue)
+                canary_runtime_queue = f"{prefix}.{'0' * 32}"
+            if runtime_declared and regex_allows(configure, canary_queue):
+                errors.append(f"{user_id} can configure the fixed canary queue name")
+            if not regex_allows(configure, canary_runtime_queue):
                 errors.append(f"{user_id} cannot configure the runtime canary queue")
             if not regex_allows(write, canary_exchange):
                 errors.append(f"{user_id} cannot write the canary exchange")
-            if not regex_allows(write, canary_queue):
+            if runtime_declared and regex_allows(write, canary_queue):
+                errors.append(f"{user_id} can write the fixed canary queue name")
+            if not regex_allows(write, canary_runtime_queue):
                 errors.append(f"{user_id} cannot write the runtime canary queue")
             if not regex_allows(read, canary_exchange):
                 errors.append(f"{user_id} cannot read the canary exchange")
-            if not regex_allows(read, canary_queue):
+            if runtime_declared and regex_allows(read, canary_queue):
+                errors.append(f"{user_id} can read the fixed canary queue name")
+            if not regex_allows(read, canary_runtime_queue):
                 errors.append(f"{user_id} cannot read the canary queue")
             for exchange in exchange_names:
                 if exchange != canary_exchange and regex_allows(write, exchange):

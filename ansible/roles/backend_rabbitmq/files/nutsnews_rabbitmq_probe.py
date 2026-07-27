@@ -166,10 +166,12 @@ def load_canary_definition(path: Path) -> dict[str, Any]:
     queue = canary.get("queue")
     if not isinstance(exchange, dict) or not isinstance(queue, dict):
         raise SystemExit("RabbitMQ canary route must declare exchange and queue")
+    queue_name = str(queue["name"])
     return {
         "exchange": str(exchange["name"]),
         "routing_key": str(canary["routing_key"]),
-        "queue": str(queue["name"]),
+        "queue": queue_name,
+        "runtime_queue_prefix": str(queue.get("runtime_queue_prefix") or queue_name),
         "runtime_declared": bool(queue.get("runtime_declared", False)),
         "exclusive": bool(queue.get("exclusive", False)),
         "auto_delete": bool(queue.get("auto_delete", False)),
@@ -323,6 +325,9 @@ def amqp_canary_roundtrip(
     cleanup_drained = 0
     message_id = str(uuid.uuid4())
     payload = canary_payload(message_id)
+    queue_name = str(route["queue"])
+    if route.get("runtime_declared"):
+        queue_name = f"{route.get('runtime_queue_prefix') or route['queue']}.{uuid.uuid4().hex}"
     started = time.monotonic()
     try:
         if failure_mode == "unroutable":
@@ -344,15 +349,15 @@ def amqp_canary_roundtrip(
 
         if route.get("runtime_declared"):
             channel.queue_declare(
-                queue=route["queue"],
+                queue=queue_name,
                 durable=bool(route.get("durable", False)),
                 exclusive=bool(route.get("exclusive", True)),
                 auto_delete=bool(route.get("auto_delete", True)),
                 arguments=route.get("arguments", {}),
             )
-            channel.queue_bind(queue=route["queue"], exchange=route["exchange"], routing_key=route["routing_key"])
+            channel.queue_bind(queue=queue_name, exchange=route["exchange"], routing_key=route["routing_key"])
 
-        preflight_drained = drain_canary_queue(channel, route["queue"])
+        preflight_drained = drain_canary_queue(channel, queue_name)
 
         publish_count = 1
         if failure_mode == "full-queue":
@@ -374,7 +379,7 @@ def amqp_canary_roundtrip(
                 break
 
         if failure_mode == "full-queue":
-            cleanup_drained = drain_canary_queue(channel, route["queue"])
+            cleanup_drained = drain_canary_queue(channel, queue_name)
             if publish_error:
                 return {
                     "expected_failure": True,
@@ -387,7 +392,7 @@ def amqp_canary_roundtrip(
             raise CanaryError("full-queue canary did not observe publisher backpressure")
 
         if failure_mode == "consumer-loss":
-            cleanup_drained = drain_canary_queue(channel, route["queue"], max_messages=1)
+            cleanup_drained = drain_canary_queue(channel, queue_name, max_messages=1)
             return {
                 "expected_failure": True,
                 "failure_class": "consumer-loss",
@@ -397,7 +402,7 @@ def amqp_canary_roundtrip(
                 "latency_seconds": time.monotonic() - started,
             }
 
-        method, _properties, body = channel.basic_get(queue=route["queue"], auto_ack=False)
+        method, _properties, body = channel.basic_get(queue=queue_name, auto_ack=False)
         if method is None:
             raise CanaryError("canary message was not available for manual ack")
         if failure_mode == "poison-message":

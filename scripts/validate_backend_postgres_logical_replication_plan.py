@@ -29,6 +29,8 @@ def main() -> int:
 
     if plan.get("issue") != 109:
         errors.append("issue must be 109")
+    if plan.get("cleanup_retention_policy") != "docs/backend-supabase-cleanup-retention-policy.json":
+        errors.append("logical replication plan must link the #506 cleanup retention policy")
     if plan.get("safe_metadata_only") is not True:
         errors.append("safe_metadata_only must be true")
 
@@ -114,10 +116,24 @@ def main() -> int:
     teardown = plan.get("post_cutover_teardown", {})
     if teardown.get("issue") != 114:
         errors.append("post-cutover teardown must be tracked by issue 114")
+    if teardown.get("cleanup_policy_issue") != "ramideltoro/nutsnews#506":
+        errors.append("post-cutover teardown must point to #506 cleanup policy")
     if "teardown-dry-run" not in teardown.get("dry_run_operation", ""):
         errors.append("post-cutover teardown must document a dry-run operation")
     if "teardown-production-logical-replication" not in teardown.get("apply_operation", ""):
         errors.append("post-cutover teardown apply must require explicit production confirmation")
+    if teardown.get("allowed_teardown_scope") != "obsolete_supabase_to_backend_migration_logical_replication_only":
+        errors.append("post-cutover teardown scope must be obsolete migration logical replication only")
+    if teardown.get("allowed_resource_prefix") != "nutsnews_backend_migration_":
+        errors.append("post-cutover teardown must stay limited to nutsnews_backend_migration_ resources")
+    teardown_requires = "\n".join(teardown.get("requires_before_apply", []))
+    for required in ("#505", "#506", "#114"):
+        if required not in teardown_requires:
+            errors.append(f"post-cutover teardown must require {required} evidence")
+    must_preserve = "\n".join(teardown.get("must_preserve", []))
+    for required in ("existing production Supabase hot standby", "NUTSNEWS_STANDBY_SUPABASE", "backend-to-Supabase standby sync relay"):
+        if required not in must_preserve:
+            errors.append(f"post-cutover teardown must preserve {required}")
     if teardown.get("source_slot_must_be_inactive") is not True:
         errors.append("post-cutover teardown must require an inactive source slot before source cleanup")
 

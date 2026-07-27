@@ -99,7 +99,7 @@ def main() -> int:
     if validation.get("dry_run_workflow") != ".github/workflows/backend-database-provider-switch-dry-run.yml":
         errors.append("dry_run_workflow must name the workflow")
     live_status = validation.get("live_status", "")
-    for required in ("app and worker provider modes implemented", "protected cutover", "owner approval"):
+    for required in ("app and worker provider modes implemented", "protected cutover", "owner approval", "hot standby"):
         if required not in live_status:
             errors.append(f"live_status must record provider switch status: {required}")
 
@@ -128,6 +128,17 @@ def main() -> int:
     for required in ("parity", "sequence safety", "no-split-brain", "owner approval"):
         if required not in switch_back_requires:
             errors.append(f"switch-back requirements must include {required}")
+
+    post_cutover = switch.get("post_cutover_status", {})
+    if post_cutover.get("standby_retention_issue") != "ramideltoro/nutsnews#506":
+        errors.append("post-cutover status must point to #506 standby retention policy")
+    retained = "\n".join(post_cutover.get("retained_standby", []))
+    for required in ("existing production Supabase", "supabase-standby", "sync relay", "failover approval"):
+        if required not in retained:
+            errors.append(f"post-cutover retained standby list must include {required}")
+    cleanup = "\n".join(post_cutover.get("migration_cleanup_pending", []))
+    if "obsolete Supabase-to-backend logical replication" not in cleanup:
+        errors.append("post-cutover cleanup must be limited to obsolete Supabase-to-backend logical replication")
 
     for token in (
         "missing_supabase_standby_promotion_decision",

@@ -64,9 +64,11 @@
   "post_cutover_status": {
     "recorded_at_utc": "2026-07-20T05:31:00Z",
     "cutover_issue": 119,
-    "retirement_issue": 114,
+    "cleanup_issue": 114,
+    "standby_retention_issue": "ramideltoro/nutsnews#506",
     "production_primary": "backend_postgres_primary",
-    "supabase_role": "rollback_window_and_retirement_source_until_issue_114_approval",
+    "supabase_role": "existing_production_supabase_hot_standby_retained_after_issue_505_506",
+    "cleanup_scope": "obsolete_supabase_to_backend_migration_resources_only",
     "latest_no_new_supabase_write_evidence": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29719176421",
     "latest_parity_evidence": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/29719283886"
   },

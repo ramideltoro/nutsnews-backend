@@ -213,6 +213,12 @@ def main() -> int:
         errors.append("cutover must be blocked before all shadow gates pass")
     if cutover.get("post_cutover_retirement_allowed_before_cutover_complete") is not False:
         errors.append("post-cutover retirement must be blocked before cutover completes")
+    if cutover.get("standby_retention_issue") != "ramideltoro/nutsnews#506":
+        errors.append("cutover cleanup policy must point to #506 standby retention")
+    if cutover.get("supabase_hot_standby_retained_after_cutover") is not True:
+        errors.append("existing production Supabase must be retained as hot standby after cutover")
+    if cutover.get("cleanup_scope") != "obsolete_migration_resources_only":
+        errors.append("post-cutover cleanup scope must be obsolete migration resources only")
 
     validation = topology.get("validation", {})
     if validation.get("local_validator") != "python3 scripts/validate_backend_postgres_future_primary_topology.py":

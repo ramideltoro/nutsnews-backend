@@ -269,8 +269,11 @@
   "cutover_and_retirement_gates": {
     "cutover_issue": 119,
     "post_cutover_issue": 114,
+    "standby_retention_issue": "ramideltoro/nutsnews#506",
     "cutover_allowed_before_all_shadow_gates_pass": false,
-    "post_cutover_retirement_allowed_before_cutover_complete": false
+    "post_cutover_retirement_allowed_before_cutover_complete": false,
+    "supabase_hot_standby_retained_after_cutover": true,
+    "cleanup_scope": "obsolete_migration_resources_only"
   },
   "validation": {
     "local_validator": "python3 scripts/validate_backend_postgres_future_primary_topology.py",

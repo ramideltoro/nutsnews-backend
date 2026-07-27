@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "policy_id": "backend-supabase-cleanup-retention-policy",
+  "tracking_issue": "ramideltoro/nutsnews#506",
+  "parent_issue": "ramideltoro/nutsnews#223",
+  "standby_acceptance_issue": "ramideltoro/nutsnews#505",
+  "standby_acceptance_evidence": {
+    "decision": "GO",
+    "backend_pr": "https://github.com/ramideltoro/nutsnews-backend/pull/436",
+    "merge_commit": "10bd486261a31c3d795f43089dd7083f556c19a3",
+    "protected_acceptance_run": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30236434040",
+    "issue_comment": "https://github.com/ramideltoro/nutsnews/issues/505#issuecomment-5087180042"
+  },
+  "production_database_policy": {
+    "normal_primary": "backend_postgres_primary",
+    "retained_hot_standby": "existing_production_supabase_standby",
+    "backend_postgresql_remains_primary_until_approved_failover": true,
+    "supabase_is_retained_as_hot_standby": true,
+    "supabase_is_not_blindly_retired": true,
+    "create_new_supabase_project": false,
+    "create_nutsnews_standby_database": false
+  },
+  "allowed_cleanup_after_standby_acceptance": [
+    {
+      "id": "obsolete_supabase_to_backend_migration_publication_slot_subscription",
+      "description": "Remove only the old Supabase-to-backend PostgreSQL migration publication, replication slot, and backend subscription after dry-run evidence proves they are inactive and owner approval is recorded.",
+      "resource_name_prefix": "nutsnews_backend_migration_",
+      "requires": [
+        "standby acceptance #505 GO evidence",
+        "protected teardown-dry-run evidence",
+        "inactive source replication slot",
+        "backend subscription detached or absent",
+        "explicit #114 or later owner-approved cleanup issue",
+        "confirmation teardown-production-logical-replication for production apply"
+      ]
+    },
+    {
+      "id": "migration_only_replication_credentials",
+      "description": "Remove or rotate only migration-only Supabase-to-backend replication credentials after the old replication path is torn down and standby relay credentials remain valid.",
+      "requires": [
+        "no standby credential names are removed",
+        "backend-to-Supabase standby relay remains healthy or intentionally paused by a later approval",
+        "safe metadata cleanup evidence"
+      ]
+    }
+  ],
+  "retained_standby_resources": [
+    "existing production Supabase project and database",
+    "supabase-standby GitHub Environment",
+    "NUTSNEWS_STANDBY_SUPABASE_PROJECT_REF",
+    "NUTSNEWS_STANDBY_SUPABASE_URL",
+    "NUTSNEWS_STANDBY_SUPABASE_DB_URL",
+    "NUTSNEWS_STANDBY_SUPABASE_SERVICE_ROLE_KEY",
+    "NUTSNEWS_STANDBY_SUPABASE_ANON_KEY",
+    "supabase/standby_manifest.json",
+    "backend-to-Supabase standby reconciliation workflow and contracts",
+    "backend-to-Supabase sync relay service, timer, environment file, contract, and last-run report",
+    "standby lag, parity, schema, sequence, writer-pause, split-brain, promotion-decision, failover, recovery, staging-drill, and production-acceptance workflows"
+  ],
+  "forbidden_without_new_owner_approval": [
+    "delete the supabase-standby GitHub Environment",
+    "delete or blank NUTSNEWS_STANDBY_SUPABASE_* secrets",
+    "disable or uninstall nutsnews-supabase-sync-relay.service",
+    "disable or uninstall nutsnews-supabase-sync-relay.timer",
+    "remove /etc/nutsnews-supabase-sync-relay/relay.env",
+    "remove /etc/nutsnews-supabase-sync-relay/contract.json",
+    "remove /var/lib/nutsnews/supabase-sync-relay/last-run.json",
+    "drop existing production Supabase schemas, tables, sequences, functions, or grants used by standby",
+    "remove standby manifest, readiness, reconciliation, lag, parity, schema, sequence, writer-pause, split-brain, promotion, failover, recovery, staging, or acceptance guardrails",
+    "route app or worker writes to Supabase outside the approved failover workflow"
+  ],
+  "cleanup_workflow_guardrails": {
+    "backend_postgres_logical_replication_workflow": ".github/workflows/backend-postgres-logical-replication.yml",
+    "allowed_teardown_scope": "obsolete_supabase_to_backend_migration_logical_replication_only",
+    "allowed_resource_prefix": "nutsnews_backend_migration_",
+    "must_preserve_hot_standby_resources": true,
+    "protected_environment": "production-backend",
+    "safe_metadata_only": true
+  },
+  "validation": {
+    "local_validator": "python3 scripts/validate_backend_supabase_cleanup_retention_policy.py",
+    "unit_tests": "python3 -m unittest tests.test_backend_supabase_cleanup_retention_policy",
+    "live_status": "cleanup retention policy added; backend checks prevent cleanup instructions or workflows from treating existing production Supabase as blindly retired"
+  }
+}

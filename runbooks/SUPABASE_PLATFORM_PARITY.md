@@ -29,7 +29,7 @@ python3 scripts/validate_supabase_platform_parity_decision.py
 | Realtime | Remove from cutover scope. | `ramideltoro/nutsnews` | Backend logical replication remains separate migration plumbing. |
 | Edge Functions | Confirmed unused in known projects. | `ramideltoro/nutsnews` | No Edge Function runtime is moved to backend now. |
 | Data API/PostgREST | Replace before cutover. | `ramideltoro/nutsnews-backend` plus app/worker repos | Blocks #119 until #111 and #117 pass. |
-| API keys | Replace or rotate. | `ramideltoro/nutsnews` | Supabase keys cannot remain production writer credentials after retirement. |
+| API keys | Replace or rotate production writer credentials only. | `ramideltoro/nutsnews` | Supabase writer credentials must not remain in normal app/worker write paths, but standby credentials and the existing production Supabase hot-standby path are retained after #505/#506. |
 
 ## Evidence
 
@@ -59,7 +59,9 @@ Production cutover stays blocked until:
 2. #117 adds provider modes for Supabase primary, backend shadow, and backend
    primary;
 3. staging rehearsal proves app and worker behavior without Supabase writes;
-4. #114 rotates or removes Supabase keys from production writer paths.
+4. #114 or a later approved cleanup issue rotates or removes only obsolete
+   migration/writer-path Supabase keys. It must not remove `supabase-standby`
+   credentials or backend-to-Supabase standby relay credentials after #505/#506.
 
 ## Pre-Cutover Recheck
 

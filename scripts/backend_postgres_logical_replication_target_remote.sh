@@ -98,6 +98,14 @@ print(json.dumps({
     "subscription_count": 1 if os.environ["SUBSCRIPTION_PRESENT"] == "true" else 0,
     "subscription_enabled": os.environ["EXISTING_ENABLED"] in {"1", "t", "true"},
     "subscription_slot_matches": os.environ["EXISTING_SLOT"] == os.environ["SLOT_NAME"],
+    "cleanup_scope": "obsolete_supabase_to_backend_migration_logical_replication_only",
+    "allowed_cleanup_resource_prefix": "nutsnews_backend_migration_",
+    "preserved_hot_standby_resources": [
+        "existing_production_supabase_standby",
+        "supabase-standby_environment_and_NUTSNEWS_STANDBY_SUPABASE_secrets",
+        "backend_to_supabase_sync_relay_service_timer_env_contract_reports",
+        "standby_manifest_and_failover_approval_guardrails",
+    ],
     "planned_actions": [
         "disable subscription if enabled",
         "detach subscription from source slot",
@@ -159,6 +167,14 @@ print(json.dumps({
     "slot": os.environ["SLOT_NAME"],
     "target_public_table_count": int(os.environ["TARGET_TABLE_COUNT"] or "0"),
     "subscription_count": subscription_count,
+    "cleanup_scope": "obsolete_supabase_to_backend_migration_logical_replication_only",
+    "allowed_cleanup_resource_prefix": "nutsnews_backend_migration_",
+    "preserved_hot_standby_resources": [
+        "existing_production_supabase_standby",
+        "supabase-standby_environment_and_NUTSNEWS_STANDBY_SUPABASE_secrets",
+        "backend_to_supabase_sync_relay_service_timer_env_contract_reports",
+        "standby_manifest_and_failover_approval_guardrails",
+    ],
     "safe_metadata_only": True,
 }, indent=2, sort_keys=True))
 PY

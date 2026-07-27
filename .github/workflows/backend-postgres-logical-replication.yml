@@ -309,6 +309,8 @@ jobs:
             echo "- Operation: \`${{ inputs.operation }}\`"
             echo "- Artifacts contain safe metadata only."
             echo "- Database URLs, passwords, tokens, row data, and WAL contents are not printed."
+            echo "- Teardown scope is obsolete Supabase-to-backend migration logical replication only."
+            echo "- Existing production Supabase hot standby, standby credentials, and backend-to-Supabase sync relay resources are preserved unless a later owner-approved issue changes that policy."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload replication setup reports

@@ -182,8 +182,10 @@ routing key: worker.uplift.canary.v4
 queue: worker.uplift.canary.queue.v4 (runtime-declared exclusive auto-delete)
 ```
 
-It cannot configure production resources and cannot publish to or consume from production
-worker queues.
+It cannot configure production resources and cannot write to or consume from
+production worker queues. The queue-scoped write permission is limited to the
+runtime canary queue because RabbitMQ checks that permission during private
+canary route setup.
 
 ## Verification
 

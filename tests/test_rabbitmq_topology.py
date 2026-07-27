@@ -129,9 +129,11 @@ class RabbitMQTopologyTests(unittest.TestCase):
         self.assertTrue(topology.regex_allows(canary["permissions"]["configure"], "worker.uplift.canary.queue.v4"))
         self.assertFalse(topology.regex_allows(canary["permissions"]["configure"], "worker.uplift.canary.exchange.v4"))
         self.assertTrue(topology.regex_allows(canary["permissions"]["write"], "worker.uplift.canary.exchange.v4"))
+        self.assertTrue(topology.regex_allows(canary["permissions"]["write"], "worker.uplift.canary.queue.v4"))
         self.assertTrue(topology.regex_allows(canary["permissions"]["read"], "worker.uplift.canary.queue.v4"))
         self.assertFalse(topology.regex_allows(canary["permissions"]["configure"], "nutsnews.worker.fetch.v1"))
         self.assertFalse(topology.regex_allows(canary["permissions"]["write"], "nutsnews.worker.v1"))
+        self.assertFalse(topology.regex_allows(canary["permissions"]["write"], "nutsnews.worker.fetch.v1"))
         self.assertFalse(topology.regex_allows(canary["permissions"]["read"], "nutsnews.worker.fetch.v1"))
 
     def test_user_tag_normalization_accepts_api_string_or_list_shape(self):

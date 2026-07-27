@@ -1,0 +1,205 @@
+name: Backend Supabase Standby Production Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Evaluate the acceptance dry-run or record the production standby acceptance decision.
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - acceptance
+      owner_decision:
+        description: Explicit owner decision for acceptance operation.
+        required: true
+        default: NO-GO
+        type: choice
+        options:
+          - GO
+          - NO-GO
+      failover_attempt_id:
+        description: Optional failover attempt id. Defaults to an acceptance-scoped run id.
+        required: false
+        default: ""
+        type: string
+      candidate_application_revision:
+        description: Optional backend revision. Defaults to the checked-out main SHA.
+        required: false
+        default: ""
+        type: string
+      fence_epoch:
+        description: Optional fence epoch. Defaults to an acceptance-scoped run id.
+        required: false
+        default: ""
+        type: string
+      confirmation:
+        description: Type plan-production-standby-acceptance for dry-run or record-production-standby-acceptance for acceptance.
+        required: true
+        default: plan-production-standby-acceptance
+        type: string
+      enforce:
+        description: Return non-zero when the production acceptance report is blocked or NO-GO.
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: backend-supabase-standby-production-acceptance-${{ inputs.failover_attempt_id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    name: Supabase standby production acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production-backend
+    env:
+      CANDIDATE_APPLICATION_REVISION_INPUT: ${{ inputs.candidate_application_revision }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+      ENFORCE: ${{ inputs.enforce }}
+      FAILOVER_ATTEMPT_ID_INPUT: ${{ inputs.failover_attempt_id }}
+      FENCE_EPOCH_INPUT: ${{ inputs.fence_epoch }}
+      OPERATION: ${{ inputs.operation }}
+      OWNER_DECISION: ${{ inputs.owner_decision }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF_NAME" != "main" ]]; then
+            echo "This production acceptance gate only runs from main." >&2
+            exit 1
+          fi
+          case "$OPERATION" in
+            dry-run|acceptance) ;;
+            *)
+              echo "Invalid operation." >&2
+              exit 1
+              ;;
+          esac
+          case "$OWNER_DECISION" in
+            GO|NO-GO) ;;
+            *)
+              echo "Invalid owner_decision." >&2
+              exit 1
+              ;;
+          esac
+          if [[ "$OPERATION" == "acceptance" ]]; then
+            if [[ "$CONFIRMATION" != "record-production-standby-acceptance" ]]; then
+              echo "Invalid acceptance confirmation." >&2
+              exit 1
+            fi
+          elif [[ "$CONFIRMATION" != "plan-production-standby-acceptance" ]]; then
+            echo "Invalid dry-run confirmation." >&2
+            exit 1
+          fi
+          if [[ -n "$FAILOVER_ATTEMPT_ID_INPUT" && ! "$FAILOVER_ATTEMPT_ID_INPUT" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then
+            echo "Invalid failover_attempt_id." >&2
+            exit 1
+          fi
+          if [[ -n "$FENCE_EPOCH_INPUT" && ! "$FENCE_EPOCH_INPUT" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then
+            echo "Invalid fence_epoch." >&2
+            exit 1
+          fi
+          if [[ -n "$CANDIDATE_APPLICATION_REVISION_INPUT" && ! "$CANDIDATE_APPLICATION_REVISION_INPUT" =~ ^[A-Fa-f0-9]{40}$ ]]; then
+            echo "Invalid candidate_application_revision." >&2
+            exit 1
+          fi
+
+      - name: Validate production acceptance implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 scripts/validate_backend_supabase_standby_production_acceptance.py
+          python3 -m unittest tests.test_backend_supabase_standby_production_acceptance
+
+      - name: Build production acceptance identities
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          attempt="${FAILOVER_ATTEMPT_ID_INPUT:-failover-acceptance-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}}"
+          revision="${CANDIDATE_APPLICATION_REVISION_INPUT:-$GITHUB_SHA}"
+          epoch="${FENCE_EPOCH_INPUT:-epoch-acceptance-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}}"
+          {
+            echo "FAILOVER_ATTEMPT_ID=$attempt"
+            echo "CANDIDATE_APPLICATION_REVISION=$revision"
+            echo "FENCE_EPOCH=$epoch"
+          } >> "$GITHUB_ENV"
+
+      - name: Render protected #502 failover dry-run plan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 scripts/backend_supabase_standby_failover_plan.py \
+            --operation dry-run \
+            --confirmation plan-supabase-standby-failover \
+            --failover-attempt-id "$FAILOVER_ATTEMPT_ID" \
+            --candidate-application-revision "$CANDIDATE_APPLICATION_REVISION" \
+            --fence-epoch "$FENCE_EPOCH" \
+            --output "$RUNNER_TEMP/backend-supabase-standby-failover-plan.json"
+
+      - name: Render protected #503 staging failover drill evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 scripts/backend_supabase_standby_staging_failover_drill.py \
+            --operation staging-apply \
+            --confirmation execute-staging-supabase-failover-drill \
+            --failover-attempt-id "$FAILOVER_ATTEMPT_ID" \
+            --candidate-application-revision "$CANDIDATE_APPLICATION_REVISION" \
+            --fence-epoch "$FENCE_EPOCH" \
+            --failover-plan "$RUNNER_TEMP/backend-supabase-standby-failover-plan.json" \
+            --fixture-pass \
+            --output "$RUNNER_TEMP/backend-supabase-standby-staging-failover-drill.json"
+
+      - name: Render production standby acceptance decision
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          args=(
+            --operation "$OPERATION"
+            --confirmation "$CONFIRMATION"
+            --owner-decision "$OWNER_DECISION"
+            --failover-attempt-id "$FAILOVER_ATTEMPT_ID"
+            --candidate-application-revision "$CANDIDATE_APPLICATION_REVISION"
+            --fence-epoch "$FENCE_EPOCH"
+            --failover-plan "$RUNNER_TEMP/backend-supabase-standby-failover-plan.json"
+            --staging-drill "$RUNNER_TEMP/backend-supabase-standby-staging-failover-drill.json"
+            --fixture-pass
+            --output "$RUNNER_TEMP/backend-supabase-standby-production-acceptance.json"
+            --summary "$GITHUB_STEP_SUMMARY"
+          )
+          if [[ "$ENFORCE" == "true" ]]; then
+            args+=(--enforce)
+          fi
+
+          python3 scripts/backend_supabase_standby_production_acceptance.py "${args[@]}"
+
+      - name: Upload production standby acceptance report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-supabase-standby-production-acceptance
+          path: |
+            ${{ runner.temp }}/backend-supabase-standby-failover-plan.json
+            ${{ runner.temp }}/backend-supabase-standby-staging-failover-drill.json
+            ${{ runner.temp }}/backend-supabase-standby-production-acceptance.json
+          if-no-files-found: error

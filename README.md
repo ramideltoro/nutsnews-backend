@@ -106,6 +106,7 @@ Use [runbooks/SUPABASE_STANDBY_PROMOTION_DECISION.md](runbooks/SUPABASE_STANDBY_
 Use [runbooks/SUPABASE_STANDBY_RECOVERY_BOUNDARIES.md](runbooks/SUPABASE_STANDBY_RECOVERY_BOUNDARIES.md) before changing abort, forward-recovery, or switch-back policy after a Supabase standby failover.
 Use [runbooks/SUPABASE_STANDBY_FAILOVER.md](runbooks/SUPABASE_STANDBY_FAILOVER.md) before planning or applying the protected Supabase standby failover workflow.
 Use [runbooks/SUPABASE_STANDBY_STAGING_FAILOVER_DRILL.md](runbooks/SUPABASE_STANDBY_STAGING_FAILOVER_DRILL.md) before running the protected staging failover drill.
+Use [runbooks/SUPABASE_STANDBY_PRODUCTION_ACCEPTANCE.md](runbooks/SUPABASE_STANDBY_PRODUCTION_ACCEPTANCE.md) before recording the production standby soak and acceptance `GO`/`NO-GO` decision.
 
 The current Ansible scaffold is intentionally narrow. It defines the host contract, runtime choice, validation commands, required secret boundaries, and rollback expectations that later issues will fill in through Ansible roles and protected workflows.
 
@@ -154,6 +155,7 @@ python3 scripts/validate_backend_db_rollback_guardrails.py
 python3 scripts/validate_backend_supabase_standby_recovery_boundaries.py
 python3 scripts/validate_backend_supabase_standby_failover.py
 python3 scripts/validate_backend_supabase_standby_staging_failover_drill.py
+python3 scripts/validate_backend_supabase_standby_production_acceptance.py
 python3 scripts/validate_backend_production_cutover_plan.py
 python3 scripts/validate_backend_postgres_logical_replication_plan.py
 python3 scripts/backend_postgres_logical_replication_source.py --operation status

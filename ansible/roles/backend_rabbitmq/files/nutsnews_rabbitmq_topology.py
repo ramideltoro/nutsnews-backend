@@ -780,11 +780,15 @@ def permission_matrix(definition: dict[str, Any], users: list[dict[str, Any]]) -
                 errors.append(f"{user_id} cannot write the canary exchange")
             if not regex_allows(write, canary_queue):
                 errors.append(f"{user_id} cannot write the runtime canary queue")
+            if not regex_allows(read, canary_exchange):
+                errors.append(f"{user_id} cannot read the canary exchange")
             if not regex_allows(read, canary_queue):
                 errors.append(f"{user_id} cannot read the canary queue")
             for exchange in exchange_names:
                 if exchange != canary_exchange and regex_allows(write, exchange):
                     errors.append(f"{user_id} can write non-canary exchange {exchange}")
+                if exchange != canary_exchange and regex_allows(read, exchange):
+                    errors.append(f"{user_id} can read non-canary exchange {exchange}")
             for queue in all_queues:
                 if regex_allows(write, queue):
                     errors.append(f"{user_id} can write non-canary queue {queue}")

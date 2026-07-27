@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "workflow_id": "backend-supabase-standby-failover",
+  "tracking_issue": "ramideltoro/nutsnews#502",
+  "epic": "ramideltoro/nutsnews#521",
+  "goal": "Provide a protected manual path to switch production from backend PostgreSQL primary to the existing production Supabase standby.",
+  "depends_on": [
+    "docs/backend-supabase-standby-promotion-decision.json",
+    "docs/backend-supabase-standby-recovery-boundaries.json",
+    "docs/backend-database-provider-switch.json"
+  ],
+  "source_before_failover": {
+    "label": "backend_postgres_primary",
+    "role": "normal production read/write primary until approved failover"
+  },
+  "target_after_failover": {
+    "label": "existing_production_supabase_standby",
+    "role": "authoritative production provider after approved failover",
+    "existing_production_supabase_project": true,
+    "create_new_supabase_project": false,
+    "create_nutsnews_standby_database": false
+  },
+  "required_decision": {
+    "issue": "ramideltoro/nutsnews#528",
+    "artifact": "backend-supabase-standby-promotion-decision",
+    "accepted_decision": "GO",
+    "single_use": true,
+    "ttl_seconds": 300,
+    "consumed_by_this_workflow": true
+  },
+  "required_recovery_boundaries": {
+    "issue": "ramideltoro/nutsnews#504",
+    "artifact": "backend-supabase-standby-recovery-boundaries",
+    "post_failover_authoritative_provider": "existing_production_supabase_standby",
+    "backend_postgres_reuse_policy": "blocked_until_rebuilt_or_reconciled_from_supabase"
+  },
+  "provider_switch_actions": [
+    {
+      "id": "consume_promotion_decision",
+      "owner": "ramideltoro/nutsnews-backend",
+      "required_for_apply": true,
+      "target_state": "promotion decision is recorded as consumed by issue #502"
+    },
+    {
+      "id": "app_provider_switch",
+      "owner": "ramideltoro/nutsnews",
+      "mechanism": "repository_dispatch nutsnews-vercel-production-release",
+      "target_database_provider_mode": "supabase_primary",
+      "production_writes_paused": "true",
+      "required_confirmation": "deploy-supabase-primary",
+      "required_before": "public app reads production traffic from Supabase"
+    },
+    {
+      "id": "worker_provider_switch",
+      "owner": "ramideltoro/nutsnews-worker",
+      "mechanism": "workflow_dispatch worker-pipeline.yml",
+      "target_database_provider_mode": "supabase_primary",
+      "production_writes_paused": "true",
+      "required_confirmation": "deploy-supabase-primary",
+      "required_before": "worker writes resume against Supabase"
+    },
+    {
+      "id": "post_failover_smoke",
+      "owner": "ramideltoro/nutsnews-backend",
+      "mechanism": "follow-up protected smoke in #503 and #505",
+      "target_database_provider_mode": "supabase_primary",
+      "required_before": "production writers are resumed"
+    }
+  ],
+  "failure_policy": {
+    "missing_go_decision": "blocked",
+    "no_go_decision": "blocked",
+    "expired_decision": "blocked",
+    "consumed_decision": "blocked",
+    "mismatched_attempt": "blocked",
+    "mismatched_revision": "blocked",
+    "mismatched_fence_epoch": "blocked",
+    "missing_recovery_boundaries": "blocked",
+    "unsafe_metadata": "blocked",
+    "app_worker_switch_evidence_missing": "blocked_for_actual_traffic_cutover"
+  },
+  "safety": {
+    "protected_environment": "production-backend",
+    "runs_from": "main",
+    "requires_typed_confirmation_for_apply": true,
+    "dry_run_by_default": true,
+    "safe_metadata_only": true,
+    "backend_postgresql_remains_primary_until_approved_failover": true,
+    "target_is_existing_production_supabase": true,
+    "create_new_supabase_project": false,
+    "create_nutsnews_standby_database": false,
+    "app_worker_writes_to_supabase_before_approved_failover": false,
+    "does_not_reimplement_gate_checks": true
+  },
+  "workflow": {
+    "path": ".github/workflows/backend-supabase-standby-failover.yml",
+    "protected_environment": "production-backend",
+    "artifact": "backend-supabase-standby-failover-plan",
+    "default_operation": "dry-run"
+  },
+  "validation": {
+    "local_validator": "python3 scripts/validate_backend_supabase_standby_failover.py",
+    "plan_renderer": "python3 scripts/backend_supabase_standby_failover_plan.py --operation dry-run",
+    "unit_tests": "python3 -m unittest tests.test_backend_supabase_standby_failover",
+    "live_status": "protected workflow accepted; live failover remains blocked unless #502 consumes a fresh matching unused #528 GO decision and records app and worker provider-switch handoff evidence"
+  }
+}

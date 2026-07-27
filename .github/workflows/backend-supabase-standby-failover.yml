@@ -1,0 +1,167 @@
+name: Backend Supabase Standby Failover
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Failover operation to evaluate.
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - apply
+      promotion_decision_run_id:
+        description: Optional #528 promotion decision workflow run id.
+        required: false
+        default: ""
+        type: string
+      failover_attempt_id:
+        description: Failover attempt id expected to match the #528 decision.
+        required: false
+        default: ""
+        type: string
+      candidate_application_revision:
+        description: Backend application revision expected to match the #528 decision.
+        required: false
+        default: ""
+        type: string
+      fence_epoch:
+        description: Fence epoch expected to match the #528 decision.
+        required: false
+        default: ""
+        type: string
+      confirmation:
+        description: Type plan-supabase-standby-failover for dry-run or execute-supabase-standby-failover for apply.
+        required: true
+        type: string
+      enforce:
+        description: Return non-zero when the failover plan is blocked.
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: backend-supabase-standby-failover-${{ inputs.failover_attempt_id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Plan Supabase standby failover
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production-backend
+    env:
+      CANDIDATE_APPLICATION_REVISION: ${{ inputs.candidate_application_revision }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+      ENFORCE: ${{ inputs.enforce }}
+      FAILOVER_ATTEMPT_ID: ${{ inputs.failover_attempt_id }}
+      FENCE_EPOCH: ${{ inputs.fence_epoch }}
+      GH_TOKEN: ${{ github.token }}
+      OPERATION: ${{ inputs.operation }}
+      PROMOTION_DECISION_RUN_ID: ${{ inputs.promotion_decision_run_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF_NAME" != "main" ]]; then
+            echo "This failover workflow only runs from main." >&2
+            exit 1
+          fi
+          case "$OPERATION" in
+            dry-run|apply) ;;
+            *)
+              echo "Invalid operation." >&2
+              exit 1
+              ;;
+          esac
+          if [[ "$OPERATION" == "apply" ]]; then
+            if [[ "$CONFIRMATION" != "execute-supabase-standby-failover" ]]; then
+              echo "Invalid apply confirmation." >&2
+              exit 1
+            fi
+          elif [[ "$CONFIRMATION" != "plan-supabase-standby-failover" ]]; then
+            echo "Invalid dry-run confirmation." >&2
+            exit 1
+          fi
+          if [[ -n "$PROMOTION_DECISION_RUN_ID" ]] && ! [[ "$PROMOTION_DECISION_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "Promotion decision run id must be numeric." >&2
+            exit 1
+          fi
+          if [[ -n "$FAILOVER_ATTEMPT_ID" ]] && ! [[ "$FAILOVER_ATTEMPT_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then
+            echo "Invalid failover_attempt_id." >&2
+            exit 1
+          fi
+          if [[ -n "$FENCE_EPOCH" ]] && ! [[ "$FENCE_EPOCH" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then
+            echo "Invalid fence_epoch." >&2
+            exit 1
+          fi
+          if [[ -n "$CANDIDATE_APPLICATION_REVISION" ]] && ! [[ "$CANDIDATE_APPLICATION_REVISION" =~ ^[A-Fa-f0-9]{40}$ ]]; then
+            echo "Invalid candidate_application_revision." >&2
+            exit 1
+          fi
+
+      - name: Validate failover implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 scripts/validate_backend_supabase_standby_failover.py
+          python3 -m unittest tests.test_backend_supabase_standby_failover
+
+      - name: Download promotion decision
+        if: ${{ env.PROMOTION_DECISION_RUN_ID != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$RUNNER_TEMP/promotion-decision"
+          gh run download "$PROMOTION_DECISION_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name backend-supabase-standby-promotion-decision \
+            --dir "$RUNNER_TEMP/promotion-decision"
+          test -s "$RUNNER_TEMP/promotion-decision/backend-supabase-standby-promotion-decision.json"
+
+      - name: Render failover plan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          args=(
+            --operation "$OPERATION"
+            --confirmation "$CONFIRMATION"
+            --failover-attempt-id "$FAILOVER_ATTEMPT_ID"
+            --candidate-application-revision "$CANDIDATE_APPLICATION_REVISION"
+            --fence-epoch "$FENCE_EPOCH"
+            --output "$RUNNER_TEMP/backend-supabase-standby-failover-plan.json"
+            --summary "$GITHUB_STEP_SUMMARY"
+          )
+          decision_path="$RUNNER_TEMP/promotion-decision/backend-supabase-standby-promotion-decision.json"
+          if [[ -s "$decision_path" ]]; then
+            args+=(--promotion-decision "$decision_path")
+          fi
+          if [[ "$ENFORCE" == "true" ]]; then
+            args+=(--enforce)
+          fi
+
+          python3 scripts/backend_supabase_standby_failover_plan.py "${args[@]}"
+
+      - name: Upload failover plan
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-supabase-standby-failover-plan
+          path: ${{ runner.temp }}/backend-supabase-standby-failover-plan.json
+          if-no-files-found: error

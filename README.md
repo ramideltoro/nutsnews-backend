@@ -104,6 +104,7 @@ Use [runbooks/SUPABASE_STANDBY_SEQUENCE_GATE.md](runbooks/SUPABASE_STANDBY_SEQUE
 Use [runbooks/SUPABASE_STANDBY_WRITER_PAUSE_GATE.md](runbooks/SUPABASE_STANDBY_WRITER_PAUSE_GATE.md) before evaluating or consuming the Supabase standby writer pause and quiescence gate.
 Use [runbooks/SUPABASE_STANDBY_PROMOTION_DECISION.md](runbooks/SUPABASE_STANDBY_PROMOTION_DECISION.md) before evaluating or consuming the Supabase standby promotion `GO`/`NO-GO` decision.
 Use [runbooks/SUPABASE_STANDBY_RECOVERY_BOUNDARIES.md](runbooks/SUPABASE_STANDBY_RECOVERY_BOUNDARIES.md) before changing abort, forward-recovery, or switch-back policy after a Supabase standby failover.
+Use [runbooks/SUPABASE_STANDBY_FAILOVER.md](runbooks/SUPABASE_STANDBY_FAILOVER.md) before planning or applying the protected Supabase standby failover workflow.
 
 The current Ansible scaffold is intentionally narrow. It defines the host contract, runtime choice, validation commands, required secret boundaries, and rollback expectations that later issues will fill in through Ansible roles and protected workflows.
 
@@ -150,6 +151,7 @@ python3 scripts/validate_backend_api_compatibility_contract.py
 python3 scripts/validate_backend_database_provider_switch.py
 python3 scripts/validate_backend_db_rollback_guardrails.py
 python3 scripts/validate_backend_supabase_standby_recovery_boundaries.py
+python3 scripts/validate_backend_supabase_standby_failover.py
 python3 scripts/validate_backend_production_cutover_plan.py
 python3 scripts/validate_backend_postgres_logical_replication_plan.py
 python3 scripts/backend_postgres_logical_replication_source.py --operation status

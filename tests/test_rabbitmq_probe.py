@@ -281,11 +281,11 @@ class RabbitMQProbeTests(unittest.TestCase):
             definition.write_text(
                 json.dumps(
                     {
-                        "exchanges": [{"id": "canary", "name": "worker.uplift.canary.v2"}],
+                        "exchanges": [{"id": "canary", "name": "worker.uplift.canary.v3"}],
                         "canary": {
                             "exchange_id": "canary",
-                            "routing_key": "worker.uplift.canary.v2",
-                            "queue": {"name": "worker.uplift.canary.v2"},
+                            "routing_key": "worker.uplift.canary.v3",
+                            "queue": {"name": "worker.uplift.canary.v3"},
                         },
                     }
                 ),
@@ -399,7 +399,7 @@ class RabbitMQProbeTests(unittest.TestCase):
         fake_connection = FakeConnection()
         fake_pika = FakePika(fake_connection)
         args = SimpleNamespace(amqp_host="127.0.0.1", amqp_port=5672, timeout_seconds=1)
-        route = {"exchange": "worker.uplift.canary.v2", "routing_key": "worker.uplift.canary.v2", "queue": "worker.uplift.canary.v2"}
+        route = {"exchange": "worker.uplift.canary.v3", "routing_key": "worker.uplift.canary.v3", "queue": "worker.uplift.canary.v3"}
 
         with (
             patch.object(probe, "import_pika", return_value=fake_pika),
@@ -419,6 +419,7 @@ class RabbitMQProbeTests(unittest.TestCase):
         self.assertEqual(result["cleanup_drained"], 0)
         self.assertEqual(fake_connection.channel_instance.published, 1)
         self.assertEqual(fake_connection.channel_instance.acked, [1, 2, 3])
+        self.assertEqual(fake_connection.channel_instance.last_publish["properties"].kwargs["delivery_mode"], 1)
         self.assertTrue(fake_connection.closed)
 
     def test_canary_failure_fixture_returns_expected_failure_metric(self):

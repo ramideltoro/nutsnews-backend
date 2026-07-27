@@ -97,8 +97,9 @@ class RabbitMQTopologyTests(unittest.TestCase):
         fetch_dlq = next(queue for queue in queues if queue["name"] == "nutsnews.worker.fetch.v1.dlq")
         self.assertEqual(fetch_dlq["arguments"]["x-message-ttl"], 1209600000)
 
-        canary_queue = next(queue for queue in queues if queue["name"] == "worker.uplift.canary.v2")
+        canary_queue = next(queue for queue in queues if queue["name"] == "worker.uplift.canary.v3")
         self.assertEqual(canary_queue["kind"], "canary")
+        self.assertFalse(canary_queue["durable"])
         self.assertEqual(canary_queue["arguments"]["x-max-length"], 10)
         self.assertEqual(canary_queue["arguments"]["x-overflow"], "reject-publish")
 
@@ -120,8 +121,8 @@ class RabbitMQTopologyTests(unittest.TestCase):
         self.assertFalse(topology.regex_allows(scheduler["permissions"]["read"], "nutsnews.worker.fetch.v1"))
 
         canary = next(user for user in users if user["id"] == "monitoring_canary")
-        self.assertTrue(topology.regex_allows(canary["permissions"]["write"], "worker.uplift.canary.v2"))
-        self.assertTrue(topology.regex_allows(canary["permissions"]["read"], "worker.uplift.canary.v2"))
+        self.assertTrue(topology.regex_allows(canary["permissions"]["write"], "worker.uplift.canary.v3"))
+        self.assertTrue(topology.regex_allows(canary["permissions"]["read"], "worker.uplift.canary.v3"))
         self.assertFalse(topology.regex_allows(canary["permissions"]["write"], "nutsnews.worker.v1"))
         self.assertFalse(topology.regex_allows(canary["permissions"]["read"], "nutsnews.worker.fetch.v1"))
 
@@ -237,6 +238,13 @@ class RabbitMQTopologyTests(unittest.TestCase):
         self.assertEqual(report["scope"], "canary_queue_only")
         self.assertEqual(report["operation"], "ensure_only")
         self.assertFalse(report["production_queues_touched"])
+
+        canary_puts = [
+            payload
+            for method, path, payload in client.calls
+            if method == "PUT" and path == "/api/queues/nutsnews-worker-uplift/worker.uplift.canary.v3"
+        ]
+        self.assertEqual(canary_puts, [{"durable": False, "auto_delete": False, "arguments": {"x-max-length": 10, "x-max-length-bytes": 1048576, "x-overflow": "reject-publish", "x-queue-type": "classic"}}])
 
 
 if __name__ == "__main__":

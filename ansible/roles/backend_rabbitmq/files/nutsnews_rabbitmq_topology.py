@@ -518,8 +518,8 @@ def ensure_queue(client: RabbitMQClient, definition: dict[str, Any], queue: dict
     vhost = definition["vhost"]
     current = client.get_or_none(api_path("api", "queues", vhost, queue["name"]))
     expected_payload = {
-        "durable": True,
-        "auto_delete": False,
+        "durable": bool(queue.get("durable", True)),
+        "auto_delete": bool(queue.get("auto_delete", False)),
         "arguments": normalize_dict(queue["arguments"]),
     }
     if current is None:
@@ -618,8 +618,8 @@ def check_queue(client: RabbitMQClient, definition: dict[str, Any], queue: dict[
     if current is None:
         return [f"missing_queue:{queue['name']}"]
     expected = {
-        "durable": True,
-        "auto_delete": False,
+        "durable": bool(queue.get("durable", True)),
+        "auto_delete": bool(queue.get("auto_delete", False)),
         "arguments": normalize_dict(queue["arguments"]),
     }
     drift = []

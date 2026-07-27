@@ -4,7 +4,8 @@
   "status": "production_primary_cutover_complete_post_cutover_retirement_pending",
   "depends_on": [
     "docs/backend-api-compatibility-contract.json",
-    "docs/backend-supabase-standby-promotion-decision.json"
+    "docs/backend-supabase-standby-promotion-decision.json",
+    "docs/backend-supabase-standby-recovery-boundaries.json"
   ],
   "safe_default": "supabase_primary",
   "production_primary_confirmation": "enable-backend-postgres-primary",
@@ -105,6 +106,22 @@
     "single_use": true,
     "ttl_seconds": 300,
     "artifact": "backend-supabase-standby-promotion-decision"
+  },
+  "supabase_standby_recovery_boundaries": {
+    "issue": "ramideltoro/nutsnews#504",
+    "required_before_production_supabase_switch": true,
+    "post_failover_authoritative_provider": "existing_production_supabase_standby",
+    "backend_postgres_reuse_policy": "blocked_until_rebuilt_or_reconciled_from_supabase",
+    "switch_back_requires": [
+      "backend PostgreSQL rebuild or reconciliation from authoritative Supabase",
+      "required-table parity",
+      "sequence safety",
+      "no-split-brain evidence",
+      "writer pause evidence",
+      "staging drill evidence",
+      "owner approval"
+    ],
+    "artifact": "backend-supabase-standby-recovery-boundaries"
   },
   "post_cutover_status": {
     "recorded_at_utc": "2026-07-20T05:31:00Z",

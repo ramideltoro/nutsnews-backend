@@ -179,13 +179,14 @@ route:
 ```text
 exchange: worker.uplift.canary.exchange.v4
 routing key: worker.uplift.canary.v4
-queue: worker.uplift.canary.queue.v4 (runtime-declared exclusive auto-delete)
+queue prefix: worker.uplift.canary.queue.v4 (runtime-declared exclusive auto-delete per-run queues)
 ```
 
 It cannot configure production resources and cannot write to or consume from
 production worker queues. The exchange-scoped read permission and queue-scoped
-write permission are limited to the private canary resources because RabbitMQ
-checks those permissions during private canary route setup.
+configure/write/read permissions are limited to UUID-suffixed private canary
+queues because RabbitMQ checks those permissions during private canary route
+setup.
 
 ## Verification
 

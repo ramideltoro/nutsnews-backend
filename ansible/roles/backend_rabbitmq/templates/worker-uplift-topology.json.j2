@@ -70,6 +70,7 @@
     "routing_key": "worker.uplift.canary.v4",
     "queue": {
       "name": "worker.uplift.canary.queue.v4",
+      "runtime_queue_prefix": "worker.uplift.canary.queue.v4",
       "runtime_declared": true,
       "durable": false,
       "exclusive": true,
@@ -360,9 +361,9 @@
       "password_variable": "RABBITMQ_MONITORING_PASSWORD",
       "tags": ["monitoring"],
       "permissions": {
-        "configure": "^worker\\.uplift\\.canary\\.queue\\.v4$",
-        "write": "^(worker\\.uplift\\.canary\\.exchange\\.v4|worker\\.uplift\\.canary\\.queue\\.v4)$",
-        "read": "^(worker\\.uplift\\.canary\\.exchange\\.v4|worker\\.uplift\\.canary\\.queue\\.v4)$"
+        "configure": "^worker\\.uplift\\.canary\\.queue\\.v4\\.[0-9a-f]{32}$",
+        "write": "^(worker\\.uplift\\.canary\\.exchange\\.v4|worker\\.uplift\\.canary\\.queue\\.v4\\.[0-9a-f]{32})$",
+        "read": "^(worker\\.uplift\\.canary\\.exchange\\.v4|worker\\.uplift\\.canary\\.queue\\.v4\\.[0-9a-f]{32})$"
       }
     },
     {

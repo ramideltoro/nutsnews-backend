@@ -415,6 +415,7 @@ class RabbitMQProbeTests(unittest.TestCase):
             "exchange": "worker.uplift.canary.exchange.v4",
             "routing_key": "worker.uplift.canary.v4",
             "queue": "worker.uplift.canary.queue.v4",
+            "runtime_queue_prefix": "worker.uplift.canary.queue.v4",
             "runtime_declared": True,
             "durable": False,
             "exclusive": True,
@@ -440,10 +441,13 @@ class RabbitMQProbeTests(unittest.TestCase):
         self.assertEqual(result["cleanup_drained"], 0)
         self.assertEqual(fake_connection.channel_instance.published, 1)
         self.assertEqual(fake_connection.channel_instance.acked, [1, 2, 3])
-        self.assertEqual(fake_connection.channel_instance.last_declare["queue"], "worker.uplift.canary.queue.v4")
+        declared_queue = fake_connection.channel_instance.last_declare["queue"]
+        self.assertRegex(declared_queue, r"^worker\.uplift\.canary\.queue\.v4\.[0-9a-f]{32}$")
         self.assertFalse(fake_connection.channel_instance.last_declare["durable"])
         self.assertTrue(fake_connection.channel_instance.last_declare["exclusive"])
         self.assertTrue(fake_connection.channel_instance.last_declare["auto_delete"])
+        self.assertEqual(fake_connection.channel_instance.last_bind["queue"], declared_queue)
+        self.assertEqual(fake_connection.channel_instance.last_queue, declared_queue)
         self.assertEqual(fake_connection.channel_instance.last_bind["exchange"], "worker.uplift.canary.exchange.v4")
         self.assertEqual(fake_connection.channel_instance.last_publish["properties"].kwargs["delivery_mode"], 1)
         self.assertTrue(fake_connection.closed)

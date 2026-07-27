@@ -166,6 +166,9 @@ def main() -> int:
         "NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED=false",
         "pause_report",
         "resume_report",
+        "resume_verification",
+        "backend_worker_database_api_resume_failed",
+        "worker_runtime_service_resume_mismatch",
         "drain_until_paused",
         "unknown_runtime_writers",
         "unknown_writers",
@@ -264,6 +267,7 @@ def main() -> int:
     for token in (
         "test_pause_installs_write_guard_dropin_and_emits_safe_status",
         "test_resume_restores_recorded_runtime_replicas_and_removes_dropin",
+        "test_resume_fails_closed_when_runtime_replica_is_not_restored",
     ):
         require_token(token, manager_tests, "writer pause manager tests", errors)
     for token in (

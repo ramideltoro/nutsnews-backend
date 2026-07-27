@@ -376,14 +376,12 @@ def pause_runtime(args: argparse.Namespace) -> list[dict[str, Any]]:
     return results
 
 
-def resume_runtime(args: argparse.Namespace, previous: dict[str, Any]) -> list[dict[str, Any]]:
+def recorded_runtime_replicas(previous: dict[str, Any]) -> dict[str, int]:
     before = previous.get("before", {}) if isinstance(previous, dict) else {}
     services = before.get("services", [])
     if not isinstance(services, list):
-        services = []
-    results: list[dict[str, Any]] = []
-    if services and not args.worker_runtime_compose.exists():
-        raise PauseError("worker_runtime_compose_missing")
+        return {}
+    replicas_by_name: dict[str, int] = {}
     for service in services:
         if not isinstance(service, dict):
             continue
@@ -391,11 +389,111 @@ def resume_runtime(args: argparse.Namespace, previous: dict[str, Any]) -> list[d
         replicas = service.get("running_replicas")
         if not SERVICE_NAME_RE.fullmatch(name) or not isinstance(replicas, int) or replicas < 0 or replicas > 20:
             continue
+        replicas_by_name[name] = replicas
+    return replicas_by_name
+
+
+def resume_runtime(args: argparse.Namespace, previous: dict[str, Any]) -> list[dict[str, Any]]:
+    replicas_by_name = recorded_runtime_replicas(previous)
+    results: list[dict[str, Any]] = []
+    if replicas_by_name and not args.worker_runtime_compose.exists():
+        raise PauseError("worker_runtime_compose_missing")
+    for name, replicas in sorted(replicas_by_name.items()):
         results.append(scale_runtime_service(args, name, replicas))
     failures = [item for item in results if item.get("returncode") != 0]
     if failures:
         raise PauseError("worker_runtime_resume_failed")
     return results
+
+
+def worker_api_resume_verification(args: argparse.Namespace, previous: dict[str, Any]) -> dict[str, Any]:
+    before = previous.get("before", {}) if isinstance(previous, dict) else {}
+    after = worker_api_status(args)
+    before_paused = before.get("paused")
+    before_active = before.get("active")
+    before_enabled = before.get("enabled")
+    blockers: list[str] = []
+    if before_paused is False and after.get("paused") is True:
+        blockers.append("backend_worker_database_api_resume_failed")
+    if before_paused is True and after.get("paused") is not True:
+        blockers.append("backend_worker_database_api_unexpectedly_unpaused")
+    if before_active in {"active", "activating"} and after.get("active") not in {"active", "activating"}:
+        blockers.append("backend_worker_database_api_active_state_not_restored")
+    if before_enabled == "enabled" and after.get("enabled") != "enabled":
+        blockers.append("backend_worker_database_api_enabled_state_not_restored")
+    return {
+        "id": "backend_worker_database_api",
+        "class": "web_app_and_legacy_worker_write_api",
+        "kind": "systemd_env_guard_restore",
+        "expected_paused": before_paused if isinstance(before_paused, bool) else None,
+        "observed_paused": after.get("paused"),
+        "expected_active": before_active if isinstance(before_active, str) else None,
+        "observed_active": after.get("active"),
+        "expected_enabled": before_enabled if isinstance(before_enabled, str) else None,
+        "observed_enabled": after.get("enabled"),
+        "resumed": not blockers,
+        "blockers": sorted(set(blockers)),
+        "safe_status_only": True,
+    }
+
+
+def runtime_resume_verification(args: argparse.Namespace, previous: dict[str, Any]) -> dict[str, Any]:
+    expected = recorded_runtime_replicas(previous)
+    status = worker_runtime_status(args)
+    observed = {
+        str(service.get("name")): service
+        for service in status.get("services", [])
+        if isinstance(service, dict) and isinstance(service.get("name"), str)
+    }
+    blockers: list[str] = []
+    service_results: list[dict[str, Any]] = []
+    for name, replicas in sorted(expected.items()):
+        service = observed.get(name, {})
+        running = service.get("running_replicas")
+        service_blockers: list[str] = []
+        if running != replicas:
+            service_blockers.append("worker_runtime_service_resume_mismatch")
+        service_results.append(
+            {
+                "name": name,
+                "expected_running_replicas": replicas,
+                "observed_running_replicas": running if isinstance(running, int) else None,
+                "resumed": not service_blockers,
+                "blockers": service_blockers,
+            }
+        )
+        blockers.extend(service_blockers)
+    status_blockers = status.get("blockers", [])
+    if isinstance(status_blockers, list):
+        blockers.extend(str(item) for item in status_blockers if item and item != "worker_runtime_service_still_running")
+    return {
+        "id": "worker_uplift_runtime_services",
+        "class": "worker_scheduler_and_stage_containers",
+        "kind": "docker_compose_scale_restore",
+        "expected_service_count": len(expected),
+        "services": service_results,
+        "resumed": not blockers,
+        "blockers": sorted(set(blockers)),
+        "safe_status_only": True,
+    }
+
+
+def resume_verification(args: argparse.Namespace, state: dict[str, Any]) -> dict[str, Any]:
+    writer_classes = [
+        worker_api_resume_verification(args, state.get("worker_api", {})),
+        runtime_resume_verification(args, state.get("worker_runtime", {})),
+    ]
+    blockers = [
+        blocker
+        for item in writer_classes
+        for blocker in item.get("blockers", [])
+    ]
+    return {
+        "status": "pass" if not blockers else "fail",
+        "writer_classes": writer_classes,
+        "blockers": sorted(set(blockers)),
+        "safe_metadata_only": True,
+    }
 
 
 def drain_until_paused(args: argparse.Namespace) -> dict[str, Any]:
@@ -566,17 +664,26 @@ def resume_report(args: argparse.Namespace, inventory: dict[str, Any]) -> dict[s
     report["pause_started_at_utc"] = state.get("pause_started_at_utc")
     report["resumed_at_utc"] = utc_now()
     runtime_status = worker_runtime_status(args)
+    verification = resume_verification(args, state)
     report["writer_classes"] = [worker_api_status(args), runtime_status, *automation_status(inventory, args)]
     report["unknown_writers"] = unknown_runtime_writers(inventory, runtime_status)
-    report["active_pause_state"] = False
+    report["active_pause_state"] = verification["status"] != "pass"
     report["all_writers_paused"] = False
-    report["status"] = "pass"
-    resume_state = {**state, "resumed_at_utc": report["resumed_at_utc"], "safe_metadata_only": True}
+    report["resume_verification"] = verification
+    report["status"] = "pass" if verification["status"] == "pass" else "fail"
+    report["errors"] = verification["blockers"]
+    resume_state = {
+        **state,
+        "resumed_at_utc": report["resumed_at_utc"],
+        "resume_verification": verification,
+        "safe_metadata_only": True,
+    }
     write_json(args.state_dir / LAST_RESUME_FILE, resume_state, mode=0o640)
-    try:
-        state_path(args).unlink()
-    except FileNotFoundError:
-        pass
+    if verification["status"] == "pass":
+        try:
+            state_path(args).unlink()
+        except FileNotFoundError:
+            pass
     return report
 
 

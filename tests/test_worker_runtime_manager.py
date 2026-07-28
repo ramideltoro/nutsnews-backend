@@ -65,7 +65,12 @@ def valid_manifest() -> dict:
                         "env_key": "NUTSNEWS_FETCHER_DATABASE_URL",
                     }
                 ],
-                "queues": {"main": "nutsnews.worker.fetch.v1", "retry": [], "dlq": "nutsnews.worker.fetch.v1.dlq"},
+                "queues": {
+                    "main": "nutsnews.worker.fetch.v1",
+                    "consumes": ["nutsnews.worker.fetch.v1"],
+                    "retry": [],
+                    "dlq": "nutsnews.worker.fetch.v1.dlq",
+                },
             }
         ],
     }
@@ -109,7 +114,12 @@ def ai_manifest() -> dict:
                 {"name": "approval-database-url", "env_key": "NUTSNEWS_APPROVAL_DATABASE_URL"},
                 {"name": "approval-rabbitmq-url", "env_key": "NUTSNEWS_APPROVAL_RABBITMQ_URL"},
             ],
-            "queues": {"main": "nutsnews.worker.approval.v1", "retry": [], "dlq": "nutsnews.worker.approval.v1.dlq"},
+            "queues": {
+                "main": "nutsnews.worker.approval.v1",
+                "consumes": ["nutsnews.worker.approval.v1"],
+                "retry": [],
+                "dlq": "nutsnews.worker.approval.v1.dlq",
+            },
             "postgres": {"production_write_path": False},
         },
         {
@@ -135,7 +145,12 @@ def ai_manifest() -> dict:
                 {"name": "translation-database-url", "env_key": "NUTSNEWS_TRANSLATION_DATABASE_URL"},
                 {"name": "translation-rabbitmq-url", "env_key": "NUTSNEWS_TRANSLATION_RABBITMQ_URL"},
             ],
-            "queues": {"main": "nutsnews.worker.translation.v1", "retry": [], "dlq": "nutsnews.worker.translation.v1.dlq"},
+            "queues": {
+                "main": "nutsnews.worker.translation.v1",
+                "consumes": ["nutsnews.worker.translation.v1"],
+                "retry": [],
+                "dlq": "nutsnews.worker.translation.v1.dlq",
+            },
             "postgres": {"production_write_path": False},
         },
     ]
@@ -176,7 +191,12 @@ def scheduler_manifest() -> dict:
                 {"name": "scheduler-database-url", "env_key": "NUTSNEWS_SCHEDULER_DATABASE_URL"},
                 {"name": "scheduler-rabbitmq-url", "env_key": "NUTSNEWS_SCHEDULER_RABBITMQ_URL"},
             ],
-            "queues": {"main": "nutsnews.worker.fetch.v1", "retry": [], "dlq": "nutsnews.worker.fetch.v1.dlq"},
+            "queues": {
+                "main": "nutsnews.worker.fetch.v1",
+                "consumes": [],
+                "retry": [],
+                "dlq": "nutsnews.worker.fetch.v1.dlq",
+            },
             "postgres": {"production_write_path": False},
         }
     ]
@@ -256,6 +276,94 @@ class WorkerRuntimeManagerTests(unittest.TestCase):
         self.assertEqual(report["status"], "pass")
         self.assertIn("no services are configured", report["summary"])
         self.assertEqual(report["commands"], [])
+
+    def test_status_fails_when_required_queue_has_zero_consumers(self):
+        manager = load_manager()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            manifest_path = root / "services.json"
+            compose_path = root / "compose.yml"
+            manifest_path.write_text(json.dumps(valid_manifest()), encoding="utf-8")
+            compose_path.write_text("services: {}\n", encoding="utf-8")
+            args = manager.parse_args(
+                [
+                    "status",
+                    "--manifest",
+                    str(manifest_path),
+                    "--compose",
+                    str(compose_path),
+                ]
+            )
+            queue_snapshot = {
+                "status": "healthy",
+                "queue": "nutsnews.worker.fetch.v1",
+                "metrics": {"consumers": 0, "messages": 2, "messages_ready": 2},
+            }
+            with (
+                mock.patch.object(manager, "run_command", return_value={"returncode": 0, "stdout": "[]", "stderr": ""}),
+                mock.patch.object(manager, "rabbitmq_get_json", return_value=queue_snapshot),
+                mock.patch.object(manager, "http_get_local", return_value={"status": "healthy"}),
+            ):
+                report = manager.build_report(args, manager.load_json(manifest_path))
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["missing_consumers"], ["fetcher"])
+        readiness = report["services"]["fetcher"]["consumer_readiness"]
+        self.assertEqual(readiness["status"], "critical")
+        self.assertEqual(readiness["zero_consumer_queues"], ["nutsnews.worker.fetch.v1"])
+
+    def test_status_does_not_require_scheduler_consumer(self):
+        manager = load_manager()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            manifest_path = root / "services.json"
+            compose_path = root / "compose.yml"
+            manifest_path.write_text(json.dumps(scheduler_manifest()), encoding="utf-8")
+            compose_path.write_text("services: {}\n", encoding="utf-8")
+            args = manager.parse_args(
+                [
+                    "status",
+                    "--manifest",
+                    str(manifest_path),
+                    "--compose",
+                    str(compose_path),
+                ]
+            )
+            with (
+                mock.patch.object(manager, "run_command", return_value={"returncode": 0, "stdout": "[]", "stderr": ""}),
+                mock.patch.object(manager, "rabbitmq_get_json") as rabbitmq,
+                mock.patch.object(manager, "http_get_local", return_value={"status": "healthy"}),
+            ):
+                report = manager.build_report(args, manager.load_json(manifest_path))
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["missing_consumers"], [])
+        self.assertEqual(report["services"]["scheduler"]["consumer_readiness"]["status"], "not_applicable")
+        rabbitmq.assert_not_called()
+
+    def test_queue_inspect_fails_when_declared_consumer_count_is_zero(self):
+        manager = load_manager()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / "services.json"
+            manifest_path.write_text(json.dumps(valid_manifest()), encoding="utf-8")
+            args = manager.parse_args(
+                [
+                    "queue-inspect",
+                    "--manifest",
+                    str(manifest_path),
+                    "--compose",
+                    str(Path(tmpdir) / "compose.yml"),
+                    "--service-name",
+                    "fetcher",
+                ]
+            )
+            queue_snapshot = {
+                "status": "healthy",
+                "queue": "nutsnews.worker.fetch.v1",
+                "metrics": {"consumers": 0, "messages": 2, "messages_ready": 2},
+            }
+            with mock.patch.object(manager, "rabbitmq_get_json", return_value=queue_snapshot):
+                report = manager.build_report(args, manager.load_json(manifest_path))
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["zero_consumer_queues"], ["nutsnews.worker.fetch.v1"])
 
     def test_queue_inspect_is_fixed_to_declared_queues(self):
         manager = load_manager()

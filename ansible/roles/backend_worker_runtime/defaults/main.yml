@@ -138,8 +138,8 @@ backend_worker_runtime_services:
   - name: fetcher
     stage: fetcher
     tracking_issue: 117
-    image: ghcr.io/ramideltoro/nutsnews-worker-feed-fetcher@sha256:76d11e4d1966251350787b295750fa6913c7c8fdcfadc79fdd5091b4a810aede
-    image_tag: 31cf4478d90e56d75b771441c54cc613bcf11d43
+    image: ghcr.io/ramideltoro/nutsnews-worker-feed-fetcher@sha256:38617a1592b98797f951070d997d6b599725aff0ce7cecfaac7f70d99016125c
+    image_tag: 5b82b3e27ef85e57fc9aec23a0815cde584758eb
     contract_version: "0.3.1"
     runtime_package_version: "0.5.0"
     runtime_mode: shadow
@@ -163,7 +163,7 @@ backend_worker_runtime_services:
       required: true
       signed: true
       source_repository: ramideltoro/nutsnews-worker-feed-fetcher
-      subject_digest: sha256:76d11e4d1966251350787b295750fa6913c7c8fdcfadc79fdd5091b4a810aede
+      subject_digest: sha256:38617a1592b98797f951070d997d6b599725aff0ce7cecfaac7f70d99016125c
     env:
       NUTSNEWS_ENVIRONMENT: production
       NUTSNEWS_FETCHER_HTTP_HOST: 127.0.0.1
@@ -211,8 +211,8 @@ backend_worker_runtime_services:
   - name: canonicalizer
     stage: canonicalizer
     tracking_issue: 117
-    image: ghcr.io/ramideltoro/nutsnews-worker-article-canonicalizer@sha256:45bfdc5fb1eebb19bc337f480221fb65136185b28712126637e7ceceeccf0559
-    image_tag: 1bc9aaed5111b157aca7bd6ce785b4a78d27fe1f
+    image: ghcr.io/ramideltoro/nutsnews-worker-article-canonicalizer@sha256:63f5c6dc639850f008fb30e6bcb4b4e19d54095bd75511119e690cb1abe7ef98
+    image_tag: 64d6f59920ec6aa5fb56028de99f7600ecb5be2d
     contract_version: "0.4.0"
     runtime_package_version: "0.5.0"
     runtime_mode: shadow
@@ -236,7 +236,7 @@ backend_worker_runtime_services:
       required: true
       signed: true
       source_repository: ramideltoro/nutsnews-worker-article-canonicalizer
-      subject_digest: sha256:45bfdc5fb1eebb19bc337f480221fb65136185b28712126637e7ceceeccf0559
+      subject_digest: sha256:63f5c6dc639850f008fb30e6bcb4b4e19d54095bd75511119e690cb1abe7ef98
     env:
       NUTSNEWS_ENVIRONMENT: production
       NUTSNEWS_CANONICALIZER_HTTP_HOST: 127.0.0.1
@@ -278,8 +278,8 @@ backend_worker_runtime_services:
   - name: enrichment
     stage: enrichment
     tracking_issue: 117
-    image: ghcr.io/ramideltoro/nutsnews-worker-article-enrichment@sha256:ca19570d037238c23998cbecdf71797a55daef5d61b8a042430e677fb57602b7
-    image_tag: a19695fc7958eefa9a27110318f0347d1047f359
+    image: ghcr.io/ramideltoro/nutsnews-worker-article-enrichment@sha256:c2decb289e7c8fb42ccb1ec661683642686d3f65a6aea310cda2debc33cf8317
+    image_tag: edd63d8acd4a46a33aea4b043e3dc8dfd95af310
     contract_version: "0.4.0"
     runtime_package_version: "0.5.0"
     runtime_mode: shadow
@@ -303,7 +303,7 @@ backend_worker_runtime_services:
       required: true
       signed: true
       source_repository: ramideltoro/nutsnews-worker-article-enrichment
-      subject_digest: sha256:ca19570d037238c23998cbecdf71797a55daef5d61b8a042430e677fb57602b7
+      subject_digest: sha256:c2decb289e7c8fb42ccb1ec661683642686d3f65a6aea310cda2debc33cf8317
     env:
       NUTSNEWS_ENVIRONMENT: production
       NUTSNEWS_ENRICHMENT_HTTP_HOST: 127.0.0.1
@@ -358,8 +358,8 @@ backend_worker_runtime_services:
   - name: approval
     stage: approval
     tracking_issue: 118
-    image: ghcr.io/ramideltoro/nutsnews-worker-article-approval@sha256:73eb61ebb8ad8d2d1222c045252561e66c29d059149be43a1149d6120b1cc35b
-    image_tag: 94271d2d8a7963b75c51b86948a957e40ed0423d
+    image: ghcr.io/ramideltoro/nutsnews-worker-article-approval@sha256:20b59d4f6aebab45a3849f36497d530a0dd1517e64d0c969fdecbbd5e7675750
+    image_tag: 38185c74717221453c662f4ba1b093315eff5b83
     contract_version: "0.4.0"
     runtime_package_version: "0.5.0"
     runtime_mode: shadow
@@ -383,7 +383,7 @@ backend_worker_runtime_services:
       required: true
       signed: true
       source_repository: ramideltoro/nutsnews-worker-article-approval
-      subject_digest: sha256:73eb61ebb8ad8d2d1222c045252561e66c29d059149be43a1149d6120b1cc35b
+      subject_digest: sha256:20b59d4f6aebab45a3849f36497d530a0dd1517e64d0c969fdecbbd5e7675750
     env:
       NUTSNEWS_ENVIRONMENT: production
       NUTSNEWS_APPROVAL_HTTP_HOST: 127.0.0.1
@@ -454,8 +454,8 @@ backend_worker_runtime_services:
   - name: translation
     stage: translation
     tracking_issue: 118
-    image: ghcr.io/ramideltoro/nutsnews-worker-article-translation@sha256:5f7bf8eb7de58a990425254245ea58ca555238de63d77b06b326359d547bf8a6
-    image_tag: bc22600fb360d5780178cc7abdab887526980086
+    image: ghcr.io/ramideltoro/nutsnews-worker-article-translation@sha256:9116bb007d2592bc84b49ac185d042e01f991f67a875aae5fbe3d364c80f1d32
+    image_tag: d3b68668c7b714500d7efd204ecf33987a34e3ee
     contract_version: "0.4.0"
     runtime_package_version: "0.5.0"
     runtime_mode: shadow
@@ -479,7 +479,7 @@ backend_worker_runtime_services:
       required: true
       signed: true
       source_repository: ramideltoro/nutsnews-worker-article-translation
-      subject_digest: sha256:5f7bf8eb7de58a990425254245ea58ca555238de63d77b06b326359d547bf8a6
+      subject_digest: sha256:9116bb007d2592bc84b49ac185d042e01f991f67a875aae5fbe3d364c80f1d32
     env:
       NUTSNEWS_ENVIRONMENT: production
       NUTSNEWS_TRANSLATION_HTTP_HOST: 127.0.0.1
@@ -547,8 +547,8 @@ backend_worker_runtime_services:
   - name: persistence
     stage: persistence
     tracking_issue: 119
-    image: ghcr.io/ramideltoro/nutsnews-worker-article-persistence@sha256:c5b5ac93d54742ff7a418da33c3cd2f373ceaaf20e5dc3f566a7b129fcda2ee1
-    image_tag: 9d2f618a7f43e76a3230585ea5bdb28e2d43ab5a
+    image: ghcr.io/ramideltoro/nutsnews-worker-article-persistence@sha256:b7cd29d59d43406e3e8ab61ed4840b2fdea84ba8016fead4eb3eaa8d1c8de77d
+    image_tag: 6dae69d96b4b081b23b5e1d85e10133ee36a6674
     contract_version: "0.4.0"
     runtime_package_version: "0.5.0"
     runtime_mode: shadow
@@ -572,7 +572,7 @@ backend_worker_runtime_services:
       required: true
       signed: true
       source_repository: ramideltoro/nutsnews-worker-article-persistence
-      subject_digest: sha256:c5b5ac93d54742ff7a418da33c3cd2f373ceaaf20e5dc3f566a7b129fcda2ee1
+      subject_digest: sha256:b7cd29d59d43406e3e8ab61ed4840b2fdea84ba8016fead4eb3eaa8d1c8de77d
     env:
       NUTSNEWS_ENVIRONMENT: production
       NUTSNEWS_PERSISTENCE_HTTP_HOST: 127.0.0.1
@@ -626,8 +626,8 @@ backend_worker_runtime_services:
   - name: publication
     stage: publication
     tracking_issue: 119
-    image: ghcr.io/ramideltoro/nutsnews-worker-article-publication@sha256:85ba95750ddc94e38c52962b896394b98ca0e64e59313e758963fd5e9dd4a94d
-    image_tag: 97920706fdcad69030f649ed1a3ac34dab7d7982
+    image: ghcr.io/ramideltoro/nutsnews-worker-article-publication@sha256:96ecc4d028a36c7a6e926174c4ce8677c506a5b8dd031bb03973859f86d85328
+    image_tag: 5a9e3c09a8572a7978687bcb7afec548e3934a63
     contract_version: "0.4.0"
     runtime_package_version: "0.5.0"
     runtime_mode: shadow
@@ -651,7 +651,7 @@ backend_worker_runtime_services:
       required: true
       signed: true
       source_repository: ramideltoro/nutsnews-worker-article-publication
-      subject_digest: sha256:85ba95750ddc94e38c52962b896394b98ca0e64e59313e758963fd5e9dd4a94d
+      subject_digest: sha256:96ecc4d028a36c7a6e926174c4ce8677c506a5b8dd031bb03973859f86d85328
     env:
       NUTSNEWS_ENVIRONMENT: production
       NUTSNEWS_PUBLICATION_HTTP_HOST: 127.0.0.1

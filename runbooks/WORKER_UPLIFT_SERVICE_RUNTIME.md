@@ -192,6 +192,39 @@ Reports are written under:
 
 The workflow uploads `backend-worker-runtime-report`.
 
+### Zero-Consumer Detection And Recovery
+
+`status` evaluates `/ready` for every configured service and RabbitMQ consumer
+count for every queue listed in that service's `queues.consumes`. The scheduler
+is producer-only and reports consumer readiness as `not_applicable`. A consuming
+service is not ready when its main queue has zero consumers; `status` and a
+main-queue `queue-inspect` return failure evidence for that condition.
+
+Use a protected restart only when the source-controlled image, configuration,
+and credentials are still correct and the evidence shows a runtime-only
+consumer loss, such as broker cancellation or a dropped channel that did not
+self-recover:
+
+1. Run `status`, `queue-inspect`, and bounded `logs` through `Backend Worker
+   Runtime Operations`.
+2. Select `restart` for only the affected service, provide
+   `confirm_target=backend.nutsnews.com`, and obtain `production-backend`
+   approval.
+3. Rerun `status` and `queue-inspect`; require `/ready` healthy, at least one
+   main-queue consumer, no DLQ growth, and the queued work drained.
+
+Use deployment recovery when the image or configuration must change. Merge the
+service and backend manifest PRs first, run protected backend Ansible check and
+apply to install the reviewed manager/manifest/Compose state, then select
+`deploy` for only the affected service through `Backend Worker Runtime
+Operations`. Require the same status, queue, DLQ, log, and drain proof after
+deployment. Do not substitute an ad hoc SSH, Compose, or host command for either
+path.
+
+Both recovery paths preserve `production_writes_enabled=false`, leave the
+legacy ingestion owner running, and do not change DNS or failover behavior.
+Grafana alert changes remain owned by `ramideltoro/nutsnews-infra`.
+
 ## #117 Shadow Verification
 
 After protected check/apply:

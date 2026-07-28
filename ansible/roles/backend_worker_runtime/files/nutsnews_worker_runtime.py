@@ -783,6 +783,16 @@ def declared_queues(service: dict[str, Any], kind: str) -> list[str]:
     return []
 
 
+def declared_consumed_queues(service: dict[str, Any]) -> list[str]:
+    queues = service.get("queues", {})
+    if not isinstance(queues, dict):
+        return []
+    value = queues.get("consumes", [])
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
 def queue_messages(queue: dict[str, Any]) -> int:
     metrics = queue.get("metrics", {})
     if not isinstance(metrics, dict):
@@ -823,6 +833,49 @@ def missing_pipeline_consumers(queue_snapshot: dict[str, Any]) -> list[str]:
                 missing.append(stage)
                 break
     return missing
+
+
+def service_consumer_readiness(
+    args: argparse.Namespace,
+    service: dict[str, Any],
+) -> dict[str, Any]:
+    queues = declared_consumed_queues(service)
+    if not queues:
+        return {
+            "status": "not_applicable",
+            "required": False,
+            "queues": [],
+            "summary": "service does not consume a RabbitMQ queue",
+        }
+
+    snapshots = [rabbitmq_get_json(args, queue) for queue in queues]
+    zero_consumer_queues = [
+        str(snapshot["queue"])
+        for snapshot in snapshots
+        if snapshot.get("status") == "healthy" and queue_consumers(snapshot) < 1
+    ]
+    unavailable_queues = [
+        str(snapshot["queue"])
+        for snapshot in snapshots
+        if snapshot.get("status") != "healthy"
+    ]
+    if zero_consumer_queues:
+        status = "critical"
+        summary = "one or more required RabbitMQ queues have zero active consumers"
+    elif unavailable_queues:
+        status = "unknown"
+        summary = "RabbitMQ consumer count could not be verified"
+    else:
+        status = "healthy"
+        summary = "all required RabbitMQ queues have active consumers"
+    return {
+        "status": status,
+        "required": True,
+        "queues": snapshots,
+        "zero_consumer_queues": zero_consumer_queues,
+        "unavailable_queues": unavailable_queues,
+        "summary": summary,
+    }
 
 
 def dlq_growth(before: dict[str, Any], after: dict[str, Any]) -> dict[str, int]:
@@ -1870,6 +1923,27 @@ def build_report(args: argparse.Namespace, manifest: dict[str, Any]) -> dict[str
         else:
             command = compose_base(args) + ["ps", "--format", "json"]
             report["commands"].append(run_command(command))
+            service_status: dict[str, Any] = {}
+            missing_consumers: list[str] = []
+            unverifiable_consumers: list[str] = []
+            for configured_service in manifest["services"]:
+                name = str(configured_service["name"])
+                consumer_readiness = service_consumer_readiness(args, configured_service)
+                port = SERVICE_HTTP_PORTS.get(str(configured_service.get("stage")))
+                service_status[name] = {
+                    "readiness": http_get_local("/ready", port) if port is not None else {"status": "not_configured"},
+                    "consumer_readiness": consumer_readiness,
+                }
+                if consumer_readiness["status"] == "critical":
+                    missing_consumers.append(name)
+                elif consumer_readiness["status"] == "unknown":
+                    unverifiable_consumers.append(name)
+            report["services"] = service_status
+            report["missing_consumers"] = missing_consumers
+            report["unverifiable_consumers"] = unverifiable_consumers
+            if missing_consumers or unverifiable_consumers:
+                report["status"] = "fail"
+                report["errors"].append("required RabbitMQ consumer readiness is not healthy")
     elif args.action == "logs":
         command = compose_base(args) + ["logs", "--no-color", "--tail", str(args.tail), service["name"]]
         report["commands"].append(run_command(command))
@@ -1905,6 +1979,18 @@ def build_report(args: argparse.Namespace, manifest: dict[str, Any]) -> dict[str
         kind = "dlq" if args.action == "dlq-inspect" else args.queue_kind
         queues = declared_queues(service, kind)
         report["queues"] = [rabbitmq_get_json(args, queue) for queue in queues]
+        consumed_queues = set(declared_consumed_queues(service))
+        zero_consumer_queues = [
+            str(snapshot["queue"])
+            for snapshot in report["queues"]
+            if snapshot.get("queue") in consumed_queues
+            and snapshot.get("status") == "healthy"
+            and queue_consumers(snapshot) < 1
+        ]
+        report["zero_consumer_queues"] = zero_consumer_queues
+        if zero_consumer_queues:
+            report["status"] = "fail"
+            report["errors"].append("required RabbitMQ queue has zero active consumers")
     elif args.action == "dlq-replay":
         report["status"] = "dry_run" if args.dry_run else "blocked"
         report["queues"] = declared_queues(service, "dlq")

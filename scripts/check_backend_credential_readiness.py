@@ -20,12 +20,42 @@ def load_inventory() -> dict:
     return json.loads(INVENTORY_PATH.read_text(encoding="utf-8"))
 
 
-def present(name: str) -> bool:
-    return bool(os.environ.get(name, "").strip())
+def load_api_pages(path: Path) -> list[dict]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    pages = payload if isinstance(payload, list) else [payload]
+    if not pages or any(not isinstance(page, dict) for page in pages):
+        raise ValueError(f"{path.name} must contain one or more GitHub API response objects")
+    return pages
 
 
-def validate_shape(name: str, shape: str) -> str | None:
-    value = os.environ.get(name, "")
+def load_environment_metadata(secret_path: Path, variable_path: Path) -> tuple[set[str], dict[str, str]]:
+    secret_names: set[str] = set()
+    for page in load_api_pages(secret_path):
+        secrets = page.get("secrets")
+        if not isinstance(secrets, list):
+            raise ValueError(f"{secret_path.name} is missing a secrets array")
+        for secret in secrets:
+            name = secret.get("name") if isinstance(secret, dict) else None
+            if not isinstance(name, str) or not name:
+                raise ValueError(f"{secret_path.name} contains invalid secret metadata")
+            secret_names.add(name)
+
+    variables: dict[str, str] = {}
+    for page in load_api_pages(variable_path):
+        items = page.get("variables")
+        if not isinstance(items, list):
+            raise ValueError(f"{variable_path.name} is missing a variables array")
+        for variable in items:
+            name = variable.get("name") if isinstance(variable, dict) else None
+            value = variable.get("value") if isinstance(variable, dict) else None
+            if not isinstance(name, str) or not name or not isinstance(value, str):
+                raise ValueError(f"{variable_path.name} contains invalid variable metadata")
+            variables[name] = value
+
+    return secret_names, variables
+
+
+def validate_shape(value: str, shape: str) -> str | None:
     if not value.strip():
         return None
 
@@ -65,9 +95,59 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--group", action="append", default=[], help="Limit checks to one or more inventory groups.")
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
+    parser.add_argument(
+        "--environment-secrets-json",
+        type=Path,
+        help="GitHub API response containing environment secret metadata. Values are never available.",
+    )
+    parser.add_argument(
+        "--environment-variables-json",
+        type=Path,
+        help="GitHub API response containing non-secret environment variables.",
+    )
     args = parser.parse_args()
 
     inventory = load_inventory()
+    metadata_paths = (args.environment_secrets_json, args.environment_variables_json)
+    if any(metadata_paths) and not all(metadata_paths):
+        parser.error("--environment-secrets-json and --environment-variables-json must be used together")
+
+    metadata_mode = all(metadata_paths)
+    secret_names: set[str] = set()
+    environment_variables: dict[str, str] = {}
+    if metadata_mode:
+        try:
+            secret_names, environment_variables = load_environment_metadata(*metadata_paths)
+        except (OSError, json.JSONDecodeError, ValueError) as error:
+            result = {
+                "ok": False,
+                "environment": inventory["environment"],
+                "validation_mode": "github_environment_metadata",
+                "metadata_errors": [str(error)],
+            }
+            if args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                print(f"Credential metadata could not be read: {error}")
+            return 2
+
+    variable_defaults = {
+        variable["name"]: variable.get("default", "")
+        for variable in inventory.get("non_secret_variables", [])
+    }
+
+    def value(name: str, *, secret: bool = False) -> str:
+        if metadata_mode:
+            if secret:
+                return ""
+            return environment_variables.get(name, variable_defaults.get(name, ""))
+        return os.environ.get(name, "")
+
+    def present(name: str, *, secret: bool = False) -> bool:
+        if metadata_mode and secret:
+            return name in secret_names
+        return bool(value(name, secret=secret).strip())
+
     selected_groups = set(args.group)
     known_groups = {group["id"] for group in inventory.get("secret_groups", [])}
     unknown_groups = sorted(selected_groups - known_groups)
@@ -89,6 +169,7 @@ def main() -> int:
     missing_required: list[str] = []
     missing_conditionals: list[str] = []
     shape_errors: list[str] = []
+    shape_checks_deferred: list[str] = []
     checked: list[str] = []
 
     variables = []
@@ -108,22 +189,32 @@ def main() -> int:
         for secret in group.get("secrets", []):
             name = secret["name"]
             checked.append(name)
-            if secret.get("required") and not present(name):
+            if secret.get("required") and not present(name, secret=True):
                 missing_required.append(name)
                 continue
-            error = validate_shape(name, secret.get("shape", "secret_text"))
-            if error:
-                shape_errors.append(f"{name}: {error}")
+            if present(name, secret=True):
+                if metadata_mode:
+                    shape_checks_deferred.append(name)
+                else:
+                    error = validate_shape(value(name, secret=True), secret.get("shape", "secret_text"))
+                    if error:
+                        shape_errors.append(f"{name}: {error}")
 
         for secret in group.get("conditional_secrets", []):
             name = secret["name"]
-            if present(name):
+            if present(name, secret=True):
                 checked.append(name)
-                error = validate_shape(name, secret.get("shape", "secret_text"))
-                if error:
-                    shape_errors.append(f"{name}: {error}")
+                if metadata_mode:
+                    shape_checks_deferred.append(name)
+                else:
+                    error = validate_shape(value(name, secret=True), secret.get("shape", "secret_text"))
+                    if error:
+                        shape_errors.append(f"{name}: {error}")
 
-        provider = os.environ.get("NUTSNEWS_BACKEND_RESTIC_PROVIDER", inventory.get("non_secret_variables", [{}])[3].get("default", "")).strip()
+        provider = (
+            value("NUTSNEWS_BACKEND_RESTIC_PROVIDER").strip()
+            or variable_defaults.get("NUTSNEWS_BACKEND_RESTIC_PROVIDER", "").strip()
+        )
         if group_id == "restic":
             matching_sets = [item for item in group.get("credential_sets", []) if item["id"] == provider]
             if not matching_sets:
@@ -131,7 +222,7 @@ def main() -> int:
             for credential_set in matching_sets:
                 required_names = credential_set.get("any_of", [])
                 checked.extend(name for name in required_names if name not in checked)
-                absent = [name for name in required_names if not present(name)]
+                absent = [name for name in required_names if not present(name, secret=True)]
                 if absent:
                     missing_conditionals.append(
                         f"{credential_set['id']} provider requires: {', '.join(absent)}"
@@ -141,10 +232,12 @@ def main() -> int:
     result = {
         "ok": ok,
         "environment": inventory["environment"],
+        "validation_mode": "github_environment_metadata" if metadata_mode else "injected_values",
         "checked_names": sorted(set(checked)),
         "missing_required": sorted(set(missing_required)),
         "missing_conditionals": missing_conditionals,
         "shape_errors": shape_errors,
+        "shape_checks_deferred_to_protected_consumers": sorted(set(shape_checks_deferred)),
     }
 
     if args.json:
@@ -163,6 +256,10 @@ def main() -> int:
             print("Shape errors:")
             for item in shape_errors:
                 print(f"- {item}")
+        if shape_checks_deferred:
+            print("Secret value/shape checks deferred to protected consuming workflows:")
+            for name in sorted(set(shape_checks_deferred)):
+                print(f"- {name}")
 
     return 0 if ok else 1
 

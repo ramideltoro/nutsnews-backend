@@ -72,6 +72,7 @@ Backend owns these operations for the uplift runtime:
 - smoke: `Backend PostgreSQL Smoke Tests`, `Backend Synthetic Monitor`, cutover smoke gates
 - queue and DLQ inspect/replay: future fixed backend RabbitMQ operations
 - broker backup/restore: rebuild topology from backend source control and replay from stage outbox
+- credential readiness: approval-free GitHub Environment metadata checks; protected value audit after rotations
 - RabbitMQ capacity/security: `runbooks/WORKER_UPLIFT_RABBITMQ_CAPACITY_SECURITY.md`
 - RabbitMQ provisioning: `runbooks/WORKER_UPLIFT_RABBITMQ_PROVISIONING.md`
 - reconciliation: backend stage schemas, outbox/watermark proof, and cutover gates

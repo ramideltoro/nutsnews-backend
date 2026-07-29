@@ -40,9 +40,12 @@ jobs:
 
       - name: Render non-mutating guardrail plan
         shell: bash
+        env:
+          REQUESTED_PHASE: ${{ inputs.phase }}
         run: |
+          set -euo pipefail
           python3 scripts/backend_db_rollback_guardrails_plan.py \
-            --phase "${{ inputs.phase }}" \
+            --phase "$REQUESTED_PHASE" \
             --output "$RUNNER_TEMP/backend-db-rollback-guardrails.json"
 
       - name: Upload rollback guardrail report

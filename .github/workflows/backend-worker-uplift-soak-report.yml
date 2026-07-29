@@ -210,14 +210,18 @@ jobs:
       - name: Summarize safe metadata
         if: always()
         shell: bash
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
+          REQUESTED_REQUIRE_COMPLETE_WINDOW: ${{ inputs.require_complete_window }}
+          REQUESTED_MIN_WINDOW_HOURS: ${{ inputs.min_window_hours }}
         run: |
           set -euo pipefail
           {
             echo "## Backend worker-uplift soak/capacity report"
             echo
-            echo "- Mode: \`${{ inputs.mode }}\`"
-            echo "- Complete-window enforcement: \`${{ inputs.require_complete_window }}\`"
-            echo "- Minimum window hours: \`${{ inputs.min_window_hours }}\`"
+            echo "- Mode: \`$REQUESTED_MODE\`"
+            echo "- Complete-window enforcement: \`$REQUESTED_REQUIRE_COMPLETE_WINDOW\`"
+            echo "- Minimum window hours: \`$REQUESTED_MIN_WINDOW_HOURS\`"
             echo "- Report artifact contains safe metadata only."
             echo "- Database URLs, passwords, tokens, article payloads, prompts, and model outputs are not printed."
             echo "- This report cannot authorize cutover or production publication visibility."

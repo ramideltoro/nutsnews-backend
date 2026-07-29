@@ -178,12 +178,14 @@ jobs:
       - name: Summarize safe metadata
         if: always()
         shell: bash
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
           {
             echo "## Backend worker-uplift parity report"
             echo
-            echo "- Mode: \`${{ inputs.mode }}\`"
+            echo "- Mode: \`$REQUESTED_MODE\`"
             echo "- Report artifact contains safe metadata only."
             echo "- Database URLs, passwords, tokens, article payloads, prompts, and model outputs are not printed."
             echo "- This report cannot authorize cutover."

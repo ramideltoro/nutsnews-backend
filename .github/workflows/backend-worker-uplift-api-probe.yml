@@ -56,12 +56,14 @@ jobs:
       - name: Summarize safe metadata
         if: always()
         shell: bash
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
           {
             echo "## Backend worker-uplift API probe"
             echo
-            echo "- Mode: \`${{ inputs.mode }}\`"
+            echo "- Mode: \`$REQUESTED_MODE\`"
             echo "- Report artifact contains safe metadata only."
             echo "- The live probe uses the persistence-scoped worker-uplift token and writes only shadow final state."
           } >> "$GITHUB_STEP_SUMMARY"

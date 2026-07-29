@@ -1,0 +1,550 @@
+{
+  "schema_version": 1,
+  "tracking_issue": "ramideltoro/nutsnews-worker#124",
+  "review_date": "2026-07-29",
+  "review_mode": "non_mutating_shadow_security_review",
+  "review_base": {
+    "repository": "ramideltoro/nutsnews-backend",
+    "commit": "f5dea5b3255471d571ba6875fa9412db7346100b"
+  },
+  "decision": "pass_with_accepted_shadow_only_residual_risks",
+  "safety_invariants": {
+    "legacy_worker_is_production_ingestion_owner": true,
+    "uplift_services_are_shadow_only": true,
+    "production_writes_enabled": false,
+    "legacy_worker_modified": false,
+    "cloudflare_or_dns_modified": false,
+    "failover_modified": false,
+    "cutover_state_modified": false,
+    "production_data_mutated": false,
+    "secret_values_retrieved_or_recorded": false
+  },
+  "repositories": [
+    {
+      "name": "ramideltoro/nutsnews-backend",
+      "commit": "f5dea5b3255471d571ba6875fa9412db7346100b",
+      "role": "deployment_and_host_operations",
+      "secret_scanning_open_alerts": 0
+    },
+    {
+      "name": "ramideltoro/nutsnews-worker-contracts",
+      "commit": "bf10f4257a1ac7f3e5aef0c5a14f62ec51ae4bb2",
+      "role": "shared_package",
+      "ci_run": 30156156567,
+      "codeql_run": 30340404423,
+      "secret_scan_run": 30438310189,
+      "dependency_install_run": 30156184152,
+      "code_scanning_open_alerts": 0,
+      "dependabot_open_alerts": 0,
+      "secret_scanning_open_alerts": 0
+    },
+    {
+      "name": "ramideltoro/nutsnews-worker-runtime",
+      "commit": "43e7883554e250b2297d40266374cb4ff87d141c",
+      "role": "shared_package",
+      "ci_run": 30398610388,
+      "codeql_run": 30398610423,
+      "secret_scan_run": 30438819166,
+      "dependency_install_run": 30398882086,
+      "code_scanning_open_alerts": 0,
+      "dependabot_open_alerts": 0,
+      "secret_scanning_open_alerts": 0
+    },
+    {
+      "name": "ramideltoro/nutsnews-worker-scheduler",
+      "commit": "ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396",
+      "role": "service",
+      "ci_run": 30214286401,
+      "codeql_run": 30340414190,
+      "publish_run": 30214286441,
+      "code_scanning_open_alerts": 0,
+      "dependabot_open_alerts": 0,
+      "secret_scanning_open_alerts": 0
+    },
+    {
+      "name": "ramideltoro/nutsnews-worker-fetcher",
+      "commit": "5b82b3e27ef85e57fc9aec23a0815cde584758eb",
+      "role": "service",
+      "ci_run": 30403472242,
+      "codeql_run": 30403472204,
+      "publish_run": 30403472254,
+      "code_scanning_open_alerts": 0,
+      "dependabot_open_alerts": 0,
+      "secret_scanning_open_alerts": 0
+    },
+    {
+      "name": "ramideltoro/nutsnews-worker-canonicalizer",
+      "commit": "64d6f59920ec6aa5fb56028de99f7600ecb5be2d",
+      "role": "service",
+      "ci_run": 30403471778,
+      "codeql_run": 30403471784,
+      "publish_run": 30403471769,
+      "code_scanning_open_alerts": 0,
+      "dependabot_open_alerts": 0,
+      "secret_scanning_open_alerts": 0
+    },
+    {
+      "name": "ramideltoro/nutsnews-worker-enrichment",
+      "commit": "edd63d8acd4a46a33aea4b043e3dc8dfd95af310",
+      "role": "service",
+      "ci_run": 30403471978,
+      "codeql_run": 30403471949,
+      "publish_run": 30403472008,
+      "code_scanning_open_alerts": 0,
+      "dependabot_open_alerts": 0,
+      "secret_scanning_open_alerts": 0
+    },
+    {
+      "name": "ramideltoro/nutsnews-worker-approval",
+      "commit": "38185c74717221453c662f4ba1b093315eff5b83",
+      "role": "service",
+      "ci_run": 30403471935,
+      "codeql_run": 30403472029,
+      "publish_run": 30403472026,
+      "code_scanning_open_alerts": 0,
+      "dependabot_open_alerts": 0,
+      "secret_scanning_open_alerts": 0
+    },
+    {
+      "name": "ramideltoro/nutsnews-worker-translation",
+      "commit": "d3b68668c7b714500d7efd204ecf33987a34e3ee",
+      "role": "service",
+      "ci_run": 30403471980,
+      "codeql_run": 30403472111,
+      "publish_run": 30403472084,
+      "code_scanning_open_alerts": 0,
+      "dependabot_open_alerts": 0,
+      "secret_scanning_open_alerts": 0
+    },
+    {
+      "name": "ramideltoro/nutsnews-worker-persistence",
+      "commit": "6dae69d96b4b081b23b5e1d85e10133ee36a6674",
+      "role": "service",
+      "ci_run": 30403472226,
+      "codeql_run": 30403472323,
+      "publish_run": 30403472413,
+      "code_scanning_open_alerts": 0,
+      "dependabot_open_alerts": 0,
+      "secret_scanning_open_alerts": 0
+    },
+    {
+      "name": "ramideltoro/nutsnews-worker-publication",
+      "commit": "5a9e3c09a8572a7978687bcb7afec548e3934a63",
+      "role": "service",
+      "ci_run": 30403471858,
+      "codeql_run": 30403471831,
+      "publish_run": 30403471857,
+      "code_scanning_open_alerts": 0,
+      "dependabot_open_alerts": 0,
+      "secret_scanning_open_alerts": 0
+    },
+    {
+      "name": "ramideltoro/nutsnews-infra",
+      "commit": "ee61807a757fe087dbcecd60d5e0b7fe07f4115a",
+      "role": "grafana_cloud_ownership",
+      "secret_scanning_open_alerts": 0
+    },
+    {
+      "name": "ramideltoro/nutsnews-docs",
+      "commit": "24af52586865790b12730ff15243de1c6cacc386",
+      "role": "architecture_and_runbooks",
+      "secret_scanning_open_alerts": 0
+    }
+  ],
+  "package_artifacts": [
+    {
+      "name": "@nutsnews/worker-contracts",
+      "version": "0.4.0",
+      "publish_run": 30156164725,
+      "attestation_id": 37079895,
+      "tarball_sha256": "3189d372db74c64f6527e4fd2ff30b5ee807c06fe6c574a8b901886bf66bc7d5",
+      "immutable": true,
+      "public_package": true
+    },
+    {
+      "name": "@nutsnews/worker-runtime",
+      "version": "0.5.0",
+      "publish_run": 30398759792,
+      "attestation_id": 37608731,
+      "tarball_sha256": "371761f3420d4219354d450b1d1cec62b373817cc78f91128274490b9a8981c0",
+      "immutable": true,
+      "public_package": true
+    }
+  ],
+  "deployed_images": [
+    {
+      "stage": "scheduler",
+      "digest": "sha256:ac1870a4f4fb1cd847ea6de43b9e3551e9d9c2acc6e32586f570edf61bc2d053",
+      "signed": true,
+      "runtime_digest_pinned": true,
+      "secret_findings": 0,
+      "triaged_high_or_critical_vulnerabilities": 7
+    },
+    {
+      "stage": "fetcher",
+      "digest": "sha256:38617a1592b98797f951070d997d6b599725aff0ce7cecfaac7f70d99016125c",
+      "signed": true,
+      "runtime_digest_pinned": true,
+      "secret_findings": 0,
+      "triaged_high_or_critical_vulnerabilities": 7
+    },
+    {
+      "stage": "canonicalizer",
+      "digest": "sha256:63f5c6dc639850f008fb30e6bcb4b4e19d54095bd75511119e690cb1abe7ef98",
+      "signed": true,
+      "runtime_digest_pinned": true,
+      "secret_findings": 0,
+      "triaged_high_or_critical_vulnerabilities": 7
+    },
+    {
+      "stage": "enrichment",
+      "digest": "sha256:c2decb289e7c8fb42ccb1ec661683642686d3f65a6aea310cda2debc33cf8317",
+      "signed": true,
+      "runtime_digest_pinned": true,
+      "secret_findings": 0,
+      "triaged_high_or_critical_vulnerabilities": 7
+    },
+    {
+      "stage": "approval",
+      "digest": "sha256:20b59d4f6aebab45a3849f36497d530a0dd1517e64d0c969fdecbbd5e7675750",
+      "signed": true,
+      "runtime_digest_pinned": true,
+      "secret_findings": 0,
+      "triaged_high_or_critical_vulnerabilities": 7
+    },
+    {
+      "stage": "translation",
+      "digest": "sha256:9116bb007d2592bc84b49ac185d042e01f991f67a875aae5fbe3d364c80f1d32",
+      "signed": true,
+      "runtime_digest_pinned": true,
+      "secret_findings": 0,
+      "triaged_high_or_critical_vulnerabilities": 7
+    },
+    {
+      "stage": "persistence",
+      "digest": "sha256:b7cd29d59d43406e3e8ab61ed4840b2fdea84ba8016fead4eb3eaa8d1c8de77d",
+      "signed": true,
+      "runtime_digest_pinned": true,
+      "secret_findings": 0,
+      "triaged_high_or_critical_vulnerabilities": 7
+    },
+    {
+      "stage": "publication",
+      "digest": "sha256:96ecc4d028a36c7a6e926174c4ce8677c506a5b8dd031bb03973859f86d85328",
+      "signed": true,
+      "runtime_digest_pinned": true,
+      "secret_findings": 0,
+      "triaged_high_or_critical_vulnerabilities": 7
+    }
+  ],
+  "control_domains": [
+    {
+      "id": "repository",
+      "status": "pass_with_accepted_residual_risk",
+      "evidence": [
+        "All ten uplift code repositories have active protect-main rulesets, required validate checks, non-fast-forward and deletion protections, resolved review-thread requirements, read-only default workflow permissions, secret scanning, and push protection.",
+        "Current-head CI and CodeQL runs succeeded and the GitHub alert APIs reported zero open code-scanning, Dependabot, or secret-scanning alerts.",
+        "Full-history redacted gitleaks scans found zero secrets in the ten uplift code repositories; three backend matches were reviewed as synthetic test metadata or a repository identifier."
+      ]
+    },
+    {
+      "id": "supply_chain",
+      "status": "pass_with_accepted_residual_risk",
+      "evidence": [
+        "Shared packages are immutable public GitHub Packages published from exact tarballs with GitHub attestations and recorded SHA-256 digests.",
+        "All eight deployed service images use exact runtime digests, have commit tags and cosign signature manifests, and are restricted to trusted source repositories by the backend runtime manifest.",
+        "Local locked dependency installs, unit/integration CI, npm high-severity audit, CycloneDX generation, CodeQL, image vulnerability scans, and image secret scans were reviewed."
+      ]
+    },
+    {
+      "id": "secrets_and_credentials",
+      "status": "pass_with_accepted_residual_risk",
+      "evidence": [
+        "No service repository stores deployment secrets. Backend runtime manifests mount only stage-specific RabbitMQ, PostgreSQL, backend API, Qwen, or reconciliation files.",
+        "RabbitMQ producer/consumer identities, PostgreSQL stage roles, and backend persistence/publication API tokens are distinct and least-privilege in the source-controlled identity maps and validators.",
+        "LOCAL_AI_API_KEY is explicitly retained as the source for only the approval and translation Qwen credential files by issue #66 and backend credential-readiness run 30445298275; no credential material was read.",
+        "Grafana management credentials remain infra-owned; the backend receives only Prometheus and Loki write credentials."
+      ]
+    },
+    {
+      "id": "network_and_ssrf",
+      "status": "pass_with_accepted_residual_risk",
+      "evidence": [
+        "External probes found only SSH, HTTP, and HTTPS open. PostgreSQL, AMQP, RabbitMQ management/metrics, worker admin, node-exporter, PostgreSQL exporter, and RabbitMQ exporter ports were closed or filtered.",
+        "backend.nutsnews.com served a valid public TLS certificate and health endpoint.",
+        "Fetcher policy rejects non-HTTP protocols, localhost, private, link-local, metadata, credential-bearing, and disallowed redirect destinations; focused tests passed."
+      ]
+    },
+    {
+      "id": "rabbitmq",
+      "status": "pass",
+      "evidence": [
+        "The uplift vhost, route queues, exchanges, and users are isolated from the legacy worker.",
+        "Service identities cannot configure RabbitMQ, administer the broker, read unrelated queues, or publish outside their declared exchanges.",
+        "RabbitMQ canary run 30217775773 and clean-rebuild recovery run 30215207093 passed; broker contents are recoverable from the PostgreSQL stage ledger."
+      ]
+    },
+    {
+      "id": "postgres",
+      "status": "pass",
+      "evidence": [
+        "Each stage has a distinct PostgreSQL role and schema boundary; permission proof run 30024831874 checks table, sequence, function, schema, database, cross-stage, and public-schema privileges.",
+        "The proof's transient write checks roll back and the security review itself executed no database writes.",
+        "Backups are encrypted and off-host; secrets and RabbitMQ live message storage are intentionally restored from their owning systems rather than copied into backup artifacts."
+      ]
+    },
+    {
+      "id": "backend_api",
+      "status": "pass",
+      "evidence": [
+        "Worker database endpoints reject missing and invalid bearer credentials with HTTP 401.",
+        "Persistence and publication tokens are command-scoped and reconciliation endpoints accept fixed bounded actions only.",
+        "Production commands fail closed unless backend PostgreSQL is primary, cutover state is approved, production writes are explicitly enabled, and the existing Worker DB API write guard also passes."
+      ]
+    },
+    {
+      "id": "ai",
+      "status": "pass_with_accepted_residual_risk",
+      "evidence": [
+        "Only approval and translation receive Qwen credentials; model calls are bounded by input size, concurrency, and timeout.",
+        "OpenAI fallback is disabled and its shadow budget is zero.",
+        "Structured logs and metrics exclude prompt bodies, article bodies, authentication material, and provider response bodies."
+      ]
+    },
+    {
+      "id": "telemetry",
+      "status": "pass",
+      "evidence": [
+        "Grafana Cloud management stays in nutsnews-infra while backend services have remote-write-only credentials.",
+        "Runtime status, queue consumer, cancellation, dropped-channel, DLQ, queue-depth, and stage telemetry are checked by protected backend workflows.",
+        "Metrics run 30405452541, logs run 30405452566, and complete soak report run 30405550709 passed with immutable artifacts."
+      ]
+    },
+    {
+      "id": "operations",
+      "status": "pass_with_accepted_residual_risk",
+      "evidence": [
+        "Protected backend workflows own deployments, restarts, recovery, credential audit, and read-only runtime checks.",
+        "Current production-backend protections fail closed while an approval is required; this review did not bypass an environment wait.",
+        "Legacy ingestion, Cloudflare routing, DNS failover, cutover state, and production writes are independent of every reviewed shadow operation."
+      ]
+    }
+  ],
+  "successful_live_evidence": [
+    {
+      "control": "credential_readiness",
+      "run": 30445298275,
+      "commit": "f5dea5b3255471d571ba6875fa9412db7346100b"
+    },
+    {
+      "control": "shadow_model",
+      "run": 30192002048
+    },
+    {
+      "control": "postgres_permission_proof",
+      "run": 30024831874
+    },
+    {
+      "control": "runtime_and_shadow_smoke",
+      "run": 30405294851,
+      "artifact_id": 8706309584,
+      "artifact_digest": "sha256:72c800e6c1155e10b2cb58d74832933d193dc68922f21c0f681f1307691e00a7"
+    },
+    {
+      "control": "metrics",
+      "run": 30405452541,
+      "artifact_id": 8706347078,
+      "artifact_digest": "sha256:9f69a18f2314026a20fdcd71f850a18ba243d8f95468b4283c4249994de58219"
+    },
+    {
+      "control": "logs",
+      "run": 30405452566,
+      "artifact_id": 8706347918,
+      "artifact_digest": "sha256:69d3c262f2c835ab70934952a1463af3b5962334213aaee91628f4f67d206230"
+    },
+    {
+      "control": "complete_soak",
+      "run": 30405550709,
+      "artifact_id": 8706384719,
+      "artifact_digest": "sha256:948e4d5c9f81a010af703db431593691190ddc2b9bab12ac90bd0567a9abc90f"
+    },
+    {
+      "control": "rabbitmq_canary",
+      "run": 30217775773
+    },
+    {
+      "control": "rabbitmq_clean_rebuild_recovery",
+      "run": 30215207093
+    },
+    {
+      "control": "network_security_apply",
+      "run": 30002785002
+    }
+  ],
+  "findings": [
+    {
+      "id": "SEC-124-001",
+      "severity": "high",
+      "status": "remediated",
+      "title": "Workflow dispatch and repository data were interpolated directly into privileged shell scripts",
+      "disposition": "Affected backend workflows now pass dispatch and repository data through step environment variables. A repository-wide validator rejects direct shell interpolation and non-immutable action references.",
+      "verification": [
+        "python3 scripts/validate_backend_github_actions_security.py",
+        "zizmor reports no high-severity backend workflow findings"
+      ]
+    },
+    {
+      "id": "SEC-124-002",
+      "severity": "medium",
+      "status": "accepted_residual_risk",
+      "title": "Uplift repositories use trusted action release tags rather than immutable action commit SHAs",
+      "risk_acceptance": {
+        "scope": "shadow_only",
+        "rationale": "Required validation, read-only default permissions, exact current workflow resolutions, branch protections, and no production writes constrain exposure.",
+        "owner": "worker-uplift repository owner",
+        "expires_at_gate": "ramideltoro/nutsnews-worker#125",
+        "required_follow_up": "Pin all external actions to reviewed commit SHAs before production-readiness approval."
+      }
+    },
+    {
+      "id": "SEC-124-003",
+      "severity": "medium",
+      "status": "accepted_residual_risk",
+      "title": "Some publish workflows restore dependency caches in artifact-producing jobs",
+      "risk_acceptance": {
+        "scope": "shadow_only",
+        "rationale": "Publishing is main-only, package lockfiles are enforced, image identity is exact-digest and signed, and production writes remain disabled.",
+        "owner": "worker-uplift repository owner",
+        "expires_at_gate": "ramideltoro/nutsnews-worker#125",
+        "required_follow_up": "Remove publish-job caches or isolate them from untrusted pull-request cache namespaces before production-readiness approval."
+      }
+    },
+    {
+      "id": "SEC-124-004",
+      "severity": "medium",
+      "status": "accepted_residual_risk",
+      "title": "Runtime images retain the npm CLI and development-only dependency content",
+      "risk_acceptance": {
+        "scope": "shadow_only",
+        "rationale": "The seven high/critical scanner matches per image are confined to an unused npm CLI or a development-only package and are not reachable by the node dist/src/index.js runtime command. Images run non-root and image secret scans are clean.",
+        "owner": "worker-uplift repository owner",
+        "expires_at_gate": "ramideltoro/nutsnews-worker#125",
+        "required_follow_up": "Use production-only multi-stage images without npm CLI or development dependencies and rescan before production-readiness approval."
+      }
+    },
+    {
+      "id": "SEC-124-005",
+      "severity": "low",
+      "status": "accepted_residual_risk",
+      "title": "Four service publish workflows do not attach an image SBOM attestation",
+      "risk_acceptance": {
+        "scope": "shadow_only",
+        "rationale": "All services generate CycloneDX dependency SBOMs in CI and every deployed image is SHA-tagged, exact-digest pinned, scanned, and signed.",
+        "owner": "worker-uplift repository owner",
+        "expires_at_gate": "ramideltoro/nutsnews-worker#125",
+        "required_follow_up": "Attach image SBOM attestations for approval, translation, persistence, and publication before production-readiness approval."
+      }
+    },
+    {
+      "id": "SEC-124-006",
+      "severity": "medium",
+      "status": "accepted_residual_risk",
+      "title": "Fetcher DNS policy has a resolution-to-connect time-of-check/time-of-use window",
+      "risk_acceptance": {
+        "scope": "shadow_only",
+        "rationale": "Feed URLs come from the controlled scheduler path, redirects are revalidated, private and metadata addresses are blocked, host-local privileged endpoints require separate credentials, and production writes are disabled.",
+        "owner": "worker-uplift repository owner",
+        "expires_at_gate": "ramideltoro/nutsnews-worker#125",
+        "required_follow_up": "Bind outbound connections to the policy-validated address or use an equivalently rebinding-safe agent before production-readiness approval."
+      }
+    },
+    {
+      "id": "SEC-124-007",
+      "severity": "low",
+      "status": "accepted_residual_risk",
+      "title": "Approval and translation derive service Qwen files from one retained source credential",
+      "risk_acceptance": {
+        "scope": "shadow_only",
+        "rationale": "The credential controls only the Qwen provider and cannot administer RabbitMQ, PostgreSQL, the backend API, Grafana, deployment, DNS, or failover.",
+        "owner": "worker-uplift repository owner",
+        "expires_at_gate": "ramideltoro/nutsnews-worker#125",
+        "required_follow_up": "Split provider credentials if supported before production-readiness approval, otherwise explicitly renew this provider-scoped acceptance."
+      }
+    },
+    {
+      "id": "SEC-124-008",
+      "severity": "medium",
+      "status": "accepted_residual_risk",
+      "title": "Scheduled read-only monitoring uses repository-level host and API credentials",
+      "risk_acceptance": {
+        "scope": "read_only_monitoring",
+        "rationale": "The scheduled workflows run fixed source-controlled read-only commands from protected main with read-only workflow permissions; state-changing backend operations remain environment-protected.",
+        "owner": "backend repository owner",
+        "expires_at_gate": "ramideltoro/nutsnews-worker#125",
+        "required_follow_up": "Evidence a forced-command or equivalently restricted read-only host identity before production-readiness approval."
+      }
+    },
+    {
+      "id": "SEC-124-009",
+      "severity": "low",
+      "status": "accepted_residual_risk",
+      "title": "Uplift repository rulesets require pull requests but zero approving reviews",
+      "risk_acceptance": {
+        "scope": "single_owner_shadow_repositories",
+        "rationale": "Rulesets require current validation and resolved review threads and block destructive history changes; all services remain shadow-only.",
+        "owner": "worker-uplift repository owner",
+        "expires_at_gate": "ramideltoro/nutsnews-worker#125",
+        "required_follow_up": "Reassess reviewer requirements when an independent maintainer is available and before production-readiness approval."
+      }
+    }
+  ],
+  "scanner_dispositions": [
+    {
+      "source": "trivy_deployed_images",
+      "classification": "not_affected",
+      "summary": "The scanner findings are confined to the unused npm CLI dependency tree or a development-only package; no finding is reachable from the production service entry point. SEC-124-004 retains the image-content hardening risk."
+    },
+    {
+      "source": "gitleaks_backend_history",
+      "classification": "false_positive",
+      "summary": "Two synthetic redaction-test strings and one repository identifier matched generic API-key heuristics. GitHub secret scanning reports zero open alerts."
+    },
+    {
+      "source": "zizmor_backend_workflows",
+      "classification": "remediated",
+      "summary": "Eight high-severity shell template-injection findings and additional direct shell expressions were removed. Remaining findings are low-severity pinned ad-hoc tooling installations."
+    }
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "no_unresolved_critical_or_high",
+      "status": "pass",
+      "evidence": "The only high source finding is remediated; scanner high/critical matches were reachability-triaged as not affected and the unnecessary image content remains tracked as medium SEC-124-004."
+    },
+    {
+      "id": "packages_and_images_traceable_scanned_pinned_signed_or_attested",
+      "status": "pass",
+      "evidence": "Package tarball digests and attestations, image source commits, publish runs, exact runtime digests, signatures, locked audits, SBOM generation, and image scan dispositions are recorded."
+    },
+    {
+      "id": "one_service_credential_cannot_control_unrelated_systems",
+      "status": "pass",
+      "evidence": "Source maps and permission proofs isolate RabbitMQ routes, PostgreSQL schemas, backend API commands, Qwen access, and Grafana write-only telemetry."
+    },
+    {
+      "id": "production_gates_fail_closed",
+      "status": "pass",
+      "evidence": "Production provider, cutover state, production-writes flag, and backend API write guard must all pass; current state is shadow with production writes disabled."
+    },
+    {
+      "id": "legacy_and_failover_independent",
+      "status": "pass",
+      "evidence": "No reviewed operation changes legacy ingestion, DNS, Cloudflare routing, failover, cutover, or production-write state."
+    }
+  ],
+  "unresolved_critical_or_high_findings": [],
+  "rollback": {
+    "review_artifacts": "Revert the review pull request; no runtime state was created by the review.",
+    "workflow_hardening": "Revert only the source commit if necessary. Environment indirection preserves workflow inputs and operation semantics and performs no host or deployment change."
+  }
+}

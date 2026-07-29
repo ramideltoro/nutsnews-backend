@@ -68,6 +68,18 @@ jobs:
         shell: bash
         run: python3 scripts/validate_worker_uplift_runtime_identities.py
 
+      - name: Validate backend GitHub Actions security
+        shell: bash
+        run: python3 scripts/validate_backend_github_actions_security.py
+
+      - name: Validate worker uplift security review
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_security_review.py
+
+      - name: Run worker uplift security review tests
+        shell: bash
+        run: python3 -m unittest tests.test_worker_uplift_security_review
+
       - name: Validate worker uplift shadow data model offline
         shell: bash
         run: python3 scripts/backend_worker_uplift_shadow_model_check.py --offline --enforce

@@ -154,6 +154,14 @@ Email/reporting:
 - `NUTSNEWS_REPORT_EMAIL_FROM`
 - `NUTSNEWS_REPORT_EMAIL_TO`
 
+Worker-uplift Qwen gateway:
+
+- `LOCAL_AI_API_KEY`
+
+The source secret is retained in `production-backend`. Protected apply maps it
+to the approval and translation service-specific runtime credential names; no
+app repository stores the value.
+
 Non-secret defaults are stored as GitHub Environment variables:
 
 - `NUTSNEWS_BACKEND_HOST=65.75.201.18`
@@ -162,6 +170,7 @@ Non-secret defaults are stored as GitHub Environment variables:
 - `NUTSNEWS_BACKEND_RESTIC_PROVIDER=s3`
 - `NUTSNEWS_REPORT_SMTP_PORT=587`
 - `NUTSNEWS_REPORT_SMTP_STARTTLS=true`
+- `LOCAL_AI_URL=https://ai.nutsnews.com`
 
 ## Readiness Workflow
 
@@ -183,6 +192,8 @@ grafana
 supabase
 restic
 reporting_email
+worker_api
+worker_uplift_ai
 backend_apply
 ```
 

@@ -45,6 +45,7 @@ EXPECTED_VARIABLES = {
 }
 
 EXPECTED_SECRETS = {
+    "LOCAL_AI_API_KEY",
     "RABBITMQ_ERLANG_COOKIE",
     "RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD",
     "RABBITMQ_MONITORING_PASSWORD",
@@ -275,8 +276,23 @@ def main() -> int:
         errors.append("Grafana resource management owner must be nutsnews-infra")
 
     ai_policy = identities.get("ai_provider_policy", {})
-    if ai_policy.get("local_ai", {}).get("status") != "blocked_missing_source_value":
-        errors.append("LOCAL_AI_API_KEY must remain blocked until a source value is provided or rotated")
+    local_ai = ai_policy.get("local_ai", {})
+    if local_ai.get("status") != "ready_retained_mapped":
+        errors.append("LOCAL_AI_API_KEY must be recorded as ready_retained_mapped")
+    if local_ai.get("secret") != "LOCAL_AI_API_KEY":
+        errors.append("local AI policy must identify LOCAL_AI_API_KEY as the protected source secret")
+    expected_ai_mappings = {
+        ("approval", "approval-qwen-api-key", "NUTSNEWS_APPROVAL_QWEN_API_KEY"),
+        ("translation", "translation-qwen-api-key", "NUTSNEWS_TRANSLATION_QWEN_API_KEY"),
+    }
+    actual_ai_mappings = {
+        (item.get("service"), item.get("runtime_secret"), item.get("environment_key"))
+        for item in local_ai.get("runtime_mappings", [])
+    }
+    if actual_ai_mappings != expected_ai_mappings:
+        errors.append("local AI policy must map the source secret to both service-specific Qwen credentials")
+    if "not eligible for retirement" not in local_ai.get("retirement_status", ""):
+        errors.append("local AI policy must explicitly retain the active source secret")
     if ai_policy.get("openai_fallback", {}).get("default") != "disabled":
         errors.append("OpenAI fallback must default to disabled")
     if ai_policy.get("openai_fallback", {}).get("new_runtime_secret_generated") is not False:
@@ -285,8 +301,8 @@ def main() -> int:
     readiness_entries = {item.get("name"): item for item in readiness.get("entries", [])}
     if readiness_entries.get("NUTSNEWS_SHADOW_SMOKE_TOKEN", {}).get("readiness") != "ready":
         errors.append("runtime readiness must mark NUTSNEWS_SHADOW_SMOKE_TOKEN ready after #67")
-    if readiness_entries.get("LOCAL_AI_API_KEY", {}).get("readiness") != "blocked_missing_source_value":
-        errors.append("runtime readiness must keep LOCAL_AI_API_KEY blocked")
+    if readiness_entries.get("LOCAL_AI_API_KEY", {}).get("readiness") != "ready":
+        errors.append("runtime readiness must mark LOCAL_AI_API_KEY ready")
 
     validation = identities.get("validation", {})
     if validation.get("local_validator") != "python3 scripts/validate_worker_uplift_runtime_identities.py":

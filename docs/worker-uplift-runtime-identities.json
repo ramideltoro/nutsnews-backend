@@ -4,7 +4,9 @@
   "tracking_repo": "ramideltoro/nutsnews-worker",
   "implementation_repo": "ramideltoro/nutsnews-backend",
   "environment": "production-backend",
-  "captured_at_utc": "2026-07-23T03:05:00Z",
+  "captured_at_utc": "2026-07-29T04:52:12Z",
+  "initial_generation_at_utc": "2026-07-23T03:05:00Z",
+  "reconciliation_note": "The value-free environment-name evidence now includes the existing LOCAL_AI_API_KEY source credential used by protected apply. No value was read, copied, or recorded.",
   "capture_mode": "generated_values_stored_value_free_evidence_committed",
   "value_policy": "No generated secret values, password fragments, token fragments, account IDs, provider IDs, or private credentials are recorded.",
   "official_docs_retrieved": [
@@ -62,6 +64,7 @@
       "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_USERNAME"
     ],
     "secrets": [
+      "LOCAL_AI_API_KEY",
       "RABBITMQ_ERLANG_COOKIE",
       "RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD",
       "RABBITMQ_MONITORING_PASSWORD",
@@ -430,9 +433,22 @@
   "ai_provider_policy": {
     "local_ai": {
       "secret": "LOCAL_AI_API_KEY",
-      "status": "blocked_missing_source_value",
-      "required_before": "article approval service deployment",
-      "action": "retrieve from password manager or rotate local AI gateway key into production-backend"
+      "status": "ready_retained_mapped",
+      "owner_boundary": "ramideltoro/nutsnews-backend production-backend Environment",
+      "runtime_mappings": [
+        {
+          "service": "approval",
+          "runtime_secret": "approval-qwen-api-key",
+          "environment_key": "NUTSNEWS_APPROVAL_QWEN_API_KEY"
+        },
+        {
+          "service": "translation",
+          "runtime_secret": "translation-qwen-api-key",
+          "environment_key": "NUTSNEWS_TRANSLATION_QWEN_API_KEY"
+        }
+      ],
+      "retirement_status": "active source credential; not eligible for retirement until both service mappings use ready replacements",
+      "rotation": "Rotate in production-backend, apply through the protected backend workflow, and verify both shadow services before revoking the prior gateway credential."
     },
     "openai_fallback": {
       "default": "disabled",
@@ -444,7 +460,8 @@
     "rabbitmq_service_identity_rotation": "Create a second username/password with the same route-scoped regex permissions, deploy consumers/producers with dual credentials where supported, drain old connections, then revoke the old user.",
     "rabbitmq_erlang_cookie_rotation": "Requires planned broker maintenance or rolling node procedure; do not rotate through app deployment alone.",
     "postgres_stage_role_rotation": "Create or update only the affected stage role password, deploy that stage, confirm reconnect, then revoke old password if dual credentials are used.",
-    "shadow_validation_rotation": "Replace token in production-backend, update protected workflows, and invalidate old token after the next successful shadow smoke."
+    "shadow_validation_rotation": "Replace token in production-backend, update protected workflows, and invalidate old token after the next successful shadow smoke.",
+    "qwen_gateway_rotation": "Rotate LOCAL_AI_API_KEY in production-backend, use protected Ansible check/apply to rematerialize approval-qwen-api-key and translation-qwen-api-key, verify both shadow services, then revoke the prior gateway credential."
   },
   "validation": {
     "local_validator": "python3 scripts/validate_worker_uplift_runtime_identities.py",

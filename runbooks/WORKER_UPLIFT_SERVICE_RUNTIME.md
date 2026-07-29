@@ -151,6 +151,26 @@ production-backend secrets:
   `NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN`; both must be distinct from
   `NUTSNEWS_BACKEND_API_TOKEN`.
 
+### Qwen credential inventory reconciliation
+
+`LOCAL_AI_API_KEY` is the active protected source credential; it was not
+replaced by new GitHub Environment secret names. Protected apply materializes
+that source under service-specific runtime names:
+
+| Service | Protected runtime secret | Service environment key |
+| --- | --- | --- |
+| approval | `approval-qwen-api-key` | `NUTSNEWS_APPROVAL_QWEN_API_KEY` |
+| translation | `translation-qwen-api-key` | `NUTSNEWS_TRANSLATION_QWEN_API_KEY` |
+
+The names are service-specific at the container boundary, but the current
+deployment intentionally has one backend-owned Qwen gateway source credential.
+Do not retire `LOCAL_AI_API_KEY` while this mapping remains active. A future
+split into independently scoped gateway credentials must first add both
+replacement secrets, update protected apply, pass protected check/apply, and
+verify both services before the shared source is removed. The legacy Cloudflare
+binding is independent and remains retained while the legacy Worker owns
+production ingestion.
+
 ## Fixed Operations
 
 Use `Backend Worker Runtime Operations`.

@@ -62,6 +62,7 @@ def main() -> int:
         "supabase",
         "restic",
         "reporting_email",
+        "worker_uplift_ai",
     }
     for group in inventory.get("secret_groups", []):
         group_id = group.get("id", "")
@@ -120,6 +121,56 @@ def main() -> int:
         errors.append("grafana group must be scoped to backend telemetry production")
     if "ramideltoro/nutsnews-infra" not in grafana_group.get("ownership", ""):
         errors.append("grafana group must document nutsnews-infra resource ownership")
+
+    variable_names = {item.get("name") for item in inventory.get("non_secret_variables", [])}
+    if "LOCAL_AI_URL" not in variable_names:
+        errors.append("backend credential inventory must include LOCAL_AI_URL")
+
+    ai_group = next(
+        (group for group in inventory.get("secret_groups", []) if group.get("id") == "worker_uplift_ai"),
+        {},
+    )
+    ai_secret_names = {
+        secret.get("name")
+        for key in ("secrets", "conditional_secrets")
+        for secret in ai_group.get(key, [])
+    }
+    if ai_secret_names != {"LOCAL_AI_API_KEY"}:
+        errors.append("worker_uplift_ai must contain only the required LOCAL_AI_API_KEY source secret")
+    mapping = ai_group.get("runtime_mapping", {})
+    if mapping.get("status") != "ready_retained_mapped":
+        errors.append("worker_uplift_ai runtime mapping must be ready_retained_mapped")
+    if mapping.get("source_environment_secret") != "LOCAL_AI_API_KEY":
+        errors.append("worker_uplift_ai source secret must be LOCAL_AI_API_KEY")
+    if mapping.get("source_environment_variable") != "LOCAL_AI_URL":
+        errors.append("worker_uplift_ai source variable must be LOCAL_AI_URL")
+    expected_service_credentials = {
+        (
+            "approval",
+            "approval-qwen-api-key",
+            "approval-qwen-base-url",
+            "NUTSNEWS_APPROVAL_QWEN_API_KEY",
+        ),
+        (
+            "translation",
+            "translation-qwen-api-key",
+            "translation-qwen-base-url",
+            "NUTSNEWS_TRANSLATION_QWEN_API_KEY",
+        ),
+    }
+    actual_service_credentials = {
+        (
+            item.get("service"),
+            item.get("runtime_secret"),
+            item.get("runtime_base_url_secret"),
+            item.get("environment_key"),
+        )
+        for item in mapping.get("service_credentials", [])
+    }
+    if actual_service_credentials != expected_service_credentials:
+        errors.append("worker_uplift_ai must map the source credential to approval and translation Qwen runtime credentials")
+    if "Do not retire" not in mapping.get("retirement_decision", ""):
+        errors.append("worker_uplift_ai must explicitly retain LOCAL_AI_API_KEY while the runtime mappings consume it")
 
     actions = inventory.get("manual_provider_actions", [])
     if len(actions) < 5:

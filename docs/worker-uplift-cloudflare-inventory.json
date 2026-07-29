@@ -266,10 +266,11 @@
         "nutsnews-worker-0 through nutsnews-worker-24 local Qwen calls"
       ],
       "classification": "required_uplift_runtime_secret",
-      "destination_or_retention": "Recreate or rotate into the backend-owned protected runtime boundary when worker containers need Qwen access. Do not store in app repositories.",
+      "destination_or_retention": "Retain the independent legacy Cloudflare binding while legacy ingestion owns production. The ready backend equivalent is the production-backend LOCAL_AI_API_KEY source credential, which protected apply maps to approval-qwen-api-key and translation-qwen-api-key. Do not store values in app repositories.",
       "canonical_owner": "ramideltoro/nutsnews-backend",
       "protected_environment": "production-backend",
-      "rotation_source_or_procedure": "Local AI service credential source on backend/home AI host or password manager. Cloudflare secret values cannot be exported after creation."
+      "rotation_source_or_procedure": "Rotate the backend source credential through production-backend and protected check/apply, then verify approval and translation. The legacy Cloudflare value remains independently managed until legacy Worker retirement; Cloudflare secret values cannot be exported after creation.",
+      "backend_runtime_status": "ready_retained_mapped"
     },
     {
       "name": "UPSTASH_REDIS_REST_URL",

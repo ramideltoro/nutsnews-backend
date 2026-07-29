@@ -91,6 +91,11 @@ def main() -> int:
         errors.append("NUTSNEWS_BACKEND_API_TOKEN must be in the worker_api group")
     if worker_token.get("required") is not True:
         errors.append("NUTSNEWS_BACKEND_API_TOKEN must be required")
+    local_ai_secret = backend_secrets.get("LOCAL_AI_API_KEY", {})
+    if local_ai_secret.get("group") != "worker_uplift_ai":
+        errors.append("LOCAL_AI_API_KEY must be in the worker_uplift_ai backend credential group")
+    if local_ai_secret.get("required") is not True:
+        errors.append("LOCAL_AI_API_KEY must be required while approval and translation consume it")
 
     evidence = readiness.get("github_environment_evidence", {})
     variables_present = set(evidence.get("variables_present", []))
@@ -98,13 +103,18 @@ def main() -> int:
     for name in ("NUTSNEWS_BACKEND_API_URL", "NUTSNEWS_BACKEND_WORKER_API_ENABLED"):
         if name not in variables_present:
             errors.append(f"production-backend variable evidence missing: {name}")
-    for name in ("NUTSNEWS_BACKEND_API_TOKEN", "NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD", "NUTSNEWS_SHADOW_SMOKE_TOKEN"):
+    for name in (
+        "LOCAL_AI_API_KEY",
+        "NUTSNEWS_BACKEND_API_TOKEN",
+        "NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD",
+        "NUTSNEWS_SHADOW_SMOKE_TOKEN",
+    ):
         if name not in secrets_present:
             errors.append(f"production-backend secret evidence missing: {name}")
-    if "LOCAL_AI_API_KEY" in secrets_present:
-        errors.append("LOCAL_AI_API_KEY must not be marked present until a source value is rotated/provided")
 
     entries = {item.get("name"): item for item in readiness.get("entries", [])}
+    if len(entries) != len(readiness.get("entries", [])):
+        errors.append("runtime readiness entry names must be unique")
     for name in readiness.get("readiness_summary", {}).get("ready_now", []):
         item = entries.get(name, {})
         if item.get("readiness") != "ready":
@@ -113,10 +123,26 @@ def main() -> int:
             errors.append(f"ready_now entry must live in production-backend: {name}")
 
     local_ai = entries.get("LOCAL_AI_API_KEY", {})
-    if local_ai.get("readiness") != "blocked_missing_source_value":
-        errors.append("LOCAL_AI_API_KEY must remain a blocked source-value item until provisioned")
-    if "approval service" not in " ".join(local_ai.get("consumers", [])):
-        errors.append("LOCAL_AI_API_KEY must identify the future approval service consumer")
+    if local_ai.get("readiness") != "ready":
+        errors.append("LOCAL_AI_API_KEY must be ready after value-free production-backend presence verification")
+    if local_ai.get("retirement_status") != "retained_active_source_not_replaced":
+        errors.append("LOCAL_AI_API_KEY must be explicitly retained because protected apply still consumes it")
+    expected_ai_mappings = {
+        ("approval", "approval-qwen-api-key", "NUTSNEWS_APPROVAL_QWEN_API_KEY"),
+        ("translation", "translation-qwen-api-key", "NUTSNEWS_TRANSLATION_QWEN_API_KEY"),
+    }
+    actual_ai_mappings = {
+        (
+            item.get("service"),
+            item.get("protected_apply_secret"),
+            item.get("environment_key"),
+        )
+        for item in local_ai.get("runtime_mappings", [])
+    }
+    if actual_ai_mappings != expected_ai_mappings:
+        errors.append("LOCAL_AI_API_KEY must map to both service-specific Qwen runtime credentials")
+    if readiness.get("readiness_summary", {}).get("required_before_service_bootstrap"):
+        errors.append("required_before_service_bootstrap must be empty after all required credentials are reconciled")
 
     shadow = entries.get("NUTSNEWS_SHADOW_SMOKE_TOKEN", {})
     if shadow.get("readiness") != "ready":
@@ -130,9 +156,31 @@ def main() -> int:
         if item.get("readiness") != "retained_not_injected":
             errors.append(f"not_injected_by_design entry must be retained_not_injected: {name}")
 
+    summary = readiness.get("readiness_summary", {})
+    summary_names = [
+        name
+        for key in (
+            "ready_now",
+            "required_before_service_bootstrap",
+            "required_before_shadow_validation",
+            "not_injected_by_design",
+        )
+        for name in summary.get(key, [])
+    ]
+    if len(summary_names) != len(set(summary_names)):
+        errors.append("runtime readiness summary entries must appear in exactly one disposition")
+    if set(summary_names) != set(entries):
+        errors.append("every runtime readiness entry must have a summary disposition")
+    allowed_readiness = {"ready", "retained_not_injected", "retired"}
+    for name, item in entries.items():
+        if item.get("readiness") not in allowed_readiness:
+            errors.append(f"runtime readiness entry is not mapped, ready, retained, or retired: {name}")
+
     validation = readiness.get("validation", {})
     if validation.get("local_validator") != "python3 scripts/validate_worker_uplift_runtime_readiness.py":
         errors.append("validation.local_validator must name this script")
+    if validation.get("blocked_items_are_intentional") != []:
+        errors.append("runtime readiness must not retain blocked inventory entries")
 
     if errors:
         for error in errors:

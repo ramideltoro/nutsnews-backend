@@ -4,7 +4,7 @@
   "tracking_repo": "ramideltoro/nutsnews-worker",
   "implementation_repo": "ramideltoro/nutsnews-backend",
   "environment": "production-backend",
-  "captured_at_utc": "2026-07-23T02:40:43Z",
+  "captured_at_utc": "2026-07-29T04:52:12Z",
   "capture_mode": "value_free_name_presence",
   "value_policy": "No secret values, token fragments, account IDs, Cloudflare store IDs, Cloudflare secret IDs, namespace IDs, passwords, or generated credentials are recorded.",
   "depends_on": [
@@ -27,6 +27,7 @@
       "NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED"
     ],
     "secrets_present": [
+      "LOCAL_AI_API_KEY",
       "NUTSNEWS_BACKEND_API_TOKEN",
       "NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD",
       "NUTSNEWS_SHADOW_SMOKE_TOKEN",
@@ -46,11 +47,10 @@
       "NUTSNEWS_BACKEND_API_URL",
       "NUTSNEWS_BACKEND_API_TOKEN",
       "NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD",
+      "LOCAL_AI_API_KEY",
       "NUTSNEWS_SHADOW_SMOKE_TOKEN"
     ],
-    "required_before_service_bootstrap": [
-      "LOCAL_AI_API_KEY"
-    ],
+    "required_before_service_bootstrap": [],
     "required_before_shadow_validation": [],
     "not_injected_by_design": [
       "SUPABASE_URL",
@@ -109,14 +109,28 @@
     {
       "name": "LOCAL_AI_API_KEY",
       "source_inventory_name": "LOCAL_AI_API_KEY",
-      "classification": "required_uplift_runtime_secret",
-      "readiness": "blocked_missing_source_value",
+      "classification": "retained_backend_source_mapped_to_service_runtime_credentials",
+      "readiness": "ready",
       "owner": "ramideltoro/nutsnews-backend",
-      "location": "not present in production-backend at capture",
+      "location": "production-backend secret",
       "consumers": [
-        "future article approval service Qwen/local AI calls"
+        "article approval service Qwen calls through NUTSNEWS_APPROVAL_QWEN_API_KEY",
+        "article translation service Qwen calls through NUTSNEWS_TRANSLATION_QWEN_API_KEY"
       ],
-      "rotation_or_update_procedure": "Retrieve the original local AI gateway key from the password manager or rotate the local AI gateway key, then store the new value as a production-backend Environment secret before deploying the approval service.",
+      "runtime_mappings": [
+        {
+          "service": "approval",
+          "protected_apply_secret": "approval-qwen-api-key",
+          "environment_key": "NUTSNEWS_APPROVAL_QWEN_API_KEY"
+        },
+        {
+          "service": "translation",
+          "protected_apply_secret": "translation-qwen-api-key",
+          "environment_key": "NUTSNEWS_TRANSLATION_QWEN_API_KEY"
+        }
+      ],
+      "retirement_status": "retained_active_source_not_replaced",
+      "rotation_or_update_procedure": "Rotate the Qwen gateway credential in the production-backend Environment, run protected Ansible check/apply, then verify and restart only approval and translation through protected runtime operations. Do not remove the source secret until a reviewed deployment maps both services to ready replacement credentials.",
       "legacy_revocation_dependency": "legacy Cloudflare LOCAL_AI_API_KEY binding remains until Cloudflare Worker approval path is retired"
     },
     {
@@ -249,9 +263,10 @@
     "local_validator": "python3 scripts/validate_worker_uplift_runtime_readiness.py",
     "backend_inventory_validator": "python3 scripts/validate_backend_credential_inventory.py",
     "value_free_live_check": "gh secret list/gh variable list against production-backend, names only",
-    "blocked_items_are_intentional": [
-      "LOCAL_AI_API_KEY must be provided or rotated before article approval service bootstrap",
-      "NUTSNEWS_SHADOW_SMOKE_TOKEN is generated and ready for future protected shadow smoke workflows"
+    "blocked_items_are_intentional": [],
+    "reconciliation_decisions": [
+      "LOCAL_AI_API_KEY is present, retained, and mapped to approval and translation service-specific Qwen runtime credentials.",
+      "NUTSNEWS_SHADOW_SMOKE_TOKEN is generated and ready for protected shadow smoke workflows."
     ]
   }
 }

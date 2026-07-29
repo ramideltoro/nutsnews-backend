@@ -180,9 +180,15 @@ Run the workflow manually:
 Backend Credential Readiness
 ```
 
-It uses the `production-backend` Environment, so GitHub asks for approval before secrets are exposed to the job.
+This routine workflow does not reference the `production-backend` Environment
+and does not request reviewer approval. It uses the repository-level
+`NUTSNEWS_MAINTENANCE_GITHUB_TOKEN` only to read GitHub Environment metadata:
+secret names plus non-secret variables. Production secret values are never
+exposed to the job.
 
-The workflow validates names, required presence, and simple shapes without printing values.
+The workflow validates inventory consistency and required secret-name presence.
+Secret value and shape checks remain fail-closed in the protected workflows that
+consume those credentials.
 
 To check one group, pass:
 
@@ -196,6 +202,17 @@ worker_api
 worker_uplift_ai
 backend_apply
 ```
+
+After a credential rotation, run the separate manual workflow:
+
+```text
+Backend Protected Value Audit
+```
+
+That audit references `production-backend`, requires reviewer approval, and
+checks injected values without printing them. Production apply, recovery,
+cutover, restart, DNS, and failover workflows continue to use the same protected
+Environment.
 
 ## Manual Provider Actions
 

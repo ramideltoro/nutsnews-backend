@@ -3,7 +3,7 @@
   "tracking_issue": 70,
   "tracking_repo": "ramideltoro/nutsnews-worker",
   "implementation_repo": "ramideltoro/nutsnews-backend",
-  "updated_at_utc": "2026-07-23",
+  "updated_at_utc": "2026-07-29",
   "guardrail": "This map assigns source-controlled owners only. It does not mutate servers, legacy Cloudflare Workers, DNS failover resources, or Grafana Cloud resources.",
   "audit_evidence": {
     "legacy_worker_repo": "ramideltoro/nutsnews-worker",
@@ -648,6 +648,7 @@
         "owner_files": [
           "docs/backend-credential-inventory.json",
           ".github/workflows/backend-credential-readiness.yml",
+          ".github/workflows/backend-protected-value-audit.yml",
           "runbooks/CREDENTIAL_BOOTSTRAP.md"
         ],
         "workflow": "Backend Credential Readiness",
@@ -655,10 +656,12 @@
       },
       "classification": "retained_current_owner",
       "copyable_behavior": [],
-      "current_api_reuse": [],
+      "current_api_reuse": [
+        "GitHub Environments secret and variable metadata REST APIs"
+      ],
       "mutation_boundary": "read_only",
-      "approval_required": "production-backend approval to read Environment secrets for readiness checks",
-      "rollback": "Rotate or remove over-scoped credentials in the GitHub Environment and rerun readiness; never commit secret values.",
+      "approval_required": "none for metadata-only routine readiness; production-backend approval remains required for the separate protected value audit and every protected consumer",
+      "rollback": "Rotate or remove over-scoped credentials in the GitHub Environment, rerun metadata readiness, and use the protected value audit after rotations; never commit secret values.",
       "runtime_coupling_to_legacy_worker": false,
       "new_deployment_requires_worker_checkout": false
     },

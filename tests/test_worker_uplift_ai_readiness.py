@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 
 
@@ -37,6 +38,35 @@ def run_readiness(*, source_secret: str | None) -> subprocess.CompletedProcess[s
     )
 
 
+def run_metadata_readiness(*, secret_names: list[str]) -> subprocess.CompletedProcess[str]:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        metadata_dir = Path(temp_dir)
+        secrets_path = metadata_dir / "secrets.json"
+        variables_path = metadata_dir / "variables.json"
+        secrets_path.write_text(
+            json.dumps([{"secrets": [{"name": name} for name in secret_names]}]),
+            encoding="utf-8",
+        )
+        variables_path.write_text(json.dumps([{"variables": []}]), encoding="utf-8")
+        return subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--group",
+                "worker_uplift_ai",
+                "--json",
+                "--environment-secrets-json",
+                str(secrets_path),
+                "--environment-variables-json",
+                str(variables_path),
+            ],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+
 class BackendCredentialReadinessTests(unittest.TestCase):
     def test_worker_uplift_ai_group_is_ready_without_printing_value(self) -> None:
         result = run_readiness(source_secret=FIXTURE_SECRET)
@@ -49,6 +79,24 @@ class BackendCredentialReadinessTests(unittest.TestCase):
 
     def test_worker_uplift_ai_group_fails_closed_when_source_is_absent(self) -> None:
         result = run_readiness(source_secret=None)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["missing_required"], ["LOCAL_AI_API_KEY"])
+
+    def test_metadata_mode_checks_presence_without_requesting_value(self) -> None:
+        result = run_metadata_readiness(secret_names=["LOCAL_AI_API_KEY"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["validation_mode"], "github_environment_metadata")
+        self.assertEqual(
+            payload["shape_checks_deferred_to_protected_consumers"],
+            ["LOCAL_AI_API_KEY"],
+        )
+
+    def test_metadata_mode_fails_closed_when_name_is_absent(self) -> None:
+        result = run_metadata_readiness(secret_names=[])
         self.assertEqual(result.returncode, 1, result.stderr)
         payload = json.loads(result.stdout)
         self.assertFalse(payload["ok"])

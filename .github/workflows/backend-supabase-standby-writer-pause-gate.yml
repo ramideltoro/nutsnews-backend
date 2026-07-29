@@ -433,12 +433,15 @@ jobs:
       - name: Summarize safe metadata
         if: always()
         shell: bash
+        env:
+          REQUESTED_ACTION: ${{ inputs.action }}
+          REQUESTED_FAILOVER_ATTEMPT_ID: ${{ inputs.failover_attempt_id }}
         run: |
           {
             echo "## Backend Supabase standby writer pause gate"
             echo
-            echo "- Action: \`${{ inputs.action }}\`"
-            echo "- Attempt: \`${{ inputs.failover_attempt_id }}\`"
+            echo "- Action: \`$REQUESTED_ACTION\`"
+            echo "- Attempt: \`$REQUESTED_FAILOVER_ATTEMPT_ID\`"
             echo "- Backend PostgreSQL remains primary until a later protected provider switch."
             echo "- This workflow pauses writer classes only for the supplied attempt; it does not switch providers."
             echo "- Reports contain writer class status plus aggregate/hash write-position metadata only."

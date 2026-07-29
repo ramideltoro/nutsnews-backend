@@ -151,11 +151,13 @@ jobs:
       - name: Summarize safe metadata
         if: always()
         shell: bash
+        env:
+          REQUESTED_OBSERVE_SECONDS: ${{ inputs.observe_seconds }}
         run: |
           {
             echo "## Supabase write watermarks"
             echo
-            echo "- Observation seconds: \`${{ inputs.observe_seconds }}\`"
+            echo "- Observation seconds: \`$REQUESTED_OBSERVE_SECONDS\`"
             echo "- Report contains aggregate watermarks only."
             echo "- Database URLs, passwords, tokens, and row data are not printed."
           } >> "$GITHUB_STEP_SUMMARY"

@@ -51,11 +51,16 @@ jobs:
 
       - name: Render non-mutating switch plan
         shell: bash
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
+          REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
+          REQUESTED_CONFIRMATION: ${{ inputs.confirmation }}
         run: |
+          set -euo pipefail
           python3 scripts/backend_database_provider_switch_plan.py \
-            --mode "${{ inputs.mode }}" \
-            --environment "${{ inputs.environment }}" \
-            --confirmation "${{ inputs.confirmation }}" \
+            --mode "$REQUESTED_MODE" \
+            --environment "$REQUESTED_ENVIRONMENT" \
+            --confirmation "$REQUESTED_CONFIRMATION" \
             --output "$RUNNER_TEMP/backend-database-provider-switch-plan.json"
 
       - name: Upload provider switch plan

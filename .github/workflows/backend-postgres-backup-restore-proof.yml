@@ -202,13 +202,16 @@ jobs:
       - name: Summarize safe metadata
         if: always()
         shell: bash
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
+          REQUESTED_SOURCE_DATABASE: ${{ inputs.source_database }}
         run: |
           set -euo pipefail
           {
             echo "## Backend PostgreSQL backup restore proof"
             echo
-            echo "- Mode: \`${{ inputs.mode }}\`"
-            echo "- Source database: \`${{ inputs.source_database }}\`"
+            echo "- Mode: \`$REQUESTED_MODE\`"
+            echo "- Source database: \`$REQUESTED_SOURCE_DATABASE\`"
             echo "- Report artifact contains safe metadata only."
             echo "- Database URLs, passwords, tokens, dumps, and row data are not printed."
           } >> "$GITHUB_STEP_SUMMARY"

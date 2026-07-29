@@ -148,12 +148,14 @@ jobs:
       - name: Summarize safe metadata
         if: always()
         shell: bash
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
           {
             echo "## Supabase logical export"
             echo
-            echo "- Mode: \`${{ inputs.mode }}\`"
+            echo "- Mode: \`$REQUESTED_MODE\`"
             echo "- Only safe metadata is uploaded."
             echo "- Dump files, database URLs, tokens, passwords, service-role keys, and row data are not uploaded."
           } >> "$GITHUB_STEP_SUMMARY"

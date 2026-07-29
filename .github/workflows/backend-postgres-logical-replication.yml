@@ -300,13 +300,16 @@ jobs:
       - name: Summarize safe metadata
         if: always()
         shell: bash
+        env:
+          REQUESTED_ENVIRONMENT_NAME: ${{ inputs.environment_name }}
+          REQUESTED_OPERATION: ${{ inputs.operation }}
         run: |
           set -euo pipefail
           {
             echo "## Backend PostgreSQL logical replication"
             echo
-            echo "- Environment: \`${{ inputs.environment_name }}\`"
-            echo "- Operation: \`${{ inputs.operation }}\`"
+            echo "- Environment: \`$REQUESTED_ENVIRONMENT_NAME\`"
+            echo "- Operation: \`$REQUESTED_OPERATION\`"
             echo "- Artifacts contain safe metadata only."
             echo "- Database URLs, passwords, tokens, row data, and WAL contents are not printed."
             echo "- Teardown scope is obsolete Supabase-to-backend migration logical replication only."

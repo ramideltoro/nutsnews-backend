@@ -89,6 +89,7 @@ jobs:
         env:
           NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
           NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
         run: |
           set -euo pipefail
           install -m 0700 -d "$HOME/.ssh"
@@ -97,7 +98,7 @@ jobs:
           printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 0600 "$HOME/.ssh/known_hosts"
           ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
-          ssh-keygen -F "${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}" -f "$HOME/.ssh/known_hosts" > /dev/null
+          ssh-keygen -F "$NUTSNEWS_BACKEND_HOST" -f "$HOME/.ssh/known_hosts" > /dev/null
 
       - name: Inspect current primary shadow restore metadata
         if: inputs.mode == 'status'
@@ -229,12 +230,14 @@ jobs:
       - name: Summarize safe metadata
         if: always()
         shell: bash
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
           {
             echo "## Backend PostgreSQL primary shadow restore"
             echo
-            echo "- Mode: \`${{ inputs.mode }}\`"
+            echo "- Mode: \`$REQUESTED_MODE\`"
             echo "- Target: \`nutsnews_primary_shadow\`"
             echo "- Report artifact contains safe metadata only."
             echo "- Database URLs, passwords, tokens, dumps, and row data are not printed."

@@ -152,12 +152,14 @@ jobs:
       - name: Summarize safe metadata
         if: always()
         shell: bash
+        env:
+          REQUESTED_ENVIRONMENT_NAME: ${{ inputs.environment_name }}
         run: |
           set -euo pipefail
           {
             echo "## Backend PostgreSQL replication propagation"
             echo
-            echo "- Environment: \`${{ inputs.environment_name }}\`"
+            echo "- Environment: \`$REQUESTED_ENVIRONMENT_NAME\`"
             echo "- Proof mutates staging only using a short-lived probe row."
             echo "- Artifact contains safe metadata only."
             echo "- Database URLs, passwords, tokens, service-role keys, and row data are not printed."

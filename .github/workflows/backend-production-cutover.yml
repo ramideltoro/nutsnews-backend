@@ -52,11 +52,16 @@ jobs:
 
       - name: Render production cutover plan
         shell: bash
+        env:
+          REQUESTED_OPERATION: ${{ inputs.operation }}
+          REQUESTED_CONFIRMATION: ${{ inputs.confirmation }}
+          REQUESTED_STAGING_EVIDENCE_URL: ${{ inputs.staging_evidence_url }}
         run: |
+          set -euo pipefail
           python3 scripts/backend_production_cutover_plan.py \
-            --operation "${{ inputs.operation }}" \
-            --confirmation "${{ inputs.confirmation }}" \
-            --staging-evidence-url "${{ inputs.staging_evidence_url }}" \
+            --operation "$REQUESTED_OPERATION" \
+            --confirmation "$REQUESTED_CONFIRMATION" \
+            --staging-evidence-url "$REQUESTED_STAGING_EVIDENCE_URL" \
             --output "$RUNNER_TEMP/backend-production-cutover-plan.json"
 
       - name: Upload cutover plan

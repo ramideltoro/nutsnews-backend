@@ -303,12 +303,14 @@ jobs:
       - name: Summarize safe metadata
         if: always()
         shell: bash
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
           {
             echo "## Backend PostgreSQL parity validation"
             echo
-            echo "- Mode: \`${{ inputs.mode }}\`"
+            echo "- Mode: \`$REQUESTED_MODE\`"
             echo "- Report artifact contains safe metadata only."
             echo "- Database URLs, passwords, tokens, service-role keys, and row data are not printed."
           } >> "$GITHUB_STEP_SUMMARY"

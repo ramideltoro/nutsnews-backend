@@ -207,6 +207,8 @@
     group: root
     mode: "0755"
   register: backend_rabbitmq_recovery_file
+  tags:
+    - worker_uplift_rabbitmq_recovery_helper
 
 - name: Render RabbitMQ worker topology definition
   ansible.builtin.template:

@@ -20,6 +20,8 @@ RECOVERY_WORKFLOW_HELPER = ROOT / "scripts" / "backend_recovery_workflow.py"
 BACKUP_MATRIX = ROOT / "docs" / "backend-backup-service-matrix.json"
 BACKEND_CHECKS = ROOT / ".github" / "workflows" / "backend-checks.yml"
 RECOVERY_WORKFLOW = ROOT / ".github" / "workflows" / "backend-rabbitmq-recovery.yml"
+PROTECTED_APPLY = ROOT / ".github" / "workflows" / "protected-backend-ansible-apply.yml"
+BOOTSTRAP = ROOT / "ansible" / "playbooks" / "bootstrap.yml"
 PROVISIONING_RUNBOOK = ROOT / "runbooks" / "WORKER_UPLIFT_RABBITMQ_PROVISIONING.md"
 RECOVERY_RUNBOOK = ROOT / "runbooks" / "WORKER_UPLIFT_RABBITMQ_RECOVERY.md"
 BACKUP_RUNBOOK = ROOT / "runbooks" / "BACKUP_RESTORE_BASELINE.md"
@@ -44,6 +46,8 @@ def main() -> int:
     backup_matrix = read(BACKUP_MATRIX)
     backend_checks = read(BACKEND_CHECKS)
     workflow = read(RECOVERY_WORKFLOW)
+    protected_apply = read(PROTECTED_APPLY)
+    bootstrap = read(BOOTSTRAP)
     provisioning_runbook = read(PROVISIONING_RUNBOOK)
     recovery_runbook = read(RECOVERY_RUNBOOK)
     backup_runbook = read(BACKUP_RUNBOOK)
@@ -185,6 +189,36 @@ def main() -> int:
     for forbidden in ("remote_command", "shell_command", "script_body", "ansible_tags", "definitions.raw.json", "definitions.sanitized.json"):
         if forbidden in workflow:
             errors.append(f"RabbitMQ recovery workflow contains forbidden free-form input or unsafe artifact: {forbidden}")
+
+    for label, text, required_items in (
+        (
+            "protected backend apply workflow",
+            protected_apply,
+            (
+                "deployment_scope:",
+                "- full-baseline",
+                "- rabbitmq-recovery-helper",
+                "args+=(--tags worker_uplift_rabbitmq_recovery_helper)",
+                "inputs.deployment_scope == 'full-baseline'",
+            ),
+        ),
+        (
+            "backend bootstrap playbook",
+            bootstrap,
+            ("worker_uplift_rabbitmq_recovery_helper",),
+        ),
+        (
+            "RabbitMQ role tasks",
+            tasks,
+            (
+                "Install RabbitMQ recovery helper",
+                "worker_uplift_rabbitmq_recovery_helper",
+            ),
+        ),
+    ):
+        for required in required_items:
+            if required not in text:
+                errors.append(f"{label} missing fixed recovery-helper deployment boundary: {required}")
 
     if "python3 scripts/validate_worker_uplift_rabbitmq_recovery.py" not in backend_checks:
         errors.append("Backend Checks must run RabbitMQ recovery validator")

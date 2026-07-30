@@ -35,6 +35,8 @@
       ansible.builtin.include_role:
         name: backend_rabbitmq
       when: backend_rabbitmq_enabled | default(false) | bool
+      tags:
+        - worker_uplift_rabbitmq_recovery_helper
 
     - name: Apply backend worker-uplift runtime framework
       ansible.builtin.include_role:

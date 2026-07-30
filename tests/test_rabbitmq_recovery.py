@@ -12,6 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 RECOVERY_PATH = ROOT / "ansible" / "roles" / "backend_rabbitmq" / "files" / "nutsnews_rabbitmq_recovery.py"
 RECOVERY_WORKFLOW = ROOT / ".github" / "workflows" / "backend-rabbitmq-recovery.yml"
 BACKEND_CHECKS = ROOT / ".github" / "workflows" / "backend-checks.yml"
+PROTECTED_APPLY = ROOT / ".github" / "workflows" / "protected-backend-ansible-apply.yml"
+BOOTSTRAP = ROOT / "ansible" / "playbooks" / "bootstrap.yml"
+RABBITMQ_TASKS = ROOT / "ansible" / "roles" / "backend_rabbitmq" / "tasks" / "main.yml"
 SPEC = importlib.util.spec_from_file_location("nutsnews_rabbitmq_recovery", RECOVERY_PATH)
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError(f"could not load recovery module from {RECOVERY_PATH}")
@@ -230,6 +233,21 @@ class RabbitMQRecoveryTests(unittest.TestCase):
     def test_backend_checks_runs_recovery_validator(self):
         checks = BACKEND_CHECKS.read_text(encoding="utf-8")
         self.assertIn("python3 scripts/validate_worker_uplift_rabbitmq_recovery.py", checks)
+
+    def test_recovery_helper_has_fixed_protected_deployment_scope(self):
+        workflow = PROTECTED_APPLY.read_text(encoding="utf-8")
+        bootstrap = BOOTSTRAP.read_text(encoding="utf-8")
+        tasks = RABBITMQ_TASKS.read_text(encoding="utf-8")
+        self.assertIn("deployment_scope:", workflow)
+        self.assertIn("- rabbitmq-recovery-helper", workflow)
+        self.assertIn("args+=(--tags worker_uplift_rabbitmq_recovery_helper)", workflow)
+        self.assertIn(
+            "if: inputs.run_mode == 'apply' && inputs.deployment_scope == 'full-baseline'",
+            workflow,
+        )
+        self.assertIn("worker_uplift_rabbitmq_recovery_helper", bootstrap)
+        helper_block = tasks.split("- name: Install RabbitMQ recovery helper", 1)[1].split("\n- name:", 1)[0]
+        self.assertIn("worker_uplift_rabbitmq_recovery_helper", helper_block)
 
 
 if __name__ == "__main__":

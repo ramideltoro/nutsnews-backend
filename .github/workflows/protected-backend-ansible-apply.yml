@@ -854,6 +854,7 @@ jobs:
         working-directory: ansible
         env:
           RUN_MODE: ${{ inputs.run_mode }}
+          DEPLOYMENT_SCOPE: ${{ inputs.deployment_scope }}
         run: |
           set -euo pipefail
 

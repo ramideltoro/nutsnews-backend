@@ -219,6 +219,12 @@ def main() -> int:
         for required in required_items:
             if required not in text:
                 errors.append(f"{label} missing fixed recovery-helper deployment boundary: {required}")
+    ansible_step = protected_apply.split("- name: Run backend Ansible baseline", 1)[-1].split(
+        "- name: Run deployment safety postcheck",
+        1,
+    )[0]
+    if "DEPLOYMENT_SCOPE: ${{ inputs.deployment_scope }}" not in ansible_step:
+        errors.append("protected backend Ansible step does not receive the fixed deployment scope")
 
     if "python3 scripts/validate_worker_uplift_rabbitmq_recovery.py" not in backend_checks:
         errors.append("Backend Checks must run RabbitMQ recovery validator")

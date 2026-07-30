@@ -10,11 +10,15 @@ class WorkerUpliftProductionReadinessTests(unittest.TestCase):
     def setUp(self):
         self.decision = readiness.load_json(readiness.DEFAULT_DECISION_PATH)
         self.binding_proof = readiness.load_json(readiness.DEFAULT_BINDING_PATH)
+        self.runtime_status_proof = readiness.load_json(
+            readiness.DEFAULT_RUNTIME_STATUS_PATH
+        )
 
-    def validate(self, decision=None, binding_proof=None):
+    def validate(self, decision=None, binding_proof=None, runtime_status_proof=None):
         return readiness.validate_decision(
             decision or self.decision,
             binding_proof or self.binding_proof,
+            runtime_status_proof or self.runtime_status_proof,
         )
 
     def test_committed_no_go_passes(self):
@@ -126,15 +130,17 @@ class WorkerUpliftProductionReadinessTests(unittest.TestCase):
 
     def test_completed_protected_status_requires_immutable_artifact(self):
         decision = copy.deepcopy(self.decision)
-        decision["runtime_and_recovery_evidence"]["fresh_status_dispatch"][
-            "status"
-        ] = "pass"
+        fresh_status = decision["runtime_and_recovery_evidence"][
+            "fresh_status_dispatch"
+        ]
+        fresh_status.pop("artifact_id")
+        fresh_status.pop("artifact_digest")
 
         errors = self.validate(decision=decision)
 
-        self.assertTrue(any("must record an artifact id" in error for error in errors))
+        self.assertTrue(any("must record artifact 8770464087" in error for error in errors))
         self.assertTrue(
-            any("must record an artifact digest" in error for error in errors)
+            any("immutable artifact digest" in error for error in errors)
         )
 
     def test_source_hash_drift_is_rejected(self):
@@ -144,6 +150,60 @@ class WorkerUpliftProductionReadinessTests(unittest.TestCase):
         errors = self.validate(decision=decision)
 
         self.assertTrue(any("source-control hash is stale" in error for error in errors))
+
+    def test_approval_free_status_cannot_enter_protected_path(self):
+        decision = copy.deepcopy(self.decision)
+        approval_free = decision["runtime_and_recovery_evidence"][
+            "approval_free_status_dispatch"
+        ]
+        approval_free["pending_deployment_count_observed"] = 1
+        approval_free["protected_job_status"] = "success"
+
+        errors = self.validate(decision=decision)
+
+        self.assertTrue(any("zero pending deployments" in error for error in errors))
+        self.assertTrue(any("must skip the protected job" in error for error in errors))
+
+    def test_scheduler_timestamp_defect_cannot_be_normalized(self):
+        proof = copy.deepcopy(self.runtime_status_proof)
+        proof["scheduler_readiness_discrepancy"]["readiness_checked_at_utc"] = (
+            proof["protected_status"]["generated_at_utc"]
+        )
+        proof["scheduler_readiness_discrepancy"]["silently_normalized"] = True
+
+        errors = self.validate(runtime_status_proof=proof)
+
+        self.assertTrue(any("preserve the observed checkedAt" in error for error in errors))
+        self.assertTrue(any("must not be silently normalized" in error for error in errors))
+
+    def test_scheduler_defect_must_link_independent_blocker(self):
+        decision = copy.deepcopy(self.decision)
+        decision["runtime_and_recovery_evidence"]["scheduler_readiness"][
+            "blocker_issue"
+        ] = "ramideltoro/nutsnews-worker#125"
+
+        errors = self.validate(decision=decision)
+
+        self.assertTrue(any("must link blocker #168" in error for error in errors))
+
+    def test_runtime_tracking_issue_85_must_remain_historical_provenance(self):
+        proof = copy.deepcopy(self.runtime_status_proof)
+        tracker = proof["report_tracking_issue_discrepancy"]
+        tracker["reported_number"] = 125
+        tracker["new_blocker_required"] = True
+
+        errors = self.validate(runtime_status_proof=proof)
+
+        self.assertTrue(any("must preserve 85" in error for error in errors))
+        self.assertTrue(any("must not fabricate a blocker" in error for error in errors))
+
+    def test_runtime_evidence_value_bearing_field_is_rejected(self):
+        proof = copy.deepcopy(self.runtime_status_proof)
+        proof["protected_status"]["value"] = "not-a-real-secret"
+
+        errors = self.validate(runtime_status_proof=proof)
+
+        self.assertTrue(any("forbidden value-bearing keys" in error for error in errors))
 
 
 if __name__ == "__main__":

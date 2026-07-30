@@ -34,7 +34,8 @@
   },
   "source_control": {
     "repository": "ramideltoro/nutsnews-infra",
-    "commit": "ee61807a757fe087dbcecd60d5e0b7fe07f4115a",
+    "commit": "48748cd7fea036d14e281fe84fcde5a52d41166c",
+    "source_paths_unchanged_from_commit": "ee61807a757fe087dbcecd60d5e0b7fe07f4115a",
     "wrangler_path": "cloudflare/dns-failover/wrangler.toml",
     "wrangler_sha256": "7c68ec7fc08d0a10ce533adffa406fdca709e55af562f053f13f35a4d02de890",
     "controller_path": "cloudflare/dns-failover/src/index.mjs",

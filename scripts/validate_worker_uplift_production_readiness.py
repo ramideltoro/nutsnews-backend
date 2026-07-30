@@ -16,6 +16,9 @@ DEFAULT_DECISION_PATH = ROOT / "docs" / "worker-uplift-production-readiness-deci
 DEFAULT_BINDING_PATH = (
     ROOT / "docs" / "evidence" / "worker-uplift-cloudflare-bindings-2026-07-30.json"
 )
+DEFAULT_RUNTIME_STATUS_PATH = (
+    ROOT / "docs" / "evidence" / "worker-uplift-runtime-status-2026-07-30.json"
+)
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -61,6 +64,7 @@ READINESS_ITEMS = {
     "dependency_outages",
     "backup_and_isolated_restore",
     "current_protected_runtime_status",
+    "scheduler_runtime_dependencies",
     "grafana_alerts_logs_metrics",
     "admin_projection",
     "security_residuals",
@@ -79,12 +83,31 @@ REQUIRED_BLOCKER_ISSUES = {
     "authenticated_admin_deployed_proof": "ramideltoro/nutsnews-worker#163",
     "security_residual_owner_disposition": "ramideltoro/nutsnews-worker#164",
     "control_implementation_plan": "ramideltoro/nutsnews-worker#165",
+    "scheduler_local_test_dependencies": "ramideltoro/nutsnews-worker#168",
     "named_readiness_approver": "ramideltoro/nutsnews-worker#125",
 }
 REQUIRED_BLOCKERS = set(REQUIRED_BLOCKER_ISSUES)
 CURRENT_GATE_DEPENDENCIES = {
     f"ramideltoro/nutsnews-worker#{number}"
-    for number in (122, 123, 124, 147, 148, 149, 157, 158, 159, 160, 161, 162, 163, 164, 165)
+    for number in (
+        122,
+        123,
+        124,
+        147,
+        148,
+        149,
+        157,
+        158,
+        159,
+        160,
+        161,
+        162,
+        163,
+        164,
+        165,
+        167,
+        168,
+    )
 }
 ORDERED_CONTROL_AND_EXECUTION_GATES = [
     {
@@ -273,7 +296,178 @@ def validate_binding_evidence(proof: dict) -> list[str]:
     return errors
 
 
-def validate_decision(decision: dict, binding_proof: dict) -> list[str]:
+def validate_runtime_status_evidence(proof: dict) -> list[str]:
+    errors: list[str] = []
+    if proof.get("schema_version") != 1:
+        errors.append("runtime status evidence schema_version must be 1")
+    if proof.get("tracking_issue") != "ramideltoro/nutsnews-worker#125":
+        errors.append("runtime status evidence must identify nutsnews-worker#125")
+    if proof.get("capture_method") != "github_actions_immutable_artifact_inspection":
+        errors.append("runtime status evidence must come from immutable artifact inspection")
+    if proof.get("production_state_changes_performed") is not False:
+        errors.append("runtime status evidence must record zero production state changes")
+    if proof.get("environment_protections_changed") is not False:
+        errors.append("runtime status evidence must record unchanged environment protections")
+
+    value_policy = proof.get("value_policy", {})
+    if value_policy.get("service_health_and_queue_counts_only") is not True:
+        errors.append("runtime status evidence must be limited to health and queue counts")
+    for field in (
+        "secret_values_recorded",
+        "environment_secret_values_recorded",
+        "connection_strings_recorded",
+        "message_payloads_recorded",
+    ):
+        if value_policy.get(field) is not False:
+            errors.append(f"runtime status value_policy.{field} must be false")
+
+    expected_queue_names = {
+        "nutsnews.worker.approval.v1",
+        "nutsnews.worker.canonicalization.v1",
+        "nutsnews.worker.enrichment.v1",
+        "nutsnews.worker.fetch.v1",
+        "nutsnews.worker.persistence.v1",
+        "nutsnews.worker.publication.v1",
+        "nutsnews.worker.translation.v1",
+    }
+
+    def validate_status(
+        label: str,
+        status: dict,
+        *,
+        run_id: int,
+        head_commit: str,
+        artifact_id: int,
+        artifact_digest: str,
+        downloaded_json_sha256: str,
+    ) -> None:
+        if status.get("run_id") != run_id:
+            errors.append(f"{label} must identify run {run_id}")
+        if status.get("head_commit") != head_commit:
+            errors.append(f"{label} must identify the immutable run head")
+        if status.get("workflow_conclusion") != "success":
+            errors.append(f"{label} workflow must have succeeded")
+        if status.get("artifact_id") != artifact_id:
+            errors.append(f"{label} must identify artifact {artifact_id}")
+        if status.get("artifact_digest") != artifact_digest:
+            errors.append(f"{label} artifact digest mismatch")
+        if status.get("downloaded_json_sha256") != downloaded_json_sha256:
+            errors.append(f"{label} downloaded JSON digest mismatch")
+        if status.get("action") != "status" or status.get("status") != "pass":
+            errors.append(f"{label} must be a passing status action")
+        if status.get("mode") != "shadow":
+            errors.append(f"{label} must record shadow mode")
+        if status.get("production_writes_enabled") is not False:
+            errors.append(f"{label} must record production writes false")
+        if status.get("healthy_services") != 8:
+            errors.append(f"{label} must record eight healthy services")
+        if status.get("required_consumer_queues") != 7:
+            errors.append(f"{label} must record seven required consumer queues")
+        for field in ("missing_consumers", "unverifiable_consumers", "errors"):
+            if status.get(field) != []:
+                errors.append(f"{label}.{field} must be empty")
+
+        queues = status.get("queues", [])
+        queue_names = {str(item.get("queue", "")) for item in queues}
+        if queue_names != expected_queue_names or len(queues) != 7:
+            errors.append(f"{label} queue inventory must cover all seven main queues")
+        for queue in queues:
+            if queue.get("status") != "healthy":
+                errors.append(f"{label} queue {queue.get('queue')} must be healthy")
+            if queue.get("consumers") != 1:
+                errors.append(f"{label} queue {queue.get('queue')} must have one consumer")
+            for field in ("messages", "messages_ready", "messages_unacknowledged"):
+                if queue.get(field) != 0:
+                    errors.append(f"{label} queue {queue.get('queue')} {field} must be zero")
+
+    protected = proof.get("protected_status", {})
+    validate_status(
+        "protected status",
+        protected,
+        run_id=30513933114,
+        head_commit="b619cf91504eafca21f70c5d68888563f5fca7a9",
+        artifact_id=8770464087,
+        artifact_digest="sha256:92fda3a7c5c1b45f2ec6a29013e6c4c1a42f7208b3a91e17ea59bc1552bc8563",
+        downloaded_json_sha256="826a6400ec71b834a10c1f89c1b7164855d9db96c9d28938d772283e6d1444e3",
+    )
+    if protected.get("environment_gate") != "production-backend":
+        errors.append("protected status must identify production-backend")
+    if protected.get("approval_required") is not True:
+        errors.append("protected status must record that approval was required")
+    if protected.get("approval_completed") is not True:
+        errors.append("protected status must record completed approval")
+    if protected.get("approval_bypassed") is not False:
+        errors.append("protected status approval must not be bypassed")
+
+    approval_free = proof.get("approval_free_status", {})
+    validate_status(
+        "approval-free status",
+        approval_free,
+        run_id=30573044860,
+        head_commit="ba26e7bb9fa7a4f30773216da1e69bfe7ec3bf0d",
+        artifact_id=8771565855,
+        artifact_digest="sha256:ea5785493cfa3db2cb84c7b006c5c6310c652ad7ed8a303b13288e3f5ad3a874",
+        downloaded_json_sha256="ad2daec609da672bbf71f473e0651b687cf5dbc749937fe8eb6a3d3e6feeec61",
+    )
+    if approval_free.get("pending_deployment_count_observed") != 0:
+        errors.append("approval-free status must have zero pending deployments")
+    if approval_free.get("protected_job_status") != "skipped":
+        errors.append("approval-free status must skip the protected job")
+    if approval_free.get("read_only_job_status") != "success":
+        errors.append("approval-free status must run only the successful read-only job")
+    if approval_free.get("tracking_issue") != "ramideltoro/nutsnews-worker#167":
+        errors.append("approval-free status must identify completed tracker #167")
+
+    diagnostic = approval_free.get("diagnostic_run", {})
+    if diagnostic.get("run_id") != 30572618948:
+        errors.append("approval-free diagnostic must identify run 30572618948")
+    if diagnostic.get("pending_deployment_count_observed") != 0:
+        errors.append("approval-free diagnostic must also have zero pending deployments")
+    if diagnostic.get("protected_job_status") != "skipped":
+        errors.append("approval-free diagnostic must have skipped the protected job")
+    if diagnostic.get("host_or_production_infrastructure_changed") is not False:
+        errors.append("approval-free identity correction must not claim a host change")
+
+    scheduler = proof.get("scheduler_readiness_discrepancy", {})
+    if scheduler.get("status") != "confirmed_evidence_defect":
+        errors.append("scheduler readiness discrepancy must remain a confirmed evidence defect")
+    if scheduler.get("readiness_checked_at_utc") != "2026-07-23T00:00:00.000Z":
+        errors.append("scheduler readiness discrepancy must preserve the observed checkedAt")
+    if scheduler.get("readiness_dependency") != "local-feed-source":
+        errors.append("scheduler readiness discrepancy must preserve the observed dependency")
+    if scheduler.get("source_commit") != "ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396":
+        errors.append("scheduler readiness discrepancy must identify the deployed source commit")
+    if scheduler.get("blocker_issue") != "ramideltoro/nutsnews-worker#168":
+        errors.append("scheduler readiness discrepancy must link blocker #168")
+    if scheduler.get("silently_normalized") is not False:
+        errors.append("scheduler readiness discrepancy must not be silently normalized")
+    for field in ("startup_source_sha256", "test_adapter_source_sha256"):
+        if not SHA256_RE.fullmatch(str(scheduler.get(field, ""))):
+            errors.append(f"scheduler readiness discrepancy {field} must be a SHA-256")
+
+    report_tracker = proof.get("report_tracking_issue_discrepancy", {})
+    if report_tracker.get("reported_number") != 85:
+        errors.append("runtime report tracking issue provenance must preserve 85")
+    if report_tracker.get("status") != "valid_historical_runtime_framework_provenance":
+        errors.append("runtime report tracking issue 85 disposition must remain explicit")
+    if report_tracker.get("historical_issue") != "ramideltoro/nutsnews-worker#85":
+        errors.append("runtime report tracking issue must link historical tracker #85")
+    if report_tracker.get("current_readiness_gate") != "ramideltoro/nutsnews-worker#125":
+        errors.append("runtime report must distinguish current readiness gate #125")
+    if report_tracker.get("silently_normalized") is not False:
+        errors.append("runtime report tracking issue must not be silently normalized")
+    if report_tracker.get("new_blocker_required") is not False:
+        errors.append("valid runtime framework provenance must not fabricate a blocker")
+
+    validate_value_free("runtime status evidence", proof, errors)
+    return errors
+
+
+def validate_decision(
+    decision: dict,
+    binding_proof: dict,
+    runtime_status_proof: dict,
+) -> list[str]:
     errors: list[str] = []
     if decision.get("schema_version") != 1:
         errors.append("decision schema_version must be 1")
@@ -483,11 +677,8 @@ def validate_decision(decision: dict, binding_proof: dict) -> list[str]:
 
     recovery = decision.get("runtime_and_recovery_evidence", {})
     fresh_status = recovery.get("fresh_status_dispatch", {})
-    if fresh_status.get("status") not in {
-        "waiting_for_production_backend_approval",
-        "pass",
-    }:
-        errors.append("current-head status dispatch must be waiting for approval or pass")
+    if fresh_status.get("status") != "pass":
+        errors.append("approved current-head status dispatch must pass")
     if fresh_status.get("run_id") != 30513933114:
         errors.append("current-head status evidence must identify run 30513933114")
     if fresh_status.get("head_commit") != "b619cf91504eafca21f70c5d68888563f5fca7a9":
@@ -496,19 +687,92 @@ def validate_decision(decision: dict, binding_proof: dict) -> list[str]:
         errors.append("current-head runtime operation must remain read-only status/dry-run")
     if fresh_status.get("approval_bypassed") is not False:
         errors.append("production-backend approval must not be bypassed")
-    if fresh_status.get("status") == "pass":
-        if not isinstance(fresh_status.get("artifact_id"), int):
-            errors.append("passing current-head status must record an artifact id")
-        if not DIGEST_RE.fullmatch(str(fresh_status.get("artifact_digest", ""))):
-            errors.append("passing current-head status must record an artifact digest")
-        if fresh_status.get("mode") != "shadow":
-            errors.append("passing current-head status must record shadow mode")
-        if fresh_status.get("production_writes_enabled") is not False:
-            errors.append("passing current-head status must record production writes false")
-        if fresh_status.get("healthy_services") != 8:
-            errors.append("passing current-head status must record eight healthy services")
-        if fresh_status.get("consumers_per_required_queue") != 1:
-            errors.append("passing current-head status must record one consumer per required queue")
+    if fresh_status.get("artifact_id") != 8770464087:
+        errors.append("passing current-head status must record artifact 8770464087")
+    if fresh_status.get("artifact_digest") != (
+        "sha256:92fda3a7c5c1b45f2ec6a29013e6c4c1a42f7208b3a91e17ea59bc1552bc8563"
+    ):
+        errors.append("passing current-head status must record the immutable artifact digest")
+    if fresh_status.get("mode") != "shadow":
+        errors.append("passing current-head status must record shadow mode")
+    if fresh_status.get("production_writes_enabled") is not False:
+        errors.append("passing current-head status must record production writes false")
+    if fresh_status.get("healthy_services") != 8:
+        errors.append("passing current-head status must record eight healthy services")
+    if fresh_status.get("consumers_per_required_queue") != 1:
+        errors.append("passing current-head status must record one consumer per required queue")
+
+    runtime_relative_path = str(fresh_status.get("evidence_path", ""))
+    if runtime_relative_path != (
+        "docs/evidence/worker-uplift-runtime-status-2026-07-30.json"
+    ):
+        errors.append("passing current-head status must link the committed runtime evidence")
+    runtime_path = ROOT / runtime_relative_path
+    if runtime_path.is_file():
+        if fresh_status.get("evidence_sha256") != file_sha256(runtime_path):
+            errors.append("current-head runtime evidence SHA-256 is stale")
+    else:
+        errors.append("current-head runtime evidence path is missing")
+
+    approval_free = recovery.get("approval_free_status_dispatch", {})
+    if approval_free.get("status") != "pass":
+        errors.append("approval-free merged-main status dispatch must pass")
+    if approval_free.get("tracking_issue") != "ramideltoro/nutsnews-worker#167":
+        errors.append("approval-free status dispatch must link completed tracker #167")
+    if approval_free.get("run_id") != 30573044860:
+        errors.append("approval-free status dispatch must identify run 30573044860")
+    if approval_free.get("head_commit") != "ba26e7bb9fa7a4f30773216da1e69bfe7ec3bf0d":
+        errors.append("approval-free status dispatch must identify merged main")
+    if approval_free.get("pending_deployment_count_observed") != 0:
+        errors.append("approval-free status dispatch must record zero pending deployments")
+    if approval_free.get("protected_job_status") != "skipped":
+        errors.append("approval-free status dispatch must skip the protected job")
+    if approval_free.get("read_only_job_status") != "success":
+        errors.append("approval-free status dispatch must pass the read-only job")
+    if approval_free.get("artifact_id") != 8771565855:
+        errors.append("approval-free status dispatch must record artifact 8771565855")
+    if approval_free.get("artifact_digest") != (
+        "sha256:ea5785493cfa3db2cb84c7b006c5c6310c652ad7ed8a303b13288e3f5ad3a874"
+    ):
+        errors.append("approval-free status dispatch must record its immutable artifact digest")
+    if approval_free.get("mode") != "shadow":
+        errors.append("approval-free status dispatch must record shadow mode")
+    if approval_free.get("production_writes_enabled") is not False:
+        errors.append("approval-free status dispatch must record production writes false")
+    if approval_free.get("healthy_services") != 8:
+        errors.append("approval-free status dispatch must record eight healthy services")
+    if approval_free.get("consumers_per_required_queue") != 1:
+        errors.append("approval-free status dispatch must record one consumer per required queue")
+    if approval_free.get("evidence_path") != runtime_relative_path:
+        errors.append("both status dispatches must link the same runtime evidence")
+    if approval_free.get("evidence_sha256") != fresh_status.get("evidence_sha256"):
+        errors.append("both status dispatches must pin the same runtime evidence digest")
+
+    scheduler = recovery.get("scheduler_readiness", {})
+    if scheduler.get("status") != "blocked_confirmed_evidence_defect":
+        errors.append("scheduler readiness defect must remain an explicit blocker")
+    if scheduler.get("checked_at_utc") != "2026-07-23T00:00:00.000Z":
+        errors.append("scheduler readiness defect must preserve the stale checkedAt")
+    if scheduler.get("source_uses_local_test_dependencies") is not True:
+        errors.append("scheduler readiness defect must record the verified local test adapters")
+    if scheduler.get("silently_normalized") is not False:
+        errors.append("scheduler readiness defect must not be silently normalized")
+    if scheduler.get("blocker_issue") != "ramideltoro/nutsnews-worker#168":
+        errors.append("scheduler readiness defect must link blocker #168")
+
+    report_tracker = recovery.get("runtime_report_tracking_issue", {})
+    if report_tracker.get("reported_number") != 85:
+        errors.append("runtime report tracking issue must preserve 85")
+    if report_tracker.get("status") != "valid_historical_runtime_framework_provenance":
+        errors.append("runtime report tracking issue disposition must remain explicit")
+    if report_tracker.get("historical_issue") != "ramideltoro/nutsnews-worker#85":
+        errors.append("runtime report tracking issue must link historical #85")
+    if report_tracker.get("current_readiness_gate") != "ramideltoro/nutsnews-worker#125":
+        errors.append("runtime report must distinguish the current #125 gate")
+    if report_tracker.get("silently_normalized") is not False:
+        errors.append("runtime report tracking issue must not be silently normalized")
+    if report_tracker.get("new_blocker_required") is not False:
+        errors.append("valid runtime framework provenance must not create a blocker")
     empty_broker = recovery.get("empty_broker_recovery", {})
     if empty_broker.get("status") != "stale":
         errors.append("empty-broker proof must remain stale after topology change")
@@ -609,6 +873,7 @@ def validate_decision(decision: dict, binding_proof: dict) -> list[str]:
 
     validate_value_free("readiness decision", decision, errors)
     errors.extend(validate_binding_evidence(binding_proof))
+    errors.extend(validate_runtime_status_evidence(runtime_status_proof))
     return errors
 
 
@@ -616,9 +881,18 @@ def main_args(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--decision", type=Path, default=DEFAULT_DECISION_PATH)
     parser.add_argument("--binding-evidence", type=Path, default=DEFAULT_BINDING_PATH)
+    parser.add_argument(
+        "--runtime-status-evidence",
+        type=Path,
+        default=DEFAULT_RUNTIME_STATUS_PATH,
+    )
     args = parser.parse_args(argv)
 
-    errors = validate_decision(load_json(args.decision), load_json(args.binding_evidence))
+    errors = validate_decision(
+        load_json(args.decision),
+        load_json(args.binding_evidence),
+        load_json(args.runtime_status_evidence),
+    )
     if errors:
         print("Worker-uplift production readiness validation failed:", file=sys.stderr)
         for error in errors:

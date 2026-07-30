@@ -3,7 +3,7 @@
   "decision_id": "worker-uplift-production-readiness",
   "tracking_issue": "ramideltoro/nutsnews-worker#125",
   "implementation_repository": "ramideltoro/nutsnews-backend",
-  "evaluated_at_utc": "2026-07-30T04:37:10Z",
+  "evaluated_at_utc": "2026-07-30T19:02:13Z",
   "tracking_model_corrected_at_utc": "2026-07-30T17:59:51Z",
   "review_mode": "non_mutating_production_readiness_decision",
   "decision_scope": "guarded_cutover_control_implementation_readiness",
@@ -39,7 +39,9 @@
       "ramideltoro/nutsnews-worker#162",
       "ramideltoro/nutsnews-worker#163",
       "ramideltoro/nutsnews-worker#164",
-      "ramideltoro/nutsnews-worker#165"
+      "ramideltoro/nutsnews-worker#165",
+      "ramideltoro/nutsnews-worker#167",
+      "ramideltoro/nutsnews-worker#168"
     ],
     "ordered_control_and_execution_gates": [
       {
@@ -74,10 +76,10 @@
   },
   "review_base": {
     "repository": "ramideltoro/nutsnews-backend",
-    "commit": "b619cf91504eafca21f70c5d68888563f5fca7a9"
+    "commit": "ba26e7bb9fa7a4f30773216da1e69bfe7ec3bf0d"
   },
   "decision": "no_go",
-  "decision_summary": "Readiness to begin guarded cutover-control implementation is not approved. FAILOVER_ANALYTICS is absent from both the deployed Cloudflare Worker and current infra source; current parity and empty-broker recovery proof do not match the deployed image/topology set; current dependency-outage, backup/restore, identity, and authenticated-admin evidence is missing or stale; security residual risks lack named dispositions; exact planned watermark, rollback deadline, observation window, and operational ownership are not recorded; and no named approver has issued GO. Missing implementation of downstream issues #150 and #126 is not a #125 blocker.",
+  "decision_summary": "Readiness to begin guarded cutover-control implementation is not approved. FAILOVER_ANALYTICS is absent from both the deployed Cloudflare Worker and current infra source; current parity and empty-broker recovery proof do not match the deployed image/topology set; the deployed scheduler uses local test dependencies and a fixed readiness clock; current dependency-outage, backup/restore, identity, and authenticated-admin evidence is missing or stale; security residual risks lack named dispositions; exact planned watermark, rollback deadline, observation window, and operational ownership are not recorded; and no named approver has issued GO. Missing implementation of downstream issues #150 and #126 is not a #125 blocker.",
   "issue_closure_authorized": false,
   "tracking_issue_state_required": "open",
   "named_approver": null,
@@ -103,7 +105,7 @@
   "source_heads": [
     {
       "repository": "ramideltoro/nutsnews-backend",
-      "commit": "b619cf91504eafca21f70c5d68888563f5fca7a9",
+      "commit": "ba26e7bb9fa7a4f30773216da1e69bfe7ec3bf0d",
       "role": "deployment_and_host_operations"
     },
     {
@@ -163,17 +165,17 @@
     },
     {
       "repository": "ramideltoro/nutsnews-infra",
-      "commit": "ee61807a757fe087dbcecd60d5e0b7fe07f4115a",
+      "commit": "48748cd7fea036d14e281fe84fcde5a52d41166c",
       "role": "grafana_and_cloudflare_ownership"
     },
     {
       "repository": "ramideltoro/nutsnews-docs",
-      "commit": "b7c3c11f65256475deb66fbb560c759c3aafbb01",
+      "commit": "fa8853515268463b5c3e32d4b6a1efc39b0f1383",
       "role": "architecture_and_runbooks"
     },
     {
       "repository": "ramideltoro/nutsnews",
-      "commit": "740230f0ada1c7031703ad075f4ddc3d0f0db4eb",
+      "commit": "ba8fd07b940d0418436b33c6ccb4d59a76caab4a",
       "role": "admin_portal"
     }
   ],
@@ -353,6 +355,10 @@
     {
       "path": "docs/worker-uplift-legacy-to-shadow-parity-report.json",
       "sha256": "58561f0be68ab194e8fc212732ea59e27670bb8cf1780985e16f8bc602ee2444"
+    },
+    {
+      "path": "docs/evidence/worker-uplift-runtime-status-2026-07-30.json",
+      "sha256": "b6006ae065ed8dc305ed228f0fb6da431ce220fab806acc4b67a45aa02df9537"
     }
   ],
   "identity_and_policy_evidence": {
@@ -464,12 +470,68 @@
       "unacknowledged_messages": 0
     },
     "fresh_status_dispatch": {
-      "status": "waiting_for_production_backend_approval",
+      "status": "pass",
       "run_id": 30513933114,
       "head_commit": "b619cf91504eafca21f70c5d68888563f5fca7a9",
       "action": "status",
       "dry_run": true,
-      "approval_bypassed": false
+      "approval_bypassed": false,
+      "artifact_id": 8770464087,
+      "artifact_digest": "sha256:92fda3a7c5c1b45f2ec6a29013e6c4c1a42f7208b3a91e17ea59bc1552bc8563",
+      "downloaded_json_sha256": "826a6400ec71b834a10c1f89c1b7164855d9db96c9d28938d772283e6d1444e3",
+      "generated_at_utc": "2026-07-30T18:24:00Z",
+      "mode": "shadow",
+      "production_writes_enabled": false,
+      "healthy_services": 8,
+      "required_consumer_queues": 7,
+      "consumers_per_required_queue": 1,
+      "ready_messages": 0,
+      "unacknowledged_messages": 0,
+      "evidence_path": "docs/evidence/worker-uplift-runtime-status-2026-07-30.json",
+      "evidence_sha256": "b6006ae065ed8dc305ed228f0fb6da431ce220fab806acc4b67a45aa02df9537"
+    },
+    "approval_free_status_dispatch": {
+      "status": "pass",
+      "tracking_issue": "ramideltoro/nutsnews-worker#167",
+      "implementation_merge_commit": "ba26e7bb9fa7a4f30773216da1e69bfe7ec3bf0d",
+      "post_merge_checks_run": 30572501619,
+      "run_id": 30573044860,
+      "head_commit": "ba26e7bb9fa7a4f30773216da1e69bfe7ec3bf0d",
+      "pending_deployment_count_observed": 0,
+      "protected_job_status": "skipped",
+      "read_only_job_status": "success",
+      "artifact_id": 8771565855,
+      "artifact_digest": "sha256:ea5785493cfa3db2cb84c7b006c5c6310c652ad7ed8a303b13288e3f5ad3a874",
+      "downloaded_json_sha256": "ad2daec609da672bbf71f473e0651b687cf5dbc749937fe8eb6a3d3e6feeec61",
+      "generated_at_utc": "2026-07-30T19:02:12Z",
+      "action": "status",
+      "mode": "shadow",
+      "production_writes_enabled": false,
+      "healthy_services": 8,
+      "required_consumer_queues": 7,
+      "consumers_per_required_queue": 1,
+      "ready_messages": 0,
+      "unacknowledged_messages": 0,
+      "evidence_path": "docs/evidence/worker-uplift-runtime-status-2026-07-30.json",
+      "evidence_sha256": "b6006ae065ed8dc305ed228f0fb6da431ce220fab806acc4b67a45aa02df9537"
+    },
+    "scheduler_readiness": {
+      "status": "blocked_confirmed_evidence_defect",
+      "report_generated_at_utc": "2026-07-30T18:24:00Z",
+      "checked_at_utc": "2026-07-23T00:00:00.000Z",
+      "dependency": "local-feed-source",
+      "source_commit": "ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396",
+      "source_uses_local_test_dependencies": true,
+      "silently_normalized": false,
+      "blocker_issue": "ramideltoro/nutsnews-worker#168"
+    },
+    "runtime_report_tracking_issue": {
+      "reported_number": 85,
+      "status": "valid_historical_runtime_framework_provenance",
+      "historical_issue": "ramideltoro/nutsnews-worker#85",
+      "current_readiness_gate": "ramideltoro/nutsnews-worker#125",
+      "silently_normalized": false,
+      "new_blocker_required": false
     },
     "consumer_loss_and_recovery": {
       "status": "pass",
@@ -529,7 +591,8 @@
     "grafana": {
       "status": "pass",
       "owner_repository": "ramideltoro/nutsnews-infra",
-      "owner_commit": "ee61807a757fe087dbcecd60d5e0b7fe07f4115a",
+      "owner_commit": "48748cd7fea036d14e281fe84fcde5a52d41166c",
+      "worker_uplift_evidence_paths_unchanged_since_commit": "ee61807a757fe087dbcecd60d5e0b7fe07f4115a",
       "alerts_catalog_sha256": "86b52af35cec309e043e459e0f6479e9fad347bd7c690ed52284d1914f5d017f",
       "telemetry_scope_sha256": "a837762f2fd57dadbee07c413ad88853e11387d01039474aa4e849a49ea830f9",
       "protected_apply_run": 30400920451,
@@ -543,7 +606,8 @@
       "status": "missing_current_authenticated_deployed_proof",
       "implementation_pr": "https://github.com/ramideltoro/nutsnews/pull/518",
       "merge_commit": "9210dec5a4177b92c2cbccc99960203d221aacd0",
-      "current_head": "740230f0ada1c7031703ad075f4ddc3d0f0db4eb",
+      "current_head": "ba8fd07b940d0418436b33c6ccb4d59a76caab4a",
+      "worker_uplift_projection_paths_unchanged_since_commit": "740230f0ada1c7031703ad075f4ddc3d0f0db4eb",
       "shards_page_sha256": "dd76f29747cae0bfc3ff6d5f4b757ced4e90051fa2692ffcbfa65c73a626979f",
       "health_projection_sha256": "1acb6a55639dfe2e227f4f8f712ae632f51e537ee30f094b6f62be3c6573d7fd",
       "source_feature_present": true,
@@ -573,7 +637,7 @@
     "status": "pass_as_built_no_cutover_authority",
     "repository": "ramideltoro/nutsnews-docs",
     "merge_commit": "77eeb52078878c2f95989db3107b814e54c52222",
-    "current_head": "b7c3c11f65256475deb66fbb560c759c3aafbb01",
+    "current_head": "fa8853515268463b5c3e32d4b6a1efc39b0f1383",
     "technical_source_sha256": "2163318864a7d6e6fa316ed441b179a012ed0a1d3ecd4626a6b0fe347e31142a",
     "post_merge_run": 30487097782,
     "artifact_id": 8738197991,
@@ -584,7 +648,7 @@
   "cloudflare_failover": {
     "status": "block",
     "binding_evidence_path": "docs/evidence/worker-uplift-cloudflare-bindings-2026-07-30.json",
-    "binding_evidence_sha256": "de7468c0863ed8a62bd2a49a731278cbe6c88f3977f2a700a454697f3fd2f9f8",
+    "binding_evidence_sha256": "c052e24baa42665401c297181c48d25132e1ba40e5a687312ab2588289259da7",
     "deployed_worker_present": true,
     "durable_object_binding_present": true,
     "cron_schedule_present": true,
@@ -642,8 +706,13 @@
     },
     {
       "id": "current_protected_runtime_status",
+      "status": "pass",
+      "evidence": "Approved run 30513933114 and approval-free merged-main run 30573044860 both passed in shadow mode with writes false, eight healthy services, and seven required queues at one consumer and zero backlog; immutable artifact IDs, digests, and downloaded JSON hashes are committed in the runtime-status evidence."
+    },
+    {
+      "id": "scheduler_runtime_dependencies",
       "status": "block",
-      "evidence": "Read-only runtime status run 30513933114 is waiting for production-backend approval. It must not be bypassed; the resulting artifact must be inspected and incorporated before this draft can advance."
+      "evidence": "Both status artifacts expose scheduler checkedAt=2026-07-23T00:00:00.000Z and local test feed-source readiness. Source commit ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396 confirms production startup unconditionally creates local test dependencies; #168 owns the independent remediation and current proof."
     },
     {
       "id": "grafana_alerts_logs_metrics",
@@ -746,6 +815,13 @@
       "required_resolution": "Record the exact planned watermark semantics, rollback deadline, observation window, thresholds, and named owners needed to implement #150/#126. Do not require those downstream controls to exist at #125."
     },
     {
+      "id": "scheduler_local_test_dependencies",
+      "status": "open",
+      "owner_repository": "ramideltoro/nutsnews-worker-feed-scheduler",
+      "issue": "ramideltoro/nutsnews-worker#168",
+      "required_resolution": "Replace deployed local test scheduler dependencies and fixed clock with production shadow adapters, then attach current readiness and scheduler-smoke evidence with a real observation timestamp."
+    },
+    {
       "id": "named_readiness_approver",
       "status": "open",
       "owner_repository": "ramideltoro/nutsnews-worker",
@@ -760,7 +836,8 @@
     "Complete #161, #162, and #163 with current dependency-outage, backup/isolated-restore, and authenticated-admin evidence.",
     "Complete #164 by dispositioning every #124 residual risk through remediation or explicit named authorized owner acceptance.",
     "Complete #165 with exact planned watermark, rollback deadline, observation window, thresholds, and named owners; #150/#126 implementation is deliberately downstream of #125.",
-    "Rerun the waiting current-head runtime status without bypassing production-backend approval.",
+    "Complete #168 by replacing the deployed scheduler's local test dependencies and fixed clock, then attach current immutable readiness and scheduler-smoke proof.",
+    "Retain the closed #167 approval-free runtime evidence path and rerun status if the candidate images or runtime configuration change.",
     "Obtain a named current approver only after every #125 blocker is closed; GO authorizes beginning #150 only.",
     "Require #166 after #126 to verify implemented controls, current evidence, rollback rehearsal, a named approver, and the exact production candidate before #127."
   ]

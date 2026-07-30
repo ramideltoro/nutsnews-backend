@@ -19,6 +19,8 @@ infrastructure from this issue.
   `docs/worker-uplift-production-readiness-decision.json`
 - Value-free deployed Cloudflare binding proof:
   `docs/evidence/worker-uplift-cloudflare-bindings-2026-07-30.json`
+- Value-free protected and approval-free runtime status proof:
+  `docs/evidence/worker-uplift-runtime-status-2026-07-30.json`
 - Validator:
   `python3 scripts/validate_worker_uplift_production_readiness.py`
 - Focused tests:
@@ -79,7 +81,8 @@ apply mode, `#127`, production writes, or an ingestion-owner change.
 | Empty-broker recovery | Block | Run `30215207093` predates the current topology hash; `#159` owns the current-topology drill |
 | Dependency outages | Block | Current-candidate PostgreSQL/API/Qwen artifacts are missing; `#161` owns the protected drills |
 | Backup/isolated restore | Block | Current candidate-tied backup and isolated restore artifacts are missing; `#162` owns the evidence and links infra implementation findings |
-| Protected runtime status | Block | Read-only run `30513933114` is waiting for `production-backend` approval and artifact inspection |
+| Runtime status | Pass | Approved run `30513933114` and approval-free merged-main run `30573044860` passed with eight healthy services, seven required consumers at one each, zero backlog, shadow mode, and writes false |
+| Scheduler production dependencies | Block | Scheduler readiness is fixed at `2026-07-23T00:00:00.000Z` and reports `local-feed-source`; deployed source uses local test adapters, so `#168` owns remediation/current proof |
 | Admin deployed proof | Block | Source and access control are present; `#163` owns current authenticated production projection proof |
 | Security residuals | Block | `SEC-124-002` through `SEC-124-009` lack named disposition; `#164` owns the record |
 | Cloudflare failover | Block | Deployed and source config omit `FAILOVER_ANALYTICS`; worker tracker `#157` owns the infra fix/decision |
@@ -104,10 +107,40 @@ dry_run=true
 run=30513933114
 ```
 
-It is waiting for `production-backend` approval. Do not approve on another
-person's behalf or bypass the environment. Once approved, inspect the artifact
-for mode, write policy, images, service health, consumers, queues, and
-guardrails; the workflow conclusion alone is insufficient.
+The owner approved that run through the normal `production-backend` gate. It
+completed successfully, and artifact `8770464087` was downloaded and inspected;
+the workflow conclusion alone was not used as proof.
+
+Approval-free read-only routing was then implemented and merged under `#167`.
+The merged workflow routes only `check`, `status`, `logs`, `queue-inspect`, and
+`dlq-inspect` through the unprotected read-only job. Run `30573044860` proved
+`pending_deployments=[]`, skipped the protected job, passed the read-only job,
+and emitted artifact `8771565855`. Mutating or potentially mutating actions
+remain on `production-backend` with exact confirmation and fail-closed routing.
+
+The first post-merge diagnostic run, `30572618948`, also proved the routing
+boundary but failed because repository-scoped SSH-user metadata was absent and
+the job selected the non-privileged fallback identity. The repository metadata
+was mapped to the existing dedicated automation account; no host policy,
+runtime, environment protection, or production infrastructure changed. Keep
+the secret name in repository inventory and never record its value.
+
+## Runtime artifact discrepancy rule
+
+The inspected runtime artifacts contain two fields that must not be normalized:
+
+- Scheduler `checkedAt=2026-07-23T00:00:00.000Z` is a real evidence defect.
+  Deployed scheduler source commit
+  `ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396` unconditionally creates the
+  local dependency bundle, whose manual clock defaults to that timestamp and
+  whose readiness dependency is `local-feed-source`. Canonical blocker `#168`
+  must replace the test adapters with production shadow adapters and attach a
+  fresh readiness/smoke artifact.
+- Top-level `tracking_issue=85` is valid historical provenance for the
+  centralized worker runtime framework from `nutsnews-worker#85`. The manifest
+  validator requires it and the runtime manager emits it intentionally. It is
+  not the current decision gate (`#125`) or workflow tracker (`#167`), so the
+  evidence records both meanings explicitly without rewriting the report.
 
 A later owner may refresh parity through the protected read-only workflow:
 
@@ -159,6 +192,7 @@ workflow. In particular:
 - backup/restore and admin proof belongs to `#162` and `#163`;
 - named security dispositions and the control implementation plan belong to
   `#164` and `#165`;
+- scheduler production-adapter remediation and current proof belongs to `#168`;
 - implementation of scheduling and reversible owner/write controls belongs
   to downstream issues `#150` and `#126`, not #125.
 
@@ -195,12 +229,14 @@ Before any later GO:
 7. Define the exact planned watermark, synchronization boundary, rollback
    deadline, observation window, thresholds, and named ownership roster in
    `#165`; do not require the downstream controls to exist yet.
-8. Allow read-only run `30513933114` to complete only through normal
-   `production-backend` approval, inspect its artifact, and incorporate the
-   result.
-9. Name the current authorized approver and record an explicit #125 decision.
+8. Complete `#168` and prove scheduler readiness uses current time and
+   production shadow adapters against the exact candidate.
+9. Retain the immutable artifacts for approved run `30513933114` and
+   approval-free run `30573044860`; rerun status if images or runtime
+   configuration change.
+10. Name the current authorized approver and record an explicit #125 decision.
    GO may authorize beginning `#150` only.
-10. After `#150` and `#126`, require `#166` to revalidate the exact production
+11. After `#150` and `#126`, require `#166` to revalidate the exact production
     candidate and rollback rehearsal before `#127`.
 
 Until then, keep #125 open and do not begin #150 or any cutover work.

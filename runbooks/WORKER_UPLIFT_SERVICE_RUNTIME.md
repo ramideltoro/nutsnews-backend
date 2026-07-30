@@ -183,8 +183,20 @@ Read-only actions:
 - `queue-inspect`
 - `dlq-inspect`
 
-Mutating actions require `confirm_target=backend.nutsnews.com` and the
-`production-backend` approval gate:
+These five actions run in the workflow's `read-only-runtime` job. That job has
+no GitHub Environment reference, so it cannot create a
+`production-backend` pending deployment. It uses only the repository Actions
+secrets `NUTSNEWS_BACKEND_SSH_PRIVATE_KEY` and
+`NUTSNEWS_BACKEND_KNOWN_HOSTS`; the SSH username remains optional and defaults
+to `rami`. Read-only dispatches require `dry_run=true`, reject
+`confirm_target` and replica inputs, retain bounded output and strict SSH
+host-key verification, and upload the same value-free
+`backend-worker-runtime-report` artifact.
+
+Mutating or potentially mutating actions run only in the
+`protected-runtime` job and require
+`confirm_target=backend.nutsnews.com` plus the `production-backend` approval
+gate:
 
 - `deploy`
 - `promote`
@@ -196,9 +208,16 @@ Mutating actions require `confirm_target=backend.nutsnews.com` and the
 - `reconciliation`
 - `smoke`
 
-The workflow validates action names, service names, replica counts, queue kind,
-and log tail size before SSH. It never accepts a free-form remote command. It
-calls only:
+The environment reviewer rule remains enabled. The workflow first validates
+the complete dispatch without secrets, then routes the action through
+mutually exclusive allow-lists. A protected action cannot enter the
+unprotected job, and a read-only action cannot enter the protected job.
+Protected execution always passes `--confirm-action`; a missing or mismatched
+typed confirmation fails before SSH.
+
+The workflow validates action names, service names, replica counts, queue
+kind, dry-run mode, typed confirmation, and log tail size before SSH. It never
+accepts a free-form remote command. Both paths call only:
 
 ```text
 sudo -n /usr/local/sbin/nutsnews-worker-runtime <fixed-action>
@@ -211,6 +230,21 @@ Reports are written under:
 ```
 
 The workflow uploads `backend-worker-runtime-report`.
+
+Repository validation:
+
+```bash
+python3 scripts/validate_backend_worker_runtime_operations_workflow.py
+python3 -m unittest tests.test_backend_worker_runtime_operations_workflow
+```
+
+After changing the workflow, dispatch `status` from merged `main` with
+`dry_run=true`. The run must start without a pending deployment, complete
+through `Read-only worker runtime evidence`, and emit a report with
+`action=status`, `status=pass`, `mode=shadow`,
+`production_writes_enabled=false`, healthy services, and positive consumers
+on every required queue. A mutating action still requires the protected job;
+do not exercise one merely to test the environment boundary.
 
 ### Zero-Consumer Detection And Recovery
 

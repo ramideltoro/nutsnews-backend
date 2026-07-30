@@ -1,6 +1,7 @@
 # Worker-Uplift RabbitMQ Recovery
 
-This runbook covers tracking issue `ramideltoro/nutsnews-worker#83`.
+This runbook covers tracking issues `ramideltoro/nutsnews-worker#83` and
+`ramideltoro/nutsnews-worker#159`.
 
 Validate the implementation with:
 
@@ -64,6 +65,41 @@ source-controlled topology, verifies drift and least-privilege permissions, and
 runs retry/DLQ transfer probes. It proves the preferred rebuild path without
 touching production queue contents.
 
+Current-candidate empty-broker reconciliation drill:
+
+```bash
+sudo -n /usr/local/sbin/nutsnews-rabbitmq-recovery current-candidate-reconciliation-drill
+```
+
+This is a protected shadow mutation, not a production-broker loss exercise. It:
+
+1. hashes the deployed manifest, Compose file, source-controlled topology, and
+   secret-redacted service configuration;
+2. starts a disposable loopback-only broker with throwaway credentials;
+3. bootstraps and validates the current topology;
+4. starts the seven digest-pinned consumer images from the deployed candidate
+   against the disposable broker on ephemeral loopback HTTP and AMQP ports;
+5. requires one consumer on every main queue;
+6. selects exactly one confirmed persistence outbox row at least 15 minutes old
+   from authoritative PostgreSQL and invokes the service-owned protected
+   reconciliation endpoint;
+7. proves the publication queue acknowledged and drained, all DLQs stayed
+   empty, the reconciliation audit advanced exactly once, and domain/shadow API
+   row counts did not duplicate; and
+8. removes every disposable container and confirms the live broker container
+   identity, image, start time, restart count, and state are unchanged.
+
+The scheduler is deliberately not started: it is a producer, not an expected
+recovery consumer, and this drill must not enqueue new scheduled work.
+Service secrets are used only through root-only temporary environment files.
+Artifacts contain hashes, presence metadata, counts, and sanitized endpoint
+results; they contain no credential values or production article identifiers.
+
+The only durable write is the bounded reconciliation audit attached to the
+already-confirmed shadow persistence outbox row. Production writes remain
+disabled, legacy ingestion remains the single writer, and the action has no
+Cloudflare, DNS, failover, route, cron, or live-broker mutation path.
+
 Stopped-volume restore drill:
 
 ```bash
@@ -96,11 +132,14 @@ Allowed actions:
 - `status`
 - `export-definitions`
 - `clean-rebuild-drill`
+- `current-candidate-reconciliation-drill`
 - `stopped-volume-restore-drill`
 - `scheduled-check`
 
-Mutating actions require `confirm_target=backend.nutsnews.com` and
-`production-backend` approval. The weekly scheduled action runs
+Mutating actions require `confirm_target=backend.nutsnews.com` and execute
+through the protected `production-backend` environment. If GitHub presents an
+environment wait, approve only the exact reviewed run; do not change the
+environment protections. The weekly scheduled action runs
 `scheduled-check`, which exports sanitized definitions and runs the clean
 rebuild drill. Run the stopped-volume drill separately after material broker
 changes or before a cutover gate that requires message-store restore evidence.
@@ -110,10 +149,13 @@ The workflow uploads status JSON only:
 ```text
 backend-rabbitmq-recovery-report.json
 backend-rabbitmq-recovery-status.json
+backend-worker-runtime-post-recovery-status.json
 ```
 
 It does not upload raw definitions, sanitized definitions, broker data,
-password hashes, or credential files.
+password hashes, or credential files. The post-recovery runtime status is a
+read-only snapshot proving that the deployed shadow services and live queues
+remain healthy after the disposable drill.
 
 ## Upgrade Procedure
 

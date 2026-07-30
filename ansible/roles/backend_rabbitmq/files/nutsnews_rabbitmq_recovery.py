@@ -9,11 +9,13 @@ exports are temporary, root-only, and removed after parsing.
 from __future__ import annotations
 
 import argparse
+import base64
 import copy
+import hashlib
 import json
-import os
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -22,6 +24,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib import error, parse, request
 
 
 DEFAULT_IMAGE = "rabbitmq@sha256:c427b73a15d01416346f429042125e663452e2a27e07fb3096fadb08f7033fc7"
@@ -31,20 +34,37 @@ DEFAULT_TOPOLOGY_ENV = Path("/etc/nutsnews-rabbitmq/topology.env")
 DEFAULT_TOPOLOGY_DEFINITION = Path("/etc/nutsnews-rabbitmq/worker-uplift-topology.json")
 DEFAULT_TOPOLOGY_SCRIPT = Path("/usr/local/sbin/nutsnews-rabbitmq-topology")
 DEFAULT_STATE_DIR = Path("/var/lib/nutsnews/rabbitmq-recovery")
+DEFAULT_RUNTIME_MANIFEST = Path("/etc/nutsnews-worker-uplift/services.json")
+DEFAULT_RUNTIME_COMPOSE = Path("/opt/nutsnews-worker-uplift/compose.yml")
 SANITIZED_DEFINITIONS = "definitions.sanitized.json"
 STATUS_FILES = {
     "definition_export": "last-definition-export.json",
     "clean_rebuild_drill": "last-clean-rebuild-drill.json",
+    "current_candidate_reconciliation_drill": "last-current-candidate-reconciliation-drill.json",
     "stopped_volume_restore_drill": "last-stopped-volume-restore-drill.json",
     "scheduled_check": "last-scheduled-check.json",
 }
 RECOVERY_TARGETS = {
     "definition_export_fresh_within_hours": 24,
     "clean_rebuild_drill_rto_seconds": 1800,
+    "current_candidate_reconciliation_drill_rto_seconds": 900,
     "stopped_volume_restore_drill_rto_seconds": 3600,
     "broker_transport_rpo": "0 broker-only committed messages; PostgreSQL outbox/reconciliation is authoritative",
 }
 SENSITIVE_DEFINITION_KEYS = {"password", "password_hash", "password_hashing_algorithm"}
+CANDIDATE_CONSUMER_STAGES = (
+    "fetcher",
+    "canonicalizer",
+    "enrichment",
+    "approval",
+    "translation",
+    "persistence",
+    "publication",
+)
+RECONCILIATION_CONFIRMATION = "persistence:replay-outbox:v1"
+RECONCILIATION_MAX_ITEMS = 1
+RECONCILIATION_MIN_AGE_SECONDS = 900
+SECRET_ENV_MARKERS = ("DATABASE_URL", "RABBITMQ_URL", "PASSWORD", "TOKEN", "SECRET", "API_KEY", "PRIVATE_KEY")
 
 
 def utc_now() -> str:
@@ -261,7 +281,7 @@ def generated_drill_environment(definition: dict[str, Any], directory: Path) -> 
     credentials_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     env_path.chmod(0o600)
     credentials_path.chmod(0o600)
-    return env_path, credentials_path, admin_username, erlang_cookie
+    return env_path, credentials_path, admin_username, admin_password
 
 
 def chown_rabbitmq_data(path: Path) -> None:
@@ -276,7 +296,8 @@ def start_drill_container(
     hostname: str,
     data_dir: Path,
     env_path: Path,
-) -> str:
+    publish_amqp: bool = False,
+) -> dict[str, str]:
     chown_rabbitmq_data(data_dir)
     command = [
         "docker",
@@ -292,8 +313,10 @@ def start_drill_container(
         f"{data_dir}:/var/lib/rabbitmq",
         "-p",
         "127.0.0.1::15672",
-        image,
     ]
+    if publish_amqp:
+        command.extend(["-p", "127.0.0.1::5672"])
+    command.append(image)
     result = run(command, timeout=180)
     if result.returncode != 0:
         raise RuntimeError(f"failed to start drill container: {result.stderr[-500:]}")
@@ -303,13 +326,18 @@ def start_drill_container(
         if ports.returncode == 0:
             try:
                 data = json.loads(ports.stdout)
-                host_port = data["15672/tcp"][0]["HostPort"]
-                if host_port:
-                    return str(host_port)
+                management_port = str(data["15672/tcp"][0]["HostPort"])
+                amqp_bindings = data.get("5672/tcp") or []
+                amqp_port = str(amqp_bindings[0]["HostPort"]) if amqp_bindings else ""
+                if management_port and (not publish_amqp or amqp_port):
+                    return {
+                        "management": management_port,
+                        "amqp": amqp_port,
+                    }
             except (KeyError, IndexError, TypeError, json.JSONDecodeError):
                 pass
         time.sleep(1)
-    raise RuntimeError("drill container management port was not published")
+    raise RuntimeError("drill container ports were not published")
 
 
 def remove_container(container_name: str) -> None:
@@ -373,6 +401,403 @@ def run_topology_sequence(
     return ok, reports
 
 
+def sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def sha256_file(path: Path) -> str:
+    return sha256_bytes(path.read_bytes())
+
+
+def sha256_json(value: Any) -> str:
+    return sha256_bytes(json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+
+
+def sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def psql_rows(database_url: str, query: str, timeout: int = 60) -> list[list[str]]:
+    try:
+        completed = subprocess.run(
+            ["psql", "--no-psqlrc", "-v", "ON_ERROR_STOP=1", "-At", "-F", "\t", database_url, "-c", query],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("psql is not installed on the backend host") from exc
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "PostgreSQL evidence query failed "
+            f"(returncode={completed.returncode}, stderr_sha256={sha256_bytes(completed.stderr.encode('utf-8'))})"
+        )
+    return [line.split("\t") for line in completed.stdout.splitlines() if line]
+
+
+def free_loopback_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        return int(listener.getsockname()[1])
+
+
+def safe_environment_fingerprint(values: dict[str, str]) -> dict[str, Any]:
+    redacted = {
+        key: "<present>" if any(marker in key for marker in SECRET_ENV_MARKERS) else value
+        for key, value in sorted(values.items())
+    }
+    return {
+        "redacted_sha256": sha256_json(redacted),
+        "keys": sorted(values),
+        "protected_value_keys": sorted(
+            key for key in values if any(marker in key for marker in SECRET_ENV_MARKERS)
+        ),
+    }
+
+
+def stage_consumer_credentials(
+    definition: dict[str, Any],
+    credentials: dict[str, str],
+    stage: str,
+) -> tuple[str, str]:
+    matches = [
+        user
+        for user in definition.get("users", [])
+        if isinstance(user, dict)
+        and user.get("stage") == stage
+        and user.get("id") == f"{stage}_consumer"
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(f"topology must declare exactly one consumer identity for {stage}")
+    user = matches[0]
+    username = credentials.get(str(user.get("username_variable") or ""), "")
+    password = credentials.get(str(user.get("password_variable") or ""), "")
+    if not username or not password:
+        raise RuntimeError(f"throwaway credentials are incomplete for {stage}")
+    return username, password
+
+
+def write_candidate_environment(
+    *,
+    source_path: Path,
+    destination_path: Path,
+    definition: dict[str, Any],
+    credentials: dict[str, str],
+    stage: str,
+    amqp_port: str,
+    http_port: int,
+) -> dict[str, Any]:
+    values = parse_env(source_path)
+    source_fingerprint = safe_environment_fingerprint(values)
+    prefix = f"NUTSNEWS_{stage.upper()}"
+    rabbitmq_key = f"{prefix}_RABBITMQ_URL"
+    username, password = stage_consumer_credentials(definition, credentials, stage)
+    vhost = str(definition["vhost"])
+    values[rabbitmq_key] = (
+        f"amqp://{parse.quote(username, safe='')}:{parse.quote(password, safe='')}"
+        f"@127.0.0.1:{amqp_port}/{parse.quote(vhost, safe='')}"
+    )
+    values[f"{prefix}_HTTP_HOST"] = "127.0.0.1"
+    values[f"{prefix}_HTTP_PORT"] = str(http_port)
+    if stage == "persistence":
+        values["NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_APPLY_ENABLED"] = "true"
+        values["NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_STOP"] = "false"
+
+    if values.get(f"{prefix}_PRODUCTION_WRITES_ENABLED", "false").strip().lower() == "true":
+        raise RuntimeError(f"{stage} candidate environment enables production writes")
+    if stage != "publication" and values.get(f"{prefix}_SHADOW_MODE", "").strip().lower() != "true":
+        raise RuntimeError(f"{stage} candidate environment is not shadow-only")
+    if stage == "publication" and values.get("NUTSNEWS_PUBLICATION_WRITE_MODE") != "shadow_comparison":
+        raise RuntimeError("publication candidate environment is not shadow comparison")
+    if any("\n" in value or "\r" in value for value in values.values()):
+        raise RuntimeError(f"{stage} candidate environment contains a newline")
+
+    destination_path.write_text(
+        "".join(f"{key}={value}\n" for key, value in sorted(values.items())),
+        encoding="utf-8",
+    )
+    destination_path.chmod(0o600)
+    return {
+        "source": str(source_path),
+        "source_fingerprint": source_fingerprint,
+        "effective_fingerprint": safe_environment_fingerprint(values),
+        "overrides": {
+            "rabbitmq": "throwaway-loopback-broker",
+            "http_port": http_port,
+            "reconciliation_apply_enabled": stage == "persistence",
+        },
+        "production_writes_enabled": False,
+        "runtime_mode": "shadow",
+    }
+
+
+def start_candidate_container(
+    *,
+    image: str,
+    container_name: str,
+    env_path: Path,
+) -> None:
+    completed = run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            container_name,
+            "--network",
+            "host",
+            "--env-file",
+            str(env_path),
+            "--memory",
+            "512m",
+            "--cpus",
+            "0.50",
+            "--pids-limit",
+            "256",
+            image,
+        ],
+        timeout=240,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(f"failed to start {container_name}: {completed.stderr[-500:]}")
+
+
+def candidate_container_snapshot(container_name: str) -> dict[str, Any]:
+    completed = run(["docker", "inspect", container_name], timeout=30)
+    if completed.returncode != 0:
+        raise RuntimeError(f"candidate container inspection failed for {container_name}")
+    data = json.loads(completed.stdout)
+    if not isinstance(data, list) or len(data) != 1:
+        raise RuntimeError(f"candidate container inspection returned an unexpected shape for {container_name}")
+    container = data[0]
+    return {
+        "configured_image": str(container.get("Config", {}).get("Image") or ""),
+        "content_image_id": str(container.get("Image") or ""),
+        "network_mode": str(container.get("HostConfig", {}).get("NetworkMode") or ""),
+    }
+
+
+def wait_for_http_ready(port: int, timeout_seconds: int = 180) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_seconds
+    last_status = "unreachable"
+    while time.monotonic() < deadline:
+        try:
+            with request.urlopen(f"http://127.0.0.1:{port}/ready", timeout=5) as response:
+                last_status = str(response.status)
+                if 200 <= response.status < 300:
+                    return {"status": "healthy", "http_status": response.status}
+        except (error.URLError, TimeoutError):
+            last_status = "unreachable"
+        time.sleep(2)
+    return {"status": "critical", "http_status": last_status}
+
+
+def rabbitmq_management_get(
+    *,
+    management_port: str,
+    admin_username: str,
+    admin_password: str,
+    path: str,
+) -> Any:
+    encoded = base64.b64encode(f"{admin_username}:{admin_password}".encode("utf-8")).decode("ascii")
+    req = request.Request(
+        f"http://127.0.0.1:{management_port}/api/{path.lstrip('/')}",
+        headers={"authorization": f"Basic {encoded}"},
+    )
+    with request.urlopen(req, timeout=15) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def queue_snapshot(
+    *,
+    management_port: str,
+    admin_username: str,
+    admin_password: str,
+    vhost: str,
+    queue: str,
+) -> dict[str, Any]:
+    data = rabbitmq_management_get(
+        management_port=management_port,
+        admin_username=admin_username,
+        admin_password=admin_password,
+        path=f"queues/{parse.quote(vhost, safe='')}/{parse.quote(queue, safe='')}",
+    )
+    stats = data.get("message_stats", {}) if isinstance(data, dict) else {}
+    return {
+        "queue": queue,
+        "consumers": int(data.get("consumers", 0) or 0),
+        "messages": int(data.get("messages", 0) or 0),
+        "messages_ready": int(data.get("messages_ready", 0) or 0),
+        "messages_unacknowledged": int(data.get("messages_unacknowledged", 0) or 0),
+        "published": int(stats.get("publish", 0) or 0),
+        "delivered": int(stats.get("deliver_get", 0) or 0),
+        "acked": int(stats.get("ack", 0) or 0),
+    }
+
+
+def wait_for_queue_drain(
+    *,
+    management_port: str,
+    admin_username: str,
+    admin_password: str,
+    vhost: str,
+    queue: str,
+    timeout_seconds: int = 120,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_seconds
+    last: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        last = queue_snapshot(
+            management_port=management_port,
+            admin_username=admin_username,
+            admin_password=admin_password,
+            vhost=vhost,
+            queue=queue,
+        )
+        if last["messages"] == 0 and last["consumers"] >= 1 and last["acked"] >= 1:
+            return last
+        time.sleep(2)
+    return last
+
+
+def post_json(url: str, token: str, body: dict[str, Any]) -> dict[str, Any]:
+    req = request.Request(
+        url,
+        data=json.dumps(body, separators=(",", ":")).encode("utf-8"),
+        headers={
+            "authorization": f"Bearer {token}",
+            "content-type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with request.urlopen(req, timeout=120) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            return data if isinstance(data, dict) else {}
+    except error.HTTPError as exc:
+        body_text = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"reconciliation endpoint returned HTTP {exc.code} "
+            f"(body_sha256={sha256_bytes(body_text.encode('utf-8'))})"
+        ) from exc
+
+
+def select_reconciliation_candidate(database_url: str) -> dict[str, str]:
+    rows = psql_rows(
+        database_url,
+        f"""
+select id::text, entity_id, idempotency_key, pipeline_run_id, created_at::text,
+       coalesce(jsonb_array_length(diagnostic_metadata->'reconciliationAuditHistory'), 0)::text
+from worker_uplift_persistence.outbox
+where status = 'confirmed'
+  and confirmed_at is not null
+  and created_at <= now() - ({RECONCILIATION_MIN_AGE_SECONDS}::integer * interval '1 second')
+order by created_at asc, id asc
+limit {RECONCILIATION_MAX_ITEMS};
+""",
+    )
+    if len(rows) != 1 or len(rows[0]) != 6:
+        raise RuntimeError("authoritative PostgreSQL range did not return exactly one bounded candidate")
+    row = rows[0]
+    return {
+        "outbox_id": row[0],
+        "entity_id": row[1],
+        "idempotency_key": row[2],
+        "pipeline_run_id": row[3],
+        "created_at": row[4],
+        "audit_count": row[5],
+    }
+
+
+def reconciliation_candidate_evidence(candidate: dict[str, str]) -> dict[str, Any]:
+    return {
+        "schema": "worker_uplift_persistence",
+        "table": "outbox",
+        "primary_key_range": {
+            "minimum": candidate["outbox_id"],
+            "maximum": candidate["outbox_id"],
+        },
+        "created_at": candidate["created_at"],
+        "entity_sha256": sha256_bytes(candidate["entity_id"].encode("utf-8")),
+        "idempotency_key_sha256": sha256_bytes(candidate["idempotency_key"].encode("utf-8")),
+        "pipeline_run_id_sha256": sha256_bytes(candidate["pipeline_run_id"].encode("utf-8")),
+        "pre_reconciliation_audit_count": int(candidate["audit_count"]),
+        "limit": RECONCILIATION_MAX_ITEMS,
+        "minimum_age_seconds": RECONCILIATION_MIN_AGE_SECONDS,
+    }
+
+
+def side_effect_counts(database_url: str, candidate: dict[str, str]) -> dict[str, int]:
+    entity = sql_literal(candidate["entity_id"])
+    idempotency = sql_literal(candidate["idempotency_key"])
+    rows = psql_rows(
+        database_url,
+        f"""
+select 'publication_inbox', count(*)::text
+from worker_uplift_publication.inbox
+where idempotency_key = {idempotency}
+union all
+select 'publication_readiness', count(*)::text
+from worker_uplift_publication.publication_readiness
+where article_identity_hash = {entity}
+union all
+select 'publication_decisions', count(*)::text
+from worker_uplift_publication.publication_decisions
+where article_identity_hash = {entity}
+union all
+select 'shadow_api_write_requests', count(*)::text
+from worker_uplift_persistence.write_requests
+where article_identity_hash = {entity};
+""",
+    )
+    return {key: int(value) for key, value in rows}
+
+
+def reconciliation_audit_count(database_url: str, outbox_id: str) -> int:
+    rows = psql_rows(
+        database_url,
+        f"""
+select coalesce(jsonb_array_length(diagnostic_metadata->'reconciliationAuditHistory'), 0)::text
+from worker_uplift_persistence.outbox
+where id = {int(outbox_id)};
+""",
+    )
+    if len(rows) != 1 or len(rows[0]) != 1:
+        raise RuntimeError("reconciliation audit row was not found after replay")
+    return int(rows[0][0])
+
+
+def live_broker_snapshot(container_name: str) -> dict[str, Any]:
+    completed = run(["docker", "inspect", container_name], timeout=30)
+    if completed.returncode != 0:
+        raise RuntimeError(f"live RabbitMQ container inspection failed: {completed.stderr[-500:]}")
+    data = json.loads(completed.stdout)
+    if not isinstance(data, list) or len(data) != 1:
+        raise RuntimeError("live RabbitMQ container inspection returned an unexpected shape")
+    container = data[0]
+    state = container.get("State", {})
+    return {
+        "container_id_sha256": sha256_bytes(str(container.get("Id") or "").encode("utf-8")),
+        "image": str(container.get("Config", {}).get("Image") or ""),
+        "started_at": str(state.get("StartedAt") or ""),
+        "restart_count": int(container.get("RestartCount", 0) or 0),
+        "status": str(state.get("Status") or ""),
+    }
+
+
+def safe_topology_reports(reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": report.get("name"),
+            "returncode": report.get("returncode"),
+            "status": report.get("json", {}).get("status"),
+        }
+        for report in reports
+    ]
+
+
 def action_clean_rebuild_drill(args: argparse.Namespace) -> dict[str, Any]:
     ensure_state_dir(args.state_dir)
     started = time.monotonic()
@@ -384,7 +809,7 @@ def action_clean_rebuild_drill(args: argparse.Namespace) -> dict[str, Any]:
         env_path, credentials_path, _, _ = generated_drill_environment(definition, temp_dir)
         data_dir = temp_dir / "rabbitmq-data"
         try:
-            port = start_drill_container(
+            ports = start_drill_container(
                 image=args.image,
                 container_name=container_name,
                 hostname="nutsnews-rabbitmq-clean-drill",
@@ -395,7 +820,7 @@ def action_clean_rebuild_drill(args: argparse.Namespace) -> dict[str, Any]:
                 args,
                 env_path=env_path,
                 credentials_path=credentials_path,
-                management_port=port,
+                management_port=ports["management"],
                 actions=("bootstrap", "check", "permissions", "probe-transfers"),
             )
         except Exception as exc:
@@ -422,6 +847,310 @@ def action_clean_rebuild_drill(args: argparse.Namespace) -> dict[str, Any]:
     return status
 
 
+def action_current_candidate_reconciliation_drill(args: argparse.Namespace) -> dict[str, Any]:
+    ensure_state_dir(args.state_dir)
+    started = time.monotonic()
+    started_at = utc_now()
+    definition = load_topology(args.definition)
+    manifest = read_json(args.runtime_manifest)
+    if manifest.get("mode") != "shadow" or manifest.get("production_writes_enabled") is not False:
+        raise RuntimeError("deployed worker candidate is not shadow-only")
+    if manifest.get("cutover_state") not in {"disabled", "shadow", "not_started"}:
+        raise RuntimeError("deployed worker candidate cutover state is not disabled")
+
+    services = {
+        str(service.get("name") or ""): service
+        for service in manifest.get("services", [])
+        if isinstance(service, dict)
+    }
+    missing_services = sorted(set(CANDIDATE_CONSUMER_STAGES) - set(services))
+    if missing_services:
+        raise RuntimeError(f"deployed worker manifest is missing consumers: {', '.join(missing_services)}")
+    for stage in CANDIDATE_CONSUMER_STAGES:
+        service = services[stage]
+        image = str(service.get("image") or "")
+        if not image.startswith("ghcr.io/ramideltoro/") or "@sha256:" not in image:
+            raise RuntimeError(f"{stage} candidate image is not digest-pinned")
+        if service.get("runtime_mode") != "shadow":
+            raise RuntimeError(f"{stage} candidate runtime mode is not shadow")
+        if service.get("postgres", {}).get("production_write_path") is not False:
+            raise RuntimeError(f"{stage} candidate declares a production PostgreSQL write path")
+
+    live_broker_before = live_broker_snapshot(args.container_name)
+    broker_container = f"nutsnews-rabbitmq-candidate-drill-{uuid.uuid4().hex[:10]}"
+    candidate_containers: list[str] = []
+    report: dict[str, Any] = {
+        "schema_version": 1,
+        "action": "current-candidate-reconciliation-drill",
+        "tracking_issue": 159,
+        "status": "critical",
+        "started_at_utc": started_at,
+        "candidate": {
+            "manifest_path": str(args.runtime_manifest),
+            "manifest_sha256": sha256_file(args.runtime_manifest),
+            "compose_path": str(args.runtime_compose),
+            "compose_sha256": sha256_file(args.runtime_compose),
+            "contract_version": manifest.get("contract_version"),
+            "runtime_version": manifest.get("runtime_version"),
+            "mode": manifest.get("mode"),
+            "production_writes_enabled": manifest.get("production_writes_enabled"),
+            "cutover_state": manifest.get("cutover_state"),
+            "images": {
+                name: {
+                    "image": service.get("image"),
+                    "source_commit": service.get("image_tag"),
+                    "contract_version": service.get("contract_version"),
+                    "runtime_package_version": service.get("runtime_package_version"),
+                }
+                for name, service in sorted(services.items())
+            },
+        },
+        "topology": {
+            "path": str(args.definition),
+            "sha256": sha256_file(args.definition),
+            "counts": topology_counts(definition),
+        },
+        "limits": {
+            "candidate_count": RECONCILIATION_MAX_ITEMS,
+            "minimum_age_seconds": RECONCILIATION_MIN_AGE_SECONDS,
+            "target_rto_seconds": RECOVERY_TARGETS["current_candidate_reconciliation_drill_rto_seconds"],
+        },
+        "guardrails": {
+            "broker_target": "throwaway-loopback-container",
+            "live_production_broker_commands": ["docker inspect"],
+            "live_production_broker_mutated": False,
+            "legacy_ingestion_mutated": False,
+            "production_writes_enabled": False,
+            "dns_or_failover_mutated": False,
+            "scheduler_started": False,
+            "scheduler_exclusion": "scheduler is a producer, not an expected recovery consumer",
+        },
+        "live_broker_before": live_broker_before,
+    }
+
+    with tempfile.TemporaryDirectory(prefix="nutsnews-rabbitmq-candidate-drill-") as temp:
+        temp_dir = Path(temp)
+        env_path, credentials_path, admin_username, admin_password = generated_drill_environment(definition, temp_dir)
+        credentials = parse_env(credentials_path)
+        data_dir = temp_dir / "rabbitmq-data"
+        try:
+            ports = start_drill_container(
+                image=args.image,
+                container_name=broker_container,
+                hostname="nutsnews-rabbitmq-candidate-drill",
+                data_dir=data_dir,
+                env_path=env_path,
+                publish_amqp=True,
+            )
+            topology_ok, topology_reports = run_topology_sequence(
+                args,
+                env_path=env_path,
+                credentials_path=credentials_path,
+                management_port=ports["management"],
+                actions=("bootstrap", "check", "permissions", "probe-transfers"),
+            )
+            report["topology"]["actions"] = safe_topology_reports(topology_reports)
+            if not topology_ok:
+                raise RuntimeError("throwaway broker topology bootstrap failed")
+
+            runtime_services: dict[str, Any] = {}
+            service_ports: dict[str, int] = {}
+            for stage in CANDIDATE_CONSUMER_STAGES:
+                service = services[stage]
+                source_env = args.runtime_manifest.parent / "services" / f"{stage}.env"
+                if not source_env.exists():
+                    raise RuntimeError(f"deployed environment is missing for {stage}")
+                candidate_env = temp_dir / f"{stage}.env"
+                http_port = free_loopback_port()
+                service_ports[stage] = http_port
+                config_evidence = write_candidate_environment(
+                    source_path=source_env,
+                    destination_path=candidate_env,
+                    definition=definition,
+                    credentials=credentials,
+                    stage=stage,
+                    amqp_port=ports["amqp"],
+                    http_port=http_port,
+                )
+                container_name = f"nutsnews-{stage}-candidate-drill-{uuid.uuid4().hex[:8]}"
+                candidate_containers.append(container_name)
+                start_candidate_container(
+                    image=str(service["image"]),
+                    container_name=container_name,
+                    env_path=candidate_env,
+                )
+                runtime_services[stage] = {
+                    "config": config_evidence,
+                    "container": candidate_container_snapshot(container_name),
+                    "main_queue": service.get("queues", {}).get("main"),
+                    "dlq": service.get("queues", {}).get("dlq"),
+                }
+
+            for stage in CANDIDATE_CONSUMER_STAGES:
+                runtime_services[stage]["readiness"] = wait_for_http_ready(service_ports[stage])
+                if runtime_services[stage]["readiness"]["status"] != "healthy":
+                    raise RuntimeError(f"{stage} exact-candidate consumer did not become ready")
+
+            main_before: dict[str, Any] = {}
+            dlq_before: dict[str, Any] = {}
+            for stage in CANDIDATE_CONSUMER_STAGES:
+                main_queue = str(runtime_services[stage]["main_queue"] or "")
+                dlq = str(runtime_services[stage]["dlq"] or "")
+                main_before[stage] = queue_snapshot(
+                    management_port=ports["management"],
+                    admin_username=admin_username,
+                    admin_password=admin_password,
+                    vhost=str(definition["vhost"]),
+                    queue=main_queue,
+                )
+                dlq_before[stage] = queue_snapshot(
+                    management_port=ports["management"],
+                    admin_username=admin_username,
+                    admin_password=admin_password,
+                    vhost=str(definition["vhost"]),
+                    queue=dlq,
+                )
+            report["runtime"] = {
+                "services": runtime_services,
+                "main_queues_before": main_before,
+                "dlqs_before": dlq_before,
+            }
+            if any(snapshot["consumers"] != 1 for snapshot in main_before.values()):
+                raise RuntimeError("not all seven exact-candidate consumers registered on the isolated topology")
+            if any(snapshot["messages"] != 0 for snapshot in main_before.values()):
+                raise RuntimeError("isolated main queues were not empty before reconciliation")
+            if any(snapshot["messages"] != 0 for snapshot in dlq_before.values()):
+                raise RuntimeError("isolated DLQs were not empty before reconciliation")
+
+            persistence_env = parse_env(temp_dir / "persistence.env")
+            database_url = persistence_env.get("NUTSNEWS_PERSISTENCE_DATABASE_URL", "")
+            token = persistence_env.get("NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN", "")
+            if not database_url or not token:
+                raise RuntimeError("persistence drill prerequisites are incomplete")
+            candidate = select_reconciliation_candidate(database_url)
+            pre_side_effects = side_effect_counts(database_url, candidate)
+            if any(count < 1 for count in pre_side_effects.values()):
+                raise RuntimeError("bounded candidate lacks prior shadow/API state required for duplicate-side-effect proof")
+            run_id = f"backend:isolated-recovery:{uuid.uuid4()}"
+            service_report = post_json(
+                f"http://127.0.0.1:{service_ports['persistence']}/reconcile/outbox",
+                token,
+                {
+                    "mode": "apply",
+                    "runId": run_id,
+                    "reason": "backend-worker-uplift-isolated-empty-broker-recovery",
+                    "maxItems": RECONCILIATION_MAX_ITEMS,
+                    "minAgeSeconds": RECONCILIATION_MIN_AGE_SECONDS,
+                    "protectedConfirmation": RECONCILIATION_CONFIRMATION,
+                },
+            )
+            safe_service_report = {
+                key: service_report.get(key)
+                for key in (
+                    "service",
+                    "mode",
+                    "status",
+                    "selectedCount",
+                    "replayedCount",
+                    "failedClosedCount",
+                    "skippedCount",
+                    "writesPerformed",
+                    "dryRun",
+                    "productionVisibilityEnabled",
+                    "legacyRuntimeRequired",
+                    "protectedApplyRequired",
+                    "errors",
+                    "metrics",
+                )
+            }
+            report["reconciliation"] = {
+                "run_id": run_id,
+                "source": reconciliation_candidate_evidence(candidate),
+                "pre_side_effect_counts": pre_side_effects,
+                "service_report": safe_service_report,
+            }
+            if (
+                service_report.get("status") != "applied"
+                or service_report.get("selectedCount") != 1
+                or service_report.get("replayedCount") != 1
+                or service_report.get("failedClosedCount") != 0
+                or service_report.get("productionVisibilityEnabled") is not False
+                or service_report.get("legacyRuntimeRequired") is not False
+                or service_report.get("errors") not in ([], None)
+            ):
+                raise RuntimeError("service-owned persistence reconciliation did not replay exactly one safe candidate")
+
+            publication_queue = str(runtime_services["publication"]["main_queue"])
+            publication_after = wait_for_queue_drain(
+                management_port=ports["management"],
+                admin_username=admin_username,
+                admin_password=admin_password,
+                vhost=str(definition["vhost"]),
+                queue=publication_queue,
+            )
+            post_side_effects = side_effect_counts(database_url, candidate)
+            post_audit_count = reconciliation_audit_count(database_url, candidate["outbox_id"])
+            report["reconciliation"]["post_side_effect_counts"] = post_side_effects
+            report["reconciliation"]["post_reconciliation_audit_count"] = post_audit_count
+            report["reconciliation"]["duplicate_domain_or_api_side_effects"] = (
+                post_side_effects != pre_side_effects
+            )
+
+            main_after: dict[str, Any] = {}
+            dlq_after: dict[str, Any] = {}
+            for stage in CANDIDATE_CONSUMER_STAGES:
+                main_after[stage] = queue_snapshot(
+                    management_port=ports["management"],
+                    admin_username=admin_username,
+                    admin_password=admin_password,
+                    vhost=str(definition["vhost"]),
+                    queue=str(runtime_services[stage]["main_queue"]),
+                )
+                dlq_after[stage] = queue_snapshot(
+                    management_port=ports["management"],
+                    admin_username=admin_username,
+                    admin_password=admin_password,
+                    vhost=str(definition["vhost"]),
+                    queue=str(runtime_services[stage]["dlq"]),
+                )
+            report["runtime"]["main_queues_after"] = main_after
+            report["runtime"]["dlqs_after"] = dlq_after
+            report["runtime"]["publication_replay_drain"] = publication_after
+            if publication_after.get("messages") != 0 or publication_after.get("acked", 0) < 1:
+                raise RuntimeError("publication replay did not drain and acknowledge on the isolated broker")
+            if any(snapshot["consumers"] != 1 or snapshot["messages"] != 0 for snapshot in main_after.values()):
+                raise RuntimeError("isolated exact-candidate consumers were not restored with drained queues")
+            if any(snapshot["messages"] != 0 for snapshot in dlq_after.values()):
+                raise RuntimeError("isolated recovery produced DLQ messages")
+            if post_side_effects != pre_side_effects:
+                raise RuntimeError("isolated recovery produced a duplicate domain or shadow API side effect")
+            if post_audit_count != int(candidate["audit_count"]) + 1:
+                raise RuntimeError("authoritative persistence outbox did not record exactly one recovery audit")
+
+        except Exception as exc:
+            report["error"] = exc.__class__.__name__
+            report["detail"] = str(exc)[-500:]
+        finally:
+            for container_name in reversed(candidate_containers):
+                remove_container(container_name)
+            remove_container(broker_container)
+
+    live_broker_after = live_broker_snapshot(args.container_name)
+    report["live_broker_after"] = live_broker_after
+    report["guardrails"]["live_production_broker_unchanged"] = live_broker_after == live_broker_before
+    duration = round(time.monotonic() - started, 3)
+    report["finished_at_utc"] = utc_now()
+    report["duration_seconds"] = duration
+    if (
+        "error" not in report
+        and live_broker_after == live_broker_before
+        and duration <= RECOVERY_TARGETS["current_candidate_reconciliation_drill_rto_seconds"]
+    ):
+        report["status"] = "healthy"
+    write_json(args.state_dir / STATUS_FILES["current_candidate_reconciliation_drill"], report)
+    return report
+
+
 def action_stopped_volume_restore_drill(args: argparse.Namespace) -> dict[str, Any]:
     ensure_state_dir(args.state_dir)
     started = time.monotonic()
@@ -438,7 +1167,7 @@ def action_stopped_volume_restore_drill(args: argparse.Namespace) -> dict[str, A
         original_data = temp_dir / "original-data"
         restored_data = temp_dir / "restored-data"
         try:
-            first_port = start_drill_container(
+            first_ports = start_drill_container(
                 image=args.image,
                 container_name=first_container,
                 hostname=hostname,
@@ -449,7 +1178,7 @@ def action_stopped_volume_restore_drill(args: argparse.Namespace) -> dict[str, A
                 args,
                 env_path=env_path,
                 credentials_path=credentials_path,
-                management_port=first_port,
+                management_port=first_ports["management"],
                 actions=("bootstrap", "check", "permissions"),
             )
             reports.extend(bootstrap_reports)
@@ -459,7 +1188,7 @@ def action_stopped_volume_restore_drill(args: argparse.Namespace) -> dict[str, A
             if ok:
                 shutil.copytree(original_data, restored_data, symlinks=True)
                 chown_rabbitmq_data(restored_data)
-                second_port = start_drill_container(
+                second_ports = start_drill_container(
                     image=args.image,
                     container_name=second_container,
                     hostname=hostname,
@@ -470,7 +1199,7 @@ def action_stopped_volume_restore_drill(args: argparse.Namespace) -> dict[str, A
                     args,
                     env_path=env_path,
                     credentials_path=credentials_path,
-                    management_port=second_port,
+                    management_port=second_ports["management"],
                     actions=("check", "permissions"),
                 )
                 reports.extend(restored_reports)
@@ -527,6 +1256,9 @@ def action_status(args: argparse.Namespace) -> dict[str, Any]:
         "generated_at_utc": utc_now(),
         "definition_export": read_json(args.state_dir / STATUS_FILES["definition_export"]),
         "clean_rebuild_drill": read_json(args.state_dir / STATUS_FILES["clean_rebuild_drill"]),
+        "current_candidate_reconciliation_drill": read_json(
+            args.state_dir / STATUS_FILES["current_candidate_reconciliation_drill"]
+        ),
         "stopped_volume_restore_drill": read_json(args.state_dir / STATUS_FILES["stopped_volume_restore_drill"]),
         "scheduled_check": read_json(args.state_dir / STATUS_FILES["scheduled_check"]),
         "sanitized_definitions_path": str(args.state_dir / SANITIZED_DEFINITIONS),
@@ -540,7 +1272,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "action",
-        choices=("status", "export-definitions", "clean-rebuild-drill", "stopped-volume-restore-drill", "scheduled-check"),
+        choices=(
+            "status",
+            "export-definitions",
+            "clean-rebuild-drill",
+            "current-candidate-reconciliation-drill",
+            "stopped-volume-restore-drill",
+            "scheduled-check",
+        ),
     )
     parser.add_argument("--container-name", default=DEFAULT_CONTAINER)
     parser.add_argument("--image", default=DEFAULT_IMAGE)
@@ -549,6 +1288,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--definition", type=Path, default=DEFAULT_TOPOLOGY_DEFINITION)
     parser.add_argument("--topology-script", type=Path, default=DEFAULT_TOPOLOGY_SCRIPT)
     parser.add_argument("--state-dir", type=Path, default=DEFAULT_STATE_DIR)
+    parser.add_argument("--runtime-manifest", type=Path, default=DEFAULT_RUNTIME_MANIFEST)
+    parser.add_argument("--runtime-compose", type=Path, default=DEFAULT_RUNTIME_COMPOSE)
     parser.add_argument("--timeout-seconds", type=int, default=120)
     return parser.parse_args(argv)
 
@@ -559,6 +1300,7 @@ def main(argv: list[str] | None = None) -> int:
         "status": action_status,
         "export-definitions": export_definitions,
         "clean-rebuild-drill": action_clean_rebuild_drill,
+        "current-candidate-reconciliation-drill": action_current_candidate_reconciliation_drill,
         "stopped-volume-restore-drill": action_stopped_volume_restore_drill,
         "scheduled-check": action_scheduled_check,
     }

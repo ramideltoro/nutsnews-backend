@@ -83,6 +83,7 @@ class RabbitMQRecoveryTests(unittest.TestCase):
             status = recovery.action_status(args)
         self.assertEqual(status["definition_export"]["status"], "not_configured")
         self.assertEqual(status["clean_rebuild_drill"]["status"], "not_configured")
+        self.assertEqual(status["current_candidate_reconciliation_drill"]["status"], "not_configured")
         self.assertEqual(status["stopped_volume_restore_drill"]["status"], "not_configured")
         self.assertIn("live /var/lib/nutsnews/rabbitmq", status["message_store_policy"])
 
@@ -93,9 +94,125 @@ class RabbitMQRecoveryTests(unittest.TestCase):
         self.assertNotIn('f"RABBITMQ_DEFAULT_PASS=', start_block)
         self.assertNotIn('f"RABBITMQ_ERLANG_COOKIE=', start_block)
 
+    def test_candidate_environment_is_shadow_only_and_value_free(self):
+        definition = {
+            "vhost": "nutsnews-worker-uplift",
+            "users": [
+                {
+                    "id": "persistence_consumer",
+                    "stage": "persistence",
+                    "username_variable": "RABBITMQ_PERSISTENCE_CONSUMER_USERNAME",
+                    "password_variable": "RABBITMQ_PERSISTENCE_CONSUMER_PASSWORD",
+                }
+            ],
+        }
+        credentials = {
+            "RABBITMQ_PERSISTENCE_CONSUMER_USERNAME": "throwaway-user",
+            "RABBITMQ_PERSISTENCE_CONSUMER_PASSWORD": "throwaway-password",
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source.env"
+            destination = root / "candidate.env"
+            source.write_text(
+                "\n".join(
+                    [
+                        "NUTSNEWS_PERSISTENCE_DATABASE_URL=postgresql://worker:database-secret@127.0.0.1/shadow",
+                        "NUTSNEWS_PERSISTENCE_RABBITMQ_URL=amqp://live:live-secret@127.0.0.1/live",
+                        "NUTSNEWS_PERSISTENCE_RECONCILIATION_TOKEN=reconciliation-secret",
+                        "NUTSNEWS_PERSISTENCE_HTTP_PORT=18087",
+                        "NUTSNEWS_PERSISTENCE_SHADOW_MODE=true",
+                        "NUTSNEWS_PERSISTENCE_PRODUCTION_WRITES_ENABLED=false",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            evidence = recovery.write_candidate_environment(
+                source_path=source,
+                destination_path=destination,
+                definition=definition,
+                credentials=credentials,
+                stage="persistence",
+                amqp_port="25672",
+                http_port=28087,
+            )
+            candidate = recovery.parse_env(destination)
+        self.assertIn("@127.0.0.1:25672/", candidate["NUTSNEWS_PERSISTENCE_RABBITMQ_URL"])
+        self.assertEqual(candidate["NUTSNEWS_PERSISTENCE_HTTP_PORT"], "28087")
+        self.assertEqual(candidate["NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_APPLY_ENABLED"], "true")
+        evidence_text = json.dumps(evidence)
+        for secret in ("database-secret", "live-secret", "reconciliation-secret", "throwaway-password"):
+            self.assertNotIn(secret, evidence_text)
+        self.assertFalse(evidence["production_writes_enabled"])
+
+    def test_candidate_environment_rejects_production_writes(self):
+        definition = {
+            "vhost": "nutsnews-worker-uplift",
+            "users": [
+                {
+                    "id": "persistence_consumer",
+                    "stage": "persistence",
+                    "username_variable": "RABBITMQ_PERSISTENCE_CONSUMER_USERNAME",
+                    "password_variable": "RABBITMQ_PERSISTENCE_CONSUMER_PASSWORD",
+                }
+            ],
+        }
+        credentials = {
+            "RABBITMQ_PERSISTENCE_CONSUMER_USERNAME": "throwaway-user",
+            "RABBITMQ_PERSISTENCE_CONSUMER_PASSWORD": "throwaway-password",
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "source.env"
+            source.write_text(
+                "\n".join(
+                    [
+                        "NUTSNEWS_PERSISTENCE_DATABASE_URL=postgresql://shadow",
+                        "NUTSNEWS_PERSISTENCE_SHADOW_MODE=true",
+                        "NUTSNEWS_PERSISTENCE_PRODUCTION_WRITES_ENABLED=true",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "enables production writes"):
+                recovery.write_candidate_environment(
+                    source_path=source,
+                    destination_path=Path(temp) / "candidate.env",
+                    definition=definition,
+                    credentials=credentials,
+                    stage="persistence",
+                    amqp_port="25672",
+                    http_port=28087,
+                )
+
+    def test_reconciliation_candidate_evidence_hashes_identifiers(self):
+        candidate = {
+            "outbox_id": "42",
+            "entity_id": "private-article",
+            "idempotency_key": "private-idempotency",
+            "pipeline_run_id": "private-pipeline",
+            "created_at": "2026-07-30 12:00:00+00",
+            "audit_count": "2",
+        }
+        evidence = recovery.reconciliation_candidate_evidence(candidate)
+        text = json.dumps(evidence)
+        self.assertNotIn("private-article", text)
+        self.assertNotIn("private-idempotency", text)
+        self.assertNotIn("private-pipeline", text)
+        self.assertEqual(evidence["primary_key_range"], {"minimum": "42", "maximum": "42"})
+        self.assertEqual(evidence["limit"], 1)
+
     def test_recovery_workflow_has_fixed_actions_and_safe_artifacts(self):
         workflow = RECOVERY_WORKFLOW.read_text(encoding="utf-8")
-        for action in ("status", "export-definitions", "clean-rebuild-drill", "stopped-volume-restore-drill", "scheduled-check"):
+        for action in (
+            "status",
+            "export-definitions",
+            "clean-rebuild-drill",
+            "current-candidate-reconciliation-drill",
+            "stopped-volume-restore-drill",
+            "scheduled-check",
+        ):
             self.assertIn(f"- {action}", workflow)
         self.assertIn("confirm_target", workflow)
         self.assertIn("backend.nutsnews.com", workflow)
@@ -104,6 +221,7 @@ class RabbitMQRecoveryTests(unittest.TestCase):
         self.assertIn("sudo -n /usr/local/sbin/nutsnews-rabbitmq-recovery '$ACTION'", workflow)
         self.assertIn("backend-rabbitmq-recovery-report.json", workflow)
         self.assertIn("backend-rabbitmq-recovery-status.json", workflow)
+        self.assertIn("backend-worker-runtime-post-recovery-status.json", workflow)
         self.assertNotIn("definitions.sanitized.json", workflow)
         self.assertNotIn("definitions.raw.json", workflow)
         for forbidden in ("remote_command", "shell_command", "script_body", "ansible_tags"):

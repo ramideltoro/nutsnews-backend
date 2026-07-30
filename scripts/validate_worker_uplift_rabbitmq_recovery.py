@@ -77,6 +77,12 @@ def main() -> int:
         "definitions.sanitized.json",
         "last-definition-export.json",
         "clean-rebuild-drill",
+        "current-candidate-reconciliation-drill",
+        "CANDIDATE_CONSUMER_STAGES",
+        "RECONCILIATION_MAX_ITEMS = 1",
+        "live_production_broker_unchanged",
+        "duplicate_domain_or_api_side_effects",
+        "throwaway-loopback-broker",
         "stopped-volume-restore-drill",
         "scheduled-check",
         "same_node_name_required",
@@ -153,7 +159,14 @@ def main() -> int:
             if required not in text:
                 errors.append(f"{label} missing RabbitMQ recovery signal: {required}")
 
-    for action in ("status", "export-definitions", "clean-rebuild-drill", "stopped-volume-restore-drill", "scheduled-check"):
+    for action in (
+        "status",
+        "export-definitions",
+        "clean-rebuild-drill",
+        "current-candidate-reconciliation-drill",
+        "stopped-volume-restore-drill",
+        "scheduled-check",
+    ):
         if f"- {action}" not in workflow:
             errors.append(f"RabbitMQ recovery workflow missing fixed action option: {action}")
     for required in (
@@ -165,6 +178,7 @@ def main() -> int:
         "sudo -n /usr/local/sbin/nutsnews-rabbitmq-recovery '$ACTION'",
         "backend-rabbitmq-recovery-report.json",
         "backend-rabbitmq-recovery-status.json",
+        "backend-worker-runtime-post-recovery-status.json",
     ):
         if required not in workflow:
             errors.append(f"RabbitMQ recovery workflow missing guardrail: {required}")

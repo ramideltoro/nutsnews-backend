@@ -12,6 +12,7 @@ on:
           - status
           - export-definitions
           - clean-rebuild-drill
+          - current-candidate-reconciliation-drill
           - stopped-volume-restore-drill
           - scheduled-check
       confirm_target:
@@ -47,7 +48,7 @@ jobs:
           set -euo pipefail
 
           case "$ACTION" in
-            status|export-definitions|clean-rebuild-drill|stopped-volume-restore-drill|scheduled-check) ;;
+            status|export-definitions|clean-rebuild-drill|current-candidate-reconciliation-drill|stopped-volume-restore-drill|scheduled-check) ;;
             *)
               echo "Unsupported RabbitMQ recovery action: $ACTION" >&2
               exit 1
@@ -117,6 +118,12 @@ jobs:
               | tee "$RUNNER_TEMP/backend-rabbitmq-recovery-status.json"
           fi
 
+          if [[ "$ACTION" == "current-candidate-reconciliation-drill" ]]; then
+            "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+              "sudo -n /usr/local/sbin/nutsnews-worker-runtime status --manifest /etc/nutsnews-worker-uplift/services.json --compose /opt/nutsnews-worker-uplift/compose.yml --project nutsnews-worker-uplift --dry-run --report /var/lib/nutsnews/worker-uplift-runtime/reports/last-status.json" \
+              | tee "$RUNNER_TEMP/backend-worker-runtime-post-recovery-status.json"
+          fi
+
       - name: Upload RabbitMQ recovery report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
@@ -125,4 +132,5 @@ jobs:
           path: |
             ${{ runner.temp }}/backend-rabbitmq-recovery-report.json
             ${{ runner.temp }}/backend-rabbitmq-recovery-status.json
+            ${{ runner.temp }}/backend-worker-runtime-post-recovery-status.json
           if-no-files-found: ignore

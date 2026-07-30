@@ -245,6 +245,11 @@ class RabbitMQRecoveryTests(unittest.TestCase):
             "if: inputs.run_mode == 'apply' && inputs.deployment_scope == 'full-baseline'",
             workflow,
         )
+        ansible_step = workflow.split("- name: Run backend Ansible baseline", 1)[1].split(
+            "- name: Run deployment safety postcheck",
+            1,
+        )[0]
+        self.assertIn("DEPLOYMENT_SCOPE: ${{ inputs.deployment_scope }}", ansible_step)
         self.assertIn("worker_uplift_rabbitmq_recovery_helper", bootstrap)
         helper_block = tasks.split("- name: Install RabbitMQ recovery helper", 1)[1].split("\n- name:", 1)[0]
         self.assertIn("worker_uplift_rabbitmq_recovery_helper", helper_block)

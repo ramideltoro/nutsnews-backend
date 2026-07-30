@@ -190,7 +190,14 @@ def validate() -> list[str]:
         operations_workflow,
         (
             "Backend Worker Runtime Operations",
+            "validate-dispatch:",
+            "read-only-runtime:",
+            "Read-only worker runtime evidence",
+            "protected-runtime:",
+            "Protected worker runtime operation",
             "environment: production-backend",
+            "Read-only actions require dry_run=true.",
+            "Protected action requires confirm_target to be exactly backend.nutsnews.com.",
             "- promote",
             "confirm_target",
             "backend.nutsnews.com",
@@ -199,6 +206,10 @@ def validate() -> list[str]:
         ),
         errors,
     )
+    if operations_workflow.count("environment: production-backend") != 1:
+        errors.append(
+            "worker runtime operations must use production-backend only for its protected job"
+        )
     for forbidden in ("remote_command", "command_input", "script_body", "GRAFANA_URL", "GRAFANA_SERVICE_ACCOUNT_TOKEN"):
         if forbidden in operations_workflow:
             errors.append(f"worker runtime operations workflow contains forbidden fragment: {forbidden}")

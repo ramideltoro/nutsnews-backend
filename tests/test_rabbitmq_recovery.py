@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -205,6 +206,38 @@ class RabbitMQRecoveryTests(unittest.TestCase):
         self.assertNotIn("private-pipeline", text)
         self.assertEqual(evidence["primary_key_range"], {"minimum": "42", "maximum": "42"})
         self.assertEqual(evidence["limit"], 1)
+
+    def test_consumer_registration_waits_for_all_expected_queues(self):
+        calls = 0
+
+        def snapshot(**kwargs):
+            nonlocal calls
+            cycle = calls // 2
+            calls += 1
+            return {
+                "queue": kwargs["queue"],
+                "consumers": 0 if cycle == 0 else 1,
+                "messages": 0,
+            }
+
+        with (
+            mock.patch.object(recovery, "queue_snapshot", side_effect=snapshot),
+            mock.patch.object(recovery.time, "sleep"),
+        ):
+            snapshots, ready = recovery.wait_for_expected_consumers(
+                management_port="15672",
+                admin_username="throwaway-admin",
+                admin_password="throwaway-password",
+                vhost="nutsnews-worker-uplift",
+                stage_queues={"fetcher": "fetch", "publication": "publication"},
+                timeout_seconds=1,
+            )
+        self.assertTrue(ready)
+        self.assertEqual(calls, 4)
+        self.assertEqual({stage: item["consumers"] for stage, item in snapshots.items()}, {
+            "fetcher": 1,
+            "publication": 1,
+        })
 
     def test_recovery_workflow_has_fixed_actions_and_safe_artifacts(self):
         workflow = RECOVERY_WORKFLOW.read_text(encoding="utf-8")

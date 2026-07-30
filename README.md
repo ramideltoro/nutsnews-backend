@@ -82,6 +82,7 @@ Use [runbooks/REDIS_VALKEY_DECISION.md](runbooks/REDIS_VALKEY_DECISION.md) befor
 Use [runbooks/SEARCH_SERVICE_DECISION.md](runbooks/SEARCH_SERVICE_DECISION.md) before adding a dedicated search service.
 Use [runbooks/WORKER_UPLIFT_RABBITMQ_CAPACITY_SECURITY.md](runbooks/WORKER_UPLIFT_RABBITMQ_CAPACITY_SECURITY.md) before adding RabbitMQ for the worker-uplift runtime.
 Use [runbooks/WORKER_UPLIFT_SECURITY_REVIEW.md](runbooks/WORKER_UPLIFT_SECURITY_REVIEW.md) to validate and refresh the non-mutating worker-uplift security review.
+Use [runbooks/WORKER_UPLIFT_PRODUCTION_READINESS_DECISION.md](runbooks/WORKER_UPLIFT_PRODUCTION_READINESS_DECISION.md) to interpret and refresh the non-mutating worker-uplift GO/NO-GO evidence.
 Use [runbooks/WORKER_UPLIFT_RABBITMQ_PROVISIONING.md](runbooks/WORKER_UPLIFT_RABBITMQ_PROVISIONING.md) before applying RabbitMQ Docker Compose provisioning.
 Use [runbooks/POSTGRES_REPLACEMENT_PLAN.md](runbooks/POSTGRES_REPLACEMENT_PLAN.md) before replacing Supabase or installing production PostgreSQL.
 Use [runbooks/SUPABASE_BACKEND_POSTGRES_PARITY.md](runbooks/SUPABASE_BACKEND_POSTGRES_PARITY.md) before changing the Supabase-to-backend PostgreSQL parity manifest.

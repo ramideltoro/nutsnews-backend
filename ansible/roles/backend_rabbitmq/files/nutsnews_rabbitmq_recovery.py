@@ -430,7 +430,10 @@ def psql_rows(database_url: str, query: str, timeout: int = 60) -> list[list[str
     except FileNotFoundError as exc:
         raise RuntimeError("psql is not installed on the backend host") from exc
     if completed.returncode != 0:
-        raise RuntimeError(f"PostgreSQL evidence query failed: {completed.stderr[-500:]}")
+        raise RuntimeError(
+            "PostgreSQL evidence query failed "
+            f"(returncode={completed.returncode}, stderr_sha256={sha256_bytes(completed.stderr.encode('utf-8'))})"
+        )
     return [line.split("\t") for line in completed.stdout.splitlines() if line]
 
 
@@ -675,7 +678,10 @@ def post_json(url: str, token: str, body: dict[str, Any]) -> dict[str, Any]:
             return data if isinstance(data, dict) else {}
     except error.HTTPError as exc:
         body_text = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"reconciliation endpoint returned HTTP {exc.code}: {body_text[-500:]}") from exc
+        raise RuntimeError(
+            f"reconciliation endpoint returned HTTP {exc.code} "
+            f"(body_sha256={sha256_bytes(body_text.encode('utf-8'))})"
+        ) from exc
 
 
 def select_reconciliation_candidate(database_url: str) -> dict[str, str]:

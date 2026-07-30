@@ -50,6 +50,11 @@ def main() -> int:
         "production_cutover_authorized",
         "legacy_ingestion_endpoints_invoked",
         "worker_uplift_parity_checks_failed",
+        "current_candidate_identity",
+        "immutable_packages",
+        "configuration_hashes",
+        "smoke_window_not_fresh",
+        "legacy_single_writer_not_confirmed",
     ):
         if required not in script:
             errors.append(f"report script missing required fragment: {required}")
@@ -59,6 +64,10 @@ def main() -> int:
         "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD",
         "nutsnews_primary_shadow",
         "backend-worker-uplift-parity-report",
+        "validate_worker_uplift_production_readiness.py",
+        "--readiness-decision",
+        "--runtime-manifest",
+        "--runtime-compose",
     ):
         if required not in workflow:
             errors.append(f"parity workflow missing required fragment: {required}")

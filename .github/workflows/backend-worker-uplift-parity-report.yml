@@ -43,6 +43,13 @@ jobs:
             *) echo "Unsupported mode: $MODE" >&2; exit 1 ;;
           esac
 
+      - name: Validate current candidate source hashes
+        if: inputs.mode == 'live-read-only'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/validate_worker_uplift_production_readiness.py
+
       - name: Run offline parity report
         if: inputs.mode == 'offline'
         shell: bash
@@ -149,13 +156,20 @@ jobs:
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             docs/worker-uplift-legacy-to-shadow-parity-report.json \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/docs/"
+          scp -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            docs/worker-uplift-production-readiness-decision.json \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/docs/"
           ssh -i "$HOME/.ssh/nutsnews_backend" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
-            "if sudo -n test -r /var/lib/nutsnews/worker-uplift-runtime/reports/last-smoke.json; then sudo -n cat /var/lib/nutsnews/worker-uplift-runtime/reports/last-smoke.json > '$remote_dir/last-smoke.json'; elif test -r /var/lib/nutsnews/worker-uplift-runtime/reports/last-smoke.json; then cat /var/lib/nutsnews/worker-uplift-runtime/reports/last-smoke.json > '$remote_dir/last-smoke.json'; else printf '{}\n' > '$remote_dir/last-smoke.json'; fi"
+            "if sudo -n test -r /var/lib/nutsnews/worker-uplift-runtime/reports/last-smoke.json; then sudo -n cat /var/lib/nutsnews/worker-uplift-runtime/reports/last-smoke.json > '$remote_dir/last-smoke.json'; elif test -r /var/lib/nutsnews/worker-uplift-runtime/reports/last-smoke.json; then cat /var/lib/nutsnews/worker-uplift-runtime/reports/last-smoke.json > '$remote_dir/last-smoke.json'; else printf '{}\n' > '$remote_dir/last-smoke.json'; fi; sudo -n cat /etc/nutsnews-worker-uplift/services.json > '$remote_dir/runtime-manifest.json'; sudo -n cat /opt/nutsnews-worker-uplift/compose.yml > '$remote_dir/runtime-compose.yml'"
           set +e
           ssh -i "$HOME/.ssh/nutsnews_backend" \
             -o BatchMode=yes \
@@ -163,7 +177,7 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
-            "cd '$remote_dir' && NUTSNEWS_WORKER_UPLIFT_PARITY_DB_URL='$db_url' python3 scripts/backend_worker_uplift_parity_report.py --manifest docs/worker-uplift-legacy-to-shadow-parity-report.json --smoke-report '$remote_dir/last-smoke.json' --enforce --output '$remote_dir/backend-worker-uplift-parity-report.json'"
+            "cd '$remote_dir' && GITHUB_SHA='$GITHUB_SHA' NUTSNEWS_WORKER_UPLIFT_PARITY_DB_URL='$db_url' python3 scripts/backend_worker_uplift_parity_report.py --manifest docs/worker-uplift-legacy-to-shadow-parity-report.json --readiness-decision docs/worker-uplift-production-readiness-decision.json --smoke-report '$remote_dir/last-smoke.json' --runtime-manifest '$remote_dir/runtime-manifest.json' --runtime-compose '$remote_dir/runtime-compose.yml' --enforce --output '$remote_dir/backend-worker-uplift-parity-report.json'"
           rc="$?"
           set -e
           scp -i "$HOME/.ssh/nutsnews_backend" \

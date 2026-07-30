@@ -66,18 +66,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  worker-runtime:
-    name: Worker runtime operation
+  validate-dispatch:
+    name: Validate worker runtime dispatch
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    environment: production-backend
+    timeout-minutes: 5
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-        with:
-          persist-credentials: false
-
       - name: Validate dispatch inputs
         shell: bash
         env:
@@ -85,6 +79,8 @@ jobs:
           SERVICE_NAME: ${{ inputs.service_name }}
           REPLICAS: ${{ inputs.replicas }}
           TAIL: ${{ inputs.tail }}
+          QUEUE_KIND: ${{ inputs.queue_kind }}
+          DRY_RUN: ${{ inputs.dry_run }}
           CONFIRM_TARGET: ${{ inputs.confirm_target }}
         run: |
           set -euo pipefail
@@ -107,22 +103,74 @@ jobs:
           esac
 
           case "$ACTION" in
+            check|status|logs|queue-inspect|dlq-inspect)
+              if [[ "$DRY_RUN" != "true" ]]; then
+                echo "Read-only actions require dry_run=true." >&2
+                exit 1
+              fi
+              if [[ -n "$CONFIRM_TARGET" ]]; then
+                echo "Read-only actions reject confirm_target." >&2
+                exit 1
+              fi
+              ;;
             deploy|promote|restart|scale|rollback|dlq-replay|drain|reconciliation|smoke)
               if [[ "$CONFIRM_TARGET" != "backend.nutsnews.com" ]]; then
-                echo "Mutating action requires confirm_target to be exactly backend.nutsnews.com." >&2
+                echo "Protected action requires confirm_target to be exactly backend.nutsnews.com." >&2
                 exit 1
               fi
               ;;
           esac
 
-          if [[ -n "$REPLICAS" && ! "$REPLICAS" =~ ^[0-9]+$ ]]; then
-            echo "replicas must be an integer when provided." >&2
+          if [[ "$ACTION" == "scale" ]]; then
+            if [[ ! "$REPLICAS" =~ ^[0-9]+$ ]]; then
+              echo "scale requires replicas to be an integer." >&2
+              exit 1
+            fi
+          elif [[ -n "$REPLICAS" ]]; then
+            echo "replicas is accepted only for scale." >&2
             exit 1
           fi
+
           if [[ ! "$TAIL" =~ ^[0-9]+$ || "$TAIL" -gt 1000 ]]; then
             echo "tail must be an integer between 0 and 1000." >&2
             exit 1
           fi
+
+          case "$QUEUE_KIND" in
+            main|retry|dlq) ;;
+            *)
+              echo "queue_kind must be main, retry, or dlq." >&2
+              exit 1
+              ;;
+          esac
+
+  read-only-runtime:
+    name: Read-only worker runtime evidence
+    needs: validate-dispatch
+    if: ${{ contains(fromJSON('["check","status","logs","queue-inspect","dlq-inspect"]'), inputs.action) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Enforce read-only route
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+        run: |
+          set -euo pipefail
+
+          case "$ACTION" in
+            check|status|logs|queue-inspect|dlq-inspect) ;;
+            *)
+              echo "Protected action cannot enter the read-only job." >&2
+              exit 1
+              ;;
+          esac
 
       - name: Prepare SSH material
         shell: bash
@@ -145,11 +193,8 @@ jobs:
         env:
           ACTION: ${{ inputs.action }}
           SERVICE_NAME: ${{ inputs.service_name }}
-          REPLICAS: ${{ inputs.replicas }}
           TAIL: ${{ inputs.tail }}
           QUEUE_KIND: ${{ inputs.queue_kind }}
-          DRY_RUN: ${{ inputs.dry_run }}
-          CONFIRM_TARGET: ${{ inputs.confirm_target }}
           NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
           NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
         run: |
@@ -171,14 +216,115 @@ jobs:
           if [[ -n "$SERVICE_NAME" ]]; then
             remote_args+=(--service-name "$SERVICE_NAME")
           fi
+          remote_args+=(--dry-run)
+
+          printf '%q ' "${remote_args[@]}" > "$RUNNER_TEMP/worker-runtime-command.txt"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=20 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "$(cat "$RUNNER_TEMP/worker-runtime-command.txt")" \
+            | tee "$RUNNER_TEMP/backend-worker-runtime-report.json"
+
+      - name: Upload worker runtime report
+        if: always()
+        uses: actions/upload-artifact@1eb3cb2b3e0f29609092a73eb033bb759a334595  # v5.0.0
+        with:
+          name: backend-worker-runtime-report
+          path: ${{ runner.temp }}/backend-worker-runtime-report.json
+          if-no-files-found: warn
+
+  protected-runtime:
+    name: Protected worker runtime operation
+    needs: validate-dispatch
+    if: ${{ contains(fromJSON('["deploy","promote","restart","scale","rollback","dlq-replay","drain","reconciliation","smoke"]'), inputs.action) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Enforce protected route and confirmation
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          CONFIRM_TARGET: ${{ inputs.confirm_target }}
+        run: |
+          set -euo pipefail
+
+          case "$ACTION" in
+            deploy|promote|restart|scale|rollback|dlq-replay|drain|reconciliation|smoke) ;;
+            *)
+              echo "Read-only action cannot enter the protected job." >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ "$CONFIRM_TARGET" != "backend.nutsnews.com" ]]; then
+            echo "Protected action requires confirm_target to be exactly backend.nutsnews.com." >&2
+            exit 1
+          fi
+
+      - name: Prepare SSH material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Run fixed protected worker runtime operation
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          SERVICE_NAME: ${{ inputs.service_name }}
+          REPLICAS: ${{ inputs.replicas }}
+          TAIL: ${{ inputs.tail }}
+          QUEUE_KIND: ${{ inputs.queue_kind }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          report="/var/lib/nutsnews/worker-uplift-runtime/reports/last-${ACTION}.json"
+          remote_args=(
+            sudo -n /usr/local/sbin/nutsnews-worker-runtime "$ACTION"
+            --manifest /etc/nutsnews-worker-uplift/services.json
+            --compose /opt/nutsnews-worker-uplift/compose.yml
+            --project nutsnews-worker-uplift
+            --queue-kind "$QUEUE_KIND"
+            --tail "$TAIL"
+            --fixture-host "$NUTSNEWS_BACKEND_HOST"
+            --report "$report"
+            --confirm-action
+          )
+
+          if [[ -n "$SERVICE_NAME" ]]; then
+            remote_args+=(--service-name "$SERVICE_NAME")
+          fi
           if [[ -n "$REPLICAS" ]]; then
             remote_args+=(--replicas "$REPLICAS")
           fi
           if [[ "$DRY_RUN" == "true" ]]; then
             remote_args+=(--dry-run)
-          fi
-          if [[ "$CONFIRM_TARGET" == "backend.nutsnews.com" ]]; then
-            remote_args+=(--confirm-action)
           fi
 
           printf '%q ' "${remote_args[@]}" > "$RUNNER_TEMP/worker-runtime-command.txt"

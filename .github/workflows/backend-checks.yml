@@ -392,6 +392,10 @@ jobs:
         shell: bash
         run: python3 scripts/validate_worker_uplift_service_runtime.py
 
+      - name: Validate backend worker runtime workflow boundaries
+        shell: bash
+        run: python3 scripts/validate_backend_worker_runtime_operations_workflow.py
+
       - name: Validate worker uplift non-AI shadow deployment
         shell: bash
         run: python3 scripts/validate_worker_uplift_non_ai_shadow_deployment.py

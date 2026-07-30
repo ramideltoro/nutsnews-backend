@@ -4,7 +4,8 @@ Tracking issue: `ramideltoro/nutsnews-worker#125`
 
 This runbook interprets
 `docs/worker-uplift-production-readiness-decision.json`. The current decision
-is **NO-GO**. It is a non-mutating readiness record, not cutover authority.
+is **NO-GO**. It is a non-mutating decision about whether guarded
+cutover-control implementation may begin. It is not cutover authority.
 
 Legacy `ramideltoro/nutsnews-worker` remains the production ingestion owner.
 All uplift services remain shadow-only. `production_writes_enabled` and
@@ -44,6 +45,25 @@ The decision may be reconsidered only after every recorded blocker is closed
 with current immutable evidence. Reconsideration is a new review; a passing
 validator does not automatically upgrade NO-GO to GO.
 
+## Corrected dependency graph
+
+The gate order is:
+
+1. `#125` evaluates whether current evidence is sufficient to begin guarded
+   control implementation.
+2. A named GO on `#125` may authorize `#150` implementation only.
+3. `#150` must complete before `#126`.
+4. `#126` implements and rehearses reversible controls without cutting over.
+5. `#166` is the final non-mutating cutover-execution readiness gate. It must
+   verify the implemented controls, current evidence, rollback rehearsal,
+   named approver, and exact production candidate.
+6. Only a GO on `#166` may unblock the separately protected execution in
+   `#127`.
+
+Missing implementation of `#150` or `#126` is deliberately not a blocker to
+`#125`, because those issues follow it. A `#125` GO does not authorize `#126`
+apply mode, `#127`, production writes, or an ingestion-owner change.
+
 ## Current disposition
 
 | Area | Status | Evidence or blocker |
@@ -54,14 +74,16 @@ validator does not automatically upgrade NO-GO to GO.
 | Zero-consumer recovery/drain | Pass | Runs `30404840645`, `30405237965`, and `30405294851` |
 | Grafana metrics/logs/alerts | Pass | Infra apply plus protected metrics/logs artifacts are pinned |
 | Operations guide | Pass | Docs merge `77eeb52078878c2f95989db3107b814e54c52222`; it denies cutover authority |
-| Runtime identity inventory | Block | Dedicated inventory uses superseded queue/permission names |
-| Parity | Block | Run `30203441579` used eight superseded image digests |
-| Empty-broker recovery | Block | Run `30215207093` predates the current topology hash |
-| Dependency outage/backup proof | Block | Current candidate-tied PostgreSQL/API/Qwen and restore artifacts are missing |
-| Admin deployed proof | Block | Source and access control are present; current authenticated production projection proof is missing |
-| Security residuals | Block | `SEC-124-002` through `SEC-124-009` lack named #125 disposition |
-| Cloudflare failover | Block | Deployed and source config omit `FAILOVER_ANALYTICS`; `nutsnews-infra#440` owns the independent fix/decision |
-| Cutover/rollback controls | Block | Watermark, rollback deadline, observation window, and owner/write controls are future #150/#126/#127 work |
+| Runtime identity inventory | Block | Dedicated inventory uses superseded queue/permission names; `#160` owns reconciliation |
+| Parity | Block | Run `30203441579` used eight superseded image digests; `#158` owns the current-candidate rerun |
+| Empty-broker recovery | Block | Run `30215207093` predates the current topology hash; `#159` owns the current-topology drill |
+| Dependency outages | Block | Current-candidate PostgreSQL/API/Qwen artifacts are missing; `#161` owns the protected drills |
+| Backup/isolated restore | Block | Current candidate-tied backup and isolated restore artifacts are missing; `#162` owns the evidence and links infra implementation findings |
+| Protected runtime status | Block | Read-only run `30513933114` is waiting for `production-backend` approval and artifact inspection |
+| Admin deployed proof | Block | Source and access control are present; `#163` owns current authenticated production projection proof |
+| Security residuals | Block | `SEC-124-002` through `SEC-124-009` lack named disposition; `#164` owns the record |
+| Cloudflare failover | Block | Deployed and source config omit `FAILOVER_ANALYTICS`; worker tracker `#157` owns the infra fix/decision |
+| Control implementation plan | Block | Exact planned watermark, rollback deadline, observation window, thresholds, and named owners are missing; `#165` owns the non-mutating plan |
 | Named readiness approval | Block | No named GO approver exists |
 
 ## Action classes
@@ -131,10 +153,14 @@ workflow. In particular:
 - `clean-rebuild-drill` requires `Backend RabbitMQ Recovery`, the exact
   confirmation target, and `production-backend` approval;
 - Cloudflare analytics remediation or disposition belongs to
-  `ramideltoro/nutsnews-infra#440`;
-- admin deployed proof belongs to `ramideltoro/nutsnews`;
-- future owner/write/watermark/rollback controls belong to the ordered
-  tracking issues, not #125.
+  `ramideltoro/nutsnews-worker#157`, implemented in `nutsnews-infra`;
+- current parity, empty-broker, identity, and outage evidence belongs to
+  `#158` through `#161`;
+- backup/restore and admin proof belongs to `#162` and `#163`;
+- named security dispositions and the control implementation plan belong to
+  `#164` and `#165`;
+- implementation of scheduling and reversible owner/write controls belongs
+  to downstream issues `#150` and `#126`, not #125.
 
 ## Cloudflare failover rule
 
@@ -147,7 +173,8 @@ The current read-only API evidence proves:
 - current infra source also omits the binding and has no analytics writer.
 
 Documentation is not proof of a deployed binding. Readiness remains blocked
-until `nutsnews-infra#440` attaches value-free protected deployment/query
+until `ramideltoro/nutsnews-worker#157` attaches value-free protected
+deployment/query
 evidence, or a named owner explicitly decides with rationale that Analytics is
 unnecessary. This runbook does not make that decision. Analytics must remain
 best-effort and must never become a dependency of DNS failover.
@@ -165,8 +192,15 @@ Before any later GO:
    Cloudflare artifacts.
 5. Reconcile the identity inventory with the authoritative topology.
 6. Record remediation or a named bounded acceptance for every #124 residual.
-7. Define and separately test the future watermark, synchronization boundary,
-   rollback triggers/deadline, observation window, and one-writer controls.
-8. Name the final approver and record the explicit decision.
+7. Define the exact planned watermark, synchronization boundary, rollback
+   deadline, observation window, thresholds, and named ownership roster in
+   `#165`; do not require the downstream controls to exist yet.
+8. Allow read-only run `30513933114` to complete only through normal
+   `production-backend` approval, inspect its artifact, and incorporate the
+   result.
+9. Name the current authorized approver and record an explicit #125 decision.
+   GO may authorize beginning `#150` only.
+10. After `#150` and `#126`, require `#166` to revalidate the exact production
+    candidate and rollback rehearsal before `#127`.
 
-Until then, keep #125 open and do not begin cutover.
+Until then, keep #125 open and do not begin #150 or any cutover work.

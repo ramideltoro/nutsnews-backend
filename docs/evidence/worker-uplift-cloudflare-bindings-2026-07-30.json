@@ -134,7 +134,7 @@
     ],
     "present": false,
     "disposition": "unresolved_blocker",
-    "blocker_issue": "ramideltoro/nutsnews-infra#440",
+    "blocker_issue": "ramideltoro/nutsnews-worker#157",
     "named_owner_decision_that_binding_is_unnecessary": null
   }
 }

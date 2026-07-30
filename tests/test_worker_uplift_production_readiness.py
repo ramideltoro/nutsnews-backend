@@ -78,6 +78,42 @@ class WorkerUpliftProductionReadinessTests(unittest.TestCase):
 
         self.assertTrue(any("blocker scope mismatch" in error for error in errors))
 
+    def test_blocker_must_link_canonical_worker_tracking_issue(self):
+        decision = copy.deepcopy(self.decision)
+        decision["blockers"][0]["issue"] = "ramideltoro/nutsnews-infra#440"
+
+        errors = self.validate(decision=decision)
+
+        self.assertTrue(
+            any("must link canonical tracking issue" in error for error in errors)
+        )
+
+    def test_downstream_control_implementation_cannot_block_issue_125(self):
+        decision = copy.deepcopy(self.decision)
+        decision["decision_authority"][
+            "missing_downstream_control_implementation_blocks_this_gate"
+        ] = True
+        decision["runtime_and_recovery_evidence"]["rollback_limits"][
+            "downstream_control_implementation_blocks_issue_125"
+        ] = True
+
+        errors = self.validate(decision=decision)
+
+        self.assertIn("missing #150/#126 implementation must not block #125", errors)
+        self.assertIn("downstream control implementation must not block #125", errors)
+
+    def test_corrected_dependency_order_is_required(self):
+        decision = copy.deepcopy(self.decision)
+        decision["dependency_graph"]["ordered_control_and_execution_gates"][1][
+            "depends_on"
+        ] = ["ramideltoro/nutsnews-worker#125"]
+
+        errors = self.validate(decision=decision)
+
+        self.assertTrue(
+            any("#125 -> #150 -> #126 -> #166 -> #127" in error for error in errors)
+        )
+
     def test_protected_approval_bypass_is_rejected(self):
         decision = copy.deepcopy(self.decision)
         decision["runtime_and_recovery_evidence"]["fresh_status_dispatch"][
@@ -87,6 +123,19 @@ class WorkerUpliftProductionReadinessTests(unittest.TestCase):
         errors = self.validate(decision=decision)
 
         self.assertTrue(any("must not be bypassed" in error for error in errors))
+
+    def test_completed_protected_status_requires_immutable_artifact(self):
+        decision = copy.deepcopy(self.decision)
+        decision["runtime_and_recovery_evidence"]["fresh_status_dispatch"][
+            "status"
+        ] = "pass"
+
+        errors = self.validate(decision=decision)
+
+        self.assertTrue(any("must record an artifact id" in error for error in errors))
+        self.assertTrue(
+            any("must record an artifact digest" in error for error in errors)
+        )
 
     def test_source_hash_drift_is_rejected(self):
         decision = copy.deepcopy(self.decision)

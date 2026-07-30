@@ -58,26 +58,56 @@ READINESS_ITEMS = {
     "soak_capacity_cost",
     "consumer_failure_recovery",
     "empty_broker_recovery",
-    "dependency_outages_backup_and_rollback",
+    "dependency_outages",
+    "backup_and_isolated_restore",
+    "current_protected_runtime_status",
     "grafana_alerts_logs_metrics",
     "admin_projection",
     "security_residuals",
     "operations_runbook",
     "cloudflare_failover_invariants",
-    "cutover_watermark_rollback_observation",
+    "control_implementation_plan",
     "named_readiness_approval",
 }
-REQUIRED_BLOCKERS = {
-    "failover_analytics_binding",
-    "current_parity",
-    "current_empty_broker_recovery",
-    "runtime_identity_inventory_drift",
-    "dependency_outage_backup_proof",
-    "authenticated_admin_deployed_proof",
-    "security_residual_owner_disposition",
-    "cutover_controls_not_implemented",
-    "named_readiness_approver",
+REQUIRED_BLOCKER_ISSUES = {
+    "failover_analytics_binding": "ramideltoro/nutsnews-worker#157",
+    "current_parity": "ramideltoro/nutsnews-worker#158",
+    "current_empty_broker_recovery": "ramideltoro/nutsnews-worker#159",
+    "runtime_identity_inventory_drift": "ramideltoro/nutsnews-worker#160",
+    "dependency_outage_proof": "ramideltoro/nutsnews-worker#161",
+    "backup_and_isolated_restore_proof": "ramideltoro/nutsnews-worker#162",
+    "authenticated_admin_deployed_proof": "ramideltoro/nutsnews-worker#163",
+    "security_residual_owner_disposition": "ramideltoro/nutsnews-worker#164",
+    "control_implementation_plan": "ramideltoro/nutsnews-worker#165",
+    "named_readiness_approver": "ramideltoro/nutsnews-worker#125",
 }
+REQUIRED_BLOCKERS = set(REQUIRED_BLOCKER_ISSUES)
+CURRENT_GATE_DEPENDENCIES = {
+    f"ramideltoro/nutsnews-worker#{number}"
+    for number in (122, 123, 124, 147, 148, 149, 157, 158, 159, 160, 161, 162, 163, 164, 165)
+}
+ORDERED_CONTROL_AND_EXECUTION_GATES = [
+    {
+        "issue": "ramideltoro/nutsnews-worker#150",
+        "depends_on": ["ramideltoro/nutsnews-worker#125"],
+        "purpose": "decouple_ingestion_scheduling_from_dns_failover",
+    },
+    {
+        "issue": "ramideltoro/nutsnews-worker#126",
+        "depends_on": ["ramideltoro/nutsnews-worker#150"],
+        "purpose": "implement_reversible_cutover_controls",
+    },
+    {
+        "issue": "ramideltoro/nutsnews-worker#166",
+        "depends_on": ["ramideltoro/nutsnews-worker#126"],
+        "purpose": "final_non_mutating_cutover_execution_readiness",
+    },
+    {
+        "issue": "ramideltoro/nutsnews-worker#127",
+        "depends_on": ["ramideltoro/nutsnews-worker#166"],
+        "purpose": "execute_protected_cutover",
+    },
+]
 REQUIRED_SECURITY_RESIDUALS = {f"SEC-124-{number:03d}" for number in range(2, 10)}
 SERVICE_IDENTITY_IDS = {
     "scheduler_publisher",
@@ -234,8 +264,8 @@ def validate_binding_evidence(proof: dict) -> list[str]:
         errors.append("FAILOVER_ANALYTICS must be recorded absent")
     if required.get("disposition") != "unresolved_blocker":
         errors.append("absent FAILOVER_ANALYTICS must remain an unresolved blocker")
-    if required.get("blocker_issue") != "ramideltoro/nutsnews-infra#440":
-        errors.append("FAILOVER_ANALYTICS blocker must be nutsnews-infra#440")
+    if required.get("blocker_issue") != "ramideltoro/nutsnews-worker#157":
+        errors.append("FAILOVER_ANALYTICS blocker must be nutsnews-worker#157")
     if required.get("named_owner_decision_that_binding_is_unnecessary") is not None:
         errors.append("binding evidence must not fabricate an owner decision")
 
@@ -253,6 +283,10 @@ def validate_decision(decision: dict, binding_proof: dict) -> list[str]:
         errors.append("implementation repository must be nutsnews-backend")
     if decision.get("review_mode") != "non_mutating_production_readiness_decision":
         errors.append("review mode must remain non-mutating")
+    if decision.get("decision_scope") != (
+        "guarded_cutover_control_implementation_readiness"
+    ):
+        errors.append("#125 must gate guarded cutover-control implementation readiness")
     if decision.get("decision") != "no_go":
         errors.append("decision must remain NO-GO while committed blockers are open")
     if decision.get("issue_closure_authorized") is not False:
@@ -265,6 +299,49 @@ def validate_decision(decision: dict, binding_proof: dict) -> list[str]:
         errors.append("decision must not fabricate risk waivers")
     if decision.get("owner_action_required") is not True:
         errors.append("NO-GO must record required owner action")
+
+    authority = decision.get("decision_authority", {})
+    if authority.get("go_authorizes_issue") != "ramideltoro/nutsnews-worker#150":
+        errors.append("#125 GO may authorize only the start of #150")
+    if authority.get("go_authorizes_action") != (
+        "begin_guarded_cutover_control_implementation_only"
+    ):
+        errors.append("#125 GO authority must be limited to guarded control implementation")
+    if authority.get("missing_downstream_control_implementation_blocks_this_gate") is not False:
+        errors.append("missing #150/#126 implementation must not block #125")
+    expected_non_authority = {
+        "cutover_execution",
+        "uplift_production_writes",
+        "ingestion_ownership_change",
+        "legacy_ingestion_change",
+        "dns_or_failover_change",
+        "production_infrastructure_change",
+    }
+    if set(authority.get("go_does_not_authorize", [])) != expected_non_authority:
+        errors.append("#125 must explicitly deny every cutover and production mutation authority")
+    if authority.get("final_cutover_execution_gate") != (
+        "ramideltoro/nutsnews-worker#166"
+    ):
+        errors.append("final cutover-execution readiness gate must be nutsnews-worker#166")
+    if authority.get("cutover_execution_issue") != "ramideltoro/nutsnews-worker#127":
+        errors.append("cutover execution issue must remain nutsnews-worker#127")
+
+    graph = decision.get("dependency_graph", {})
+    if graph.get("current_gate") != "ramideltoro/nutsnews-worker#125":
+        errors.append("dependency graph current gate must be nutsnews-worker#125")
+    current_dependencies = graph.get("current_gate_dependencies", [])
+    if len(current_dependencies) != len(set(current_dependencies)):
+        errors.append("dependency graph contains duplicate #125 dependencies")
+    if set(current_dependencies) != CURRENT_GATE_DEPENDENCIES:
+        errors.append(
+            "#125 dependency graph mismatch: "
+            f"missing={sorted(CURRENT_GATE_DEPENDENCIES - set(current_dependencies))} "
+            f"extra={sorted(set(current_dependencies) - CURRENT_GATE_DEPENDENCIES)}"
+        )
+    if graph.get("ordered_control_and_execution_gates") != (
+        ORDERED_CONTROL_AND_EXECUTION_GATES
+    ):
+        errors.append("control/execution dependency order must be #125 -> #150 -> #126 -> #166 -> #127")
 
     base = decision.get("review_base", {})
     if base.get("repository") != "ramideltoro/nutsnews-backend":
@@ -406,10 +483,32 @@ def validate_decision(decision: dict, binding_proof: dict) -> list[str]:
 
     recovery = decision.get("runtime_and_recovery_evidence", {})
     fresh_status = recovery.get("fresh_status_dispatch", {})
-    if fresh_status.get("status") != "waiting_for_production_backend_approval":
-        errors.append("current-head status dispatch must record its waiting approval state")
+    if fresh_status.get("status") not in {
+        "waiting_for_production_backend_approval",
+        "pass",
+    }:
+        errors.append("current-head status dispatch must be waiting for approval or pass")
+    if fresh_status.get("run_id") != 30513933114:
+        errors.append("current-head status evidence must identify run 30513933114")
+    if fresh_status.get("head_commit") != "b619cf91504eafca21f70c5d68888563f5fca7a9":
+        errors.append("current-head status evidence must identify the reviewed main commit")
+    if fresh_status.get("action") != "status" or fresh_status.get("dry_run") is not True:
+        errors.append("current-head runtime operation must remain read-only status/dry-run")
     if fresh_status.get("approval_bypassed") is not False:
         errors.append("production-backend approval must not be bypassed")
+    if fresh_status.get("status") == "pass":
+        if not isinstance(fresh_status.get("artifact_id"), int):
+            errors.append("passing current-head status must record an artifact id")
+        if not DIGEST_RE.fullmatch(str(fresh_status.get("artifact_digest", ""))):
+            errors.append("passing current-head status must record an artifact digest")
+        if fresh_status.get("mode") != "shadow":
+            errors.append("passing current-head status must record shadow mode")
+        if fresh_status.get("production_writes_enabled") is not False:
+            errors.append("passing current-head status must record production writes false")
+        if fresh_status.get("healthy_services") != 8:
+            errors.append("passing current-head status must record eight healthy services")
+        if fresh_status.get("consumers_per_required_queue") != 1:
+            errors.append("passing current-head status must record one consumer per required queue")
     empty_broker = recovery.get("empty_broker_recovery", {})
     if empty_broker.get("status") != "stale":
         errors.append("empty-broker proof must remain stale after topology change")
@@ -426,6 +525,14 @@ def validate_decision(decision: dict, binding_proof: dict) -> list[str]:
     ):
         if rollback.get(field) is not False:
             errors.append(f"rollback_limits.{field} must remain false")
+    if rollback.get("planning_blocker_issue") != "ramideltoro/nutsnews-worker#165":
+        errors.append("planned cutover parameters must be owned by nutsnews-worker#165")
+    if rollback.get("downstream_control_implementation_required_before") != (
+        "ramideltoro/nutsnews-worker#166"
+    ):
+        errors.append("downstream controls must be complete before final gate #166")
+    if rollback.get("downstream_control_implementation_blocks_issue_125") is not False:
+        errors.append("downstream control implementation must not block #125")
 
     security = decision.get("security_gate", {})
     if security.get("status") != "blocked_pending_named_owner_disposition":
@@ -445,9 +552,9 @@ def validate_decision(decision: dict, binding_proof: dict) -> list[str]:
     if failover.get("named_owner_decision_that_analytics_is_unnecessary") is not None:
         errors.append("decision must not fabricate an analytics owner decision")
     if failover.get("blocker_issue") != (
-        "https://github.com/ramideltoro/nutsnews-infra/issues/440"
+        "https://github.com/ramideltoro/nutsnews-worker/issues/157"
     ):
-        errors.append("decision must link nutsnews-infra#440")
+        errors.append("decision must link nutsnews-worker#157")
     binding_relative_path = str(failover.get("binding_evidence_path", ""))
     if binding_relative_path != (
         "docs/evidence/worker-uplift-cloudflare-bindings-2026-07-30.json"
@@ -491,6 +598,11 @@ def validate_decision(decision: dict, binding_proof: dict) -> list[str]:
             errors.append(f"{item.get('id')} must remain open")
         if not item.get("owner_repository") or not item.get("required_resolution"):
             errors.append(f"{item.get('id')} must record owner and resolution")
+        expected_issue = REQUIRED_BLOCKER_ISSUES.get(str(item.get("id", "")))
+        if item.get("issue") != expected_issue:
+            errors.append(
+                f"{item.get('id')} must link canonical tracking issue {expected_issue}"
+            )
 
     if not decision.get("reconsideration_requirements"):
         errors.append("NO-GO must record reconsideration requirements")

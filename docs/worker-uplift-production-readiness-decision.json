@@ -4,13 +4,80 @@
   "tracking_issue": "ramideltoro/nutsnews-worker#125",
   "implementation_repository": "ramideltoro/nutsnews-backend",
   "evaluated_at_utc": "2026-07-30T04:37:10Z",
+  "tracking_model_corrected_at_utc": "2026-07-30T17:59:51Z",
   "review_mode": "non_mutating_production_readiness_decision",
+  "decision_scope": "guarded_cutover_control_implementation_readiness",
+  "decision_authority": {
+    "go_authorizes_issue": "ramideltoro/nutsnews-worker#150",
+    "go_authorizes_action": "begin_guarded_cutover_control_implementation_only",
+    "missing_downstream_control_implementation_blocks_this_gate": false,
+    "go_does_not_authorize": [
+      "cutover_execution",
+      "uplift_production_writes",
+      "ingestion_ownership_change",
+      "legacy_ingestion_change",
+      "dns_or_failover_change",
+      "production_infrastructure_change"
+    ],
+    "final_cutover_execution_gate": "ramideltoro/nutsnews-worker#166",
+    "cutover_execution_issue": "ramideltoro/nutsnews-worker#127"
+  },
+  "dependency_graph": {
+    "current_gate": "ramideltoro/nutsnews-worker#125",
+    "current_gate_dependencies": [
+      "ramideltoro/nutsnews-worker#122",
+      "ramideltoro/nutsnews-worker#123",
+      "ramideltoro/nutsnews-worker#124",
+      "ramideltoro/nutsnews-worker#147",
+      "ramideltoro/nutsnews-worker#148",
+      "ramideltoro/nutsnews-worker#149",
+      "ramideltoro/nutsnews-worker#157",
+      "ramideltoro/nutsnews-worker#158",
+      "ramideltoro/nutsnews-worker#159",
+      "ramideltoro/nutsnews-worker#160",
+      "ramideltoro/nutsnews-worker#161",
+      "ramideltoro/nutsnews-worker#162",
+      "ramideltoro/nutsnews-worker#163",
+      "ramideltoro/nutsnews-worker#164",
+      "ramideltoro/nutsnews-worker#165"
+    ],
+    "ordered_control_and_execution_gates": [
+      {
+        "issue": "ramideltoro/nutsnews-worker#150",
+        "depends_on": [
+          "ramideltoro/nutsnews-worker#125"
+        ],
+        "purpose": "decouple_ingestion_scheduling_from_dns_failover"
+      },
+      {
+        "issue": "ramideltoro/nutsnews-worker#126",
+        "depends_on": [
+          "ramideltoro/nutsnews-worker#150"
+        ],
+        "purpose": "implement_reversible_cutover_controls"
+      },
+      {
+        "issue": "ramideltoro/nutsnews-worker#166",
+        "depends_on": [
+          "ramideltoro/nutsnews-worker#126"
+        ],
+        "purpose": "final_non_mutating_cutover_execution_readiness"
+      },
+      {
+        "issue": "ramideltoro/nutsnews-worker#127",
+        "depends_on": [
+          "ramideltoro/nutsnews-worker#166"
+        ],
+        "purpose": "execute_protected_cutover"
+      }
+    ]
+  },
   "review_base": {
     "repository": "ramideltoro/nutsnews-backend",
     "commit": "b619cf91504eafca21f70c5d68888563f5fca7a9"
   },
   "decision": "no_go",
-  "decision_summary": "Production readiness is not approved. FAILOVER_ANALYTICS is absent from both the deployed Cloudflare Worker and current infra source; current parity and empty-broker recovery proof do not match the deployed image/topology set; security residual risks lack a named gate disposition; and the future cutover watermark, rollback deadline, and observation controls do not exist.",
+  "decision_summary": "Readiness to begin guarded cutover-control implementation is not approved. FAILOVER_ANALYTICS is absent from both the deployed Cloudflare Worker and current infra source; current parity and empty-broker recovery proof do not match the deployed image/topology set; current dependency-outage, backup/restore, identity, and authenticated-admin evidence is missing or stale; security residual risks lack named dispositions; exact planned watermark, rollback deadline, observation window, and operational ownership are not recorded; and no named approver has issued GO. Missing implementation of downstream issues #150 and #126 is not a #125 blocker.",
   "issue_closure_authorized": false,
   "tracking_issue_state_required": "open",
   "named_approver": null,
@@ -446,12 +513,15 @@
       ]
     },
     "rollback_limits": {
-      "status": "blocked_future_control",
+      "status": "planned_parameters_missing",
       "current_runtime_rollback_scope": "single shadow service image only",
       "production_owner_rollback_workflow_exists": false,
       "cutover_watermark_exists": false,
       "rollback_deadline_defined": false,
       "observation_window_approved": false,
+      "planning_blocker_issue": "ramideltoro/nutsnews-worker#165",
+      "downstream_control_implementation_required_before": "ramideltoro/nutsnews-worker#166",
+      "downstream_control_implementation_blocks_issue_125": false,
       "post_synchronization_policy": "forward recovery unless a reviewed sync-back procedure proves no loss or duplication"
     }
   },
@@ -514,14 +584,14 @@
   "cloudflare_failover": {
     "status": "block",
     "binding_evidence_path": "docs/evidence/worker-uplift-cloudflare-bindings-2026-07-30.json",
-    "binding_evidence_sha256": "d566c0f65d36ca72292ac84110820d03ed84df14e43999ef6f349fa944f407b7",
+    "binding_evidence_sha256": "de7468c0863ed8a62bd2a49a731278cbe6c88f3977f2a700a454697f3fd2f9f8",
     "deployed_worker_present": true,
     "durable_object_binding_present": true,
     "cron_schedule_present": true,
     "failover_analytics_binding_present": false,
     "current_controller_status_and_alarm_artifact_present": false,
     "named_owner_decision_that_analytics_is_unnecessary": null,
-    "blocker_issue": "https://github.com/ramideltoro/nutsnews-infra/issues/440",
+    "blocker_issue": "https://github.com/ramideltoro/nutsnews-worker/issues/157",
     "dns_or_failover_state_changed_by_review": false
   },
   "readiness_items": [
@@ -543,7 +613,7 @@
     {
       "id": "parity_window",
       "status": "block",
-      "evidence": "Run 30203441579 passed for an older eight-image set and is not current proof for the deployed candidate."
+      "evidence": "Run 30203441579 passed for an older eight-image set and is not current proof for the deployed candidate; #158 owns the protected current-candidate rerun."
     },
     {
       "id": "soak_capacity_cost",
@@ -558,12 +628,22 @@
     {
       "id": "empty_broker_recovery",
       "status": "block",
-      "evidence": "Run 30215207093 met RTO, but its topology hash differs from the current source-controlled topology."
+      "evidence": "Run 30215207093 met RTO, but its topology hash differs from the current source-controlled topology; #159 owns the protected current-topology drill."
     },
     {
-      "id": "dependency_outages_backup_and_rollback",
+      "id": "dependency_outages",
       "status": "block",
-      "evidence": "Current candidate evidence does not attach PostgreSQL, backend API, Qwen outage/restore drills or a candidate-tied backup restore; production owner rollback controls are future work."
+      "evidence": "Current candidate evidence does not attach PostgreSQL, backend API, and Qwen outage/recovery drills; #161 owns the protected evidence refresh."
+    },
+    {
+      "id": "backup_and_isolated_restore",
+      "status": "block",
+      "evidence": "Current candidate evidence does not attach current backup inventory and isolated PostgreSQL/RabbitMQ recovery proof; #162 owns the value-free readiness evidence and links any underlying infra implementation issue."
+    },
+    {
+      "id": "current_protected_runtime_status",
+      "status": "block",
+      "evidence": "Read-only runtime status run 30513933114 is waiting for production-backend approval. It must not be bypassed; the resulting artifact must be inspected and incorporated before this draft can advance."
     },
     {
       "id": "grafana_alerts_logs_metrics",
@@ -588,12 +668,12 @@
     {
       "id": "cloudflare_failover_invariants",
       "status": "block",
-      "evidence": "The deployed Worker and cron exist, but FAILOVER_ANALYTICS and current controller status/alarm proof are absent; infra blocker #440 owns remediation or named disposition."
+      "evidence": "The deployed Worker and cron exist, but FAILOVER_ANALYTICS and current controller status/alarm proof are absent; worker tracking issue #157 owns the infra implementation or named disposition."
     },
     {
-      "id": "cutover_watermark_rollback_observation",
+      "id": "control_implementation_plan",
       "status": "block",
-      "evidence": "The exact watermark, owner switch, rollback deadline, observation window, and synchronization boundary controls are intentionally deferred to #150/#126/#127 and are not implemented."
+      "evidence": "The exact planned watermark semantics, rollback deadline, observation window, thresholds, and named ownership roster are missing; #165 owns the non-mutating plan. Implementation of #150/#126 is downstream and is not a #125 blocker."
     },
     {
       "id": "named_readiness_approval",
@@ -606,66 +686,82 @@
       "id": "failover_analytics_binding",
       "status": "open",
       "owner_repository": "ramideltoro/nutsnews-infra",
-      "issue": "ramideltoro/nutsnews-infra#440",
+      "issue": "ramideltoro/nutsnews-worker#157",
       "required_resolution": "Deploy and prove FAILOVER_ANALYTICS through the protected infra path, or attach an explicit named owner decision with rationale that it is unnecessary."
     },
     {
       "id": "current_parity",
       "status": "open",
       "owner_repository": "ramideltoro/nutsnews-backend",
+      "issue": "ramideltoro/nutsnews-worker#158",
       "required_resolution": "Run the protected parity report against the exact candidate image set and inspect its artifact."
     },
     {
       "id": "current_empty_broker_recovery",
       "status": "open",
       "owner_repository": "ramideltoro/nutsnews-backend",
+      "issue": "ramideltoro/nutsnews-worker#159",
       "required_resolution": "Obtain separate approval for the protected clean-rebuild drill on the current topology and inspect recovery and drain artifacts."
     },
     {
       "id": "runtime_identity_inventory_drift",
       "status": "open",
       "owner_repository": "ramideltoro/nutsnews-backend",
+      "issue": "ramideltoro/nutsnews-worker#160",
       "required_resolution": "Reconcile the dedicated identity inventory and validator with the authoritative current RabbitMQ topology."
     },
     {
-      "id": "dependency_outage_backup_proof",
+      "id": "dependency_outage_proof",
       "status": "open",
       "owner_repository": "ramideltoro/nutsnews-backend",
-      "required_resolution": "Attach current protected PostgreSQL, backend API, Qwen outage/recovery and backup/restore artifacts tied to the candidate."
+      "issue": "ramideltoro/nutsnews-worker#161",
+      "required_resolution": "Attach current protected PostgreSQL, backend API, and Qwen outage/recovery artifacts tied to the exact candidate."
+    },
+    {
+      "id": "backup_and_isolated_restore_proof",
+      "status": "open",
+      "owner_repository": "ramideltoro/nutsnews-infra",
+      "issue": "ramideltoro/nutsnews-worker#162",
+      "required_resolution": "Attach current value-free backup inventory and isolated restore artifacts tied to the candidate, completing any linked infra implementation findings."
     },
     {
       "id": "authenticated_admin_deployed_proof",
       "status": "open",
       "owner_repository": "ramideltoro/nutsnews",
+      "issue": "ramideltoro/nutsnews-worker#163",
       "required_resolution": "Attach value-free authenticated production evidence for the current worker-uplift admin projection."
     },
     {
       "id": "security_residual_owner_disposition",
       "status": "open",
-      "owner_repository": "ramideltoro/nutsnews-worker",
+      "owner_repository": "ramideltoro/nutsnews-backend",
+      "issue": "ramideltoro/nutsnews-worker#164",
       "required_resolution": "A named owner must record remediation or explicit bounded residual-risk acceptance for every #124 finding that expires at #125."
     },
     {
-      "id": "cutover_controls_not_implemented",
+      "id": "control_implementation_plan",
       "status": "open",
-      "owner_repository": "unassigned_until_future_issues",
-      "required_resolution": "Do not implement from #125. Future #150 and #126 must establish the independently tested scheduling, owner, write, watermark, rollback, and observation controls before #127."
+      "owner_repository": "ramideltoro/nutsnews-backend",
+      "issue": "ramideltoro/nutsnews-worker#165",
+      "required_resolution": "Record the exact planned watermark semantics, rollback deadline, observation window, thresholds, and named owners needed to implement #150/#126. Do not require those downstream controls to exist at #125."
     },
     {
       "id": "named_readiness_approver",
       "status": "open",
       "owner_repository": "ramideltoro/nutsnews-worker",
-      "required_resolution": "After every technical blocker is resolved, a named approver must issue the final current GO decision."
+      "issue": "ramideltoro/nutsnews-worker#125",
+      "required_resolution": "After every technical blocker is resolved, a named authorized approver must issue the current GO decision to begin #150 only."
     }
   ],
   "reconsideration_requirements": [
-    "Resolve ramideltoro/nutsnews-infra#440 with protected, value-free deployed proof or an explicit named owner decision.",
-    "Refresh parity and empty-broker recovery evidence for the exact candidate images and topology.",
-    "Reconcile the runtime identity inventory with the authoritative topology.",
-    "Attach current dependency outage, backup/restore, and authenticated admin evidence.",
-    "Disposition every #124 residual risk through remediation or explicit named owner acceptance.",
-    "Implement and separately approve the future scheduling, owner, write, watermark, rollback, and observation controls in their ordered issues.",
+    "Resolve ramideltoro/nutsnews-worker#157 with protected, value-free deployed proof or an explicit named owner decision.",
+    "Complete #158 and #159 with current parity and empty-broker recovery evidence for the exact candidate images and topology.",
+    "Complete #160 by reconciling the runtime identity inventory with the authoritative topology.",
+    "Complete #161, #162, and #163 with current dependency-outage, backup/isolated-restore, and authenticated-admin evidence.",
+    "Complete #164 by dispositioning every #124 residual risk through remediation or explicit named authorized owner acceptance.",
+    "Complete #165 with exact planned watermark, rollback deadline, observation window, thresholds, and named owners; #150/#126 implementation is deliberately downstream of #125.",
     "Rerun the waiting current-head runtime status without bypassing production-backend approval.",
-    "Obtain a named final readiness approver only after every blocker is closed."
+    "Obtain a named current approver only after every #125 blocker is closed; GO authorizes beginning #150 only.",
+    "Require #166 after #126 to verify implemented controls, current evidence, rollback rehearsal, a named approver, and the exact production candidate before #127."
   ]
 }

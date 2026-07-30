@@ -80,6 +80,14 @@ jobs:
         shell: bash
         run: python3 -m unittest tests.test_worker_uplift_security_review
 
+      - name: Validate worker uplift production readiness decision
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_production_readiness.py
+
+      - name: Run worker uplift production readiness decision tests
+        shell: bash
+        run: python3 -m unittest tests.test_worker_uplift_production_readiness
+
       - name: Validate worker uplift shadow data model offline
         shell: bash
         run: python3 scripts/backend_worker_uplift_shadow_model_check.py --offline --enforce

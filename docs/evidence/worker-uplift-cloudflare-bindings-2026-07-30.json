@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "tracking_issue": "ramideltoro/nutsnews-worker#125",
+  "captured_at_utc": "2026-07-30T04:32:32Z",
+  "capture_method": "cloudflare_workers_settings_api_read_only",
+  "api_success": true,
+  "state_changes_performed": false,
+  "value_policy": {
+    "binding_names_and_types_only": true,
+    "binding_values_recorded": false,
+    "account_identifiers_recorded": false,
+    "zone_identifiers_recorded": false,
+    "credentials_recorded": false
+  },
+  "worker": {
+    "script_name": "nutsnews-dns-failover",
+    "latest_deployment_id": "98ef6ac8-fc43-4033-8373-ddf38452411d",
+    "latest_version_id": "529bf006-8768-47e2-b84b-4f53cc2e6599",
+    "version_number": 30,
+    "deployment_source": "wrangler",
+    "deployment_percentage": 100,
+    "deployed_at_utc": "2026-07-22T01:56:14.053575Z",
+    "compatibility_date": "2026-07-21"
+  },
+  "deployed_schedules": {
+    "api_success": true,
+    "schedules": [
+      {
+        "cron": "* * * * *",
+        "created_at_utc": "2026-07-22T00:56:29.153425Z",
+        "modified_at_utc": "2026-07-22T01:56:04.597014Z"
+      }
+    ]
+  },
+  "source_control": {
+    "repository": "ramideltoro/nutsnews-infra",
+    "commit": "48748cd7fea036d14e281fe84fcde5a52d41166c",
+    "source_paths_unchanged_from_commit": "ee61807a757fe087dbcecd60d5e0b7fe07f4115a",
+    "wrangler_path": "cloudflare/dns-failover/wrangler.toml",
+    "wrangler_sha256": "7c68ec7fc08d0a10ce533adffa406fdca709e55af562f053f13f35a4d02de890",
+    "controller_path": "cloudflare/dns-failover/src/index.mjs",
+    "controller_sha256": "2a63d9558ada40d5017d4ddef1cf6bc3f00f6908a18b3fddea270485ec5c4ba5",
+    "failover_analytics_declared": false,
+    "analytics_writer_present": false
+  },
+  "bindings": [
+    {
+      "name": "ADMIN_TOKEN",
+      "type": "secret_text"
+    },
+    {
+      "name": "AUTOMATIC_DNS_WRITES_ENABLED",
+      "type": "secret_text"
+    },
+    {
+      "name": "CHECK_INTERVAL_SECONDS",
+      "type": "plain_text"
+    },
+    {
+      "name": "CLOUDFLARE_DNS_API_TOKEN",
+      "type": "secret_text"
+    },
+    {
+      "name": "CLOUDFLARE_ZONE_ID",
+      "type": "secret_text"
+    },
+    {
+      "name": "CONTROLLER_NAME",
+      "type": "plain_text"
+    },
+    {
+      "name": "DNS_FAILOVER",
+      "type": "durable_object_namespace",
+      "class_name": "DnsFailoverController"
+    },
+    {
+      "name": "DNS_PROXIED",
+      "type": "plain_text"
+    },
+    {
+      "name": "DNS_RECORDS_JSON",
+      "type": "secret_text"
+    },
+    {
+      "name": "DNS_RECORD_TYPE",
+      "type": "plain_text"
+    },
+    {
+      "name": "DNS_TTL",
+      "type": "plain_text"
+    },
+    {
+      "name": "EXPECTED_READINESS_TARGET",
+      "type": "plain_text"
+    },
+    {
+      "name": "FAILURE_THRESHOLD",
+      "type": "plain_text"
+    },
+    {
+      "name": "HEALTH_CHECK_TIMEOUT_MS",
+      "type": "plain_text"
+    },
+    {
+      "name": "HEALTH_CHECK_URL",
+      "type": "plain_text"
+    },
+    {
+      "name": "MIN_DNS_UPDATE_INTERVAL_SECONDS",
+      "type": "plain_text"
+    },
+    {
+      "name": "PRIMARY_DNS_TARGET",
+      "type": "plain_text"
+    },
+    {
+      "name": "RECOVERY_THRESHOLD",
+      "type": "plain_text"
+    },
+    {
+      "name": "RETIRED_CONTROLLER_NAMES",
+      "type": "plain_text"
+    },
+    {
+      "name": "SECONDARY_DNS_TARGET",
+      "type": "plain_text"
+    }
+  ],
+  "required_binding": {
+    "name": "FAILOVER_ANALYTICS",
+    "expected_type": "analytics_engine",
+    "required_by": [
+      "ramideltoro/nutsnews-worker#125",
+      "ramideltoro/nutsnews-docs@77eeb52078878c2f95989db3107b814e54c52222"
+    ],
+    "present": false,
+    "disposition": "unresolved_blocker",
+    "blocker_issue": "ramideltoro/nutsnews-worker#157",
+    "named_owner_decision_that_binding_is_unnecessary": null
+  }
+}

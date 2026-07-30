@@ -1,0 +1,235 @@
+{
+  "schema_version": 1,
+  "tracking_issue": "ramideltoro/nutsnews-worker#125",
+  "implementation_repository": "ramideltoro/nutsnews-backend",
+  "captured_at_utc": "2026-07-30T19:02:13Z",
+  "capture_method": "github_actions_immutable_artifact_inspection",
+  "value_policy": {
+    "service_health_and_queue_counts_only": true,
+    "secret_values_recorded": false,
+    "environment_secret_values_recorded": false,
+    "connection_strings_recorded": false,
+    "message_payloads_recorded": false
+  },
+  "production_state_changes_performed": false,
+  "environment_protections_changed": false,
+  "protected_status": {
+    "run_id": 30513933114,
+    "run_url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30513933114",
+    "head_commit": "b619cf91504eafca21f70c5d68888563f5fca7a9",
+    "workflow_conclusion": "success",
+    "environment_gate": "production-backend",
+    "approval_required": true,
+    "approval_completed": true,
+    "approval_bypassed": false,
+    "artifact_name": "backend-worker-runtime-report",
+    "artifact_id": 8770464087,
+    "artifact_digest": "sha256:92fda3a7c5c1b45f2ec6a29013e6c4c1a42f7208b3a91e17ea59bc1552bc8563",
+    "downloaded_json_sha256": "826a6400ec71b834a10c1f89c1b7164855d9db96c9d28938d772283e6d1444e3",
+    "generated_at_utc": "2026-07-30T18:24:00Z",
+    "action": "status",
+    "status": "pass",
+    "mode": "shadow",
+    "production_writes_enabled": false,
+    "healthy_services": 8,
+    "required_consumer_queues": 7,
+    "missing_consumers": [],
+    "unverifiable_consumers": [],
+    "errors": [],
+    "queues": [
+      {
+        "service": "approval",
+        "queue": "nutsnews.worker.approval.v1",
+        "status": "healthy",
+        "consumers": 1,
+        "messages": 0,
+        "messages_ready": 0,
+        "messages_unacknowledged": 0
+      },
+      {
+        "service": "canonicalizer",
+        "queue": "nutsnews.worker.canonicalization.v1",
+        "status": "healthy",
+        "consumers": 1,
+        "messages": 0,
+        "messages_ready": 0,
+        "messages_unacknowledged": 0
+      },
+      {
+        "service": "enrichment",
+        "queue": "nutsnews.worker.enrichment.v1",
+        "status": "healthy",
+        "consumers": 1,
+        "messages": 0,
+        "messages_ready": 0,
+        "messages_unacknowledged": 0
+      },
+      {
+        "service": "fetcher",
+        "queue": "nutsnews.worker.fetch.v1",
+        "status": "healthy",
+        "consumers": 1,
+        "messages": 0,
+        "messages_ready": 0,
+        "messages_unacknowledged": 0
+      },
+      {
+        "service": "persistence",
+        "queue": "nutsnews.worker.persistence.v1",
+        "status": "healthy",
+        "consumers": 1,
+        "messages": 0,
+        "messages_ready": 0,
+        "messages_unacknowledged": 0
+      },
+      {
+        "service": "publication",
+        "queue": "nutsnews.worker.publication.v1",
+        "status": "healthy",
+        "consumers": 1,
+        "messages": 0,
+        "messages_ready": 0,
+        "messages_unacknowledged": 0
+      },
+      {
+        "service": "translation",
+        "queue": "nutsnews.worker.translation.v1",
+        "status": "healthy",
+        "consumers": 1,
+        "messages": 0,
+        "messages_ready": 0,
+        "messages_unacknowledged": 0
+      }
+    ]
+  },
+  "approval_free_status": {
+    "tracking_issue": "ramideltoro/nutsnews-worker#167",
+    "implementation_pr": "https://github.com/ramideltoro/nutsnews-backend/pull/446",
+    "implementation_merge_commit": "ba26e7bb9fa7a4f30773216da1e69bfe7ec3bf0d",
+    "post_merge_checks_run": 30572501619,
+    "diagnostic_run": {
+      "run_id": 30572618948,
+      "workflow_conclusion": "failure",
+      "pending_deployment_count_observed": 0,
+      "protected_job_status": "skipped",
+      "failure_reason": "repository-scoped SSH automation user metadata was absent, so the read-only job used the non-privileged fallback account",
+      "remediation": "configured the repository-scoped NUTSNEWS_BACKEND_ANSIBLE_USER metadata for the existing dedicated automation account",
+      "host_or_production_infrastructure_changed": false
+    },
+    "run_id": 30573044860,
+    "run_url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30573044860",
+    "head_commit": "ba26e7bb9fa7a4f30773216da1e69bfe7ec3bf0d",
+    "workflow_conclusion": "success",
+    "pending_deployment_count_observed": 0,
+    "protected_job_status": "skipped",
+    "read_only_job_status": "success",
+    "artifact_name": "backend-worker-runtime-report",
+    "artifact_id": 8771565855,
+    "artifact_digest": "sha256:ea5785493cfa3db2cb84c7b006c5c6310c652ad7ed8a303b13288e3f5ad3a874",
+    "downloaded_json_sha256": "ad2daec609da672bbf71f473e0651b687cf5dbc749937fe8eb6a3d3e6feeec61",
+    "generated_at_utc": "2026-07-30T19:02:12Z",
+    "action": "status",
+    "status": "pass",
+    "mode": "shadow",
+    "production_writes_enabled": false,
+    "healthy_services": 8,
+    "required_consumer_queues": 7,
+    "missing_consumers": [],
+    "unverifiable_consumers": [],
+    "errors": [],
+    "queues": [
+      {
+        "service": "approval",
+        "queue": "nutsnews.worker.approval.v1",
+        "status": "healthy",
+        "consumers": 1,
+        "messages": 0,
+        "messages_ready": 0,
+        "messages_unacknowledged": 0
+      },
+      {
+        "service": "canonicalizer",
+        "queue": "nutsnews.worker.canonicalization.v1",
+        "status": "healthy",
+        "consumers": 1,
+        "messages": 0,
+        "messages_ready": 0,
+        "messages_unacknowledged": 0
+      },
+      {
+        "service": "enrichment",
+        "queue": "nutsnews.worker.enrichment.v1",
+        "status": "healthy",
+        "consumers": 1,
+        "messages": 0,
+        "messages_ready": 0,
+        "messages_unacknowledged": 0
+      },
+      {
+        "service": "fetcher",
+        "queue": "nutsnews.worker.fetch.v1",
+        "status": "healthy",
+        "consumers": 1,
+        "messages": 0,
+        "messages_ready": 0,
+        "messages_unacknowledged": 0
+      },
+      {
+        "service": "persistence",
+        "queue": "nutsnews.worker.persistence.v1",
+        "status": "healthy",
+        "consumers": 1,
+        "messages": 0,
+        "messages_ready": 0,
+        "messages_unacknowledged": 0
+      },
+      {
+        "service": "publication",
+        "queue": "nutsnews.worker.publication.v1",
+        "status": "healthy",
+        "consumers": 1,
+        "messages": 0,
+        "messages_ready": 0,
+        "messages_unacknowledged": 0
+      },
+      {
+        "service": "translation",
+        "queue": "nutsnews.worker.translation.v1",
+        "status": "healthy",
+        "consumers": 1,
+        "messages": 0,
+        "messages_ready": 0,
+        "messages_unacknowledged": 0
+      }
+    ]
+  },
+  "scheduler_readiness_discrepancy": {
+    "status": "confirmed_evidence_defect",
+    "report_generated_at_utc": "2026-07-30T18:24:00Z",
+    "readiness_checked_at_utc": "2026-07-23T00:00:00.000Z",
+    "readiness_dependency": "local-feed-source",
+    "readiness_summary": "local test feed source ready",
+    "source_repository": "ramideltoro/nutsnews-worker-feed-scheduler",
+    "source_commit": "ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396",
+    "startup_source_path": "src/index.ts",
+    "startup_source_sha256": "218f06ae353118ab599251c4fd092c817471e2519e7f0ad4476fb4d96556a7d5",
+    "test_adapter_source_path": "src/test-doubles.ts",
+    "test_adapter_source_sha256": "290ef231fbf6981fa08ef02505ccd689ed71af6676188e75d72d1d37849158f2",
+    "source_finding": "production startup unconditionally creates local scheduler dependencies whose manual clock defaults to the stale readiness timestamp",
+    "blocker_issue": "ramideltoro/nutsnews-worker#168",
+    "silently_normalized": false
+  },
+  "report_tracking_issue_discrepancy": {
+    "reported_number": 85,
+    "status": "valid_historical_runtime_framework_provenance",
+    "historical_issue": "ramideltoro/nutsnews-worker#85",
+    "historical_issue_title": "[22] Repo: nutsnews-backend - Centralize worker service deployment and operations",
+    "manifest_source_path": "ansible/roles/backend_worker_runtime/templates/worker-uplift-services.json.j2",
+    "manager_source_path": "ansible/roles/backend_worker_runtime/files/nutsnews_worker_runtime.py",
+    "source_behavior": "the manifest validator requires 85 and the runtime report intentionally emits 85",
+    "current_readiness_gate": "ramideltoro/nutsnews-worker#125",
+    "current_runtime_workflow_tracker": "ramideltoro/nutsnews-worker#167",
+    "silently_normalized": false,
+    "new_blocker_required": false
+  }
+}

@@ -1,0 +1,844 @@
+{
+  "schema_version": 1,
+  "decision_id": "worker-uplift-production-readiness",
+  "tracking_issue": "ramideltoro/nutsnews-worker#125",
+  "implementation_repository": "ramideltoro/nutsnews-backend",
+  "evaluated_at_utc": "2026-07-30T19:02:13Z",
+  "tracking_model_corrected_at_utc": "2026-07-30T17:59:51Z",
+  "review_mode": "non_mutating_production_readiness_decision",
+  "decision_scope": "guarded_cutover_control_implementation_readiness",
+  "decision_authority": {
+    "go_authorizes_issue": "ramideltoro/nutsnews-worker#150",
+    "go_authorizes_action": "begin_guarded_cutover_control_implementation_only",
+    "missing_downstream_control_implementation_blocks_this_gate": false,
+    "go_does_not_authorize": [
+      "cutover_execution",
+      "uplift_production_writes",
+      "ingestion_ownership_change",
+      "legacy_ingestion_change",
+      "dns_or_failover_change",
+      "production_infrastructure_change"
+    ],
+    "final_cutover_execution_gate": "ramideltoro/nutsnews-worker#166",
+    "cutover_execution_issue": "ramideltoro/nutsnews-worker#127"
+  },
+  "dependency_graph": {
+    "current_gate": "ramideltoro/nutsnews-worker#125",
+    "current_gate_dependencies": [
+      "ramideltoro/nutsnews-worker#122",
+      "ramideltoro/nutsnews-worker#123",
+      "ramideltoro/nutsnews-worker#124",
+      "ramideltoro/nutsnews-worker#147",
+      "ramideltoro/nutsnews-worker#148",
+      "ramideltoro/nutsnews-worker#149",
+      "ramideltoro/nutsnews-worker#157",
+      "ramideltoro/nutsnews-worker#158",
+      "ramideltoro/nutsnews-worker#159",
+      "ramideltoro/nutsnews-worker#160",
+      "ramideltoro/nutsnews-worker#161",
+      "ramideltoro/nutsnews-worker#162",
+      "ramideltoro/nutsnews-worker#163",
+      "ramideltoro/nutsnews-worker#164",
+      "ramideltoro/nutsnews-worker#165",
+      "ramideltoro/nutsnews-worker#167",
+      "ramideltoro/nutsnews-worker#168"
+    ],
+    "ordered_control_and_execution_gates": [
+      {
+        "issue": "ramideltoro/nutsnews-worker#150",
+        "depends_on": [
+          "ramideltoro/nutsnews-worker#125"
+        ],
+        "purpose": "decouple_ingestion_scheduling_from_dns_failover"
+      },
+      {
+        "issue": "ramideltoro/nutsnews-worker#126",
+        "depends_on": [
+          "ramideltoro/nutsnews-worker#150"
+        ],
+        "purpose": "implement_reversible_cutover_controls"
+      },
+      {
+        "issue": "ramideltoro/nutsnews-worker#166",
+        "depends_on": [
+          "ramideltoro/nutsnews-worker#126"
+        ],
+        "purpose": "final_non_mutating_cutover_execution_readiness"
+      },
+      {
+        "issue": "ramideltoro/nutsnews-worker#127",
+        "depends_on": [
+          "ramideltoro/nutsnews-worker#166"
+        ],
+        "purpose": "execute_protected_cutover"
+      }
+    ]
+  },
+  "review_base": {
+    "repository": "ramideltoro/nutsnews-backend",
+    "commit": "ba26e7bb9fa7a4f30773216da1e69bfe7ec3bf0d"
+  },
+  "decision": "no_go",
+  "decision_summary": "Readiness to begin guarded cutover-control implementation is not approved. FAILOVER_ANALYTICS is absent from both the deployed Cloudflare Worker and current infra source; current parity and empty-broker recovery proof do not match the deployed image/topology set; the deployed scheduler uses local test dependencies and a fixed readiness clock; current dependency-outage, backup/restore, identity, and authenticated-admin evidence is missing or stale; security residual risks lack named dispositions; exact planned watermark, rollback deadline, observation window, and operational ownership are not recorded; and no named approver has issued GO. Missing implementation of downstream issues #150 and #126 is not a #125 blocker.",
+  "issue_closure_authorized": false,
+  "tracking_issue_state_required": "open",
+  "named_approver": null,
+  "risk_waivers": [],
+  "owner_action_required": true,
+  "safety_invariants": {
+    "legacy_worker_is_production_ingestion_owner": true,
+    "active_single_writer_repository": "ramideltoro/nutsnews-worker",
+    "active_single_writer_commit": "22a2c4f33d8dacdf9fd2367de852ae29d3abaa85",
+    "uplift_services_are_shadow_only": true,
+    "production_writes_enabled": false,
+    "production_visibility_enabled": false,
+    "legacy_worker_modified": false,
+    "ingestion_ownership_changed": false,
+    "cloudflare_or_dns_modified": false,
+    "failover_behavior_modified": false,
+    "cutover_performed": false,
+    "production_infrastructure_modified": false,
+    "github_environment_protections_modified": false,
+    "production_data_mutated": false,
+    "secret_values_recorded": false
+  },
+  "source_heads": [
+    {
+      "repository": "ramideltoro/nutsnews-backend",
+      "commit": "ba26e7bb9fa7a4f30773216da1e69bfe7ec3bf0d",
+      "role": "deployment_and_host_operations"
+    },
+    {
+      "repository": "ramideltoro/nutsnews-worker",
+      "commit": "22a2c4f33d8dacdf9fd2367de852ae29d3abaa85",
+      "role": "legacy_production_ingestion_and_tracking"
+    },
+    {
+      "repository": "ramideltoro/nutsnews-worker-contracts",
+      "commit": "bf10f4257a1ac7f3e5aef0c5a14f62ec51ae4bb2",
+      "role": "shared_contract_package"
+    },
+    {
+      "repository": "ramideltoro/nutsnews-worker-runtime",
+      "commit": "43e7883554e250b2297d40266374cb4ff87d141c",
+      "role": "shared_runtime_package"
+    },
+    {
+      "repository": "ramideltoro/nutsnews-worker-feed-scheduler",
+      "commit": "ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396",
+      "role": "scheduler_service"
+    },
+    {
+      "repository": "ramideltoro/nutsnews-worker-feed-fetcher",
+      "commit": "5b82b3e27ef85e57fc9aec23a0815cde584758eb",
+      "role": "fetcher_service"
+    },
+    {
+      "repository": "ramideltoro/nutsnews-worker-article-canonicalizer",
+      "commit": "64d6f59920ec6aa5fb56028de99f7600ecb5be2d",
+      "role": "canonicalizer_service"
+    },
+    {
+      "repository": "ramideltoro/nutsnews-worker-article-enrichment",
+      "commit": "edd63d8acd4a46a33aea4b043e3dc8dfd95af310",
+      "role": "enrichment_service"
+    },
+    {
+      "repository": "ramideltoro/nutsnews-worker-article-approval",
+      "commit": "38185c74717221453c662f4ba1b093315eff5b83",
+      "role": "approval_service"
+    },
+    {
+      "repository": "ramideltoro/nutsnews-worker-article-translation",
+      "commit": "d3b68668c7b714500d7efd204ecf33987a34e3ee",
+      "role": "translation_service"
+    },
+    {
+      "repository": "ramideltoro/nutsnews-worker-article-persistence",
+      "commit": "6dae69d96b4b081b23b5e1d85e10133ee36a6674",
+      "role": "persistence_service"
+    },
+    {
+      "repository": "ramideltoro/nutsnews-worker-article-publication",
+      "commit": "5a9e3c09a8572a7978687bcb7afec548e3934a63",
+      "role": "publication_service"
+    },
+    {
+      "repository": "ramideltoro/nutsnews-infra",
+      "commit": "48748cd7fea036d14e281fe84fcde5a52d41166c",
+      "role": "grafana_and_cloudflare_ownership"
+    },
+    {
+      "repository": "ramideltoro/nutsnews-docs",
+      "commit": "fa8853515268463b5c3e32d4b6a1efc39b0f1383",
+      "role": "architecture_and_runbooks"
+    },
+    {
+      "repository": "ramideltoro/nutsnews",
+      "commit": "ba8fd07b940d0418436b33c6ccb4d59a76caab4a",
+      "role": "admin_portal"
+    }
+  ],
+  "immutable_packages": [
+    {
+      "repository": "ramideltoro/nutsnews-worker-contracts",
+      "version": "0.3.1",
+      "commit": "396d94dba76e3773ede50783463419501853b107",
+      "publish_run": 29980948115,
+      "attestation_id": 36694796,
+      "tarball_sha256": "5e2c006e8aba3c20e0b52a42f53e07c3d3ab5fbb00dd118a346ee9bf6e32fb2d",
+      "consumed_by": [
+        "scheduler",
+        "fetcher"
+      ]
+    },
+    {
+      "repository": "ramideltoro/nutsnews-worker-contracts",
+      "version": "0.4.0",
+      "commit": "bf10f4257a1ac7f3e5aef0c5a14f62ec51ae4bb2",
+      "publish_run": 30156164725,
+      "attestation_id": 37079895,
+      "tarball_sha256": "3189d372db74c64f6527e4fd2ff30b5ee807c06fe6c574a8b901886bf66bc7d5",
+      "consumed_by": [
+        "canonicalizer",
+        "enrichment",
+        "approval",
+        "translation",
+        "persistence",
+        "publication"
+      ]
+    },
+    {
+      "repository": "ramideltoro/nutsnews-worker-runtime",
+      "version": "0.4.0",
+      "commit": "077a83ee717e385afffccec489aaa1fff31c50f1",
+      "publish_run": 30139733351,
+      "attestation_id": 37051512,
+      "tarball_sha256": "34bd7278b0a321449d3bcbda109e9cd2d1931dd78fffc587818e822ea4d2c6ba",
+      "consumed_by": [
+        "scheduler"
+      ]
+    },
+    {
+      "repository": "ramideltoro/nutsnews-worker-runtime",
+      "version": "0.5.0",
+      "commit": "43e7883554e250b2297d40266374cb4ff87d141c",
+      "publish_run": 30398759792,
+      "attestation_id": 37608731,
+      "tarball_sha256": "371761f3420d4219354d450b1d1cec62b373817cc78f91128274490b9a8981c0",
+      "consumed_by": [
+        "fetcher",
+        "canonicalizer",
+        "enrichment",
+        "approval",
+        "translation",
+        "persistence",
+        "publication"
+      ]
+    }
+  ],
+  "deployed_services": [
+    {
+      "stage": "scheduler",
+      "source_repository": "ramideltoro/nutsnews-worker-feed-scheduler",
+      "source_commit": "ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396",
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler@sha256:ac1870a4f4fb1cd847ea6de43b9e3551e9d9c2acc6e32586f570edf61bc2d053",
+      "contract_version": "0.3.1",
+      "runtime_package_version": "0.4.0",
+      "mode": "shadow",
+      "production_writes_enabled": false
+    },
+    {
+      "stage": "fetcher",
+      "source_repository": "ramideltoro/nutsnews-worker-feed-fetcher",
+      "source_commit": "5b82b3e27ef85e57fc9aec23a0815cde584758eb",
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-feed-fetcher@sha256:38617a1592b98797f951070d997d6b599725aff0ce7cecfaac7f70d99016125c",
+      "contract_version": "0.3.1",
+      "runtime_package_version": "0.5.0",
+      "mode": "shadow",
+      "production_writes_enabled": false
+    },
+    {
+      "stage": "canonicalizer",
+      "source_repository": "ramideltoro/nutsnews-worker-article-canonicalizer",
+      "source_commit": "64d6f59920ec6aa5fb56028de99f7600ecb5be2d",
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-canonicalizer@sha256:63f5c6dc639850f008fb30e6bcb4b4e19d54095bd75511119e690cb1abe7ef98",
+      "contract_version": "0.4.0",
+      "runtime_package_version": "0.5.0",
+      "mode": "shadow",
+      "production_writes_enabled": false
+    },
+    {
+      "stage": "enrichment",
+      "source_repository": "ramideltoro/nutsnews-worker-article-enrichment",
+      "source_commit": "edd63d8acd4a46a33aea4b043e3dc8dfd95af310",
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-enrichment@sha256:c2decb289e7c8fb42ccb1ec661683642686d3f65a6aea310cda2debc33cf8317",
+      "contract_version": "0.4.0",
+      "runtime_package_version": "0.5.0",
+      "mode": "shadow",
+      "production_writes_enabled": false
+    },
+    {
+      "stage": "approval",
+      "source_repository": "ramideltoro/nutsnews-worker-article-approval",
+      "source_commit": "38185c74717221453c662f4ba1b093315eff5b83",
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-approval@sha256:20b59d4f6aebab45a3849f36497d530a0dd1517e64d0c969fdecbbd5e7675750",
+      "contract_version": "0.4.0",
+      "runtime_package_version": "0.5.0",
+      "mode": "shadow",
+      "production_writes_enabled": false
+    },
+    {
+      "stage": "translation",
+      "source_repository": "ramideltoro/nutsnews-worker-article-translation",
+      "source_commit": "d3b68668c7b714500d7efd204ecf33987a34e3ee",
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-translation@sha256:9116bb007d2592bc84b49ac185d042e01f991f67a875aae5fbe3d364c80f1d32",
+      "contract_version": "0.4.0",
+      "runtime_package_version": "0.5.0",
+      "mode": "shadow",
+      "production_writes_enabled": false
+    },
+    {
+      "stage": "persistence",
+      "source_repository": "ramideltoro/nutsnews-worker-article-persistence",
+      "source_commit": "6dae69d96b4b081b23b5e1d85e10133ee36a6674",
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-persistence@sha256:b7cd29d59d43406e3e8ab61ed4840b2fdea84ba8016fead4eb3eaa8d1c8de77d",
+      "contract_version": "0.4.0",
+      "runtime_package_version": "0.5.0",
+      "mode": "shadow",
+      "production_writes_enabled": false
+    },
+    {
+      "stage": "publication",
+      "source_repository": "ramideltoro/nutsnews-worker-article-publication",
+      "source_commit": "5a9e3c09a8572a7978687bcb7afec548e3934a63",
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-publication@sha256:96ecc4d028a36c7a6e926174c4ce8677c506a5b8dd031bb03973859f86d85328",
+      "contract_version": "0.4.0",
+      "runtime_package_version": "0.5.0",
+      "mode": "shadow",
+      "production_writes_enabled": false
+    }
+  ],
+  "source_control_hashes": [
+    {
+      "path": "ansible/roles/backend_worker_runtime/defaults/main.yml",
+      "sha256": "0b5232c6c1636d130eac1510704fab5b694eaddfa0dc8427135dd364a1e0aa03"
+    },
+    {
+      "path": "ansible/roles/backend_worker_runtime/templates/worker-uplift-services.json.j2",
+      "sha256": "df532e62099cf1a19c553346d753d05811ffe3de64210ee25fc1423352d1b238"
+    },
+    {
+      "path": "ansible/roles/backend_rabbitmq/templates/worker-uplift-topology.json.j2",
+      "sha256": "b9a02b2719bf08fb7add31e466afec70312c2d4e3b807e68358d606c9c6f6565"
+    },
+    {
+      "path": "docs/worker-uplift-runtime-identities.json",
+      "sha256": "aff6c426b29b5877f2857e8c69dadcf817d80df899a089b41166fa61256959a5"
+    },
+    {
+      "path": "docs/worker-uplift-api-admin-compatibility-contract.json",
+      "sha256": "4727bf858013cf5856bb6e385bfc9a2ffbec045f42b988b81517663a4af39fdc"
+    },
+    {
+      "path": "docs/worker-uplift-operation-map.json",
+      "sha256": "eb85fb0708f4cd52432f5c6da581712f37fdbf49359c82605d07f0f80e98483a"
+    },
+    {
+      "path": "docs/worker-uplift-security-review.json",
+      "sha256": "89c837e7375a04629d4d3e33cf65e1a5b8661365a05eaaaff7c722c8d22e2d56"
+    },
+    {
+      "path": "docs/worker-uplift-shadow-soak-capacity-report.json",
+      "sha256": "e327379b89c66022ca17e85100c7da8355b7efe12bb0485103de08911df84f46"
+    },
+    {
+      "path": "docs/worker-uplift-legacy-to-shadow-parity-report.json",
+      "sha256": "58561f0be68ab194e8fc212732ea59e27670bb8cf1780985e16f8bc602ee2444"
+    },
+    {
+      "path": "docs/evidence/worker-uplift-runtime-status-2026-07-30.json",
+      "sha256": "b6006ae065ed8dc305ed228f0fb6da431ce220fab806acc4b67a45aa02df9537"
+    }
+  ],
+  "identity_and_policy_evidence": {
+    "authoritative_rabbitmq_topology_path": "ansible/roles/backend_rabbitmq/templates/worker-uplift-topology.json.j2",
+    "authoritative_rabbitmq_topology_sha256": "b9a02b2719bf08fb7add31e466afec70312c2d4e3b807e68358d606c9c6f6565",
+    "rabbitmq_service_identity_ids": [
+      "scheduler_publisher",
+      "fetcher_consumer",
+      "fetcher_publisher",
+      "canonicalizer_consumer",
+      "canonicalizer_publisher",
+      "enrichment_consumer",
+      "enrichment_publisher",
+      "approval_consumer",
+      "approval_publisher",
+      "translation_consumer",
+      "translation_publisher",
+      "persistence_consumer",
+      "persistence_publisher",
+      "publication_consumer"
+    ],
+    "rabbitmq_non_service_identity_ids": [
+      "break_glass_admin",
+      "monitoring_canary"
+    ],
+    "postgres_stage_roles": [
+      "worker_uplift_scheduler",
+      "worker_uplift_fetcher",
+      "worker_uplift_canonicalizer",
+      "worker_uplift_enrichment",
+      "worker_uplift_approval",
+      "worker_uplift_translation",
+      "worker_uplift_persistence",
+      "worker_uplift_publication"
+    ],
+    "protected_permission_check": {
+      "run_id": 30451806594,
+      "artifact_id": 8736787451,
+      "artifact_digest": "sha256:ea6c7ae47acd211b2b870ac162502ef6d4f36c74616fbf62edcc53cfdf9315ef",
+      "status": "pass"
+    },
+    "inventory_state": "stale",
+    "inventory_discrepancy": "docs/worker-uplift-runtime-identities.json still records the superseded worker.uplift events/queue regex map and an empty monitoring identity, while the deployed and source-controlled topology uses nutsnews.worker.v1 routes plus the isolated monitoring_canary identity.",
+    "backend_api_write_policy": {
+      "runtime_api_writes_enabled": false,
+      "publication_visibility_enabled": false,
+      "reconciliation_apply_enabled": false,
+      "openai_fallback_enabled": false,
+      "qwen_source_credential": "LOCAL_AI_API_KEY",
+      "qwen_runtime_mappings": [
+        "approval-qwen-api-key",
+        "translation-qwen-api-key"
+      ]
+    }
+  },
+  "comparison_and_soak_evidence": {
+    "parity": {
+      "status": "stale",
+      "run_id": 30203441579,
+      "head_commit": "62d2fcc0e20a2dde9d80e65a82108fe679118d16",
+      "artifact_id": 8632350143,
+      "artifact_digest": "sha256:ebd5c7cb7591af5a1d5cefb2190c937e198136eab06eff6ca8074d1608f2b3ea",
+      "checked_at_utc": "2026-07-26T13:08:32Z",
+      "comparison_window": "latest protected scheduler shadow smoke fixture",
+      "failed_checks": [],
+      "stale_reason": "All eight image digests in the parity artifact differ from the currently deployed image set."
+    },
+    "soak": {
+      "status": "pass",
+      "run_id": 30405550709,
+      "head_commit": "2d044026b132eb0e0544c86647a38b07b69e47a8",
+      "artifact_id": 8706384719,
+      "artifact_digest": "sha256:948e35028e0d83b5503c1845495a63b6689b50688dba15cc1306cf271ae28d2c",
+      "checked_at_utc": "2026-07-28T22:43:13Z",
+      "window_start_utc": "2026-07-25T22:13:47Z",
+      "window_end_utc": "2026-07-28T22:39:40Z",
+      "observed_hours": 72.43,
+      "observed_events": 415,
+      "failed_checks": [],
+      "image_set_matches_current": true,
+      "host_headroom": {
+        "cpu_count": 4,
+        "load_per_vcpu": 0.203,
+        "memory_used_percent": 13.12,
+        "root_disk_used_percent": 17.05,
+        "failed_systemd_units": 0
+      },
+      "model_cost_policy": {
+        "qwen_calls": 110,
+        "openai_calls": 0,
+        "openai_budget_usd": 0
+      }
+    }
+  },
+  "runtime_and_recovery_evidence": {
+    "current_equivalent_status": {
+      "status": "pass",
+      "run_id": 30451804551,
+      "head_commit": "f5dea5b3255471d571ba6875fa9412db7346100b",
+      "artifact_id": 8736791561,
+      "artifact_digest": "sha256:ee17958bbc70b21982cda09c4b1b5974a25d69328030de32b6a29886756ccf82",
+      "runtime_configuration_unchanged_through_review_base": true,
+      "mode": "shadow",
+      "production_writes_enabled": false,
+      "healthy_services": 8,
+      "required_consumer_queues": 7,
+      "consumers_per_required_queue": 1,
+      "ready_messages": 0,
+      "unacknowledged_messages": 0
+    },
+    "fresh_status_dispatch": {
+      "status": "pass",
+      "run_id": 30513933114,
+      "head_commit": "b619cf91504eafca21f70c5d68888563f5fca7a9",
+      "action": "status",
+      "dry_run": true,
+      "approval_bypassed": false,
+      "artifact_id": 8770464087,
+      "artifact_digest": "sha256:92fda3a7c5c1b45f2ec6a29013e6c4c1a42f7208b3a91e17ea59bc1552bc8563",
+      "downloaded_json_sha256": "826a6400ec71b834a10c1f89c1b7164855d9db96c9d28938d772283e6d1444e3",
+      "generated_at_utc": "2026-07-30T18:24:00Z",
+      "mode": "shadow",
+      "production_writes_enabled": false,
+      "healthy_services": 8,
+      "required_consumer_queues": 7,
+      "consumers_per_required_queue": 1,
+      "ready_messages": 0,
+      "unacknowledged_messages": 0,
+      "evidence_path": "docs/evidence/worker-uplift-runtime-status-2026-07-30.json",
+      "evidence_sha256": "b6006ae065ed8dc305ed228f0fb6da431ce220fab806acc4b67a45aa02df9537"
+    },
+    "approval_free_status_dispatch": {
+      "status": "pass",
+      "tracking_issue": "ramideltoro/nutsnews-worker#167",
+      "implementation_merge_commit": "ba26e7bb9fa7a4f30773216da1e69bfe7ec3bf0d",
+      "post_merge_checks_run": 30572501619,
+      "run_id": 30573044860,
+      "head_commit": "ba26e7bb9fa7a4f30773216da1e69bfe7ec3bf0d",
+      "pending_deployment_count_observed": 0,
+      "protected_job_status": "skipped",
+      "read_only_job_status": "success",
+      "artifact_id": 8771565855,
+      "artifact_digest": "sha256:ea5785493cfa3db2cb84c7b006c5c6310c652ad7ed8a303b13288e3f5ad3a874",
+      "downloaded_json_sha256": "ad2daec609da672bbf71f473e0651b687cf5dbc749937fe8eb6a3d3e6feeec61",
+      "generated_at_utc": "2026-07-30T19:02:12Z",
+      "action": "status",
+      "mode": "shadow",
+      "production_writes_enabled": false,
+      "healthy_services": 8,
+      "required_consumer_queues": 7,
+      "consumers_per_required_queue": 1,
+      "ready_messages": 0,
+      "unacknowledged_messages": 0,
+      "evidence_path": "docs/evidence/worker-uplift-runtime-status-2026-07-30.json",
+      "evidence_sha256": "b6006ae065ed8dc305ed228f0fb6da431ce220fab806acc4b67a45aa02df9537"
+    },
+    "scheduler_readiness": {
+      "status": "blocked_confirmed_evidence_defect",
+      "report_generated_at_utc": "2026-07-30T18:24:00Z",
+      "checked_at_utc": "2026-07-23T00:00:00.000Z",
+      "dependency": "local-feed-source",
+      "source_commit": "ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396",
+      "source_uses_local_test_dependencies": true,
+      "silently_normalized": false,
+      "blocker_issue": "ramideltoro/nutsnews-worker#168"
+    },
+    "runtime_report_tracking_issue": {
+      "reported_number": 85,
+      "status": "valid_historical_runtime_framework_provenance",
+      "historical_issue": "ramideltoro/nutsnews-worker#85",
+      "current_readiness_gate": "ramideltoro/nutsnews-worker#125",
+      "silently_normalized": false,
+      "new_blocker_required": false
+    },
+    "consumer_loss_and_recovery": {
+      "status": "pass",
+      "failure_detection_run": 30404840645,
+      "restored_status_run": 30405237965,
+      "queue_drain_smoke_run": 30405294851,
+      "restored_services": 8,
+      "restored_consumers_per_required_queue": 1,
+      "main_queues_drained": true,
+      "dlq_growth": 0,
+      "legacy_ingestion_endpoints_invoked": false,
+      "production_writes_enabled": false
+    },
+    "empty_broker_recovery": {
+      "status": "stale",
+      "run_id": 30215207093,
+      "head_commit": "eb46bbb937d09a97e754741b8a51eb26972e679c",
+      "artifact_id": 8635606538,
+      "artifact_digest": "sha256:9877debcdb36606f460ff0dac4f3d03e8866d5b2fd1f4c2da08f342b220be239",
+      "drill_duration_seconds": 6.39,
+      "target_rto_seconds": 1800,
+      "drill_topology_sha256": "36eec90bc70cb3252c906036269154ec5d8a1cd98a525ad6094bf822c21df01a",
+      "current_topology_sha256": "b9a02b2719bf08fb7add31e466afec70312c2d4e3b807e68358d606c9c6f6565",
+      "stale_reason": "The source-controlled RabbitMQ topology changed after the protected clean-rebuild drill."
+    },
+    "service_owned_reconciliation": {
+      "status": "pass_historical",
+      "persistence_apply_run": 30213792420,
+      "replayed_items": 2,
+      "new_message_ids": true,
+      "duplicate_final_effects": 0,
+      "production_visibility_enabled": false
+    },
+    "dependency_outage_and_backup_proof": {
+      "status": "missing_current_evidence",
+      "missing": [
+        "current PostgreSQL outage and recovery artifact",
+        "current backend Worker API outage and recovery artifact",
+        "current Qwen/provider outage and recovery artifact",
+        "current backup and isolated restore proof tied to the candidate versions"
+      ]
+    },
+    "rollback_limits": {
+      "status": "planned_parameters_missing",
+      "current_runtime_rollback_scope": "single shadow service image only",
+      "production_owner_rollback_workflow_exists": false,
+      "cutover_watermark_exists": false,
+      "rollback_deadline_defined": false,
+      "observation_window_approved": false,
+      "planning_blocker_issue": "ramideltoro/nutsnews-worker#165",
+      "downstream_control_implementation_required_before": "ramideltoro/nutsnews-worker#166",
+      "downstream_control_implementation_blocks_issue_125": false,
+      "post_synchronization_policy": "forward recovery unless a reviewed sync-back procedure proves no loss or duplication"
+    }
+  },
+  "observability_and_admin_evidence": {
+    "grafana": {
+      "status": "pass",
+      "owner_repository": "ramideltoro/nutsnews-infra",
+      "owner_commit": "48748cd7fea036d14e281fe84fcde5a52d41166c",
+      "worker_uplift_evidence_paths_unchanged_since_commit": "ee61807a757fe087dbcecd60d5e0b7fe07f4115a",
+      "alerts_catalog_sha256": "86b52af35cec309e043e459e0f6479e9fad347bd7c690ed52284d1914f5d017f",
+      "telemetry_scope_sha256": "a837762f2fd57dadbee07c413ad88853e11387d01039474aa4e849a49ea830f9",
+      "protected_apply_run": 30400920451,
+      "protected_apply_artifact_digest": "sha256:506f1c8069169abbc6dea80a4721fa5a904a69121769c406e08a499e8985df32",
+      "metrics_run": 30451809064,
+      "metrics_artifact_digest": "sha256:a05ba5387b886f5fc132ea63180612dc5a8c3a2f546445be8b29f52028df7c25",
+      "logs_run": 30451811517,
+      "logs_artifact_digest": "sha256:9ae904ffeb31ef2435f97fde0282a29b6a6bf4ab7df9972c51519ff6ac4f3fd0"
+    },
+    "admin_portal": {
+      "status": "missing_current_authenticated_deployed_proof",
+      "implementation_pr": "https://github.com/ramideltoro/nutsnews/pull/518",
+      "merge_commit": "9210dec5a4177b92c2cbccc99960203d221aacd0",
+      "current_head": "ba8fd07b940d0418436b33c6ccb4d59a76caab4a",
+      "worker_uplift_projection_paths_unchanged_since_commit": "740230f0ada1c7031703ad075f4ddc3d0f0db4eb",
+      "shards_page_sha256": "dd76f29747cae0bfc3ff6d5f4b757ced4e90051fa2692ffcbfa65c73a626979f",
+      "health_projection_sha256": "1acb6a55639dfe2e227f4f8f712ae632f51e537ee30f094b6f62be3c6573d7fd",
+      "source_feature_present": true,
+      "production_route_redirects_to_authenticated_login": true,
+      "authenticated_live_projection_artifact_present": false
+    }
+  },
+  "security_gate": {
+    "status": "blocked_pending_named_owner_disposition",
+    "review_artifact": "docs/worker-uplift-security-review.json",
+    "review_merge_commit": "b619cf91504eafca21f70c5d68888563f5fca7a9",
+    "post_merge_checks_run": 30484088483,
+    "unresolved_critical_or_high_findings": [],
+    "residual_findings_requiring_gate_disposition": [
+      "SEC-124-002",
+      "SEC-124-003",
+      "SEC-124-004",
+      "SEC-124-005",
+      "SEC-124-006",
+      "SEC-124-007",
+      "SEC-124-008",
+      "SEC-124-009"
+    ],
+    "named_owner_decisions": []
+  },
+  "operations_guide": {
+    "status": "pass_as_built_no_cutover_authority",
+    "repository": "ramideltoro/nutsnews-docs",
+    "merge_commit": "77eeb52078878c2f95989db3107b814e54c52222",
+    "current_head": "fa8853515268463b5c3e32d4b6a1efc39b0f1383",
+    "technical_source_sha256": "2163318864a7d6e6fa316ed441b179a012ed0a1d3ecd4626a6b0fe347e31142a",
+    "post_merge_run": 30487097782,
+    "artifact_id": 8738197991,
+    "artifact_digest": "sha256:fed85e9de9c570e5092bef057b0bc31b487ff45e2bc4c30174be54222fc945ba",
+    "guide_unchanged_on_current_head": true,
+    "readiness_documentation_authorizes_cutover": false
+  },
+  "cloudflare_failover": {
+    "status": "block",
+    "binding_evidence_path": "docs/evidence/worker-uplift-cloudflare-bindings-2026-07-30.json",
+    "binding_evidence_sha256": "c052e24baa42665401c297181c48d25132e1ba40e5a687312ab2588289259da7",
+    "deployed_worker_present": true,
+    "durable_object_binding_present": true,
+    "cron_schedule_present": true,
+    "failover_analytics_binding_present": false,
+    "current_controller_status_and_alarm_artifact_present": false,
+    "named_owner_decision_that_analytics_is_unnecessary": null,
+    "blocker_issue": "https://github.com/ramideltoro/nutsnews-worker/issues/157",
+    "dns_or_failover_state_changed_by_review": false
+  },
+  "readiness_items": [
+    {
+      "id": "single_writer_and_write_policy",
+      "status": "pass",
+      "evidence": "Legacy nutsnews-worker at 22a2c4f33d8dacdf9fd2367de852ae29d3abaa85 remains the only production ingestion owner; uplift mode is shadow and both production-write and publication-visibility gates are false."
+    },
+    {
+      "id": "exact_images_packages_contracts",
+      "status": "pass",
+      "evidence": "Eight digest-pinned images and four immutable package versions are recorded with source commits, publish runs, attestations, and tarball digests."
+    },
+    {
+      "id": "scoped_identities",
+      "status": "block",
+      "evidence": "Current topology and protected permission check pass, but the dedicated runtime-identity inventory still records superseded route names and monitoring permissions."
+    },
+    {
+      "id": "parity_window",
+      "status": "block",
+      "evidence": "Run 30203441579 passed for an older eight-image set and is not current proof for the deployed candidate; #158 owns the protected current-candidate rerun."
+    },
+    {
+      "id": "soak_capacity_cost",
+      "status": "pass",
+      "evidence": "Run 30405550709 passed a complete 72.43-hour, 415-event window on the current image set with healthy queues, zero failed checks, zero OpenAI calls, and host headroom."
+    },
+    {
+      "id": "consumer_failure_recovery",
+      "status": "pass",
+      "evidence": "Runs 30404840645, 30405237965, and 30405294851 prove zero-consumer detection, protected recovery, restored count one, and queue drain without DLQ growth."
+    },
+    {
+      "id": "empty_broker_recovery",
+      "status": "block",
+      "evidence": "Run 30215207093 met RTO, but its topology hash differs from the current source-controlled topology; #159 owns the protected current-topology drill."
+    },
+    {
+      "id": "dependency_outages",
+      "status": "block",
+      "evidence": "Current candidate evidence does not attach PostgreSQL, backend API, and Qwen outage/recovery drills; #161 owns the protected evidence refresh."
+    },
+    {
+      "id": "backup_and_isolated_restore",
+      "status": "block",
+      "evidence": "Current candidate evidence does not attach current backup inventory and isolated PostgreSQL/RabbitMQ recovery proof; #162 owns the value-free readiness evidence and links any underlying infra implementation issue."
+    },
+    {
+      "id": "current_protected_runtime_status",
+      "status": "pass",
+      "evidence": "Approved run 30513933114 and approval-free merged-main run 30573044860 both passed in shadow mode with writes false, eight healthy services, and seven required queues at one consumer and zero backlog; immutable artifact IDs, digests, and downloaded JSON hashes are committed in the runtime-status evidence."
+    },
+    {
+      "id": "scheduler_runtime_dependencies",
+      "status": "block",
+      "evidence": "Both status artifacts expose scheduler checkedAt=2026-07-23T00:00:00.000Z and local test feed-source readiness. Source commit ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396 confirms production startup unconditionally creates local test dependencies; #168 owns the independent remediation and current proof."
+    },
+    {
+      "id": "grafana_alerts_logs_metrics",
+      "status": "pass",
+      "evidence": "Infra-owned protected alert apply and backend metrics/logs checks passed with immutable artifacts."
+    },
+    {
+      "id": "admin_projection",
+      "status": "block",
+      "evidence": "Current source retains the sanitized uplift panel and production enforces authentication, but no current authenticated deployed projection artifact is attached."
+    },
+    {
+      "id": "security_residuals",
+      "status": "block",
+      "evidence": "Eight medium/low #124 residual findings expired at #125 and have no named owner remediation or acceptance decision."
+    },
+    {
+      "id": "operations_runbook",
+      "status": "pass",
+      "evidence": "Docs merge 77eeb52078878c2f95989db3107b814e54c52222 and deployment run 30487097782 provide the current as-built guide and explicitly deny cutover authority."
+    },
+    {
+      "id": "cloudflare_failover_invariants",
+      "status": "block",
+      "evidence": "The deployed Worker and cron exist, but FAILOVER_ANALYTICS and current controller status/alarm proof are absent; worker tracking issue #157 owns the infra implementation or named disposition."
+    },
+    {
+      "id": "control_implementation_plan",
+      "status": "block",
+      "evidence": "The exact planned watermark semantics, rollback deadline, observation window, thresholds, and named ownership roster are missing; #165 owns the non-mutating plan. Implementation of #150/#126 is downstream and is not a #125 blocker."
+    },
+    {
+      "id": "named_readiness_approval",
+      "status": "block",
+      "evidence": "No named approver has issued a current GO decision, and this artifact does not fabricate approval or risk acceptance."
+    }
+  ],
+  "blockers": [
+    {
+      "id": "failover_analytics_binding",
+      "status": "open",
+      "owner_repository": "ramideltoro/nutsnews-infra",
+      "issue": "ramideltoro/nutsnews-worker#157",
+      "required_resolution": "Deploy and prove FAILOVER_ANALYTICS through the protected infra path, or attach an explicit named owner decision with rationale that it is unnecessary."
+    },
+    {
+      "id": "current_parity",
+      "status": "open",
+      "owner_repository": "ramideltoro/nutsnews-backend",
+      "issue": "ramideltoro/nutsnews-worker#158",
+      "required_resolution": "Run the protected parity report against the exact candidate image set and inspect its artifact."
+    },
+    {
+      "id": "current_empty_broker_recovery",
+      "status": "open",
+      "owner_repository": "ramideltoro/nutsnews-backend",
+      "issue": "ramideltoro/nutsnews-worker#159",
+      "required_resolution": "Obtain separate approval for the protected clean-rebuild drill on the current topology and inspect recovery and drain artifacts."
+    },
+    {
+      "id": "runtime_identity_inventory_drift",
+      "status": "open",
+      "owner_repository": "ramideltoro/nutsnews-backend",
+      "issue": "ramideltoro/nutsnews-worker#160",
+      "required_resolution": "Reconcile the dedicated identity inventory and validator with the authoritative current RabbitMQ topology."
+    },
+    {
+      "id": "dependency_outage_proof",
+      "status": "open",
+      "owner_repository": "ramideltoro/nutsnews-backend",
+      "issue": "ramideltoro/nutsnews-worker#161",
+      "required_resolution": "Attach current protected PostgreSQL, backend API, and Qwen outage/recovery artifacts tied to the exact candidate."
+    },
+    {
+      "id": "backup_and_isolated_restore_proof",
+      "status": "open",
+      "owner_repository": "ramideltoro/nutsnews-infra",
+      "issue": "ramideltoro/nutsnews-worker#162",
+      "required_resolution": "Attach current value-free backup inventory and isolated restore artifacts tied to the candidate, completing any linked infra implementation findings."
+    },
+    {
+      "id": "authenticated_admin_deployed_proof",
+      "status": "open",
+      "owner_repository": "ramideltoro/nutsnews",
+      "issue": "ramideltoro/nutsnews-worker#163",
+      "required_resolution": "Attach value-free authenticated production evidence for the current worker-uplift admin projection."
+    },
+    {
+      "id": "security_residual_owner_disposition",
+      "status": "open",
+      "owner_repository": "ramideltoro/nutsnews-backend",
+      "issue": "ramideltoro/nutsnews-worker#164",
+      "required_resolution": "A named owner must record remediation or explicit bounded residual-risk acceptance for every #124 finding that expires at #125."
+    },
+    {
+      "id": "control_implementation_plan",
+      "status": "open",
+      "owner_repository": "ramideltoro/nutsnews-backend",
+      "issue": "ramideltoro/nutsnews-worker#165",
+      "required_resolution": "Record the exact planned watermark semantics, rollback deadline, observation window, thresholds, and named owners needed to implement #150/#126. Do not require those downstream controls to exist at #125."
+    },
+    {
+      "id": "scheduler_local_test_dependencies",
+      "status": "open",
+      "owner_repository": "ramideltoro/nutsnews-worker-feed-scheduler",
+      "issue": "ramideltoro/nutsnews-worker#168",
+      "required_resolution": "Replace deployed local test scheduler dependencies and fixed clock with production shadow adapters, then attach current readiness and scheduler-smoke evidence with a real observation timestamp."
+    },
+    {
+      "id": "named_readiness_approver",
+      "status": "open",
+      "owner_repository": "ramideltoro/nutsnews-worker",
+      "issue": "ramideltoro/nutsnews-worker#125",
+      "required_resolution": "After every technical blocker is resolved, a named authorized approver must issue the current GO decision to begin #150 only."
+    }
+  ],
+  "reconsideration_requirements": [
+    "Resolve ramideltoro/nutsnews-worker#157 with protected, value-free deployed proof or an explicit named owner decision.",
+    "Complete #158 and #159 with current parity and empty-broker recovery evidence for the exact candidate images and topology.",
+    "Complete #160 by reconciling the runtime identity inventory with the authoritative topology.",
+    "Complete #161, #162, and #163 with current dependency-outage, backup/isolated-restore, and authenticated-admin evidence.",
+    "Complete #164 by dispositioning every #124 residual risk through remediation or explicit named authorized owner acceptance.",
+    "Complete #165 with exact planned watermark, rollback deadline, observation window, thresholds, and named owners; #150/#126 implementation is deliberately downstream of #125.",
+    "Complete #168 by replacing the deployed scheduler's local test dependencies and fixed clock, then attach current immutable readiness and scheduler-smoke proof.",
+    "Retain the closed #167 approval-free runtime evidence path and rerun status if the candidate images or runtime configuration change.",
+    "Obtain a named current approver only after every #125 blocker is closed; GO authorizes beginning #150 only.",
+    "Require #166 after #126 to verify implemented controls, current evidence, rollback rehearsal, a named approver, and the exact production candidate before #127."
+  ]
+}

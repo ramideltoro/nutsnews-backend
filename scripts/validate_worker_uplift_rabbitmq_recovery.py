@@ -83,6 +83,8 @@ def main() -> int:
         "clean-rebuild-drill",
         "current-candidate-reconciliation-drill",
         "CANDIDATE_CONSUMER_STAGES",
+        "wait_for_expected_consumers",
+        "consumer_registration_complete",
         "RECONCILIATION_MAX_ITEMS = 1",
         "live_production_broker_unchanged",
         "duplicate_domain_or_api_side_effects",

@@ -79,7 +79,8 @@ This is a protected shadow mutation, not a production-broker loss exercise. It:
 3. bootstraps and validates the current topology;
 4. starts the seven digest-pinned consumer images from the deployed candidate
    against the disposable broker on ephemeral loopback HTTP and AMQP ports;
-5. requires one consumer on every main queue;
+5. polls the isolated broker for up to 120 seconds and requires one consumer on
+   every main queue;
 6. selects exactly one confirmed persistence outbox row at least 15 minutes old
    from authoritative PostgreSQL and invokes the service-owned protected
    reconciliation endpoint;

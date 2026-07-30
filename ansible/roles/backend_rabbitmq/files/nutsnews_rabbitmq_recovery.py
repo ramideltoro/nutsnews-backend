@@ -572,10 +572,14 @@ def candidate_container_snapshot(container_name: str) -> dict[str, Any]:
     if not isinstance(data, list) or len(data) != 1:
         raise RuntimeError(f"candidate container inspection returned an unexpected shape for {container_name}")
     container = data[0]
+    state = container.get("State", {})
     return {
         "configured_image": str(container.get("Config", {}).get("Image") or ""),
         "content_image_id": str(container.get("Image") or ""),
         "network_mode": str(container.get("HostConfig", {}).get("NetworkMode") or ""),
+        "running": state.get("Running") is True,
+        "status": str(state.get("Status") or ""),
+        "restart_count": int(container.get("RestartCount", 0) or 0),
     }
 
 
@@ -660,6 +664,34 @@ def wait_for_queue_drain(
             return last
         time.sleep(2)
     return last
+
+
+def wait_for_expected_consumers(
+    *,
+    management_port: str,
+    admin_username: str,
+    admin_password: str,
+    vhost: str,
+    stage_queues: dict[str, str],
+    timeout_seconds: int = 120,
+) -> tuple[dict[str, dict[str, Any]], bool]:
+    deadline = time.monotonic() + timeout_seconds
+    snapshots: dict[str, dict[str, Any]] = {}
+    while time.monotonic() < deadline:
+        snapshots = {
+            stage: queue_snapshot(
+                management_port=management_port,
+                admin_username=admin_username,
+                admin_password=admin_password,
+                vhost=vhost,
+                queue=queue,
+            )
+            for stage, queue in stage_queues.items()
+        }
+        if all(snapshot["consumers"] == 1 for snapshot in snapshots.values()):
+            return snapshots, True
+        time.sleep(2)
+    return snapshots, False
 
 
 def post_json(url: str, token: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -991,18 +1023,20 @@ def action_current_candidate_reconciliation_drill(args: argparse.Namespace) -> d
                 if runtime_services[stage]["readiness"]["status"] != "healthy":
                     raise RuntimeError(f"{stage} exact-candidate consumer did not become ready")
 
-            main_before: dict[str, Any] = {}
             dlq_before: dict[str, Any] = {}
+            stage_main_queues = {
+                stage: str(runtime_services[stage]["main_queue"] or "")
+                for stage in CANDIDATE_CONSUMER_STAGES
+            }
+            main_before, consumers_ready = wait_for_expected_consumers(
+                management_port=ports["management"],
+                admin_username=admin_username,
+                admin_password=admin_password,
+                vhost=str(definition["vhost"]),
+                stage_queues=stage_main_queues,
+            )
             for stage in CANDIDATE_CONSUMER_STAGES:
-                main_queue = str(runtime_services[stage]["main_queue"] or "")
                 dlq = str(runtime_services[stage]["dlq"] or "")
-                main_before[stage] = queue_snapshot(
-                    management_port=ports["management"],
-                    admin_username=admin_username,
-                    admin_password=admin_password,
-                    vhost=str(definition["vhost"]),
-                    queue=main_queue,
-                )
                 dlq_before[stage] = queue_snapshot(
                     management_port=ports["management"],
                     admin_username=admin_username,
@@ -1012,10 +1046,12 @@ def action_current_candidate_reconciliation_drill(args: argparse.Namespace) -> d
                 )
             report["runtime"] = {
                 "services": runtime_services,
+                "consumer_registration_timeout_seconds": 120,
+                "consumer_registration_complete": consumers_ready,
                 "main_queues_before": main_before,
                 "dlqs_before": dlq_before,
             }
-            if any(snapshot["consumers"] != 1 for snapshot in main_before.values()):
+            if not consumers_ready:
                 raise RuntimeError("not all seven exact-candidate consumers registered on the isolated topology")
             if any(snapshot["messages"] != 0 for snapshot in main_before.values()):
                 raise RuntimeError("isolated main queues were not empty before reconciliation")

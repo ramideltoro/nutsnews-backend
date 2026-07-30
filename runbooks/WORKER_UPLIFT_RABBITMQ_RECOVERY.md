@@ -117,6 +117,25 @@ that gap from PostgreSQL outbox/reconciliation state.
 
 ## Workflow
 
+Install only a reviewed recovery-helper change without applying unrelated
+baseline drift:
+
+```bash
+gh workflow run protected-backend-ansible-apply.yml \
+  --repo ramideltoro/nutsnews-backend \
+  --ref main \
+  -f run_mode=check \
+  -f deployment_scope=rabbitmq-recovery-helper
+```
+
+Inspect the check-mode diff, then repeat with `run_mode=apply`,
+`deployment_scope=rabbitmq-recovery-helper`, and the existing typed
+`confirm_apply=backend.nutsnews.com`. This fixed scope runs only the tagged
+helper-copy task. It does not reset UFW, change RabbitMQ data ownership, render
+broker configuration, restart the broker, or deploy worker services. Use
+`full-baseline` only when the complete check-mode diff is intentionally in
+scope.
+
 Use the fixed `Backend RabbitMQ Recovery` workflow:
 
 ```bash

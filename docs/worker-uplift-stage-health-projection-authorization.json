@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "tracking_issue": "ramideltoro/nutsnews-worker#169",
+  "implementation_repository": "ramideltoro/nutsnews-backend",
+  "authorization": {
+    "kind": "standing_bounded_authorization",
+    "per_release_owner_approval_required": false,
+    "first_run_owner_approval_required": false,
+    "environment": "production-backend",
+    "workflow": ".github/workflows/backend-worker-uplift-stage-health-projection.yml",
+    "typed_confirmation": "refresh-worker-uplift-stage-health-projections",
+    "survives_candidate_revisions": true,
+    "revision_condition": "Every run binds to an exact value-free candidate artifact and passes this contract without scope changes.",
+    "fails_closed_on_contract_change": true
+  },
+  "mutation": {
+    "database": "nutsnews_primary_shadow",
+    "target": "worker_uplift_final.stage_health_projections",
+    "operation": "insert_on_conflict_stage_name_update",
+    "expected_row_count": 8,
+    "idempotent": true,
+    "stale_overwrite_allowed": false,
+    "statement_timeout_seconds": 30,
+    "allowed_columns": [
+      "stage_name",
+      "active_ingestion_owner",
+      "stage_status",
+      "stale_status",
+      "last_attempt_at",
+      "last_success_at",
+      "last_failure_at",
+      "consecutive_failure_count",
+      "throughput_per_minute",
+      "latency_p50_ms",
+      "latency_p95_ms",
+      "retry_count",
+      "dlq_count",
+      "queue_age_seconds",
+      "active_consumers",
+      "deployment_version",
+      "telemetry_version",
+      "projection_version",
+      "sanitized_error_code",
+      "sanitized_error_message",
+      "diagnostic_metadata",
+      "redact_after",
+      "updated_at"
+    ]
+  },
+  "stages": [
+    {"name": "scheduler", "consumer_required": false},
+    {"name": "fetcher", "consumer_required": true},
+    {"name": "canonicalizer", "consumer_required": true},
+    {"name": "enrichment", "consumer_required": true},
+    {"name": "approval", "consumer_required": true},
+    {"name": "translation", "consumer_required": true},
+    {"name": "persistence", "consumer_required": true},
+    {"name": "publication", "consumer_required": true}
+  ],
+  "database_identity": {
+    "role": "nutsnews_worker_uplift_projection",
+    "password_source": "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD",
+    "new_secret_material_required": false,
+    "allowed_table_privileges": ["SELECT", "INSERT", "UPDATE"],
+    "forbidden_table_privileges": ["DELETE", "TRUNCATE", "TRIGGER", "REFERENCES"],
+    "other_table_mutation_privileges_allowed": false,
+    "schema_create_allowed": false,
+    "role_create_allowed": false,
+    "database_create_allowed": false
+  },
+  "dry_run": {
+    "approval_free": true,
+    "value_free": true,
+    "exact_candidate_required": true,
+    "maximum_evidence_age_seconds": 900,
+    "required_inputs": [
+      "runtime_status",
+      "runtime_manifest",
+      "runtime_compose",
+      "main_retry_dlq_queue_snapshots"
+    ],
+    "forbidden_values": [
+      "tokens",
+      "cookies",
+      "credentials",
+      "connection_strings",
+      "private_endpoints",
+      "message_payloads",
+      "article_content",
+      "personal_data"
+    ]
+  },
+  "required_preconditions": {
+    "runtime_mode": "shadow",
+    "production_writes_enabled": false,
+    "active_ingestion_owner": "legacy_shards",
+    "runtime_status": "pass",
+    "required_consumer_minimum": 1,
+    "missing_consumers": [],
+    "unverifiable_consumers": []
+  },
+  "post_apply_proof": {
+    "runtime_mode_unchanged": true,
+    "production_writes_enabled_false": true,
+    "active_ingestion_owner_unchanged": true,
+    "consumer_counts_unchanged": true,
+    "queue_counts_unchanged": true,
+    "runtime_manifest_digest_unchanged": true,
+    "runtime_compose_digest_unchanged": true,
+    "target_schema_fingerprint_unchanged": true,
+    "target_rows_match_candidate": true,
+    "dns_or_failover_credentials_available": false,
+    "rabbitmq_mutation_credentials_available": false,
+    "article_or_domain_mutation_privileges_available": false,
+    "infrastructure_mutation_credentials_available": false
+  },
+  "forbidden_operations": [
+    "delete",
+    "truncate",
+    "arbitrary_sql",
+    "article_write",
+    "domain_write",
+    "queue_publish",
+    "queue_consume",
+    "queue_purge",
+    "infrastructure_mutation",
+    "schema_change",
+    "cutover",
+    "ingestion_owner_change",
+    "legacy_worker_change",
+    "dns_change",
+    "failover_change"
+  ],
+  "audit": {
+    "immutable_artifact_required": true,
+    "artifact_name": "backend-worker-uplift-stage-health-projection",
+    "candidate_sha256_required": true,
+    "workflow_run_id_required": true,
+    "workflow_commit_required": true,
+    "redacted_results_only": true
+  }
+}

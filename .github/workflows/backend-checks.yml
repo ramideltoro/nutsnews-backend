@@ -100,6 +100,14 @@ jobs:
         shell: bash
         run: python3 scripts/backend_worker_uplift_shadow_model_check.py --offline --enforce
 
+      - name: Validate worker uplift stage health projection authorization
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_stage_health_projection.py
+
+      - name: Run worker uplift stage health projection tests
+        shell: bash
+        run: python3 -m unittest tests.test_worker_uplift_stage_health_projection
+
       - name: Validate service baseline inventory
         shell: bash
         run: python3 scripts/validate_service_baseline.py

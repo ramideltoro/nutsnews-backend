@@ -545,6 +545,7 @@ jobs:
               extra_vars["backend_postgres_readonly_password"] = readonly_password
               extra_vars["backend_postgres_restore_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_RESTORE_PASSWORD"]
               extra_vars["backend_postgres_validation_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD"]
+              extra_vars["backend_worker_uplift_projection_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD"]
               extra_vars["backend_postgres_replication_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD"]
               extra_vars["backend_postgres_app_rehearsal_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD"]
               extra_vars["backend_postgres_worker_api_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD"]

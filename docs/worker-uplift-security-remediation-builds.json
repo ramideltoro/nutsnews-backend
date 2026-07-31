@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "tracking_issue": "ramideltoro/nutsnews-worker#164",
+  "captured_at_utc": "2026-07-31T18:05:00Z",
+  "safety": {
+    "legacy_worker_is_production_ingestion_owner": true,
+    "uplift_services_are_shadow_only": true,
+    "production_writes_enabled": false,
+    "cutover_authorized": false,
+    "dns_or_failover_changed": false,
+    "secret_values_recorded": false
+  },
+  "package_repositories": [
+    {
+      "repository": "ramideltoro/nutsnews-worker-contracts",
+      "pull_request": 19,
+      "merge_commit": "663e5b6053666ebf5fbcf9ed79c02d34193d215c",
+      "pr_ci_run": 30653343795,
+      "post_merge_ci_run": 30653472765,
+      "controls": [
+        "immutable_action_commits",
+        "no_artifact_publish_dependency_cache_restore",
+        "fail_closed_security_baseline_validator"
+      ]
+    },
+    {
+      "repository": "ramideltoro/nutsnews-worker-runtime",
+      "pull_request": 15,
+      "merge_commit": "9d3ad5998eaa2c2d2d157293f77e86a8c22a38b5",
+      "pr_ci_run": 30653343853,
+      "post_merge_ci_run": 30653508285,
+      "controls": [
+        "immutable_action_commits",
+        "no_artifact_publish_dependency_cache_restore",
+        "fail_closed_security_baseline_validator"
+      ]
+    }
+  ],
+  "service_images": [
+    {
+      "stage": "scheduler",
+      "repository": "ramideltoro/nutsnews-worker-feed-scheduler",
+      "pull_request": 19,
+      "source_commit": "938009f7ed7529a28eda81c8189c207b6e449a32",
+      "pr_ci_run": 30653344718,
+      "post_merge_ci_run": 30653471970,
+      "publish_run": 30653471961,
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler@sha256:cfbb3247914a623bb60362d5e983d02c5936987571e72f5ac910391e1602ef8c",
+      "attestation_manifest_digest": "sha256:29d95378f8c3133000d3aee9cfd52e0e788213071761cdb3481cddc3c5d9bb22",
+      "sbom_digest": "sha256:1fa005a34fd0759e2ce9f650516a5857dd36e881a3c25dc6ace3178abc21fc47",
+      "provenance_digest": "sha256:4c94e36abb791d03bb6a715bd763363c10ee849e62e8bfbebc53dd518f07c850",
+      "minimal_runtime_validated": true,
+      "signed": true
+    },
+    {
+      "stage": "fetcher",
+      "repository": "ramideltoro/nutsnews-worker-feed-fetcher",
+      "pull_request": 20,
+      "source_commit": "501ededcad48924b632b0547679f4dcb54ed4a90",
+      "pr_ci_run": 30653342946,
+      "post_merge_ci_run": 30653472634,
+      "publish_run": 30653472929,
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-feed-fetcher@sha256:7ee6f7a8155b959f01ff265c9b3b8861be5ef5f9bcef5616d5eba88a48e0fbaa",
+      "attestation_manifest_digest": "sha256:6eeaa9322f1d80576d27161bd4bd9d5ff14cd4329b9b59e633e054c5bba6513a",
+      "sbom_digest": "sha256:749e6482a4f7a4cb940616c97bc7ce4386e4a3354451b3f77b13a93e537f6089",
+      "provenance_digest": "sha256:96e5a2f7d6df9eb3d0b990d644d31c60bdab94577978d7453c216e67c375472a",
+      "minimal_runtime_validated": true,
+      "signed": true,
+      "dns_resolution_bound_to_connect": true,
+      "dns_binding_fail_closed_tested": true
+    },
+    {
+      "stage": "canonicalizer",
+      "repository": "ramideltoro/nutsnews-worker-article-canonicalizer",
+      "pull_request": 21,
+      "source_commit": "64dea55ad8f0e9b67e746b5d4363d43762fea792",
+      "pr_ci_run": 30653343777,
+      "post_merge_ci_run": 30653509070,
+      "publish_run": 30653508807,
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-canonicalizer@sha256:6d9fa787412697767a4b8af0eecef43b7c333fdcbae4ad41bda34ce94a2da4c9",
+      "attestation_manifest_digest": "sha256:73d5defd2aae86f269dc82f25fd4ee87b1830a2f3e4fa6853cc11ee786349c68",
+      "sbom_digest": "sha256:3f2d5b381133455f0f6d1a5dd7ec76634996929d46931d8568a46cf3af663b8b",
+      "provenance_digest": "sha256:1f8469940a108ff714c3697dd36a84df0d44280e8f716d29f33ea7afc5c90b89",
+      "minimal_runtime_validated": true,
+      "signed": true
+    },
+    {
+      "stage": "enrichment",
+      "repository": "ramideltoro/nutsnews-worker-article-enrichment",
+      "pull_request": 20,
+      "source_commit": "c7a464e54eda1ed9e5f82d8dc545b1f7f7a36ec0",
+      "pr_ci_run": 30653345624,
+      "post_merge_ci_run": 30653511645,
+      "publish_run": 30653512202,
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-enrichment@sha256:c00bec63cc7a410d8ba228e72b0616d561e64d05ae9316f871183fe5b2a840dc",
+      "attestation_manifest_digest": "sha256:a058cac5ed256e87f084b236c3cd1bab0b8b661e80377ba710872b006725ff6b",
+      "sbom_digest": "sha256:ffd748c718ea36e06aa1667b90d094cecc502baf28437a59ca9566c568b3402c",
+      "provenance_digest": "sha256:c1d41e50e10aff9c08c5f850cc40bf4b810769459e7ff7267822b8353c23f2ca",
+      "minimal_runtime_validated": true,
+      "signed": true
+    },
+    {
+      "stage": "approval",
+      "repository": "ramideltoro/nutsnews-worker-article-approval",
+      "pull_request": 23,
+      "source_commit": "6597030ffcc07c51fb1259b3152d2645f5927d75",
+      "pr_ci_run": 30653343220,
+      "post_merge_ci_run": 30653472756,
+      "publish_run": 30653472671,
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-approval@sha256:b977adb932647808b73f62dc84bee69a52dca88e4198566d9e0c30180fdb2407",
+      "attestation_manifest_digest": "sha256:f945507dcd0027d79924ac44cf87dabc884bf9c38cf39a72eb1ae719260e69bc",
+      "sbom_digest": "sha256:463949d43b38be9e57d35e87897cc2c1d1b58f17d42778051525ff34d6f10947",
+      "provenance_digest": "sha256:8ed7fc020fe7b20d366f6cde22872b2f6dac936ac12578f69b339106fe60b0b5",
+      "minimal_runtime_validated": true,
+      "signed": true
+    },
+    {
+      "stage": "translation",
+      "repository": "ramideltoro/nutsnews-worker-article-translation",
+      "pull_request": 26,
+      "source_commit": "d1206b73157305128b3bf5dc6bf5a7bcbb4c818d",
+      "pr_ci_run": 30653343249,
+      "post_merge_ci_run": 30653471920,
+      "publish_run": 30653472030,
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-translation@sha256:926dc46ac29f9e6661ee8baa83171aca7a4e9941edbe93af6dbd19708a614da9",
+      "attestation_manifest_digest": "sha256:935e7c66e323c7f040abf74ee9e8ff0d1ca1ce57e5aca3debbbb2877f379ae75",
+      "sbom_digest": "sha256:1840f20f060577e9ecddbb805197848e15606b45bad872c5890e793826ec2b00",
+      "provenance_digest": "sha256:8de69110f4c7a4f7431fd1905c9fb7aaa035d7609c9634816b528136eb3a2f61",
+      "minimal_runtime_validated": true,
+      "signed": true
+    },
+    {
+      "stage": "persistence",
+      "repository": "ramideltoro/nutsnews-worker-article-persistence",
+      "pull_request": 23,
+      "source_commit": "e646a51bfea5142d769e0980608dc86f6c7623f7",
+      "pr_ci_run": 30653343761,
+      "post_merge_ci_run": 30653472028,
+      "publish_run": 30653472024,
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-persistence@sha256:3d158826415f1ad602436aebd21280dd35b1fa34a8f44303b6f39a814ba2b9b9",
+      "attestation_manifest_digest": "sha256:6577ec017268cd108815c20f6491ca927858eda0775a18c1143637d328d3bfcd",
+      "sbom_digest": "sha256:0241834445c2c96ee27ca92699919f5ee74e97c4ee284503d78cae1e684b96fc",
+      "provenance_digest": "sha256:a1680e1dd7d7d6927cfe81342cde3e6cb477af5a7ddf10afc78e13303caf0864",
+      "minimal_runtime_validated": true,
+      "signed": true
+    },
+    {
+      "stage": "publication",
+      "repository": "ramideltoro/nutsnews-worker-article-publication",
+      "pull_request": 21,
+      "source_commit": "47f05a5e177d63c43f18ac203ec773d606a2fbf4",
+      "pr_ci_run": 30653343364,
+      "post_merge_ci_run": 30653473633,
+      "publish_run": 30653474652,
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-publication@sha256:3e9fbebb7e345b7928f94de37e646e4829e81732f5153b6da06246f7618adf4a",
+      "attestation_manifest_digest": "sha256:a1318941532d35e4241c1f116c34d7bfe847381789363419ee2166f8ba66ea0f",
+      "sbom_digest": "sha256:80fe99be431bbc7405245cf974c798cad1689c47c6eb912336e82bb79e3db921",
+      "provenance_digest": "sha256:d782298d5fff8f6c8ecdc9f0eb4b622dcb9d582c79f5b4d3910133c9086e913b",
+      "minimal_runtime_validated": true,
+      "signed": true
+    }
+  ]
+}

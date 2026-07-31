@@ -106,6 +106,39 @@ tree or development-only content. That disposition does not make the image
 content desirable: production-only multi-stage images remain required before
 production-readiness approval.
 
+## #164 remediation builds and shadow deployment
+
+The immutable build record is
+`docs/worker-uplift-security-remediation-builds.json`. Validate it before a
+shadow deployment:
+
+```bash
+python3 scripts/validate_worker_uplift_security_remediation_builds.py
+python3 -m unittest tests.test_worker_uplift_security_remediation_builds
+```
+
+The validator binds each of the eight source commits to its signed GHCR index
+digest, SPDX attestation, SLSA provenance attestation, pull request, CI runs,
+publication run, and source-controlled backend runtime candidate. It also
+requires the fetcher DNS resolution-to-connect proof. Each service CI builds
+the runtime image and proves that npm, npx, npm's global module tree,
+TypeScript, and Vitest are absent.
+
+Deploy these digest-pinned candidates only with the existing protected backend
+Ansible check/apply workflow. The check must precede apply. After apply, run the
+approval-free worker-runtime `status` action and inspect its artifact for all
+eight exact source commits and digests, shadow mode, writes disabled, all
+services healthy, one consumer on every required main queue, unchanged legacy
+ownership, and no queue backlog or DLQ growth. A successful workflow conclusion
+without those artifact fields is insufficient.
+
+This refresh changes only the eight shadow container revisions. It does not
+authorize cutover, alter the legacy worker, change ingestion ownership, enable
+production writes, or modify DNS or failover behavior. Roll back a failed
+service through the protected worker-runtime rollback action to the existing
+digest-pinned per-service rollback image; do not change DNS or invoke a writer
+path as recovery.
+
 ## Operational ownership and recovery
 
 Protected backend workflows remain the only route for deployment, restart,

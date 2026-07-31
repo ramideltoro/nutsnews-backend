@@ -721,7 +721,11 @@ def select_reconciliation_candidate(database_url: str) -> dict[str, str]:
         database_url,
         f"""
 select id::text, entity_id, idempotency_key, pipeline_run_id, created_at::text,
-       coalesce(jsonb_array_length(diagnostic_metadata->'reconciliationAuditHistory'), 0)::text
+       case
+         when jsonb_typeof(diagnostic_metadata->'reconciliationAuditHistory') = 'array'
+           then jsonb_array_length(diagnostic_metadata->'reconciliationAuditHistory')
+         else 0
+       end::text
 from worker_uplift_persistence.outbox
 where status = 'confirmed'
   and confirmed_at is not null
@@ -761,11 +765,15 @@ def reconciliation_candidate_evidence(candidate: dict[str, str]) -> dict[str, An
     }
 
 
-def side_effect_counts(database_url: str, candidate: dict[str, str]) -> dict[str, int]:
+def side_effect_counts(
+    persistence_database_url: str,
+    publication_database_url: str,
+    candidate: dict[str, str],
+) -> dict[str, int]:
     entity = sql_literal(candidate["entity_id"])
     idempotency = sql_literal(candidate["idempotency_key"])
-    rows = psql_rows(
-        database_url,
+    publication_rows = psql_rows(
+        publication_database_url,
         f"""
 select 'publication_inbox', count(*)::text
 from worker_uplift_publication.inbox
@@ -777,21 +785,38 @@ where article_identity_hash = {entity}
 union all
 select 'publication_decisions', count(*)::text
 from worker_uplift_publication.publication_decisions
-where article_identity_hash = {entity}
-union all
+where article_identity_hash = {entity};
+""",
+    )
+    persistence_rows = psql_rows(
+        persistence_database_url,
+        f"""
 select 'shadow_api_write_requests', count(*)::text
 from worker_uplift_persistence.write_requests
 where article_identity_hash = {entity};
 """,
     )
-    return {key: int(value) for key, value in rows}
+    counts = {key: int(value) for key, value in publication_rows + persistence_rows}
+    expected = {
+        "publication_inbox",
+        "publication_readiness",
+        "publication_decisions",
+        "shadow_api_write_requests",
+    }
+    if set(counts) != expected:
+        raise RuntimeError("side-effect evidence query returned an unexpected shape")
+    return counts
 
 
 def reconciliation_audit_count(database_url: str, outbox_id: str) -> int:
     rows = psql_rows(
         database_url,
         f"""
-select coalesce(jsonb_array_length(diagnostic_metadata->'reconciliationAuditHistory'), 0)::text
+select case
+         when jsonb_typeof(diagnostic_metadata->'reconciliationAuditHistory') = 'array'
+           then jsonb_array_length(diagnostic_metadata->'reconciliationAuditHistory')
+         else 0
+       end::text
 from worker_uplift_persistence.outbox
 where id = {int(outbox_id)};
 """,
@@ -1059,12 +1084,18 @@ def action_current_candidate_reconciliation_drill(args: argparse.Namespace) -> d
                 raise RuntimeError("isolated DLQs were not empty before reconciliation")
 
             persistence_env = parse_env(temp_dir / "persistence.env")
-            database_url = persistence_env.get("NUTSNEWS_PERSISTENCE_DATABASE_URL", "")
+            publication_env = parse_env(temp_dir / "publication.env")
+            persistence_database_url = persistence_env.get("NUTSNEWS_PERSISTENCE_DATABASE_URL", "")
+            publication_database_url = publication_env.get("NUTSNEWS_PUBLICATION_DATABASE_URL", "")
             token = persistence_env.get("NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN", "")
-            if not database_url or not token:
+            if not persistence_database_url or not publication_database_url or not token:
                 raise RuntimeError("persistence drill prerequisites are incomplete")
-            candidate = select_reconciliation_candidate(database_url)
-            pre_side_effects = side_effect_counts(database_url, candidate)
+            candidate = select_reconciliation_candidate(persistence_database_url)
+            pre_side_effects = side_effect_counts(
+                persistence_database_url,
+                publication_database_url,
+                candidate,
+            )
             if any(count < 1 for count in pre_side_effects.values()):
                 raise RuntimeError("bounded candidate lacks prior shadow/API state required for duplicate-side-effect proof")
             run_id = f"backend:isolated-recovery:{uuid.uuid4()}"
@@ -1124,8 +1155,15 @@ def action_current_candidate_reconciliation_drill(args: argparse.Namespace) -> d
                 vhost=str(definition["vhost"]),
                 queue=publication_queue,
             )
-            post_side_effects = side_effect_counts(database_url, candidate)
-            post_audit_count = reconciliation_audit_count(database_url, candidate["outbox_id"])
+            post_side_effects = side_effect_counts(
+                persistence_database_url,
+                publication_database_url,
+                candidate,
+            )
+            post_audit_count = reconciliation_audit_count(
+                persistence_database_url,
+                candidate["outbox_id"],
+            )
             report["reconciliation"]["post_side_effect_counts"] = post_side_effects
             report["reconciliation"]["post_reconciliation_audit_count"] = post_audit_count
             report["reconciliation"]["duplicate_domain_or_api_side_effects"] = (

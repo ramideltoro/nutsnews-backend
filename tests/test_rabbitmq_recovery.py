@@ -207,6 +207,67 @@ class RabbitMQRecoveryTests(unittest.TestCase):
         self.assertEqual(evidence["primary_key_range"], {"minimum": "42", "maximum": "42"})
         self.assertEqual(evidence["limit"], 1)
 
+    def test_side_effect_counts_use_each_service_owned_database_identity(self):
+        candidate = {
+            "entity_id": "private-article",
+            "idempotency_key": "private-idempotency",
+        }
+        with mock.patch.object(
+            recovery,
+            "psql_rows",
+            side_effect=[
+                [
+                    ["publication_inbox", "1"],
+                    ["publication_readiness", "1"],
+                    ["publication_decisions", "1"],
+                ],
+                [["shadow_api_write_requests", "1"]],
+            ],
+        ) as psql:
+            counts = recovery.side_effect_counts(
+                "postgresql://persistence-role",
+                "postgresql://publication-role",
+                candidate,
+            )
+
+        self.assertEqual(
+            counts,
+            {
+                "publication_inbox": 1,
+                "publication_readiness": 1,
+                "publication_decisions": 1,
+                "shadow_api_write_requests": 1,
+            },
+        )
+        self.assertEqual(psql.call_args_list[0].args[0], "postgresql://publication-role")
+        self.assertEqual(psql.call_args_list[1].args[0], "postgresql://persistence-role")
+        self.assertIn("worker_uplift_publication", psql.call_args_list[0].args[1])
+        self.assertNotIn("worker_uplift_persistence", psql.call_args_list[0].args[1])
+        self.assertIn("worker_uplift_persistence", psql.call_args_list[1].args[1])
+        self.assertNotIn("worker_uplift_publication", psql.call_args_list[1].args[1])
+
+    def test_side_effect_counts_fail_closed_on_missing_evidence(self):
+        with (
+            mock.patch.object(
+                recovery,
+                "psql_rows",
+                side_effect=[
+                    [["publication_inbox", "1"]],
+                    [["shadow_api_write_requests", "1"]],
+                ],
+            ),
+            self.assertRaisesRegex(RuntimeError, "unexpected shape"),
+        ):
+            recovery.side_effect_counts(
+                "postgresql://persistence-role",
+                "postgresql://publication-role",
+                {"entity_id": "private-article", "idempotency_key": "private-idempotency"},
+            )
+
+    def test_reconciliation_queries_tolerate_legacy_non_array_audit_metadata(self):
+        source = RECOVERY_PATH.read_text(encoding="utf-8")
+        self.assertEqual(source.count("when jsonb_typeof(diagnostic_metadata->'reconciliationAuditHistory') = 'array'"), 2)
+
     def test_consumer_registration_waits_for_all_expected_queues(self):
         calls = 0
 

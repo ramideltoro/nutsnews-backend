@@ -96,6 +96,14 @@ jobs:
         shell: bash
         run: python3 -m unittest tests.test_worker_uplift_security_dispositions
 
+      - name: Validate worker uplift security remediation builds
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_security_remediation_builds.py
+
+      - name: Run worker uplift security remediation build tests
+        shell: bash
+        run: python3 -m unittest tests.test_worker_uplift_security_remediation_builds
+
       - name: Validate worker uplift production readiness decision
         shell: bash
         run: python3 scripts/validate_worker_uplift_production_readiness.py

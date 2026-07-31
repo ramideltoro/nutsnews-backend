@@ -126,20 +126,10 @@ def deployed_candidates(status: dict[str, Any]) -> dict[str, dict[str, str]]:
     return deployed
 
 
-def readiness_body(service: dict[str, Any]) -> dict[str, Any]:
-    body = service.get("readiness", {}).get("body")
-    if not isinstance(body, str):
-        return {}
-    try:
-        parsed = json.loads(body)
-    except json.JSONDecodeError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
 def status_snapshot(
     label: str,
     status: dict[str, Any],
+    dependency_readiness: dict[str, Any],
     expected_candidates: dict[str, dict[str, Any]],
     errors: list[str],
 ) -> dict[str, Any]:
@@ -207,29 +197,32 @@ def status_snapshot(
             for field in ("messages", "messages_ready", "messages_unacknowledged"):
                 if queue[field] != 0:
                     errors.append(f"{label} queue did not drain: {stage} {field}")
-        for check in readiness_body(service).get("checks", []):
-            name = str(check.get("name", ""))
-            if name in {
-                "approval-state",
-                "qwen-client",
-                "persistence-inbox",
-                "backend-worker-api",
-            }:
-                dependency_checks.append(
-                    {
-                        "service": stage,
-                        "check": name,
-                        "status": str(check.get("status", "")),
-                    }
-                )
-                if check.get("status") != "ok":
-                    errors.append(f"{label} dependency readiness did not recover: {stage}/{name}")
     required_dependency_checks = {
         ("approval", "approval-state"),
         ("approval", "qwen-client"),
         ("persistence", "persistence-inbox"),
         ("persistence", "backend-worker-api"),
     }
+    if set(dependency_readiness) != {"approval", "persistence"}:
+        errors.append(f"{label} direct dependency readiness service set is incomplete")
+    for stage, value in dependency_readiness.items():
+        if stage not in {"approval", "persistence"}:
+            continue
+        if value.get("status") != "ok":
+            errors.append(f"{label} direct dependency readiness failed: {stage}")
+        for check in value.get("checks", []):
+            name = str(check.get("name", ""))
+            dependency_checks.append(
+                {
+                    "service": stage,
+                    "check": name,
+                    "status": str(check.get("status", "")),
+                }
+            )
+            if check.get("status") != "ok":
+                errors.append(
+                    f"{label} dependency readiness did not recover: {stage}/{name}"
+                )
     observed_dependency_checks = {
         (item["service"], item["check"]) for item in dependency_checks
     }
@@ -380,8 +373,20 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     if source_checkouts.get("infra") != args.infra_commit:
         errors.append("alert catalog checkout does not match the declared infra commit")
 
-    pre = status_snapshot("pre-drill", load_json(args.pre_status), candidate_by_stage, errors)
-    post = status_snapshot("post-drill", load_json(args.post_status), candidate_by_stage, errors)
+    pre = status_snapshot(
+        "pre-drill",
+        load_json(args.pre_status),
+        load_json(args.pre_dependency_readiness),
+        candidate_by_stage,
+        errors,
+    )
+    post = status_snapshot(
+        "post-drill",
+        load_json(args.post_status),
+        load_json(args.post_dependency_readiness),
+        candidate_by_stage,
+        errors,
+    )
     pre_configs = {
         item["service"]: item["compose_config_hash"]
         for item in pre["deployed_candidates"]
@@ -591,6 +596,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--topology", type=Path, required=True)
     parser.add_argument("--pre-status", type=Path, required=True)
     parser.add_argument("--post-status", type=Path, required=True)
+    parser.add_argument("--pre-dependency-readiness", type=Path, required=True)
+    parser.add_argument("--post-dependency-readiness", type=Path, required=True)
     parser.add_argument("--approval-results", type=Path, required=True)
     parser.add_argument("--persistence-results", type=Path, required=True)
     parser.add_argument("--postgres-probe", type=Path, required=True)

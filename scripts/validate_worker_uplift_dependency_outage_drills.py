@@ -57,6 +57,9 @@ def repository_errors() -> list[str]:
         "ref: b10a76cf523c9f5b47bd69b8301dc3d9d9a4d8a6",
         "postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777",
         "sudo -n /usr/local/sbin/nutsnews-worker-runtime status",
+        "curl --fail --silent --show-error --max-time 10 http://127.0.0.1:${port}/ready",
+        "--pre-dependency-readiness",
+        "--post-dependency-readiness",
         "--dry-run",
         "backend_worker_uplift_dependency_outage_report.py",
         "validate_worker_uplift_dependency_outage_drills.py",
@@ -86,6 +89,16 @@ def repository_errors() -> list[str]:
     for raw_status in ("pre-status.json", "post-status.json"):
         if raw_status in package_block:
             errors.append(f"raw private-host status must not be retained: {raw_status}")
+    for raw_readiness in (
+        "pre-approval-readiness-raw.json",
+        "pre-persistence-readiness-raw.json",
+        "post-approval-readiness-raw.json",
+        "post-persistence-readiness-raw.json",
+    ):
+        if raw_readiness in package_block:
+            errors.append(
+                f"raw dependency readiness body must not be retained: {raw_readiness}"
+            )
 
     fixture_contracts = {
         "postgres_probe.test.ts": "PostgresPersistenceInboxStore",

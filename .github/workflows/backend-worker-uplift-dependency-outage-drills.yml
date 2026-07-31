@@ -149,6 +149,63 @@ jobs:
               "safe_metadata_only": True,
           }, sort_keys=True))
           PY
+          for specification in approval:18085 persistence:18087; do
+            stage="${specification%%:*}"
+            port="${specification##*:}"
+            ssh -i "$HOME/.ssh/nutsnews_backend" \
+              -o BatchMode=yes \
+              -o IdentitiesOnly=yes \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=20 \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+              "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+              "curl --fail --silent --show-error --max-time 10 http://127.0.0.1:${port}/ready" \
+              > "$RUNNER_TEMP/pre-${stage}-readiness-raw.json"
+          done
+          python3 - "$RUNNER_TEMP" pre <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          directory = Path(sys.argv[1])
+          prefix = sys.argv[2]
+          required = {
+              "approval": ("approval-state", "qwen-client"),
+              "persistence": ("persistence-inbox", "backend-worker-api"),
+          }
+          summary = {}
+          for stage, required_names in required.items():
+              body = json.loads(
+                  (directory / f"{prefix}-{stage}-readiness-raw.json").read_text(
+                      encoding="utf-8"
+                  )
+              )
+              checks = {
+                  str(item.get("name")): str(item.get("status"))
+                  for item in body.get("checks", [])
+              }
+              if body.get("status") != "ok" or any(
+                  checks.get(name) != "ok" for name in required_names
+              ):
+                  raise SystemExit(f"{stage} direct dependency readiness did not pass")
+              summary[stage] = {
+                  "status": "ok",
+                  "checks": [
+                      {"name": name, "status": checks[name]}
+                      for name in required_names
+                  ],
+              }
+          (directory / f"{prefix}-dependency-readiness.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps({
+              "direct_dependency_readiness": "pass",
+              "service_count": len(summary),
+              "check_count": sum(len(item["checks"]) for item in summary.values()),
+              "safe_metadata_only": True,
+          }, sort_keys=True))
+          PY
 
       - name: Install exact candidate dependencies
         shell: bash
@@ -299,6 +356,63 @@ jobs:
               "safe_metadata_only": True,
           }, sort_keys=True))
           PY
+          for specification in approval:18085 persistence:18087; do
+            stage="${specification%%:*}"
+            port="${specification##*:}"
+            ssh -i "$HOME/.ssh/nutsnews_backend" \
+              -o BatchMode=yes \
+              -o IdentitiesOnly=yes \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=20 \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+              "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+              "curl --fail --silent --show-error --max-time 10 http://127.0.0.1:${port}/ready" \
+              > "$RUNNER_TEMP/post-${stage}-readiness-raw.json"
+          done
+          python3 - "$RUNNER_TEMP" post <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          directory = Path(sys.argv[1])
+          prefix = sys.argv[2]
+          required = {
+              "approval": ("approval-state", "qwen-client"),
+              "persistence": ("persistence-inbox", "backend-worker-api"),
+          }
+          summary = {}
+          for stage, required_names in required.items():
+              body = json.loads(
+                  (directory / f"{prefix}-{stage}-readiness-raw.json").read_text(
+                      encoding="utf-8"
+                  )
+              )
+              checks = {
+                  str(item.get("name")): str(item.get("status"))
+                  for item in body.get("checks", [])
+              }
+              if body.get("status") != "ok" or any(
+                  checks.get(name) != "ok" for name in required_names
+              ):
+                  raise SystemExit(f"{stage} direct dependency readiness did not pass")
+              summary[stage] = {
+                  "status": "ok",
+                  "checks": [
+                      {"name": name, "status": checks[name]}
+                      for name in required_names
+                  ],
+              }
+          (directory / f"{prefix}-dependency-readiness.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps({
+              "direct_dependency_readiness": "pass",
+              "service_count": len(summary),
+              "check_count": sum(len(item["checks"]) for item in summary.values()),
+              "safe_metadata_only": True,
+          }, sort_keys=True))
+          PY
 
       - name: Build and validate value-free outage evidence
         shell: bash
@@ -314,6 +428,8 @@ jobs:
             --topology ansible/roles/backend_rabbitmq/templates/worker-uplift-topology.json.j2 \
             --pre-status "$RUNNER_TEMP/pre-status.json" \
             --post-status "$RUNNER_TEMP/post-status.json" \
+            --pre-dependency-readiness "$RUNNER_TEMP/pre-dependency-readiness.json" \
+            --post-dependency-readiness "$RUNNER_TEMP/post-dependency-readiness.json" \
             --approval-results "$RUNNER_TEMP/approval-vitest.json" \
             --persistence-results "$RUNNER_TEMP/persistence-vitest.json" \
             --postgres-probe "$RUNNER_TEMP/postgres-probe.json" \

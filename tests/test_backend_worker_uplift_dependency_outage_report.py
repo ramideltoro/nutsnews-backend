@@ -26,6 +26,24 @@ class WorkerUpliftDependencyOutageReportTests(unittest.TestCase):
         self.files: dict[str, Path] = {}
         self._write("pre", self._status())
         self._write("post", self._status())
+        dependency_readiness = {
+            "approval": {
+                "status": "ok",
+                "checks": [
+                    {"name": "approval-state", "status": "ok"},
+                    {"name": "qwen-client", "status": "ok"},
+                ],
+            },
+            "persistence": {
+                "status": "ok",
+                "checks": [
+                    {"name": "persistence-inbox", "status": "ok"},
+                    {"name": "backend-worker-api", "status": "ok"},
+                ],
+            },
+        }
+        self._write("pre_dependency_readiness", dependency_readiness)
+        self._write("post_dependency_readiness", dependency_readiness)
         self._write(
             "approval_results",
             self._vitest(
@@ -218,6 +236,8 @@ class WorkerUpliftDependencyOutageReportTests(unittest.TestCase):
             / "ansible/roles/backend_rabbitmq/templates/worker-uplift-topology.json.j2",
             pre_status=self.files["pre"],
             post_status=self.files["post"],
+            pre_dependency_readiness=self.files["pre_dependency_readiness"],
+            post_dependency_readiness=self.files["post_dependency_readiness"],
             approval_results=self.files["approval_results"],
             persistence_results=self.files["persistence_results"],
             postgres_probe=self.files["postgres_probe"],
@@ -270,6 +290,23 @@ class WorkerUpliftDependencyOutageReportTests(unittest.TestCase):
         self.assertEqual(report["status"], "fail")
         self.assertTrue(
             any("required focused assertion" in item for item in report["errors"])
+        )
+
+    def test_missing_direct_persistence_readiness_fails_report(self) -> None:
+        readiness = json.loads(
+            self.files["pre_dependency_readiness"].read_text(encoding="utf-8")
+        )
+        del readiness["persistence"]
+        self._write("pre_dependency_readiness", readiness)
+
+        report = report_module.build_report(self._args())
+
+        self.assertEqual(report["status"], "fail")
+        self.assertTrue(
+            any(
+                "direct dependency readiness service set is incomplete" in item
+                for item in report["errors"]
+            )
         )
 
     def test_raw_host_command_data_is_rejected_from_final_report(self) -> None:

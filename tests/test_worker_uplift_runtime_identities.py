@@ -114,6 +114,14 @@ class WorkerUpliftRuntimeIdentityTests(unittest.TestCase):
 
         self.assertTrue(any("container account inventory" in error for error in errors))
 
+    def test_projection_writer_scope_expansion_is_rejected(self):
+        inventory = copy.deepcopy(self.inventory)
+        inventory["postgres"]["projection_writer"]["privileges"].append("DELETE")
+
+        errors = self.validate(inventory)
+
+        self.assertTrue(any("projection writer identity" in error for error in errors))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -112,6 +112,7 @@
     {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_PASSWORD", "kind": "secret", "disposition": "current", "scope": "persistence schema"},
     {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_USERNAME", "kind": "variable", "disposition": "current", "scope": "publication schema"},
     {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_PASSWORD", "kind": "secret", "disposition": "current", "scope": "publication schema"},
+    {"name": "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD", "kind": "secret", "disposition": "retained", "scope": "source credential for the read-only validation role and the separately bounded stage-health projection role"},
     {"name": "NUTSNEWS_BACKEND_API_TOKEN", "kind": "secret", "disposition": "retained", "scope": "scheduler shadow feed-source reads; explicitly shared, not a dedicated uplift identity"},
     {"name": "NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN", "kind": "secret", "disposition": "current", "scope": "persistence-scoped backend API commands"},
     {"name": "NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN", "kind": "secret", "disposition": "current", "scope": "publication-scoped backend API commands"},
@@ -192,6 +193,16 @@
       {"stage": "persistence", "schema": "worker_uplift_persistence", "username_variable": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_USERNAME", "password_secret": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_PASSWORD", "grants": ["own stage schema only", "final domain writes only through backend Worker DB API"], "disposition": "current"},
       {"stage": "publication", "schema": "worker_uplift_publication", "username_variable": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_USERNAME", "password_secret": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_PASSWORD", "grants": ["own stage schema only", "final domain writes only through backend Worker DB API"], "disposition": "current"}
     ],
+    "projection_writer": {
+      "role": "nutsnews_worker_uplift_projection",
+      "credential_reference": "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD",
+      "credential_reused_from_read_only_role": true,
+      "runtime_service_injection": false,
+      "target": "worker_uplift_final.stage_health_projections",
+      "privileges": ["SELECT", "INSERT", "UPDATE"],
+      "other_table_mutation_privileges_allowed": false,
+      "disposition": "current"
+    },
     "least_privilege_evidence": {
       "protected_permission_proof_run": 30024831874,
       "shared_role_allowed": false,

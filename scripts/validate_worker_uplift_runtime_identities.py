@@ -461,6 +461,23 @@ def validate_inventory(
                 errors.append(f"PostgreSQL credential reference missing: {role.get(key)}")
         if not all("only" in grant for grant in role.get("grants", [])):
             errors.append(f"PostgreSQL grants must state bounded scope: {stage}")
+    projection_writer = postgres.get("projection_writer", {})
+    expected_projection_writer = {
+        "role": "nutsnews_worker_uplift_projection",
+        "credential_reference": "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD",
+        "credential_reused_from_read_only_role": True,
+        "runtime_service_injection": False,
+        "target": "worker_uplift_final.stage_health_projections",
+        "privileges": ["SELECT", "INSERT", "UPDATE"],
+        "other_table_mutation_privileges_allowed": False,
+        "disposition": "current",
+    }
+    if projection_writer != expected_projection_writer:
+        errors.append("PostgreSQL projection writer identity must remain exact and bounded")
+    if projection_writer.get("credential_reference") not in reference_map:
+        errors.append("PostgreSQL projection writer credential reference is missing")
+    if "backend_worker_uplift_projection_password" not in workflow_text:
+        errors.append("protected workflow must inject the bounded projection role credential")
     pg_policy = postgres.get("least_privilege_evidence", {})
     for key in ("shared_role_allowed", "cross_stage_grants_allowed", "public_schema_write_allowed"):
         if pg_policy.get(key) is not False:

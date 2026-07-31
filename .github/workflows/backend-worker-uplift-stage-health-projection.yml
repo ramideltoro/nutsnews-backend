@@ -1,0 +1,398 @@
+name: Backend Worker-Uplift Stage Health Projection
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Build a value-free candidate or apply the exact protected eight-row upsert.
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - apply
+      confirmation:
+        description: For apply, type refresh-worker-uplift-stage-health-projections.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-worker-uplift-stage-health-projection
+  cancel-in-progress: false
+
+jobs:
+  dry_run:
+    name: Build exact value-free projection candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      candidate_sha256: ${{ steps.candidate.outputs.sha256 }}
+
+    steps:
+      - name: Checkout immutable workflow source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch and standing authorization
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            dry-run)
+              if [[ -n "$CONFIRMATION" ]]; then
+                echo "Dry-run rejects apply confirmation." >&2
+                exit 1
+              fi
+              ;;
+            apply)
+              if [[ "$CONFIRMATION" != "refresh-worker-uplift-stage-health-projections" ]]; then
+                echo "Apply requires the exact typed confirmation." >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Unsupported mode." >&2
+              exit 1
+              ;;
+          esac
+          python3 scripts/validate_worker_uplift_stage_health_projection.py
+
+      - name: Prepare read-only SSH material
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Collect current read-only runtime and queue evidence
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh_args=(
+            -i "$HOME/.ssh/nutsnews_backend"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o ServerAliveInterval=30
+            -o ServerAliveCountMax=20
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+          )
+          runtime_args=(
+            sudo -n /usr/local/sbin/nutsnews-worker-runtime status
+            --manifest /etc/nutsnews-worker-uplift/services.json
+            --compose /opt/nutsnews-worker-uplift/compose.yml
+            --project nutsnews-worker-uplift
+            --queue-kind main
+            --tail 0
+            --dry-run
+          )
+          printf '%q ' "${runtime_args[@]}" > "$RUNNER_TEMP/runtime-command"
+          # The quoted command is built only from fixed arguments.
+          # shellcheck disable=SC2029
+          ssh "${ssh_args[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "$(cat "$RUNNER_TEMP/runtime-command")" \
+            > "$RUNNER_TEMP/runtime-status.json"
+          ssh "${ssh_args[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "sudo -n cat /etc/nutsnews-worker-uplift/services.json" > "$RUNNER_TEMP/runtime-manifest.json"
+          ssh "${ssh_args[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "sudo -n cat /opt/nutsnews-worker-uplift/compose.yml" > "$RUNNER_TEMP/runtime-compose.yml"
+
+          install -m 0700 -d "$RUNNER_TEMP/queue-evidence"
+          for stage in scheduler fetcher canonicalizer enrichment approval translation persistence publication; do
+            for kind in main retry dlq; do
+              queue_args=(
+                sudo -n /usr/local/sbin/nutsnews-worker-runtime queue-inspect
+                --manifest /etc/nutsnews-worker-uplift/services.json
+                --compose /opt/nutsnews-worker-uplift/compose.yml
+                --project nutsnews-worker-uplift
+                --service-name "$stage"
+                --queue-kind "$kind"
+                --tail 0
+                --dry-run
+              )
+              printf '%q ' "${queue_args[@]}" > "$RUNNER_TEMP/queue-command"
+              # Stage and kind are fixed loop allowlists.
+              # shellcheck disable=SC2029
+              ssh "${ssh_args[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "$(cat "$RUNNER_TEMP/queue-command")" \
+                > "$RUNNER_TEMP/queue-evidence/$stage-$kind.json"
+            done
+          done
+
+      - name: Build and validate the exact candidate
+        id: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/backend_worker_uplift_stage_health_projection.py \
+            --mode dry-run \
+            --runtime-status "$RUNNER_TEMP/runtime-status.json" \
+            --runtime-manifest "$RUNNER_TEMP/runtime-manifest.json" \
+            --runtime-compose "$RUNNER_TEMP/runtime-compose.yml" \
+            --queue-evidence-dir "$RUNNER_TEMP/queue-evidence" \
+            --output "$RUNNER_TEMP/projection-candidate.json"
+          python3 scripts/validate_worker_uplift_stage_health_projection.py \
+            --artifact "$RUNNER_TEMP/projection-candidate.json"
+          sha256sum "$RUNNER_TEMP/projection-candidate.json" \
+            | sed "s|$RUNNER_TEMP/||" > "$RUNNER_TEMP/projection-candidate.sha256"
+          candidate_sha256="$(cut -d' ' -f1 "$RUNNER_TEMP/projection-candidate.sha256")"
+          echo "sha256=$candidate_sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize value-free dry run
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Worker-uplift stage health projection"
+            echo
+            echo "- Mode: \`$MODE\`"
+            echo "- Dry-run candidate contains exactly eight value-free stage rows."
+            echo "- Apply remains limited to \`worker_uplift_final.stage_health_projections\`."
+            echo "- This workflow cannot authorize cutover or production domain writes."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload immutable dry-run candidate
+        uses: actions/upload-artifact@1eb3cb2b3e0f29609092a73eb033bb759a334595  # v5.0.0
+        with:
+          name: backend-worker-uplift-stage-health-projection-dry-run
+          path: |
+            ${{ runner.temp }}/projection-candidate.json
+            ${{ runner.temp }}/projection-candidate.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  apply:
+    name: Apply and prove bounded projection refresh
+    needs: dry_run
+    if: inputs.mode == 'apply'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-backend
+
+    steps:
+      - name: Checkout immutable workflow source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Revalidate protected route and confirmation
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          if [[ "$MODE" != "apply" ]]; then
+            echo "Protected job accepts apply only." >&2
+            exit 1
+          fi
+          if [[ "$CONFIRMATION" != "refresh-worker-uplift-stage-health-projections" ]]; then
+            echo "Protected job requires the exact typed confirmation." >&2
+            exit 1
+          fi
+          python3 scripts/validate_worker_uplift_stage_health_projection.py
+
+      - name: Download exact dry-run candidate
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0  # v5
+        with:
+          name: backend-worker-uplift-stage-health-projection-dry-run
+          path: ${{ runner.temp }}/candidate
+
+      - name: Verify candidate digest and contract
+        shell: bash
+        env:
+          EXPECTED_SHA256: ${{ needs.dry_run.outputs.candidate_sha256 }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/candidate"
+          sha256sum --check projection-candidate.sha256
+          actual_sha256="$(sha256sum projection-candidate.json | cut -d' ' -f1)"
+          if [[ "$actual_sha256" != "$EXPECTED_SHA256" ]]; then
+            echo "Downloaded candidate digest does not match the dry-run job output." >&2
+            exit 1
+          fi
+          python3 "$GITHUB_WORKSPACE/scripts/validate_worker_uplift_stage_health_projection.py" \
+            --artifact "$RUNNER_TEMP/candidate/projection-candidate.json"
+
+      - name: Prepare protected SSH tunnel
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F "$NUTSNEWS_BACKEND_HOST" -f "$HOME/.ssh/known_hosts" > /dev/null
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh -fN -L 15432:127.0.0.1:5432 \
+            -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o ExitOnForwardFailure=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=20 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST"
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Apply exact eight-row upsert
+        shell: bash
+        env:
+          NUTSNEWS_STAGE_HEALTH_PROJECTION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          python3 scripts/backend_worker_uplift_stage_health_projection.py \
+            --mode apply \
+            --artifact "$RUNNER_TEMP/candidate/projection-candidate.json" \
+            --db-password-env NUTSNEWS_STAGE_HEALTH_PROJECTION_PASSWORD \
+            --confirmation "$CONFIRMATION" \
+            --output "$RUNNER_TEMP/projection-apply-report.json"
+
+      - name: Collect post-apply read-only runtime and queue evidence
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh_args=(
+            -i "$HOME/.ssh/nutsnews_backend"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o ServerAliveInterval=30
+            -o ServerAliveCountMax=20
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+          )
+          runtime_args=(
+            sudo -n /usr/local/sbin/nutsnews-worker-runtime status
+            --manifest /etc/nutsnews-worker-uplift/services.json
+            --compose /opt/nutsnews-worker-uplift/compose.yml
+            --project nutsnews-worker-uplift
+            --queue-kind main
+            --tail 0
+            --dry-run
+          )
+          printf '%q ' "${runtime_args[@]}" > "$RUNNER_TEMP/post-runtime-command"
+          # The quoted command is built only from fixed arguments.
+          # shellcheck disable=SC2029
+          ssh "${ssh_args[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "$(cat "$RUNNER_TEMP/post-runtime-command")" \
+            > "$RUNNER_TEMP/post-runtime-status.json"
+          ssh "${ssh_args[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "sudo -n cat /etc/nutsnews-worker-uplift/services.json" > "$RUNNER_TEMP/post-runtime-manifest.json"
+          ssh "${ssh_args[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "sudo -n cat /opt/nutsnews-worker-uplift/compose.yml" > "$RUNNER_TEMP/post-runtime-compose.yml"
+
+          install -m 0700 -d "$RUNNER_TEMP/post-queue-evidence"
+          for stage in scheduler fetcher canonicalizer enrichment approval translation persistence publication; do
+            for kind in main retry dlq; do
+              queue_args=(
+                sudo -n /usr/local/sbin/nutsnews-worker-runtime queue-inspect
+                --manifest /etc/nutsnews-worker-uplift/services.json
+                --compose /opt/nutsnews-worker-uplift/compose.yml
+                --project nutsnews-worker-uplift
+                --service-name "$stage"
+                --queue-kind "$kind"
+                --tail 0
+                --dry-run
+              )
+              printf '%q ' "${queue_args[@]}" > "$RUNNER_TEMP/post-queue-command"
+              # Stage and kind are fixed loop allowlists.
+              # shellcheck disable=SC2029
+              ssh "${ssh_args[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "$(cat "$RUNNER_TEMP/post-queue-command")" \
+                > "$RUNNER_TEMP/post-queue-evidence/$stage-$kind.json"
+            done
+          done
+
+      - name: Prove post-apply invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/backend_worker_uplift_stage_health_projection.py \
+            --mode verify \
+            --artifact "$RUNNER_TEMP/candidate/projection-candidate.json" \
+            --apply-report "$RUNNER_TEMP/projection-apply-report.json" \
+            --runtime-status "$RUNNER_TEMP/post-runtime-status.json" \
+            --runtime-manifest "$RUNNER_TEMP/post-runtime-manifest.json" \
+            --runtime-compose "$RUNNER_TEMP/post-runtime-compose.yml" \
+            --queue-evidence-dir "$RUNNER_TEMP/post-queue-evidence" \
+            --output "$RUNNER_TEMP/projection-post-apply-proof.json"
+          install -m 0700 -d "$RUNNER_TEMP/projection-evidence"
+          install -m 0600 \
+            "$RUNNER_TEMP/candidate/projection-candidate.json" \
+            "$RUNNER_TEMP/candidate/projection-candidate.sha256" \
+            "$RUNNER_TEMP/projection-apply-report.json" \
+            "$RUNNER_TEMP/projection-post-apply-proof.json" \
+            "$RUNNER_TEMP/projection-evidence/"
+          (
+            cd "$RUNNER_TEMP/projection-evidence"
+            sha256sum \
+              projection-candidate.json \
+              projection-apply-report.json \
+              projection-post-apply-proof.json \
+              > projection-evidence.sha256
+          )
+
+      - name: Summarize bounded apply
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Protected worker-uplift projection refresh"
+            echo
+            echo "- Sole mutation target: \`worker_uplift_final.stage_health_projections\`."
+            echo "- Operation: fixed idempotent upsert of exactly eight declared stage rows."
+            echo "- Evidence artifacts contain safe metadata only."
+            echo "- No cutover, production domain write, queue mutation, DNS/failover change, or legacy-worker change is authorized."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload immutable apply evidence
+        if: always()
+        uses: actions/upload-artifact@1eb3cb2b3e0f29609092a73eb033bb759a334595  # v5.0.0
+        with:
+          name: backend-worker-uplift-stage-health-projection
+          path: |
+            ${{ runner.temp }}/projection-evidence/projection-candidate.json
+            ${{ runner.temp }}/projection-evidence/projection-candidate.sha256
+            ${{ runner.temp }}/projection-evidence/projection-apply-report.json
+            ${{ runner.temp }}/projection-evidence/projection-post-apply-proof.json
+            ${{ runner.temp }}/projection-evidence/projection-evidence.sha256
+          if-no-files-found: warn
+          retention-days: 90

@@ -68,6 +68,14 @@ jobs:
         shell: bash
         run: python3 scripts/validate_worker_uplift_runtime_identities.py
 
+      - name: Validate worker uplift dependency outage drills
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_dependency_outage_drills.py
+
+      - name: Run worker uplift dependency outage drill tests
+        shell: bash
+        run: python3 -m unittest tests.test_backend_worker_uplift_dependency_outage_report
+
       - name: Validate backend GitHub Actions security
         shell: bash
         run: python3 scripts/validate_backend_github_actions_security.py

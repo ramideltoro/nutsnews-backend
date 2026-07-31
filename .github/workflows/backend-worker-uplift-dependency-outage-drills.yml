@@ -1,0 +1,368 @@
+name: Backend Worker-Uplift Dependency Outage Drills
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_scope:
+        description: Type worker-uplift-shadow-dependency-drills to confirm isolated drills.
+        required: true
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: backend-worker-uplift-dependency-outage-drills
+  cancel-in-progress: false
+
+jobs:
+  validate-dispatch:
+    name: Validate isolated drill dispatch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Validate exact scope
+        shell: bash
+        env:
+          CONFIRM_SCOPE: ${{ inputs.confirm_scope }}
+        run: |
+          set -euo pipefail
+          if [[ "$CONFIRM_SCOPE" != "worker-uplift-shadow-dependency-drills" ]]; then
+            echo "confirm_scope must be worker-uplift-shadow-dependency-drills." >&2
+            exit 1
+          fi
+
+  protected-isolated-drills:
+    name: Protected isolated PostgreSQL, API, and Qwen drills
+    needs: validate-dispatch
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: production-backend
+
+    services:
+      postgres:
+        image: postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 24
+
+    steps:
+      - name: Checkout backend evidence implementation
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Checkout exact approval candidate
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          repository: ramideltoro/nutsnews-worker-article-approval
+          ref: 38185c74717221453c662f4ba1b093315eff5b83
+          path: _candidate/approval
+          persist-credentials: false
+
+      - name: Checkout exact persistence candidate
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          repository: ramideltoro/nutsnews-worker-article-persistence
+          ref: 6dae69d96b4b081b23b5e1d85e10133ee36a6674
+          path: _candidate/persistence
+          persist-credentials: false
+
+      - name: Checkout exact Grafana alert catalog
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          repository: ramideltoro/nutsnews-infra
+          ref: b10a76cf523c9f5b47bd69b8301dc3d9d9a4d8a6
+          path: _candidate/infra
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: "24"
+          registry-url: https://npm.pkg.github.com
+          scope: "@ramideltoro"
+
+      - name: Prepare SSH material for read-only status
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Capture value-free pre-drill live status
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          STATUS_OUTPUT: ${{ runner.temp }}/pre-status.json
+        run: |
+          set -euo pipefail
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          remote_args=(
+            sudo -n /usr/local/sbin/nutsnews-worker-runtime status
+            --manifest /etc/nutsnews-worker-uplift/services.json
+            --compose /opt/nutsnews-worker-uplift/compose.yml
+            --project nutsnews-worker-uplift
+            --queue-kind main
+            --tail 0
+            --report /var/lib/nutsnews/worker-uplift-runtime/reports/last-status.json
+            --dry-run
+          )
+          printf '%q ' "${remote_args[@]}" > "$RUNNER_TEMP/worker-runtime-command.txt"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=20 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "$(cat "$RUNNER_TEMP/worker-runtime-command.txt")" > "$STATUS_OUTPUT"
+          python3 - "$STATUS_OUTPUT" <<'PY'
+          import json
+          import sys
+          report = json.load(open(sys.argv[1], encoding="utf-8"))
+          print(json.dumps({
+              "status": report.get("status"),
+              "mode": report.get("mode"),
+              "production_writes_enabled": report.get("production_writes_enabled"),
+              "service_count": len(report.get("services", {})),
+              "missing_consumer_count": len(report.get("missing_consumers", [])),
+              "safe_metadata_only": True,
+          }, sort_keys=True))
+          PY
+
+      - name: Install exact candidate dependencies
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          npm ci --prefix _candidate/approval
+          npm ci --prefix _candidate/persistence
+
+      - name: Record tested source and delivery-policy identities
+        shell: bash
+        env:
+          APPROVAL_COMMIT: 38185c74717221453c662f4ba1b093315eff5b83
+          PERSISTENCE_COMMIT: 6dae69d96b4b081b23b5e1d85e10133ee36a6674
+          INFRA_COMMIT: b10a76cf523c9f5b47bd69b8301dc3d9d9a4d8a6
+          SOURCE_OUTPUT: ${{ runner.temp }}/source-checkouts.json
+          POLICY_OUTPUT: ${{ runner.temp }}/delivery-policy.json
+        run: |
+          set -euo pipefail
+          test "$(git -C _candidate/approval rev-parse HEAD)" = "$APPROVAL_COMMIT"
+          test "$(git -C _candidate/persistence rev-parse HEAD)" = "$PERSISTENCE_COMMIT"
+          test "$(git -C _candidate/infra rev-parse HEAD)" = "$INFRA_COMMIT"
+          python3 - "$SOURCE_OUTPUT" "$APPROVAL_COMMIT" "$PERSISTENCE_COMMIT" "$INFRA_COMMIT" <<'PY'
+          import json
+          import sys
+          with open(sys.argv[1], "w", encoding="utf-8") as handle:
+              json.dump({
+                  "approval": sys.argv[2],
+                  "persistence": sys.argv[3],
+                  "infra": sys.argv[4],
+              }, handle, indent=2, sort_keys=True)
+              handle.write("\n")
+          PY
+          (
+            cd _candidate/approval
+            node --input-type=module - "$POLICY_OUTPUT" <<'NODE'
+          import { writeFileSync } from "node:fs";
+          import { WORKER_DELIVERY_BEHAVIOR } from "@ramideltoro/nutsnews-worker-contracts";
+          writeFileSync(process.argv[2], JSON.stringify({
+            schema_version: 1,
+            max_attempts: WORKER_DELIVERY_BEHAVIOR.maxAttempts,
+            manual_ack_required: WORKER_DELIVERY_BEHAVIOR.manualAckRequired,
+            retry_transfer_requires_confirm_before_ack:
+              WORKER_DELIVERY_BEHAVIOR.retryTransferRequiresPublishConfirmBeforeAck,
+            dlq_transfer_requires_confirm_before_ack:
+              WORKER_DELIVERY_BEHAVIOR.dlqTransferRequiresPublishConfirmBeforeAck,
+            poison_message_convention: WORKER_DELIVERY_BEHAVIOR.poisonMessageConvention
+          }, null, 2) + "\n");
+          NODE
+          )
+
+      - name: Run exact production-adapter failure and recovery probes
+        shell: bash
+        env:
+          POSTGRES_PROBE_OUTPUT: ${{ runner.temp }}/postgres-probe.json
+          BACKEND_API_PROBE_OUTPUT: ${{ runner.temp }}/backend-api-probe.json
+          QWEN_PROBE_OUTPUT: ${{ runner.temp }}/qwen-probe.json
+        run: |
+          set -euo pipefail
+          install -m 0600 \
+            tests/fixtures/worker_uplift_dependency_drills/postgres_probe.test.ts \
+            _candidate/persistence/test/issue-161-postgres-probe.test.ts
+          install -m 0600 \
+            tests/fixtures/worker_uplift_dependency_drills/backend_api_probe.test.ts \
+            _candidate/persistence/test/issue-161-backend-api-probe.test.ts
+          install -m 0600 \
+            tests/fixtures/worker_uplift_dependency_drills/qwen_probe.test.ts \
+            _candidate/approval/test/issue-161-qwen-probe.test.ts
+          (
+            cd _candidate/persistence
+            NUTSNEWS_DEPENDENCY_DRILL_OUTPUT="$POSTGRES_PROBE_OUTPUT" \
+              npx vitest run test/issue-161-postgres-probe.test.ts --reporter=dot
+            NUTSNEWS_DEPENDENCY_DRILL_OUTPUT="$BACKEND_API_PROBE_OUTPUT" \
+              npx vitest run test/issue-161-backend-api-probe.test.ts --reporter=dot
+          )
+          (
+            cd _candidate/approval
+            NUTSNEWS_DEPENDENCY_DRILL_OUTPUT="$QWEN_PROBE_OUTPUT" \
+              npx vitest run test/issue-161-qwen-probe.test.ts --reporter=dot
+          )
+
+      - name: Prove retry, DLQ, no-early-ack, recovery, and idempotency bounds
+        shell: bash
+        env:
+          APPROVAL_RESULTS: ${{ runner.temp }}/approval-vitest.json
+          PERSISTENCE_RESULTS: ${{ runner.temp }}/persistence-vitest.json
+        run: |
+          set -euo pipefail
+          (
+            cd _candidate/approval
+            npx vitest run \
+              test/service.test.ts \
+              test/approval.test.ts \
+              -t 'starts, becomes ready, registers approval and translation routes, and drains cleanly|accepts valid Qwen decisions, records traceable metadata, and publishes one translation task|retries Qwen timeouts without recording a decision|DLQs repeated transient Qwen failures after retry attempts are exhausted' \
+              --reporter=json \
+              --outputFile="$APPROVAL_RESULTS"
+          )
+          (
+            cd _candidate/persistence
+            npx vitest run \
+              test/service.test.ts \
+              test/safety.test.ts \
+              -t 'starts, becomes ready, registers persistence and publication routes, and drains cleanly|materializes valid persistence deliveries and acks duplicate replays without duplicate side effects|rolls back local final-shadow writes after backend API failure and remains recoverable|rolls back local final-shadow transaction failures and recovers through backend idempotency|sends permanent backend/database faults to DLQ without local accepted output' \
+              --reporter=json \
+              --outputFile="$PERSISTENCE_RESULTS"
+          )
+
+      - name: Capture value-free post-drill live status
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          STATUS_OUTPUT: ${{ runner.temp }}/post-status.json
+        run: |
+          set -euo pipefail
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          remote_args=(
+            sudo -n /usr/local/sbin/nutsnews-worker-runtime status
+            --manifest /etc/nutsnews-worker-uplift/services.json
+            --compose /opt/nutsnews-worker-uplift/compose.yml
+            --project nutsnews-worker-uplift
+            --queue-kind main
+            --tail 0
+            --report /var/lib/nutsnews/worker-uplift-runtime/reports/last-status.json
+            --dry-run
+          )
+          printf '%q ' "${remote_args[@]}" > "$RUNNER_TEMP/worker-runtime-command.txt"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=20 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "$(cat "$RUNNER_TEMP/worker-runtime-command.txt")" > "$STATUS_OUTPUT"
+          python3 - "$STATUS_OUTPUT" <<'PY'
+          import json
+          import sys
+          report = json.load(open(sys.argv[1], encoding="utf-8"))
+          print(json.dumps({
+              "status": report.get("status"),
+              "mode": report.get("mode"),
+              "production_writes_enabled": report.get("production_writes_enabled"),
+              "service_count": len(report.get("services", {})),
+              "missing_consumer_count": len(report.get("missing_consumers", [])),
+              "safe_metadata_only": True,
+          }, sort_keys=True))
+          PY
+
+      - name: Build and validate value-free outage evidence
+        shell: bash
+        env:
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          WORKFLOW_COMMIT: ${{ github.sha }}
+          INFRA_COMMIT: b10a76cf523c9f5b47bd69b8301dc3d9d9a4d8a6
+          REPORT_OUTPUT: ${{ runner.temp }}/worker-uplift-dependency-outage-report.json
+        run: |
+          set -euo pipefail
+          python3 scripts/backend_worker_uplift_dependency_outage_report.py \
+            --runtime-defaults ansible/roles/backend_worker_runtime/defaults/main.yml \
+            --topology ansible/roles/backend_rabbitmq/templates/worker-uplift-topology.json.j2 \
+            --pre-status "$RUNNER_TEMP/pre-status.json" \
+            --post-status "$RUNNER_TEMP/post-status.json" \
+            --approval-results "$RUNNER_TEMP/approval-vitest.json" \
+            --persistence-results "$RUNNER_TEMP/persistence-vitest.json" \
+            --postgres-probe "$RUNNER_TEMP/postgres-probe.json" \
+            --backend-api-probe "$RUNNER_TEMP/backend-api-probe.json" \
+            --qwen-probe "$RUNNER_TEMP/qwen-probe.json" \
+            --delivery-policy "$RUNNER_TEMP/delivery-policy.json" \
+            --source-checkouts "$RUNNER_TEMP/source-checkouts.json" \
+            --approval-service-source _candidate/approval/src/service.ts \
+            --persistence-service-source _candidate/persistence/src/service.ts \
+            --alert-catalog _candidate/infra/terraform/grafana-cloud/catalog/worker-uplift-rabbitmq-alerts.json \
+            --infra-commit "$INFRA_COMMIT" \
+            --workflow-run-id "$WORKFLOW_RUN_ID" \
+            --workflow-commit "$WORKFLOW_COMMIT" \
+            --output "$REPORT_OUTPUT"
+          python3 scripts/validate_worker_uplift_dependency_outage_drills.py \
+            --report "$REPORT_OUTPUT"
+
+      - name: Package immutable safe evidence
+        if: always()
+        shell: bash
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/issue-161-artifact
+        run: |
+          set -euo pipefail
+          install -m 0700 -d "$ARTIFACT_DIR"
+          for file in \
+            worker-uplift-dependency-outage-report.json \
+            approval-vitest.json \
+            persistence-vitest.json \
+            postgres-probe.json \
+            backend-api-probe.json \
+            qwen-probe.json \
+            delivery-policy.json \
+            source-checkouts.json
+          do
+            if [[ -f "$RUNNER_TEMP/$file" ]]; then
+              install -m 0600 "$RUNNER_TEMP/$file" "$ARTIFACT_DIR/$file"
+            fi
+          done
+          (
+            cd "$ARTIFACT_DIR"
+            sha256sum ./*.json > SHA256SUMS
+          )
+
+      - name: Upload immutable safe evidence
+        if: always()
+        uses: actions/upload-artifact@1eb3cb2b3e0f29609092a73eb033bb759a334595  # v5.0.0
+        with:
+          name: backend-worker-uplift-dependency-outage-drills
+          path: ${{ runner.temp }}/issue-161-artifact
+          if-no-files-found: error
+          retention-days: 90

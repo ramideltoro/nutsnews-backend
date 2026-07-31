@@ -137,6 +137,82 @@ def validate(document: dict[str, Any], defaults_text: str | None = None) -> list
     if fetcher.get("dns_binding_fail_closed_tested") is not True:
         errors.append("fetcher must prove fail-closed DNS binding tests")
 
+    deployment = document.get("protected_shadow_deployment", {})
+    if not SHA_RE.fullmatch(str(deployment.get("backend_merge_commit", ""))):
+        errors.append("protected deployment backend_merge_commit must be a full Git SHA")
+    for field in ("protected_check_run", "protected_apply_run", "status_run"):
+        if not positive_integer(deployment.get(field)):
+            errors.append(f"protected_shadow_deployment.{field} must be a positive integer")
+
+    for field in ("protected_check_artifact", "protected_apply_artifact", "status_artifact"):
+        artifact = deployment.get(field, {})
+        if not positive_integer(artifact.get("artifact_id")):
+            errors.append(f"protected_shadow_deployment.{field}.artifact_id must be positive")
+        if not DIGEST_RE.fullmatch(str(artifact.get("artifact_digest", ""))):
+            errors.append(f"protected_shadow_deployment.{field}.artifact_digest must be SHA-256")
+    apply_artifact = deployment.get("protected_apply_artifact", {})
+    for field in ("pre_report_sha256", "post_report_sha256"):
+        if not re.fullmatch(r"^[0-9a-f]{64}$", str(apply_artifact.get(field, ""))):
+            errors.append(f"protected apply {field} must be SHA-256")
+    for field in ("pre_status", "post_status"):
+        if apply_artifact.get(field) != "pass":
+            errors.append(f"protected apply {field} must be pass")
+    for field in ("pre_blockers", "post_blockers"):
+        if apply_artifact.get(field) != []:
+            errors.append(f"protected apply {field} must be empty")
+    status_artifact = deployment.get("status_artifact", {})
+    if not re.fullmatch(r"^[0-9a-f]{64}$", str(status_artifact.get("report_sha256", ""))):
+        errors.append("protected status report_sha256 must be SHA-256")
+
+    deploy_runs = deployment.get("service_deploy_runs", {})
+    if set(deploy_runs) != set(SERVICE_REPOSITORIES):
+        errors.append("protected deploy runs must cover all eight stages exactly once")
+    for stage, run_id in deploy_runs.items():
+        if not positive_integer(run_id):
+            errors.append(f"{stage} protected deploy run must be a positive integer")
+
+    deployed_images = deployment.get("deployed_images", [])
+    deployed_by_stage = {str(item.get("stage", "")): item for item in deployed_images}
+    if set(deployed_by_stage) != set(SERVICE_REPOSITORIES) or len(deployed_images) != len(
+        SERVICE_REPOSITORIES
+    ):
+        errors.append("deployed image evidence must cover all eight stages exactly once")
+    source_by_stage = {str(item.get("stage", "")): item for item in images}
+    for stage, deployed in deployed_by_stage.items():
+        source = source_by_stage.get(stage, {})
+        if deployed.get("source_commit") != source.get("source_commit"):
+            errors.append(f"{stage} deployed source commit does not match the built candidate")
+        if deployed.get("image") != source.get("image"):
+            errors.append(f"{stage} deployed image does not match the built candidate")
+
+    if deployment.get("runtime_status") != "pass":
+        errors.append("protected runtime status must pass")
+    if deployment.get("mode") != "shadow":
+        errors.append("protected runtime mode must remain shadow")
+    if deployment.get("production_writes_enabled") is not False:
+        errors.append("protected runtime production writes must remain disabled")
+    if deployment.get("healthy_service_count") != 8:
+        errors.append("protected runtime must prove eight healthy services")
+    if deployment.get("required_consumer_queue_count") != 7:
+        errors.append("protected runtime must prove seven consumer queues")
+    for field in ("missing_consumers", "unverifiable_consumers"):
+        if deployment.get(field) != []:
+            errors.append(f"protected runtime {field} must be empty")
+    if deployment.get("queue_messages_total") != 0:
+        errors.append("protected runtime queues must be drained")
+
+    deployment_safety = deployment.get("safety", {})
+    if deployment_safety.get("legacy_worker_is_production_ingestion_owner") is not True:
+        errors.append("protected deployment must preserve legacy ingestion ownership")
+    for field in (
+        "cutover_authorized",
+        "dns_or_failover_changed",
+        "queue_mutation_performed",
+        "production_infrastructure_changed",
+    ):
+        if deployment_safety.get(field) is not False:
+            errors.append(f"protected deployment safety.{field} must be false")
+
     return errors
 
 

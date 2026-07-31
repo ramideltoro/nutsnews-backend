@@ -59,6 +59,36 @@ class WorkerUpliftSecurityRemediationBuildTests(unittest.TestCase):
         self.assertIn("safety.production_writes_enabled must be false", errors)
         self.assertIn("safety.cutover_authorized must be false", errors)
 
+    def test_deployed_candidate_drift_is_rejected(self):
+        document = copy.deepcopy(self.document)
+        deployment = document["protected_shadow_deployment"]
+        deployment["deployed_images"][0]["image"] = (
+            "ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler@sha256:" + "0" * 64
+        )
+        deployment["service_deploy_runs"].pop("publication")
+
+        errors = builds.validate(document)
+
+        self.assertTrue(any("deploy runs must cover all eight" in error for error in errors))
+        self.assertTrue(any("deployed image does not match" in error for error in errors))
+
+    def test_runtime_shadow_and_consumer_proof_fails_closed(self):
+        document = copy.deepcopy(self.document)
+        deployment = document["protected_shadow_deployment"]
+        deployment["mode"] = "production"
+        deployment["production_writes_enabled"] = True
+        deployment["missing_consumers"] = ["nutsnews.worker.fetch.v1"]
+        deployment["queue_messages_total"] = 1
+        deployment["safety"]["dns_or_failover_changed"] = True
+
+        errors = builds.validate(document)
+
+        self.assertIn("protected runtime mode must remain shadow", errors)
+        self.assertIn("protected runtime production writes must remain disabled", errors)
+        self.assertIn("protected runtime missing_consumers must be empty", errors)
+        self.assertIn("protected runtime queues must be drained", errors)
+        self.assertIn("protected deployment safety.dns_or_failover_changed must be false", errors)
+
 
 if __name__ == "__main__":
     unittest.main()

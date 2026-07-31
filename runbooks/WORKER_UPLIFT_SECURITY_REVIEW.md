@@ -125,12 +125,36 @@ the runtime image and proves that npm, npx, npm's global module tree,
 TypeScript, and Vitest are absent.
 
 Deploy these digest-pinned candidates only with the existing protected backend
-Ansible check/apply workflow. The check must precede apply. After apply, run the
-approval-free worker-runtime `status` action and inspect its artifact for all
-eight exact source commits and digests, shadow mode, writes disabled, all
-services healthy, one consumer on every required main queue, unchanged legacy
-ownership, and no queue backlog or DLQ growth. A successful workflow conclusion
-without those artifact fields is insufficient.
+workflows. The Ansible check must precede apply; apply installs the reviewed
+runtime manager, manifest, and Compose definition but does not itself recreate
+the eight containers. After apply, invoke the protected worker-runtime `deploy`
+action separately for each affected service with
+`confirm_target=backend.nutsnews.com` and `dry_run=false`. Each artifact must
+show only the named service pull/recreate, `mode=shadow`, and
+`production_writes_enabled=false`.
+
+After all service-scoped deploys, run the approval-free worker-runtime `status`
+action and inspect its artifact for all eight exact source commits and digests,
+shadow mode, writes disabled, all services healthy, one consumer on every
+required main queue, unchanged legacy ownership, and no queue backlog or DLQ
+growth. A successful workflow conclusion without those artifact fields is
+insufficient.
+
+The current immutable proof is recorded in the build record:
+
+- Ansible check `30654352991` and apply `30654848549` passed with empty blocker
+  lists in the downloaded safety artifacts.
+- Protected service deploys `30655582222`, `30655683990`, `30655874225`,
+  `30655921484`, `30655959048`, `30655999806`, `30656028849`, and
+  `30656073845` each pulled and recreated exactly one named shadow service.
+- Read-only status `30656141654`, artifact `8803290341`, proved the eight exact
+  digests, eight healthy services, seven active consumers, zero queued or
+  unacknowledged messages, shadow mode, and writes disabled.
+
+This evidence remediates `SEC-124-002` through `SEC-124-006`. Findings
+`SEC-124-007` through `SEC-124-009` remain pending and keep #164 and #125
+blocked until actual remediation or an explicit, bounded, owner-authored
+disposition satisfies the strict validator.
 
 This refresh changes only the eight shadow container revisions. It does not
 authorize cutover, alter the legacy worker, change ingestion ownership, enable

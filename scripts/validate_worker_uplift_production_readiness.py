@@ -802,14 +802,11 @@ def validate_decision(
         errors.append("downstream control implementation must not block #125")
 
     security = decision.get("security_gate", {})
-    if security.get("status") != "blocked_pending_validated_dispositions":
-        errors.append("security residuals must block pending validated dispositions")
-    if set(security.get("residual_findings_requiring_gate_disposition", [])) != (
-        REQUIRED_SECURITY_RESIDUALS
-    ):
-        errors.append("all #124 residual findings must remain in the gate")
-    if security.get("named_owner_decisions") != []:
-        errors.append("security gate must not fabricate owner decisions")
+    recorded_security_findings = set(
+        security.get("residual_findings_requiring_gate_disposition", [])
+    )
+    if not recorded_security_findings.issubset(REQUIRED_SECURITY_RESIDUALS):
+        errors.append("security gate contains an unknown #124 finding")
     if security.get("disposition_artifact") != (
         "docs/worker-uplift-security-dispositions.json"
     ):
@@ -826,8 +823,6 @@ def validate_decision(
         "python3 scripts/validate_worker_uplift_security_dispositions.py --enforce-closure"
     ):
         errors.append("security gate must name the fail-closed closure validator")
-    if security.get("closure_ready") is not False:
-        errors.append("security gate must remain blocked while #164 dispositions are pending")
     if DEFAULT_SECURITY_DISPOSITIONS_PATH.is_file():
         if security.get("disposition_artifact_sha256") != file_sha256(
             DEFAULT_SECURITY_DISPOSITIONS_PATH
@@ -839,13 +834,21 @@ def validate_decision(
             for item in dispositions.get("findings", [])
             if item.get("status") == "pending"
         }
-        if disposition_ids != REQUIRED_SECURITY_RESIDUALS:
+        if disposition_ids != recorded_security_findings:
             errors.append("security gate must match the disposition artifact's pending findings")
         closure = dispositions.get("closure_gate", {})
-        if closure.get("ready") is not False or closure.get("issue_closure_authorized") is not False:
-            errors.append("pending security dispositions must not authorize closure")
-        if closure.get("named_owner_decisions") != []:
-            errors.append("pending disposition artifact must not fabricate owner decisions")
+        closure_ready = closure.get("ready") is True
+        expected_security_status = (
+            "pass" if closure_ready else "blocked_pending_validated_dispositions"
+        )
+        if security.get("status") != expected_security_status:
+            errors.append("security status must match disposition closure readiness")
+        if security.get("closure_ready") is not closure_ready:
+            errors.append("security closure_ready must match the disposition artifact")
+        if closure.get("issue_closure_authorized") is not closure_ready:
+            errors.append("security disposition closure authorization is inconsistent")
+        if security.get("named_owner_decisions") != closure.get("named_owner_decisions", []):
+            errors.append("security gate owner decisions must match the disposition artifact")
     else:
         errors.append("security disposition artifact is missing")
 

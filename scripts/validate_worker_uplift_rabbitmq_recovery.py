@@ -95,6 +95,7 @@ def main() -> int:
         "duplicate_domain_or_api_side_effects",
         "throwaway-loopback-broker",
         "stopped-volume-restore-drill",
+        'actions=("check", "permissions", "probe-transfers")',
         "scheduled-check",
         "same_node_name_required",
         "same_erlang_cookie_required",

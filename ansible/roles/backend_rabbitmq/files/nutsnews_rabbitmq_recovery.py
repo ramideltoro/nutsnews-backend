@@ -1274,7 +1274,7 @@ def action_stopped_volume_restore_drill(args: argparse.Namespace) -> dict[str, A
                     env_path=env_path,
                     credentials_path=credentials_path,
                     management_port=second_ports["management"],
-                    actions=("check", "permissions"),
+                    actions=("check", "permissions", "probe-transfers"),
                 )
                 reports.extend(restored_reports)
                 ok = ok and restored_ok

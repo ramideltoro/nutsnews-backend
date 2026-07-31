@@ -108,7 +108,11 @@ sudo -n /usr/local/sbin/nutsnews-rabbitmq-recovery stopped-volume-restore-drill
 ```
 
 This drill uses disposable broker data only. It stops the source drill broker,
-copies the stopped data directory, restarts a second drill broker with the same node name and same Erlang cookie, then verifies topology and permissions.
+copies the stopped data directory, restarts a second drill broker with the same
+node name and same Erlang cookie, then verifies topology, permissions, and
+representative main-to-retry/DLQ publish-consume transfers against the restored
+disposable broker.
+The restore therefore preserves the same node name and same Erlang cookie.
 
 The stopped-volume path is supported only when a real incident snapshot is
 taken after the broker is stopped or otherwise quiesced. Preserve the node name,

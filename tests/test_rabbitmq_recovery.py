@@ -98,6 +98,16 @@ class RabbitMQRecoveryTests(unittest.TestCase):
         self.assertNotIn('f"RABBITMQ_DEFAULT_PASS=', start_block)
         self.assertNotIn('f"RABBITMQ_ERLANG_COOKIE=', start_block)
 
+    def test_stopped_volume_restore_probes_transfers_after_restore(self):
+        source = RECOVERY_PATH.read_text(encoding="utf-8")
+        stopped_restore = source.split(
+            "def action_stopped_volume_restore_drill", 1
+        )[1].split("def action_scheduled_check", 1)[0]
+        self.assertIn(
+            'actions=("check", "permissions", "probe-transfers")',
+            stopped_restore,
+        )
+
     def test_candidate_environment_is_shadow_only_and_value_free(self):
         definition = {
             "vhost": "nutsnews-worker-uplift",

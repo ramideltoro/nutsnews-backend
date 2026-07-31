@@ -54,6 +54,18 @@ class WorkerUpliftProductionReadinessTests(unittest.TestCase):
         self.assertTrue(any("must not fabricate a named approver" in error for error in errors))
         self.assertTrue(any("must not fabricate risk waivers" in error for error in errors))
 
+    def test_pending_security_dispositions_cannot_satisfy_gate(self):
+        decision = copy.deepcopy(self.decision)
+        decision["security_gate"]["closure_ready"] = True
+        decision["security_gate"]["named_owner_decisions"] = [
+            {"finding": "SEC-124-007", "owner": "ramideltoro"}
+        ]
+
+        errors = self.validate(decision=decision)
+
+        self.assertTrue(any("must remain blocked" in error for error in errors))
+        self.assertTrue(any("must not fabricate owner decisions" in error for error in errors))
+
     def test_failover_analytics_cannot_be_inferred_from_documentation(self):
         proof = copy.deepcopy(self.binding_proof)
         proof["required_binding"]["present"] = True

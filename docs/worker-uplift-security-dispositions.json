@@ -1,0 +1,431 @@
+{
+  "schema_version": 1,
+  "tracking_issue": "ramideltoro/nutsnews-worker#164",
+  "implementation_repository": "ramideltoro/nutsnews-backend",
+  "captured_at_utc": "2026-07-31T17:30:12Z",
+  "decision": "blocked_pending_dispositions",
+  "source_review": {
+    "tracking_issue": "ramideltoro/nutsnews-worker#124",
+    "artifact": "docs/worker-uplift-security-review.json",
+    "artifact_sha256": "89c837e7375a04629d4d3e33cf65e1a5b8661365a05eaaaff7c722c8d22e2d56",
+    "merge_commit": "b619cf91504eafca21f70c5d68888563f5fca7a9",
+    "post_merge_checks_run": 30484088483,
+    "historical_acceptances_expired_at_gate": "ramideltoro/nutsnews-worker#125",
+    "historical_acceptance_is_current_disposition": false
+  },
+  "authorized_owner_logins": [
+    "ramideltoro"
+  ],
+  "safety_invariants": {
+    "legacy_worker_is_production_ingestion_owner": true,
+    "uplift_services_are_shadow_only": true,
+    "production_writes_enabled": false,
+    "cutover_authorized": false,
+    "legacy_worker_modified": false,
+    "ingestion_ownership_changed": false,
+    "dns_or_failover_modified": false,
+    "production_infrastructure_modified": false,
+    "secret_values_retrieved_or_recorded": false
+  },
+  "disposition_policy": {
+    "allowed_decisions": [
+      "remediated",
+      "accepted_residual_risk"
+    ],
+    "pending_is_a_valid_current_record_but_not_a_disposition": true,
+    "remediation_requires_separately_reviewed_repository_pr": true,
+    "remediation_requires_immutable_merge_and_successful_ci_evidence": true,
+    "deployment_proof_required_when_runtime_or_deployed_configuration_changes": true,
+    "residual_acceptance_requires_explicit_named_owner_evidence": true,
+    "issue_closure_is_acceptance": false,
+    "advisory_approval_metadata_is_acceptance": false,
+    "automation_is_acceptance": false,
+    "expired_acceptance_is_valid": false,
+    "no_disposition_authorizes_cutover_or_production_writes": true
+  },
+  "findings": [
+    {
+      "id": "SEC-124-002",
+      "severity": "medium",
+      "title": "Uplift repositories use trusted action release tags rather than immutable action commit SHAs",
+      "affected_scope": [
+        "ramideltoro/nutsnews-worker-contracts",
+        "ramideltoro/nutsnews-worker-runtime",
+        "ramideltoro/nutsnews-worker-feed-scheduler",
+        "ramideltoro/nutsnews-worker-feed-fetcher",
+        "ramideltoro/nutsnews-worker-article-canonicalizer",
+        "ramideltoro/nutsnews-worker-article-enrichment",
+        "ramideltoro/nutsnews-worker-article-approval",
+        "ramideltoro/nutsnews-worker-article-translation",
+        "ramideltoro/nutsnews-worker-article-persistence",
+        "ramideltoro/nutsnews-worker-article-publication"
+      ],
+      "current_evidence": {
+        "source_heads": [
+          {"repository": "ramideltoro/nutsnews-worker-contracts", "commit": "bf10f4257a1ac7f3e5aef0c5a14f62ec51ae4bb2", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-runtime", "commit": "43e7883554e250b2297d40266374cb4ff87d141c", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-feed-scheduler", "commit": "ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-feed-fetcher", "commit": "5b82b3e27ef85e57fc9aec23a0815cde584758eb", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-canonicalizer", "commit": "64d6f59920ec6aa5fb56028de99f7600ecb5be2d", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-enrichment", "commit": "edd63d8acd4a46a33aea4b043e3dc8dfd95af310", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-approval", "commit": "38185c74717221453c662f4ba1b093315eff5b83", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-translation", "commit": "d3b68668c7b714500d7efd204ecf33987a34e3ee", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-persistence", "commit": "6dae69d96b4b081b23b5e1d85e10133ee36a6674", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-publication", "commit": "5a9e3c09a8572a7978687bcb7afec548e3934a63", "paths": [".github/workflows"]}
+        ],
+        "observation": "All ten heads still contain one or more external actions referenced by a release tag instead of a reviewed 40-character commit SHA."
+      },
+      "accountable_owner": {
+        "login": "ramideltoro",
+        "basis": "named owner of every affected repository",
+        "acceptance_inferred": false
+      },
+      "status": "pending",
+      "owner_action_required": true,
+      "planned_remediation": "Pin every external action in all affected workflows to reviewed immutable commit SHAs and pass each repository's required checks.",
+      "compensating_controls": [
+        "workflows default to read-only permissions unless a publishing job declares narrower writes",
+        "main rulesets require current validation and block deletion and non-fast-forward updates",
+        "uplift services remain shadow-only with production writes disabled"
+      ],
+      "review_by": "2026-08-31",
+      "reopen_trigger": "Any external action reference is introduced without a reviewed immutable commit SHA.",
+      "remediation": null,
+      "risk_acceptance": null
+    },
+    {
+      "id": "SEC-124-003",
+      "severity": "medium",
+      "title": "Some publish workflows restore dependency caches in artifact-producing jobs",
+      "affected_scope": [
+        "ramideltoro/nutsnews-worker-contracts",
+        "ramideltoro/nutsnews-worker-runtime",
+        "ramideltoro/nutsnews-worker-feed-scheduler",
+        "ramideltoro/nutsnews-worker-feed-fetcher",
+        "ramideltoro/nutsnews-worker-article-canonicalizer",
+        "ramideltoro/nutsnews-worker-article-enrichment"
+      ],
+      "current_evidence": {
+        "source_heads": [
+          {"repository": "ramideltoro/nutsnews-worker-contracts", "commit": "bf10f4257a1ac7f3e5aef0c5a14f62ec51ae4bb2", "paths": [".github/workflows/publish-package.yml"]},
+          {"repository": "ramideltoro/nutsnews-worker-runtime", "commit": "43e7883554e250b2297d40266374cb4ff87d141c", "paths": [".github/workflows/publish-package.yml"]},
+          {"repository": "ramideltoro/nutsnews-worker-feed-scheduler", "commit": "ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396", "paths": [".github/workflows/publish-container.yml"]},
+          {"repository": "ramideltoro/nutsnews-worker-feed-fetcher", "commit": "5b82b3e27ef85e57fc9aec23a0815cde584758eb", "paths": [".github/workflows/publish-container.yml"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-canonicalizer", "commit": "64d6f59920ec6aa5fb56028de99f7600ecb5be2d", "paths": [".github/workflows/publish-container.yml"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-enrichment", "commit": "edd63d8acd4a46a33aea4b043e3dc8dfd95af310", "paths": [".github/workflows/publish-container.yml"]}
+        ],
+        "observation": "The artifact-producing job in each listed workflow configures the setup-node npm dependency cache."
+      },
+      "accountable_owner": {
+        "login": "ramideltoro",
+        "basis": "named owner of every affected repository",
+        "acceptance_inferred": false
+      },
+      "status": "pending",
+      "owner_action_required": true,
+      "planned_remediation": "Remove dependency-cache restore from artifact-producing package and image publication jobs while retaining locked npm ci installs and normal validation-job caching where appropriate.",
+      "compensating_controls": [
+        "package lockfiles are enforced",
+        "publishing is main-only or release-only",
+        "published package and image identities are immutable"
+      ],
+      "review_by": "2026-08-31",
+      "reopen_trigger": "An artifact-producing workflow restores a dependency cache from a namespace writable by less-trusted execution.",
+      "remediation": null,
+      "risk_acceptance": null
+    },
+    {
+      "id": "SEC-124-004",
+      "severity": "medium",
+      "title": "Runtime images retain the npm CLI and development-only dependency content",
+      "affected_scope": [
+        "ramideltoro/nutsnews-worker-feed-scheduler",
+        "ramideltoro/nutsnews-worker-feed-fetcher",
+        "ramideltoro/nutsnews-worker-article-canonicalizer",
+        "ramideltoro/nutsnews-worker-article-enrichment",
+        "ramideltoro/nutsnews-worker-article-approval",
+        "ramideltoro/nutsnews-worker-article-translation",
+        "ramideltoro/nutsnews-worker-article-persistence",
+        "ramideltoro/nutsnews-worker-article-publication"
+      ],
+      "current_evidence": {
+        "source_heads": [
+          {"repository": "ramideltoro/nutsnews-worker-feed-scheduler", "commit": "ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396", "paths": ["Dockerfile"]},
+          {"repository": "ramideltoro/nutsnews-worker-feed-fetcher", "commit": "5b82b3e27ef85e57fc9aec23a0815cde584758eb", "paths": ["Dockerfile"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-canonicalizer", "commit": "64d6f59920ec6aa5fb56028de99f7600ecb5be2d", "paths": ["Dockerfile"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-enrichment", "commit": "edd63d8acd4a46a33aea4b043e3dc8dfd95af310", "paths": ["Dockerfile"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-approval", "commit": "38185c74717221453c662f4ba1b093315eff5b83", "paths": ["Dockerfile"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-translation", "commit": "d3b68668c7b714500d7efd204ecf33987a34e3ee", "paths": ["Dockerfile"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-persistence", "commit": "6dae69d96b4b081b23b5e1d85e10133ee36a6674", "paths": ["Dockerfile"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-publication", "commit": "5a9e3c09a8572a7978687bcb7afec548e3934a63", "paths": ["Dockerfile"]}
+        ],
+        "observation": "Every runtime stage copies node_modules from the full dependency stage and uses a Node base image that retains the npm CLI."
+      },
+      "accountable_owner": {
+        "login": "ramideltoro",
+        "basis": "named owner of every affected repository",
+        "acceptance_inferred": false
+      },
+      "status": "pending",
+      "owner_action_required": true,
+      "planned_remediation": "Build production-only node_modules, remove the npm CLI from the runtime layer, rebuild all eight images, rescan the exact digests, and deploy them only through the protected shadow workflow.",
+      "compensating_controls": [
+        "containers run as a non-root user",
+        "the service command invokes node directly",
+        "image secret scans were clean",
+        "production writes remain disabled"
+      ],
+      "review_by": "2026-08-31",
+      "reopen_trigger": "A deployed worker image contains npm, npx, or dependencies absent from the production dependency graph.",
+      "remediation": null,
+      "risk_acceptance": null
+    },
+    {
+      "id": "SEC-124-005",
+      "severity": "low",
+      "title": "Four service publish workflows do not attach an image SBOM attestation",
+      "affected_scope": [
+        "ramideltoro/nutsnews-worker-article-approval",
+        "ramideltoro/nutsnews-worker-article-translation",
+        "ramideltoro/nutsnews-worker-article-persistence",
+        "ramideltoro/nutsnews-worker-article-publication"
+      ],
+      "current_evidence": {
+        "source_heads": [
+          {"repository": "ramideltoro/nutsnews-worker-article-approval", "commit": "38185c74717221453c662f4ba1b093315eff5b83", "paths": [".github/workflows/publish-container.yml"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-translation", "commit": "d3b68668c7b714500d7efd204ecf33987a34e3ee", "paths": [".github/workflows/publish-container.yml"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-persistence", "commit": "6dae69d96b4b081b23b5e1d85e10133ee36a6674", "paths": [".github/workflows/publish-container.yml"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-publication", "commit": "5a9e3c09a8572a7978687bcb7afec548e3934a63", "paths": [".github/workflows/publish-container.yml"]}
+        ],
+        "observation": "The four listed build-push steps omit both sbom=true and provenance=mode=max."
+      },
+      "accountable_owner": {
+        "login": "ramideltoro",
+        "basis": "named owner of every affected repository",
+        "acceptance_inferred": false
+      },
+      "status": "pending",
+      "owner_action_required": true,
+      "planned_remediation": "Enable BuildKit SBOM and maximum provenance attestations, publish new exact-digest images, and verify the attestations before protected shadow deployment.",
+      "compensating_controls": [
+        "all four services generate dependency SBOMs in CI",
+        "deployed images are digest-pinned and signed",
+        "production writes remain disabled"
+      ],
+      "review_by": "2026-08-31",
+      "reopen_trigger": "A published or deployed service image lacks a retrievable SBOM attestation.",
+      "remediation": null,
+      "risk_acceptance": null
+    },
+    {
+      "id": "SEC-124-006",
+      "severity": "medium",
+      "title": "Fetcher DNS policy has a resolution-to-connect time-of-check/time-of-use window",
+      "affected_scope": [
+        "ramideltoro/nutsnews-worker-feed-fetcher"
+      ],
+      "current_evidence": {
+        "source_heads": [
+          {"repository": "ramideltoro/nutsnews-worker-feed-fetcher", "commit": "5b82b3e27ef85e57fc9aec23a0815cde584758eb", "paths": ["src/network.ts", "src/ingestion.ts", "src/dependencies.ts"]}
+        ],
+        "file_sha256": {
+          "src/network.ts": "998c5964e08b2264f9a31178516989cdaed22ef7ee9dcaeca1665ceca0a64f38",
+          "src/ingestion.ts": "4b50b28cf14d9dba044563f0c47060148afca6d98770ecc0eea265d37fbcc686",
+          "src/dependencies.ts": "dda6526c7ee57c6ec2d47d5e102d9866bf155e529d5e0edd2e38b390304b336d"
+        },
+        "observation": "The policy validates dns.lookup results, but the subsequent global fetch call performs an independent connection resolution; redirects repeat the same split validation and connection path."
+      },
+      "accountable_owner": {
+        "login": "ramideltoro",
+        "basis": "named owner of the affected repository",
+        "acceptance_inferred": false
+      },
+      "status": "pending",
+      "owner_action_required": true,
+      "planned_remediation": "Bind each outbound connection, including every redirect hop, to the address set returned by the policy validation and add rebinding-focused integration tests.",
+      "compensating_controls": [
+        "feed URLs originate from the controlled scheduler path",
+        "redirect targets are revalidated",
+        "literal private, loopback, link-local, localhost, and metadata targets are blocked",
+        "production writes remain disabled"
+      ],
+      "review_by": "2026-08-31",
+      "reopen_trigger": "Any fetch or redirect connection can resolve an address independently after policy validation.",
+      "remediation": null,
+      "risk_acceptance": null
+    },
+    {
+      "id": "SEC-124-007",
+      "severity": "low",
+      "title": "Approval and translation derive service Qwen files from one retained source credential",
+      "affected_scope": [
+        "ramideltoro/nutsnews-backend",
+        "ramideltoro/nutsnews-worker-article-approval",
+        "ramideltoro/nutsnews-worker-article-translation"
+      ],
+      "current_evidence": {
+        "source_heads": [
+          {"repository": "ramideltoro/nutsnews-backend", "commit": "232d2a924a4677a7919fe8c4ca4a01aff6fcf749", "paths": [".github/workflows/protected-backend-ansible-apply.yml", "docs/worker-uplift-runtime-identities.json", "runbooks/WORKER_UPLIFT_SERVICE_RUNTIME.md"]}
+        ],
+        "file_sha256": {
+          ".github/workflows/protected-backend-ansible-apply.yml": "d6cb2737cf91a03fdc394326abbbbcb0a42d4230d630279bbc3f9ac48f9ce44e",
+          "docs/worker-uplift-runtime-identities.json": "76e6b4f8d5f7d787e41738324e821f0fd04fa8ab223070a27e52eb056ceba71e"
+        },
+        "value_free_secret_names_observed": [
+          "LOCAL_AI_API_KEY",
+          "approval-qwen-api-key",
+          "translation-qwen-api-key",
+          "NUTSNEWS_APPROVAL_QWEN_API_KEY",
+          "NUTSNEWS_TRANSLATION_QWEN_API_KEY"
+        ],
+        "observation": "The protected environment exposes one retained LOCAL_AI_API_KEY source. Protected apply writes that same source into the two service-named runtime files. No credential value was read."
+      },
+      "accountable_owner": {
+        "login": "ramideltoro",
+        "basis": "named owner of the backend and affected service repositories",
+        "acceptance_inferred": false
+      },
+      "status": "pending",
+      "owner_action_required": true,
+      "planned_remediation": "If the Qwen provider supports independently scoped credentials, provision and rotate to distinct approval and translation sources through protected credential workflows; otherwise obtain an explicit bounded named-owner acceptance for the provider-only shared scope.",
+      "compensating_controls": [
+        "the credential authorizes only Qwen provider requests",
+        "service containers receive separate files and environment keys",
+        "the credential cannot administer RabbitMQ, PostgreSQL, backend operations, deployment, DNS, or failover",
+        "production writes remain disabled"
+      ],
+      "review_by": "2026-08-31",
+      "reopen_trigger": "The shared provider credential gains broader authority, is used by another service, or existing provider isolation controls weaken.",
+      "remediation": null,
+      "risk_acceptance": null
+    },
+    {
+      "id": "SEC-124-008",
+      "severity": "medium",
+      "title": "Scheduled read-only monitoring uses repository-level host and API credentials",
+      "affected_scope": [
+        "ramideltoro/nutsnews-backend"
+      ],
+      "current_evidence": {
+        "source_heads": [
+          {"repository": "ramideltoro/nutsnews-backend", "commit": "232d2a924a4677a7919fe8c4ca4a01aff6fcf749", "paths": [".github/workflows/backend-health-report.yml", ".github/workflows/backend-worker-runtime-operations.yml", "docs/worker-uplift-runtime-identities.json"]}
+        ],
+        "file_sha256": {
+          ".github/workflows/backend-worker-runtime-operations.yml": "36452b44c2457e3b188104c7307934e38b824ac8b9b49491fefa8e1b224182b4",
+          "docs/worker-uplift-runtime-identities.json": "76e6b4f8d5f7d787e41738324e821f0fd04fa8ab223070a27e52eb056ceba71e"
+        },
+        "value_free_repository_secret_names_observed": [
+          "NUTSNEWS_BACKEND_ANSIBLE_USER",
+          "NUTSNEWS_BACKEND_API_TOKEN",
+          "NUTSNEWS_BACKEND_KNOWN_HOSTS",
+          "NUTSNEWS_BACKEND_SSH_PRIVATE_KEY"
+        ],
+        "observation": "Approval-free and scheduled read-only workflows use repository-scoped credentials. The runtime workflow calls a fixed source-controlled command, but the SSH key is also the backend automation key and is not evidenced as forced-command-only. No credential value was read."
+      },
+      "accountable_owner": {
+        "login": "ramideltoro",
+        "basis": "named owner of the affected repository and backend host automation",
+        "acceptance_inferred": false
+      },
+      "status": "pending",
+      "owner_action_required": true,
+      "planned_remediation": "Provision and prove a dedicated forced-command or equivalently restricted read-only host identity and least-privilege API identity, then route scheduled monitoring to those credentials through reviewed protected configuration.",
+      "compensating_controls": [
+        "scheduled workflows execute fixed source-controlled read-only programs",
+        "workflow permissions default to read-only",
+        "mutating backend actions remain isolated behind the production-backend environment and typed confirmation",
+        "runtime read-only actions force dry_run=true and cannot enter the protected job"
+      ],
+      "review_by": "2026-08-31",
+      "reopen_trigger": "A scheduled or approval-free workflow can invoke an unrestricted host command or a write-capable API operation.",
+      "remediation": null,
+      "risk_acceptance": null
+    },
+    {
+      "id": "SEC-124-009",
+      "severity": "low",
+      "title": "Uplift repository rulesets allow zero approving reviews",
+      "affected_scope": [
+        "ramideltoro/nutsnews-worker-contracts",
+        "ramideltoro/nutsnews-worker-runtime",
+        "ramideltoro/nutsnews-worker-feed-scheduler",
+        "ramideltoro/nutsnews-worker-feed-fetcher",
+        "ramideltoro/nutsnews-worker-article-canonicalizer",
+        "ramideltoro/nutsnews-worker-article-enrichment",
+        "ramideltoro/nutsnews-worker-article-approval",
+        "ramideltoro/nutsnews-worker-article-translation",
+        "ramideltoro/nutsnews-worker-article-persistence",
+        "ramideltoro/nutsnews-worker-article-publication"
+      ],
+      "current_evidence": {
+        "source_heads": [
+          {"repository": "ramideltoro/nutsnews-worker-contracts", "commit": "bf10f4257a1ac7f3e5aef0c5a14f62ec51ae4bb2", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-runtime", "commit": "43e7883554e250b2297d40266374cb4ff87d141c", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-feed-scheduler", "commit": "ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-feed-fetcher", "commit": "5b82b3e27ef85e57fc9aec23a0815cde584758eb", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-canonicalizer", "commit": "64d6f59920ec6aa5fb56028de99f7600ecb5be2d", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-enrichment", "commit": "edd63d8acd4a46a33aea4b043e3dc8dfd95af310", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-approval", "commit": "38185c74717221453c662f4ba1b093315eff5b83", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-translation", "commit": "d3b68668c7b714500d7efd204ecf33987a34e3ee", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-persistence", "commit": "6dae69d96b4b081b23b5e1d85e10133ee36a6674", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-publication", "commit": "5a9e3c09a8572a7978687bcb7afec548e3934a63", "paths": [".github/workflows"]}
+        ],
+        "ruleset_snapshot": [
+          {"repository": "ramideltoro/nutsnews-worker-contracts", "ruleset_id": 19594883, "name": "protect-main", "enforcement": "active", "required_approving_review_count": 0},
+          {"repository": "ramideltoro/nutsnews-worker-runtime", "ruleset_id": 19594900, "name": "protect-main", "enforcement": "active", "required_approving_review_count": 0},
+          {"repository": "ramideltoro/nutsnews-worker-feed-scheduler", "ruleset_id": 19594904, "name": "protect-main", "enforcement": "active", "required_approving_review_count": 0},
+          {"repository": "ramideltoro/nutsnews-worker-feed-fetcher", "ruleset_id": 19594906, "name": "protect-main", "enforcement": "active", "required_approving_review_count": 0},
+          {"repository": "ramideltoro/nutsnews-worker-article-canonicalizer", "ruleset_id": 19594908, "name": "protect-main", "enforcement": "active", "required_approving_review_count": 0},
+          {"repository": "ramideltoro/nutsnews-worker-article-enrichment", "ruleset_id": 19594910, "name": "protect-main", "enforcement": "active", "required_approving_review_count": 0},
+          {"repository": "ramideltoro/nutsnews-worker-article-approval", "ruleset_id": 19594912, "name": "protect-main", "enforcement": "active", "required_approving_review_count": 0},
+          {"repository": "ramideltoro/nutsnews-worker-article-translation", "ruleset_id": 19594914, "name": "protect-main", "enforcement": "active", "required_approving_review_count": 0},
+          {"repository": "ramideltoro/nutsnews-worker-article-persistence", "ruleset_id": 19594916, "name": "protect-main", "enforcement": "active", "required_approving_review_count": 0},
+          {"repository": "ramideltoro/nutsnews-worker-article-publication", "ruleset_id": 19594918, "name": "protect-main", "enforcement": "active", "required_approving_review_count": 0}
+        ],
+        "observation": "The active protect-main ruleset on every affected repository requires a pull request but currently requires zero approving reviews."
+      },
+      "accountable_owner": {
+        "login": "ramideltoro",
+        "basis": "named owner of every affected repository",
+        "acceptance_inferred": false
+      },
+      "status": "pending",
+      "owner_action_required": true,
+      "planned_remediation": "Require at least one independent approving review when an authorized independent maintainer is available; until then, any bounded residual decision must be explicit, named, time-limited, and preserve all existing ruleset controls.",
+      "compensating_controls": [
+        "active protect-main rulesets require pull requests",
+        "required validation must pass",
+        "review threads must be resolved",
+        "branch deletion and non-fast-forward updates are blocked",
+        "uplift services remain shadow-only"
+      ],
+      "review_by": "2026-08-31",
+      "reopen_trigger": "An independent maintainer becomes available, required validation weakens, or the repositories cease to be single-owner shadow repositories.",
+      "remediation": null,
+      "risk_acceptance": null
+    }
+  ],
+  "closure_gate": {
+    "ready": false,
+    "status": "blocked",
+    "unresolved_findings": [
+      "SEC-124-002",
+      "SEC-124-003",
+      "SEC-124-004",
+      "SEC-124-005",
+      "SEC-124-006",
+      "SEC-124-007",
+      "SEC-124-008",
+      "SEC-124-009"
+    ],
+    "named_owner_decisions": [],
+    "issue_closure_authorized": false,
+    "production_readiness_effect": "ramideltoro/nutsnews-worker#125 remains NO-GO",
+    "owner_action_required": true
+  },
+  "validation": {
+    "current_record": "python3 scripts/validate_worker_uplift_security_dispositions.py",
+    "closure": "python3 scripts/validate_worker_uplift_security_dispositions.py --enforce-closure",
+    "focused_tests": "python3 -m unittest tests.test_worker_uplift_security_dispositions"
+  }
+}

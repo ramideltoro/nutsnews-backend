@@ -1,471 +1,256 @@
 {
-  "version": 1,
-  "tracking_issue": 67,
+  "version": 2,
+  "tracking_issue": 160,
   "tracking_repo": "ramideltoro/nutsnews-worker",
   "implementation_repo": "ramideltoro/nutsnews-backend",
   "environment": "production-backend",
-  "captured_at_utc": "2026-07-29T04:52:12Z",
-  "initial_generation_at_utc": "2026-07-23T03:05:00Z",
-  "reconciliation_note": "The value-free environment-name evidence now includes the existing LOCAL_AI_API_KEY source credential used by protected apply. No value was read, copied, or recorded.",
-  "capture_mode": "generated_values_stored_value_free_evidence_committed",
-  "value_policy": "No generated secret values, password fragments, token fragments, account IDs, provider IDs, or private credentials are recorded.",
-  "official_docs_retrieved": [
-    "https://www.rabbitmq.com/docs/access-control",
-    "https://www.rabbitmq.com/docs/clustering",
-    "https://www.rabbitmq.com/docs/management",
-    "https://www.rabbitmq.com/docs/monitoring",
-    "https://www.rabbitmq.com/docs/http-api-reference"
+  "captured_at_utc": "2026-07-31T00:30:00Z",
+  "capture_mode": "source_and_value_free_deployed_evidence_reconciliation",
+  "value_policy": "Credential references are recorded by source-controlled name only. No credential value, connection string, token fragment, private host, or policy-sensitive account name is recorded.",
+  "dispositions": [
+    "current",
+    "retained",
+    "replaced",
+    "retired"
   ],
-  "depends_on": [
-    "docs/worker-uplift-runtime-readiness.json",
-    "docs/worker-uplift-api-admin-compatibility-contract.json",
-    "docs/worker-uplift-legacy-parity-baseline.md"
-  ],
-  "generation_summary": {
-    "secret_generation": "random values generated locally and written directly to GitHub production-backend Environment secrets through gh secret set stdin",
-    "erlang_cookie_shape": "64 alphanumeric characters",
-    "password_shape": "48 random bytes encoded with base64",
-    "values_printed_or_committed": false,
-    "legacy_worker_changed": false,
-    "cloudflare_changed": false,
-    "rabbitmq_broker_changed": false,
-    "postgres_roles_created": false
+  "safety_invariants": {
+    "inventory_only": true,
+    "credentials_rotated": false,
+    "rabbitmq_permissions_changed": false,
+    "services_restarted": false,
+    "production_writes_enabled": false,
+    "legacy_ingestion_owner_changed": false,
+    "dns_or_failover_changed": false
   },
-  "environment_names_present": {
-    "variables": [
-      "RABBITMQ_VHOST",
-      "RABBITMQ_EVENTS_EXCHANGE",
-      "RABBITMQ_RETRY_EXCHANGE",
-      "RABBITMQ_DLX_EXCHANGE",
-      "RABBITMQ_BREAK_GLASS_ADMIN_USERNAME",
-      "RABBITMQ_MONITORING_USERNAME",
-      "RABBITMQ_SCHEDULER_PUBLISHER_USERNAME",
-      "RABBITMQ_FETCHER_CONSUMER_USERNAME",
-      "RABBITMQ_FETCHER_PUBLISHER_USERNAME",
-      "RABBITMQ_CANONICALIZER_CONSUMER_USERNAME",
-      "RABBITMQ_CANONICALIZER_PUBLISHER_USERNAME",
-      "RABBITMQ_ENRICHMENT_CONSUMER_USERNAME",
-      "RABBITMQ_ENRICHMENT_PUBLISHER_USERNAME",
-      "RABBITMQ_APPROVAL_CONSUMER_USERNAME",
-      "RABBITMQ_APPROVAL_PUBLISHER_USERNAME",
-      "RABBITMQ_TRANSLATION_CONSUMER_USERNAME",
-      "RABBITMQ_TRANSLATION_PUBLISHER_USERNAME",
-      "RABBITMQ_PERSISTENCE_CONSUMER_USERNAME",
-      "RABBITMQ_PERSISTENCE_PUBLISHER_USERNAME",
-      "RABBITMQ_PUBLICATION_CONSUMER_USERNAME",
-      "NUTSNEWS_WORKER_UPLIFT_POSTGRES_DATABASE",
-      "NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_USERNAME",
-      "NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_USERNAME",
-      "NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_USERNAME",
-      "NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_USERNAME",
-      "NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_USERNAME",
-      "NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_USERNAME",
-      "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_USERNAME",
-      "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_USERNAME"
-    ],
-    "secrets": [
-      "LOCAL_AI_API_KEY",
-      "RABBITMQ_ERLANG_COOKIE",
-      "RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD",
-      "RABBITMQ_MONITORING_PASSWORD",
-      "RABBITMQ_SCHEDULER_PUBLISHER_PASSWORD",
-      "RABBITMQ_FETCHER_CONSUMER_PASSWORD",
-      "RABBITMQ_FETCHER_PUBLISHER_PASSWORD",
-      "RABBITMQ_CANONICALIZER_CONSUMER_PASSWORD",
-      "RABBITMQ_CANONICALIZER_PUBLISHER_PASSWORD",
-      "RABBITMQ_ENRICHMENT_CONSUMER_PASSWORD",
-      "RABBITMQ_ENRICHMENT_PUBLISHER_PASSWORD",
-      "RABBITMQ_APPROVAL_CONSUMER_PASSWORD",
-      "RABBITMQ_APPROVAL_PUBLISHER_PASSWORD",
-      "RABBITMQ_TRANSLATION_CONSUMER_PASSWORD",
-      "RABBITMQ_TRANSLATION_PUBLISHER_PASSWORD",
-      "RABBITMQ_PERSISTENCE_CONSUMER_PASSWORD",
-      "RABBITMQ_PERSISTENCE_PUBLISHER_PASSWORD",
-      "RABBITMQ_PUBLICATION_CONSUMER_PASSWORD",
-      "NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD",
-      "NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_PASSWORD",
-      "NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_PASSWORD",
-      "NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_PASSWORD",
-      "NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_PASSWORD",
-      "NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_PASSWORD",
-      "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_PASSWORD",
-      "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_PASSWORD",
-      "NUTSNEWS_SHADOW_SMOKE_TOKEN",
-      "NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN"
-    ]
-  },
-  "rabbitmq": {
-    "vhost_variable": "RABBITMQ_VHOST",
-    "vhost_value": "nutsnews-worker-uplift",
-    "exchange_variables": {
-      "events": "RABBITMQ_EVENTS_EXCHANGE",
-      "retry": "RABBITMQ_RETRY_EXCHANGE",
-      "dlx": "RABBITMQ_DLX_EXCHANGE"
+  "source_evidence": {
+    "rabbitmq_topology": "ansible/roles/backend_rabbitmq/templates/worker-uplift-topology.json.j2",
+    "runtime_defaults": "ansible/roles/backend_worker_runtime/defaults/main.yml",
+    "runtime_compose": "ansible/roles/backend_worker_runtime/templates/worker-uplift-compose.yml.j2",
+    "protected_apply_workflow": ".github/workflows/protected-backend-ansible-apply.yml",
+    "api_contract": "docs/worker-uplift-api-admin-compatibility-contract.json",
+    "security_review": "docs/worker-uplift-security-review.json",
+    "committed_runtime_status": {
+      "path": "docs/evidence/worker-uplift-runtime-status-2026-07-30.json",
+      "run_id": 30573044860,
+      "artifact_id": 8771565855,
+      "artifact_digest": "sha256:ea5785493cfa3db2cb84c7b006c5c6310c652ad7ed8a303b13288e3f5ad3a874",
+      "report_sha256": "ad2daec609da672bbf71f473e0651b687cf5dbc749937fe8eb6a3d3e6feeec61"
     },
-    "management_identities": [
-      {
-        "id": "break_glass_admin",
-        "username_variable": "RABBITMQ_BREAK_GLASS_ADMIN_USERNAME",
-        "password_secret": "RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD",
-        "tags": [
-          "administrator"
-        ],
-        "permissions": {
-          "configure": ".*",
-          "write": ".*",
-          "read": ".*"
-        },
-        "service_runtime_allowed": false,
-        "guardrail": "Not injected into worker services. Use only for protected broker recovery or credential rotation."
-      },
-      {
-        "id": "monitoring",
-        "username_variable": "RABBITMQ_MONITORING_USERNAME",
-        "password_secret": "RABBITMQ_MONITORING_PASSWORD",
-        "tags": [
-          "monitoring"
-        ],
-        "permissions": {
-          "configure": "^$",
-          "write": "^$",
-          "read": "^$"
-        },
-        "service_runtime_allowed": false,
-        "guardrail": "Monitoring API identity only; cannot configure, publish, consume, purge, or administer broker resources."
-      }
+    "latest_value_free_runtime_status": {
+      "run_id": 30593155799,
+      "artifact_id": 8779092081,
+      "artifact_digest": "sha256:b924dbec02d349f3e6c378dcade5e76217f56692daed2e8d6254ea2f71e6821e",
+      "report_sha256": "fec12266609c348ce6566c0ff469a2fa7fa298caef1918eed4a444e443c1fe2c",
+      "status": "pass",
+      "mode": "shadow",
+      "production_writes_enabled": false,
+      "healthy_services": 8,
+      "required_consumer_queues": 7,
+      "missing_consumers": [],
+      "unverifiable_consumers": []
+    },
+    "known_runtime_evidence_blocker": {
+      "issue": "ramideltoro/nutsnews-worker#168",
+      "service": "scheduler",
+      "scope": "deployed local test adapters and fixed clock",
+      "silently_normalized": false
+    }
+  },
+  "credential_reference_dispositions": [
+    {"name": "RABBITMQ_VHOST", "kind": "variable", "disposition": "current", "scope": "broker and all uplift services"},
+    {"name": "RABBITMQ_EVENTS_EXCHANGE", "kind": "variable", "disposition": "replaced", "scope": "superseded inventory", "replacement": "source-controlled exchange id main"},
+    {"name": "RABBITMQ_RETRY_EXCHANGE", "kind": "variable", "disposition": "replaced", "scope": "superseded inventory", "replacement": "source-controlled exchange id retry"},
+    {"name": "RABBITMQ_DLX_EXCHANGE", "kind": "variable", "disposition": "replaced", "scope": "superseded inventory", "replacement": "source-controlled exchange id dlq"},
+    {"name": "RABBITMQ_ERLANG_COOKIE", "kind": "secret", "disposition": "current", "scope": "broker internal only"},
+    {"name": "RABBITMQ_BREAK_GLASS_ADMIN_USERNAME", "kind": "variable", "disposition": "retained", "scope": "protected broker recovery only"},
+    {"name": "RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD", "kind": "secret", "disposition": "retained", "scope": "protected broker recovery only"},
+    {"name": "RABBITMQ_MONITORING_USERNAME", "kind": "variable", "disposition": "current", "scope": "isolated canary only"},
+    {"name": "RABBITMQ_MONITORING_PASSWORD", "kind": "secret", "disposition": "current", "scope": "isolated canary only"},
+    {"name": "RABBITMQ_SCHEDULER_PUBLISHER_USERNAME", "kind": "variable", "disposition": "current", "scope": "scheduler runtime"},
+    {"name": "RABBITMQ_SCHEDULER_PUBLISHER_PASSWORD", "kind": "secret", "disposition": "current", "scope": "scheduler runtime"},
+    {"name": "RABBITMQ_FETCHER_CONSUMER_USERNAME", "kind": "variable", "disposition": "current", "scope": "fetcher stage runtime"},
+    {"name": "RABBITMQ_FETCHER_CONSUMER_PASSWORD", "kind": "secret", "disposition": "current", "scope": "fetcher stage runtime"},
+    {"name": "RABBITMQ_FETCHER_PUBLISHER_USERNAME", "kind": "variable", "disposition": "retained", "scope": "topology-only producer identity; not injected into services"},
+    {"name": "RABBITMQ_FETCHER_PUBLISHER_PASSWORD", "kind": "secret", "disposition": "retained", "scope": "topology-only producer identity; not injected into services"},
+    {"name": "RABBITMQ_CANONICALIZER_CONSUMER_USERNAME", "kind": "variable", "disposition": "current", "scope": "canonicalizer stage runtime"},
+    {"name": "RABBITMQ_CANONICALIZER_CONSUMER_PASSWORD", "kind": "secret", "disposition": "current", "scope": "canonicalizer stage runtime"},
+    {"name": "RABBITMQ_CANONICALIZER_PUBLISHER_USERNAME", "kind": "variable", "disposition": "retained", "scope": "topology-only producer identity; not injected into services"},
+    {"name": "RABBITMQ_CANONICALIZER_PUBLISHER_PASSWORD", "kind": "secret", "disposition": "retained", "scope": "topology-only producer identity; not injected into services"},
+    {"name": "RABBITMQ_ENRICHMENT_CONSUMER_USERNAME", "kind": "variable", "disposition": "current", "scope": "enrichment stage runtime"},
+    {"name": "RABBITMQ_ENRICHMENT_CONSUMER_PASSWORD", "kind": "secret", "disposition": "current", "scope": "enrichment stage runtime"},
+    {"name": "RABBITMQ_ENRICHMENT_PUBLISHER_USERNAME", "kind": "variable", "disposition": "retained", "scope": "topology-only producer identity; not injected into services"},
+    {"name": "RABBITMQ_ENRICHMENT_PUBLISHER_PASSWORD", "kind": "secret", "disposition": "retained", "scope": "topology-only producer identity; not injected into services"},
+    {"name": "RABBITMQ_APPROVAL_CONSUMER_USERNAME", "kind": "variable", "disposition": "current", "scope": "approval stage runtime"},
+    {"name": "RABBITMQ_APPROVAL_CONSUMER_PASSWORD", "kind": "secret", "disposition": "current", "scope": "approval stage runtime"},
+    {"name": "RABBITMQ_APPROVAL_PUBLISHER_USERNAME", "kind": "variable", "disposition": "retained", "scope": "topology-only producer identity; not injected into services"},
+    {"name": "RABBITMQ_APPROVAL_PUBLISHER_PASSWORD", "kind": "secret", "disposition": "retained", "scope": "topology-only producer identity; not injected into services"},
+    {"name": "RABBITMQ_TRANSLATION_CONSUMER_USERNAME", "kind": "variable", "disposition": "current", "scope": "translation stage runtime"},
+    {"name": "RABBITMQ_TRANSLATION_CONSUMER_PASSWORD", "kind": "secret", "disposition": "current", "scope": "translation stage runtime"},
+    {"name": "RABBITMQ_TRANSLATION_PUBLISHER_USERNAME", "kind": "variable", "disposition": "retained", "scope": "topology-only producer identity; not injected into services"},
+    {"name": "RABBITMQ_TRANSLATION_PUBLISHER_PASSWORD", "kind": "secret", "disposition": "retained", "scope": "topology-only producer identity; not injected into services"},
+    {"name": "RABBITMQ_PERSISTENCE_CONSUMER_USERNAME", "kind": "variable", "disposition": "current", "scope": "persistence stage runtime"},
+    {"name": "RABBITMQ_PERSISTENCE_CONSUMER_PASSWORD", "kind": "secret", "disposition": "current", "scope": "persistence stage runtime"},
+    {"name": "RABBITMQ_PERSISTENCE_PUBLISHER_USERNAME", "kind": "variable", "disposition": "retained", "scope": "topology-only producer identity; not injected into services"},
+    {"name": "RABBITMQ_PERSISTENCE_PUBLISHER_PASSWORD", "kind": "secret", "disposition": "retained", "scope": "topology-only producer identity; not injected into services"},
+    {"name": "RABBITMQ_PUBLICATION_CONSUMER_USERNAME", "kind": "variable", "disposition": "current", "scope": "publication stage runtime"},
+    {"name": "RABBITMQ_PUBLICATION_CONSUMER_PASSWORD", "kind": "secret", "disposition": "current", "scope": "publication stage runtime"},
+    {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_DATABASE", "kind": "variable", "disposition": "replaced", "scope": "superseded inventory", "replacement": "NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE"},
+    {"name": "NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE", "kind": "variable", "disposition": "current", "scope": "all uplift stage roles"},
+    {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_USERNAME", "kind": "variable", "disposition": "current", "scope": "scheduler schema"},
+    {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD", "kind": "secret", "disposition": "current", "scope": "scheduler schema"},
+    {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_USERNAME", "kind": "variable", "disposition": "current", "scope": "fetcher schema"},
+    {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_PASSWORD", "kind": "secret", "disposition": "current", "scope": "fetcher schema"},
+    {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_USERNAME", "kind": "variable", "disposition": "current", "scope": "canonicalizer schema"},
+    {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_PASSWORD", "kind": "secret", "disposition": "current", "scope": "canonicalizer schema"},
+    {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_USERNAME", "kind": "variable", "disposition": "current", "scope": "enrichment schema"},
+    {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_PASSWORD", "kind": "secret", "disposition": "current", "scope": "enrichment schema"},
+    {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_USERNAME", "kind": "variable", "disposition": "current", "scope": "approval schema"},
+    {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_PASSWORD", "kind": "secret", "disposition": "current", "scope": "approval schema"},
+    {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_USERNAME", "kind": "variable", "disposition": "current", "scope": "translation schema"},
+    {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_PASSWORD", "kind": "secret", "disposition": "current", "scope": "translation schema"},
+    {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_USERNAME", "kind": "variable", "disposition": "current", "scope": "persistence schema"},
+    {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_PASSWORD", "kind": "secret", "disposition": "current", "scope": "persistence schema"},
+    {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_USERNAME", "kind": "variable", "disposition": "current", "scope": "publication schema"},
+    {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_PASSWORD", "kind": "secret", "disposition": "current", "scope": "publication schema"},
+    {"name": "NUTSNEWS_BACKEND_API_TOKEN", "kind": "secret", "disposition": "retained", "scope": "scheduler shadow feed-source reads; explicitly shared, not a dedicated uplift identity"},
+    {"name": "NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN", "kind": "secret", "disposition": "current", "scope": "persistence-scoped backend API commands"},
+    {"name": "NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN", "kind": "secret", "disposition": "current", "scope": "publication-scoped backend API commands"},
+    {"name": "NUTSNEWS_SHADOW_SMOKE_TOKEN", "kind": "secret", "disposition": "retained", "scope": "protected smoke workflow only"},
+    {"name": "NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN", "kind": "secret", "disposition": "current", "scope": "shared protected reconciliation authorization; explicitly not a dedicated stage identity"},
+    {"name": "LOCAL_AI_API_KEY", "kind": "secret", "disposition": "retained", "scope": "source for approval and translation Qwen runtime files"},
+    {"name": "NUTSNEWS_BACKEND_ANSIBLE_USER", "kind": "variable", "disposition": "current", "scope": "protected and approval-free backend host automation"},
+    {"name": "NUTSNEWS_BACKEND_SSH_PRIVATE_KEY", "kind": "secret", "disposition": "current", "scope": "backend host automation only"}
+  ],
+  "rabbitmq": {
+    "vhost": {
+      "reference": "RABBITMQ_VHOST",
+      "name": "nutsnews-worker-uplift",
+      "disposition": "current"
+    },
+    "exchanges": [
+      {"id": "main", "name": "nutsnews.worker.v1", "type": "topic", "disposition": "current"},
+      {"id": "retry", "name": "nutsnews.worker.retry.v1", "type": "topic", "disposition": "current"},
+      {"id": "dlq", "name": "nutsnews.worker.dlq.v1", "type": "topic", "disposition": "current"},
+      {"id": "canary", "name": "worker.uplift.canary.exchange.v4", "type": "direct", "disposition": "current"}
+    ],
+    "topology_identities": [
+      {"id": "break_glass_admin", "kind": "break_glass_admin", "username_variable": "RABBITMQ_BREAK_GLASS_ADMIN_USERNAME", "password_variable": "RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD", "tags": ["administrator"], "permissions": {"configure": ".*", "write": ".*", "read": ".*"}, "disposition": "retained", "runtime_service": null},
+      {"id": "monitoring_canary", "kind": "monitoring_canary", "username_variable": "RABBITMQ_MONITORING_USERNAME", "password_variable": "RABBITMQ_MONITORING_PASSWORD", "tags": ["monitoring"], "permissions": {"configure": "^worker\\.uplift\\.canary\\.queue\\.v4\\.[0-9a-f]{32}$", "write": "^(worker\\.uplift\\.canary\\.exchange\\.v4|worker\\.uplift\\.canary\\.queue\\.v4\\.[0-9a-f]{32})$", "read": "^(worker\\.uplift\\.canary\\.exchange\\.v4|worker\\.uplift\\.canary\\.queue\\.v4\\.[0-9a-f]{32})$"}, "disposition": "current", "runtime_service": null},
+      {"id": "scheduler_publisher", "kind": "producer", "stage": "scheduler", "route_stage": "fetch", "username_variable": "RABBITMQ_SCHEDULER_PUBLISHER_USERNAME", "password_variable": "RABBITMQ_SCHEDULER_PUBLISHER_PASSWORD", "tags": [], "permissions": {"configure": "^$", "write": "^nutsnews\\.worker\\.v1$", "read": "^$"}, "disposition": "current", "runtime_service": "scheduler"},
+      {"id": "fetcher_consumer", "kind": "stage_runtime", "stage": "fetcher", "route_stage": "fetch", "username_variable": "RABBITMQ_FETCHER_CONSUMER_USERNAME", "password_variable": "RABBITMQ_FETCHER_CONSUMER_PASSWORD", "tags": [], "permissions": {"configure": "^$", "write": "^(nutsnews\\.worker\\.v1|nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$", "read": "^nutsnews\\.worker\\.fetch\\.v1$"}, "disposition": "current", "runtime_service": "fetcher"},
+      {"id": "fetcher_publisher", "kind": "producer", "stage": "fetcher", "route_stage": "canonicalization", "username_variable": "RABBITMQ_FETCHER_PUBLISHER_USERNAME", "password_variable": "RABBITMQ_FETCHER_PUBLISHER_PASSWORD", "tags": [], "permissions": {"configure": "^$", "write": "^nutsnews\\.worker\\.v1$", "read": "^$"}, "disposition": "retained", "runtime_service": null},
+      {"id": "canonicalizer_consumer", "kind": "stage_runtime", "stage": "canonicalizer", "route_stage": "canonicalization", "username_variable": "RABBITMQ_CANONICALIZER_CONSUMER_USERNAME", "password_variable": "RABBITMQ_CANONICALIZER_CONSUMER_PASSWORD", "tags": [], "permissions": {"configure": "^$", "write": "^(nutsnews\\.worker\\.v1|nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$", "read": "^nutsnews\\.worker\\.canonicalization\\.v1$"}, "disposition": "current", "runtime_service": "canonicalizer"},
+      {"id": "canonicalizer_publisher", "kind": "producer", "stage": "canonicalizer", "route_stage": "enrichment", "username_variable": "RABBITMQ_CANONICALIZER_PUBLISHER_USERNAME", "password_variable": "RABBITMQ_CANONICALIZER_PUBLISHER_PASSWORD", "tags": [], "permissions": {"configure": "^$", "write": "^nutsnews\\.worker\\.v1$", "read": "^$"}, "disposition": "retained", "runtime_service": null},
+      {"id": "enrichment_consumer", "kind": "stage_runtime", "stage": "enrichment", "route_stage": "enrichment", "username_variable": "RABBITMQ_ENRICHMENT_CONSUMER_USERNAME", "password_variable": "RABBITMQ_ENRICHMENT_CONSUMER_PASSWORD", "tags": [], "permissions": {"configure": "^$", "write": "^(nutsnews\\.worker\\.v1|nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$", "read": "^nutsnews\\.worker\\.enrichment\\.v1$"}, "disposition": "current", "runtime_service": "enrichment"},
+      {"id": "enrichment_publisher", "kind": "producer", "stage": "enrichment", "route_stage": "approval", "username_variable": "RABBITMQ_ENRICHMENT_PUBLISHER_USERNAME", "password_variable": "RABBITMQ_ENRICHMENT_PUBLISHER_PASSWORD", "tags": [], "permissions": {"configure": "^$", "write": "^nutsnews\\.worker\\.v1$", "read": "^$"}, "disposition": "retained", "runtime_service": null},
+      {"id": "approval_consumer", "kind": "stage_runtime", "stage": "approval", "route_stage": "approval", "username_variable": "RABBITMQ_APPROVAL_CONSUMER_USERNAME", "password_variable": "RABBITMQ_APPROVAL_CONSUMER_PASSWORD", "tags": [], "permissions": {"configure": "^$", "write": "^(nutsnews\\.worker\\.v1|nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$", "read": "^nutsnews\\.worker\\.approval\\.v1$"}, "disposition": "current", "runtime_service": "approval"},
+      {"id": "approval_publisher", "kind": "producer", "stage": "approval", "route_stage": "translation", "username_variable": "RABBITMQ_APPROVAL_PUBLISHER_USERNAME", "password_variable": "RABBITMQ_APPROVAL_PUBLISHER_PASSWORD", "tags": [], "permissions": {"configure": "^$", "write": "^nutsnews\\.worker\\.v1$", "read": "^$"}, "disposition": "retained", "runtime_service": null},
+      {"id": "translation_consumer", "kind": "stage_runtime", "stage": "translation", "route_stage": "translation", "username_variable": "RABBITMQ_TRANSLATION_CONSUMER_USERNAME", "password_variable": "RABBITMQ_TRANSLATION_CONSUMER_PASSWORD", "tags": [], "permissions": {"configure": "^$", "write": "^(nutsnews\\.worker\\.v1|nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$", "read": "^nutsnews\\.worker\\.translation\\.v1$"}, "disposition": "current", "runtime_service": "translation"},
+      {"id": "translation_publisher", "kind": "producer", "stage": "translation", "route_stage": "persistence", "username_variable": "RABBITMQ_TRANSLATION_PUBLISHER_USERNAME", "password_variable": "RABBITMQ_TRANSLATION_PUBLISHER_PASSWORD", "tags": [], "permissions": {"configure": "^$", "write": "^nutsnews\\.worker\\.v1$", "read": "^$"}, "disposition": "retained", "runtime_service": null},
+      {"id": "persistence_consumer", "kind": "stage_runtime", "stage": "persistence", "route_stage": "persistence", "username_variable": "RABBITMQ_PERSISTENCE_CONSUMER_USERNAME", "password_variable": "RABBITMQ_PERSISTENCE_CONSUMER_PASSWORD", "tags": [], "permissions": {"configure": "^$", "write": "^(nutsnews\\.worker\\.v1|nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$", "read": "^nutsnews\\.worker\\.persistence\\.v1$"}, "disposition": "current", "runtime_service": "persistence"},
+      {"id": "persistence_publisher", "kind": "producer", "stage": "persistence", "route_stage": "publication", "username_variable": "RABBITMQ_PERSISTENCE_PUBLISHER_USERNAME", "password_variable": "RABBITMQ_PERSISTENCE_PUBLISHER_PASSWORD", "tags": [], "permissions": {"configure": "^$", "write": "^nutsnews\\.worker\\.v1$", "read": "^$"}, "disposition": "retained", "runtime_service": null},
+      {"id": "publication_consumer", "kind": "consumer", "stage": "publication", "route_stage": "publication", "username_variable": "RABBITMQ_PUBLICATION_CONSUMER_USERNAME", "password_variable": "RABBITMQ_PUBLICATION_CONSUMER_PASSWORD", "tags": [], "permissions": {"configure": "^$", "write": "^(nutsnews\\.worker\\.retry\\.v1|nutsnews\\.worker\\.dlq\\.v1)$", "read": "^nutsnews\\.worker\\.publication\\.v1$"}, "disposition": "current", "runtime_service": "publication"}
     ],
     "route_permissions": [
-      {
-        "route_id": "scheduler_to_fetcher",
-        "queue": "worker.uplift.feeds.fetch",
-        "routing_key": "feeds.fetch",
-        "producer": {
-          "stage": "scheduler",
-          "username_variable": "RABBITMQ_SCHEDULER_PUBLISHER_USERNAME",
-          "password_secret": "RABBITMQ_SCHEDULER_PUBLISHER_PASSWORD",
-          "permissions": {
-            "configure": "^$",
-            "write": "^worker\\.uplift\\.events$",
-            "read": "^$"
-          }
-        },
-        "consumer": {
-          "stage": "fetcher",
-          "username_variable": "RABBITMQ_FETCHER_CONSUMER_USERNAME",
-          "password_secret": "RABBITMQ_FETCHER_CONSUMER_PASSWORD",
-          "permissions": {
-            "configure": "^$",
-            "write": "^worker\\.uplift\\.(retry|dlx)$",
-            "read": "^worker\\.uplift\\.feeds\\.fetch$"
-          }
-        }
-      },
-      {
-        "route_id": "fetcher_to_canonicalizer",
-        "queue": "worker.uplift.articles.canonicalize",
-        "routing_key": "articles.canonicalize",
-        "producer": {
-          "stage": "fetcher",
-          "username_variable": "RABBITMQ_FETCHER_PUBLISHER_USERNAME",
-          "password_secret": "RABBITMQ_FETCHER_PUBLISHER_PASSWORD",
-          "permissions": {
-            "configure": "^$",
-            "write": "^worker\\.uplift\\.events$",
-            "read": "^$"
-          }
-        },
-        "consumer": {
-          "stage": "canonicalizer",
-          "username_variable": "RABBITMQ_CANONICALIZER_CONSUMER_USERNAME",
-          "password_secret": "RABBITMQ_CANONICALIZER_CONSUMER_PASSWORD",
-          "permissions": {
-            "configure": "^$",
-            "write": "^worker\\.uplift\\.(retry|dlx)$",
-            "read": "^worker\\.uplift\\.articles\\.canonicalize$"
-          }
-        }
-      },
-      {
-        "route_id": "canonicalizer_to_enrichment",
-        "queue": "worker.uplift.articles.enrich",
-        "routing_key": "articles.enrich",
-        "producer": {
-          "stage": "canonicalizer",
-          "username_variable": "RABBITMQ_CANONICALIZER_PUBLISHER_USERNAME",
-          "password_secret": "RABBITMQ_CANONICALIZER_PUBLISHER_PASSWORD",
-          "permissions": {
-            "configure": "^$",
-            "write": "^worker\\.uplift\\.events$",
-            "read": "^$"
-          }
-        },
-        "consumer": {
-          "stage": "enrichment",
-          "username_variable": "RABBITMQ_ENRICHMENT_CONSUMER_USERNAME",
-          "password_secret": "RABBITMQ_ENRICHMENT_CONSUMER_PASSWORD",
-          "permissions": {
-            "configure": "^$",
-            "write": "^worker\\.uplift\\.(retry|dlx)$",
-            "read": "^worker\\.uplift\\.articles\\.enrich$"
-          }
-        }
-      },
-      {
-        "route_id": "enrichment_to_approval",
-        "queue": "worker.uplift.articles.approve",
-        "routing_key": "articles.approve",
-        "producer": {
-          "stage": "enrichment",
-          "username_variable": "RABBITMQ_ENRICHMENT_PUBLISHER_USERNAME",
-          "password_secret": "RABBITMQ_ENRICHMENT_PUBLISHER_PASSWORD",
-          "permissions": {
-            "configure": "^$",
-            "write": "^worker\\.uplift\\.events$",
-            "read": "^$"
-          }
-        },
-        "consumer": {
-          "stage": "approval",
-          "username_variable": "RABBITMQ_APPROVAL_CONSUMER_USERNAME",
-          "password_secret": "RABBITMQ_APPROVAL_CONSUMER_PASSWORD",
-          "permissions": {
-            "configure": "^$",
-            "write": "^worker\\.uplift\\.(retry|dlx)$",
-            "read": "^worker\\.uplift\\.articles\\.approve$"
-          }
-        }
-      },
-      {
-        "route_id": "approval_to_translation",
-        "queue": "worker.uplift.articles.translate",
-        "routing_key": "articles.translate",
-        "producer": {
-          "stage": "approval",
-          "username_variable": "RABBITMQ_APPROVAL_PUBLISHER_USERNAME",
-          "password_secret": "RABBITMQ_APPROVAL_PUBLISHER_PASSWORD",
-          "permissions": {
-            "configure": "^$",
-            "write": "^worker\\.uplift\\.events$",
-            "read": "^$"
-          }
-        },
-        "consumer": {
-          "stage": "translation",
-          "username_variable": "RABBITMQ_TRANSLATION_CONSUMER_USERNAME",
-          "password_secret": "RABBITMQ_TRANSLATION_CONSUMER_PASSWORD",
-          "permissions": {
-            "configure": "^$",
-            "write": "^worker\\.uplift\\.(retry|dlx)$",
-            "read": "^worker\\.uplift\\.articles\\.translate$"
-          }
-        }
-      },
-      {
-        "route_id": "translation_to_persistence",
-        "queue": "worker.uplift.articles.persist",
-        "routing_key": "articles.persist",
-        "producer": {
-          "stage": "translation",
-          "username_variable": "RABBITMQ_TRANSLATION_PUBLISHER_USERNAME",
-          "password_secret": "RABBITMQ_TRANSLATION_PUBLISHER_PASSWORD",
-          "permissions": {
-            "configure": "^$",
-            "write": "^worker\\.uplift\\.events$",
-            "read": "^$"
-          }
-        },
-        "consumer": {
-          "stage": "persistence",
-          "username_variable": "RABBITMQ_PERSISTENCE_CONSUMER_USERNAME",
-          "password_secret": "RABBITMQ_PERSISTENCE_CONSUMER_PASSWORD",
-          "permissions": {
-            "configure": "^$",
-            "write": "^worker\\.uplift\\.(retry|dlx)$",
-            "read": "^worker\\.uplift\\.articles\\.persist$"
-          }
-        }
-      },
-      {
-        "route_id": "persistence_to_publication",
-        "queue": "worker.uplift.articles.publish",
-        "routing_key": "articles.publish",
-        "producer": {
-          "stage": "persistence",
-          "username_variable": "RABBITMQ_PERSISTENCE_PUBLISHER_USERNAME",
-          "password_secret": "RABBITMQ_PERSISTENCE_PUBLISHER_PASSWORD",
-          "permissions": {
-            "configure": "^$",
-            "write": "^worker\\.uplift\\.events$",
-            "read": "^$"
-          }
-        },
-        "consumer": {
-          "stage": "publication",
-          "username_variable": "RABBITMQ_PUBLICATION_CONSUMER_USERNAME",
-          "password_secret": "RABBITMQ_PUBLICATION_CONSUMER_PASSWORD",
-          "permissions": {
-            "configure": "^$",
-            "write": "^worker\\.uplift\\.(retry|dlx)$",
-            "read": "^worker\\.uplift\\.articles\\.publish$"
-          }
-        }
-      }
-    ]
+      {"route_id": "scheduler_to_fetcher", "route_stage": "fetch", "routing_key": "nutsnews.worker.fetch.v1", "queue": "nutsnews.worker.fetch.v1", "producer_identity_id": "scheduler_publisher", "consumer_identity_id": "fetcher_consumer", "disposition": "current"},
+      {"route_id": "fetcher_to_canonicalizer", "route_stage": "canonicalization", "routing_key": "nutsnews.worker.canonicalization.v1", "queue": "nutsnews.worker.canonicalization.v1", "producer_identity_id": "fetcher_consumer", "retained_producer_identity_id": "fetcher_publisher", "consumer_identity_id": "canonicalizer_consumer", "disposition": "current"},
+      {"route_id": "canonicalizer_to_enrichment", "route_stage": "enrichment", "routing_key": "nutsnews.worker.enrichment.v1", "queue": "nutsnews.worker.enrichment.v1", "producer_identity_id": "canonicalizer_consumer", "retained_producer_identity_id": "canonicalizer_publisher", "consumer_identity_id": "enrichment_consumer", "disposition": "current"},
+      {"route_id": "enrichment_to_approval", "route_stage": "approval", "routing_key": "nutsnews.worker.approval.v1", "queue": "nutsnews.worker.approval.v1", "producer_identity_id": "enrichment_consumer", "retained_producer_identity_id": "enrichment_publisher", "consumer_identity_id": "approval_consumer", "disposition": "current"},
+      {"route_id": "approval_to_translation", "route_stage": "translation", "routing_key": "nutsnews.worker.translation.v1", "queue": "nutsnews.worker.translation.v1", "producer_identity_id": "approval_consumer", "retained_producer_identity_id": "approval_publisher", "consumer_identity_id": "translation_consumer", "disposition": "current"},
+      {"route_id": "translation_to_persistence", "route_stage": "persistence", "routing_key": "nutsnews.worker.persistence.v1", "queue": "nutsnews.worker.persistence.v1", "producer_identity_id": "translation_consumer", "retained_producer_identity_id": "translation_publisher", "consumer_identity_id": "persistence_consumer", "disposition": "current"},
+      {"route_id": "persistence_to_publication", "route_stage": "publication", "routing_key": "nutsnews.worker.publication.v1", "queue": "nutsnews.worker.publication.v1", "producer_identity_id": "persistence_consumer", "retained_producer_identity_id": "persistence_publisher", "consumer_identity_id": "publication_consumer", "disposition": "current"}
+    ],
+    "service_bindings": [
+      {"service": "scheduler", "identity_id": "scheduler_publisher", "credential_pair": ["RABBITMQ_SCHEDULER_PUBLISHER_USERNAME", "RABBITMQ_SCHEDULER_PUBLISHER_PASSWORD"], "main_queue": "nutsnews.worker.fetch.v1", "consumes": [], "publishes": ["nutsnews.worker.fetch.v1"], "disposition": "current"},
+      {"service": "fetcher", "identity_id": "fetcher_consumer", "credential_pair": ["RABBITMQ_FETCHER_CONSUMER_USERNAME", "RABBITMQ_FETCHER_CONSUMER_PASSWORD"], "main_queue": "nutsnews.worker.fetch.v1", "consumes": ["nutsnews.worker.fetch.v1"], "publishes": ["nutsnews.worker.canonicalization.v1"], "disposition": "current"},
+      {"service": "canonicalizer", "identity_id": "canonicalizer_consumer", "credential_pair": ["RABBITMQ_CANONICALIZER_CONSUMER_USERNAME", "RABBITMQ_CANONICALIZER_CONSUMER_PASSWORD"], "main_queue": "nutsnews.worker.canonicalization.v1", "consumes": ["nutsnews.worker.canonicalization.v1"], "publishes": ["nutsnews.worker.enrichment.v1"], "disposition": "current"},
+      {"service": "enrichment", "identity_id": "enrichment_consumer", "credential_pair": ["RABBITMQ_ENRICHMENT_CONSUMER_USERNAME", "RABBITMQ_ENRICHMENT_CONSUMER_PASSWORD"], "main_queue": "nutsnews.worker.enrichment.v1", "consumes": ["nutsnews.worker.enrichment.v1"], "publishes": ["nutsnews.worker.approval.v1"], "disposition": "current"},
+      {"service": "approval", "identity_id": "approval_consumer", "credential_pair": ["RABBITMQ_APPROVAL_CONSUMER_USERNAME", "RABBITMQ_APPROVAL_CONSUMER_PASSWORD"], "main_queue": "nutsnews.worker.approval.v1", "consumes": ["nutsnews.worker.approval.v1"], "publishes": ["nutsnews.worker.translation.v1"], "disposition": "current"},
+      {"service": "translation", "identity_id": "translation_consumer", "credential_pair": ["RABBITMQ_TRANSLATION_CONSUMER_USERNAME", "RABBITMQ_TRANSLATION_CONSUMER_PASSWORD"], "main_queue": "nutsnews.worker.translation.v1", "consumes": ["nutsnews.worker.translation.v1"], "publishes": ["nutsnews.worker.persistence.v1"], "disposition": "current"},
+      {"service": "persistence", "identity_id": "persistence_consumer", "credential_pair": ["RABBITMQ_PERSISTENCE_CONSUMER_USERNAME", "RABBITMQ_PERSISTENCE_CONSUMER_PASSWORD"], "main_queue": "nutsnews.worker.persistence.v1", "consumes": ["nutsnews.worker.persistence.v1"], "publishes": ["nutsnews.worker.publication.v1"], "disposition": "current"},
+      {"service": "publication", "identity_id": "publication_consumer", "credential_pair": ["RABBITMQ_PUBLICATION_CONSUMER_USERNAME", "RABBITMQ_PUBLICATION_CONSUMER_PASSWORD"], "main_queue": "nutsnews.worker.publication.v1", "consumes": ["nutsnews.worker.publication.v1"], "publishes": [], "disposition": "current"}
+    ],
+    "least_privilege_policy": {
+      "wildcard_identity_allowed_only_for": "break_glass_admin",
+      "monitoring_identity_scope": "isolated ephemeral canary resources only",
+      "active_forwarding_model": "Each intermediate service uses its stage_runtime consumer identity for its own main queue and the main/retry/DLQ exchanges.",
+      "retained_publishers": ["fetcher_publisher", "canonicalizer_publisher", "enrichment_publisher", "approval_publisher", "translation_publisher", "persistence_publisher"],
+      "retained_publisher_guardrail": "Retained producer identities are declared by topology but are not injected into current deployed services and must not be reported as active service identities."
+    }
   },
   "postgres": {
-    "database_variable": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_DATABASE",
-    "database_value": "nutsnews_worker_uplift",
+    "database_reference": "NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE",
+    "database_disposition": "current",
+    "replaced_database_reference": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_DATABASE",
     "stage_roles": [
-      {
-        "stage": "scheduler",
-        "schema": "worker_uplift_scheduler",
-        "username_variable": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_USERNAME",
-        "password_secret": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD",
-        "grants": [
-          "usage on schema worker_uplift_scheduler",
-          "select/insert/update/delete on own inbox, outbox, run_state, and reconciliation tables only"
-        ]
-      },
-      {
-        "stage": "fetcher",
-        "schema": "worker_uplift_fetcher",
-        "username_variable": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_USERNAME",
-        "password_secret": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_PASSWORD",
-        "grants": [
-          "usage on schema worker_uplift_fetcher",
-          "select/insert/update/delete on own inbox, outbox, fetch_attempt, and reconciliation tables only"
-        ]
-      },
-      {
-        "stage": "canonicalizer",
-        "schema": "worker_uplift_canonicalizer",
-        "username_variable": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_USERNAME",
-        "password_secret": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_PASSWORD",
-        "grants": [
-          "usage on schema worker_uplift_canonicalizer",
-          "select/insert/update/delete on own inbox, outbox, canonical_url, and reconciliation tables only"
-        ]
-      },
-      {
-        "stage": "enrichment",
-        "schema": "worker_uplift_enrichment",
-        "username_variable": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_USERNAME",
-        "password_secret": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_PASSWORD",
-        "grants": [
-          "usage on schema worker_uplift_enrichment",
-          "select/insert/update/delete on own inbox, outbox, enrichment_attempt, and reconciliation tables only"
-        ]
-      },
-      {
-        "stage": "approval",
-        "schema": "worker_uplift_approval",
-        "username_variable": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_USERNAME",
-        "password_secret": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_PASSWORD",
-        "grants": [
-          "usage on schema worker_uplift_approval",
-          "select/insert/update/delete on own inbox, outbox, review_attempt, and reconciliation tables only"
-        ]
-      },
-      {
-        "stage": "translation",
-        "schema": "worker_uplift_translation",
-        "username_variable": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_USERNAME",
-        "password_secret": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_PASSWORD",
-        "grants": [
-          "usage on schema worker_uplift_translation",
-          "select/insert/update/delete on own inbox, outbox, translation_attempt, and reconciliation tables only"
-        ]
-      },
-      {
-        "stage": "persistence",
-        "schema": "worker_uplift_persistence",
-        "username_variable": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_USERNAME",
-        "password_secret": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_PASSWORD",
-        "grants": [
-          "usage on schema worker_uplift_persistence",
-          "select/insert/update/delete on own inbox, outbox, write_request, and reconciliation tables only",
-          "final production domain writes go through backend Worker DB API, not direct public schema grants"
-        ]
-      },
-      {
-        "stage": "publication",
-        "schema": "worker_uplift_publication",
-        "username_variable": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_USERNAME",
-        "password_secret": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_PASSWORD",
-        "grants": [
-          "usage on schema worker_uplift_publication",
-          "select/insert/update/delete on own inbox, outbox, publish_decision, and reconciliation tables only",
-          "publish and snapshot refresh go through backend Worker DB API"
-        ]
-      }
-    ]
-  },
-  "validation_identities": [
-    {
-      "id": "shadow_smoke",
-      "secret": "NUTSNEWS_SHADOW_SMOKE_TOKEN",
-      "owner": "ramideltoro/nutsnews-backend",
-      "purpose": "Protected shadow smoke workflow authorization and replay protection.",
-      "runtime_service_injection": false
-    },
-    {
-      "id": "reconciliation_confirmation",
-      "secret": "NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN",
-      "owner": "ramideltoro/nutsnews-backend",
-      "purpose": "Bearer authorization for protected backend-to-service reconciliation calls. Apply still requires the protected workflow confirmation body and apply gate.",
-      "runtime_service_injection": true
+      {"stage": "scheduler", "schema": "worker_uplift_scheduler", "username_variable": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_USERNAME", "password_secret": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD", "grants": ["own stage schema only"], "disposition": "current"},
+      {"stage": "fetcher", "schema": "worker_uplift_fetcher", "username_variable": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_USERNAME", "password_secret": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_PASSWORD", "grants": ["own stage schema only"], "disposition": "current"},
+      {"stage": "canonicalizer", "schema": "worker_uplift_canonicalizer", "username_variable": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_USERNAME", "password_secret": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_PASSWORD", "grants": ["own stage schema only"], "disposition": "current"},
+      {"stage": "enrichment", "schema": "worker_uplift_enrichment", "username_variable": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_USERNAME", "password_secret": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_ENRICHMENT_PASSWORD", "grants": ["own stage schema only"], "disposition": "current"},
+      {"stage": "approval", "schema": "worker_uplift_approval", "username_variable": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_USERNAME", "password_secret": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_APPROVAL_PASSWORD", "grants": ["own stage schema only"], "disposition": "current"},
+      {"stage": "translation", "schema": "worker_uplift_translation", "username_variable": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_USERNAME", "password_secret": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_TRANSLATION_PASSWORD", "grants": ["own stage schema only"], "disposition": "current"},
+      {"stage": "persistence", "schema": "worker_uplift_persistence", "username_variable": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_USERNAME", "password_secret": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PERSISTENCE_PASSWORD", "grants": ["own stage schema only", "final domain writes only through backend Worker DB API"], "disposition": "current"},
+      {"stage": "publication", "schema": "worker_uplift_publication", "username_variable": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_USERNAME", "password_secret": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_PASSWORD", "grants": ["own stage schema only", "final domain writes only through backend Worker DB API"], "disposition": "current"}
+    ],
+    "least_privilege_evidence": {
+      "protected_permission_proof_run": 30024831874,
+      "shared_role_allowed": false,
+      "cross_stage_grants_allowed": false,
+      "public_schema_write_allowed": false
     }
+  },
+  "api_identities": [
+    {"service": "scheduler", "identity_class": "shared_backend_read_only", "credential_reference": "NUTSNEWS_BACKEND_API_TOKEN", "dedicated": false, "operations": ["shadow feed-source reads"], "production_writes_allowed": false, "disposition": "retained"},
+    {"service": "fetcher", "identity_class": "none", "credential_reference": null, "dedicated": false, "operations": [], "production_writes_allowed": false, "disposition": "current"},
+    {"service": "canonicalizer", "identity_class": "none", "credential_reference": null, "dedicated": false, "operations": [], "production_writes_allowed": false, "disposition": "current"},
+    {"service": "enrichment", "identity_class": "none", "credential_reference": null, "dedicated": false, "operations": [], "production_writes_allowed": false, "disposition": "current"},
+    {"service": "approval", "identity_class": "qwen_provider_only", "credential_reference": "LOCAL_AI_API_KEY", "runtime_mapping": "approval-qwen-api-key", "dedicated": false, "operations": ["Qwen provider requests"], "production_writes_allowed": false, "disposition": "retained"},
+    {"service": "translation", "identity_class": "qwen_provider_only", "credential_reference": "LOCAL_AI_API_KEY", "runtime_mapping": "translation-qwen-api-key", "dedicated": false, "operations": ["Qwen provider requests"], "production_writes_allowed": false, "disposition": "retained"},
+    {"service": "persistence", "identity_class": "dedicated_backend_worker_api", "credential_reference": "NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN", "dedicated": true, "operations": ["persistence-scoped uplift commands"], "production_writes_allowed": false, "disposition": "current"},
+    {"service": "publication", "identity_class": "dedicated_backend_worker_api", "credential_reference": "NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN", "dedicated": true, "operations": ["publication-scoped uplift commands"], "production_writes_allowed": false, "disposition": "current"}
   ],
-  "telemetry_policy": {
-    "backend_host_write_credentials": [
-      "GRAFANA_CLOUD_PROMETHEUS_USERNAME",
-      "GRAFANA_CLOUD_PROMETHEUS_PASSWORD",
-      "GRAFANA_CLOUD_LOKI_USERNAME",
-      "GRAFANA_CLOUD_LOKI_PASSWORD"
+  "shared_validation_identities": [
+    {"id": "shadow_smoke", "credential_reference": "NUTSNEWS_SHADOW_SMOKE_TOKEN", "services": [], "runtime_service_injection": false, "disposition": "retained"},
+    {"id": "reconciliation_confirmation", "credential_reference": "NUTSNEWS_WORKER_UPLIFT_RECONCILIATION_TOKEN", "services": ["scheduler", "fetcher", "canonicalizer", "enrichment", "approval", "translation", "persistence", "publication"], "runtime_service_injection": true, "dedicated": false, "disposition": "current"}
+  ],
+  "host_and_runtime_accounts": {
+    "host_automation": [
+      {"id": "backend_ansible_automation", "account_reference": "NUTSNEWS_BACKEND_ANSIBLE_USER", "authentication_reference": "NUTSNEWS_BACKEND_SSH_PRIVATE_KEY", "account_name_recorded": false, "scope": "existing protected backend workflows and approval-free read-only status", "disposition": "current"}
     ],
-    "grafana_management_credentials_not_for_worker_services": [
-      "GRAFANA_SERVICE_ACCOUNT_TOKEN",
-      "GRAFANA_URL"
-    ],
-    "grafana_resource_management_owner": "ramideltoro/nutsnews-infra",
-    "otlp_status": "No new OTLP worker-uplift write token was generated because backend Alloy does not yet consume one."
-  },
-  "ai_provider_policy": {
-    "local_ai": {
-      "secret": "LOCAL_AI_API_KEY",
-      "status": "ready_retained_mapped",
-      "owner_boundary": "ramideltoro/nutsnews-backend production-backend Environment",
-      "runtime_mappings": [
-        {
-          "service": "approval",
-          "runtime_secret": "approval-qwen-api-key",
-          "environment_key": "NUTSNEWS_APPROVAL_QWEN_API_KEY"
-        },
-        {
-          "service": "translation",
-          "runtime_secret": "translation-qwen-api-key",
-          "environment_key": "NUTSNEWS_TRANSLATION_QWEN_API_KEY"
-        }
-      ],
-      "retirement_status": "active source credential; not eligible for retirement until both service mappings use ready replacements",
-      "rotation": "Rotate in production-backend, apply through the protected backend workflow, and verify both shadow services before revoking the prior gateway credential."
+    "host_configuration_owner": {
+      "account_class": "privileged host configuration owner",
+      "injected_into_worker_services": false,
+      "disposition": "retained"
     },
-    "openai_fallback": {
-      "default": "disabled",
-      "new_runtime_secret_generated": false,
-      "guardrail": "Do not reuse backend maintenance robot OPENAI_API_KEY for worker-uplift fallback."
-    }
+    "container_accounts": [
+      {"service": "scheduler", "account_class": "image-defined non-root runtime user", "account_name_recorded": false, "disposition": "current"},
+      {"service": "fetcher", "account_class": "image-defined non-root runtime user", "account_name_recorded": false, "disposition": "current"},
+      {"service": "canonicalizer", "account_class": "image-defined non-root runtime user", "account_name_recorded": false, "disposition": "current"},
+      {"service": "enrichment", "account_class": "image-defined non-root runtime user", "account_name_recorded": false, "disposition": "current"},
+      {"service": "approval", "account_class": "image-defined non-root runtime user", "account_name_recorded": false, "disposition": "current"},
+      {"service": "translation", "account_class": "image-defined non-root runtime user", "account_name_recorded": false, "disposition": "current"},
+      {"service": "persistence", "account_class": "image-defined non-root runtime user", "account_name_recorded": false, "disposition": "current"},
+      {"service": "publication", "account_class": "image-defined non-root runtime user", "account_name_recorded": false, "disposition": "current"}
+    ],
+    "evidence": "docs/worker-uplift-security-review.json deployed_images and image runtime review"
+  },
+  "telemetry_policy": {
+    "worker_services_receive_grafana_management_credentials": false,
+    "backend_host_write_credentials": ["GRAFANA_CLOUD_PROMETHEUS_USERNAME", "GRAFANA_CLOUD_PROMETHEUS_PASSWORD", "GRAFANA_CLOUD_LOKI_USERNAME", "GRAFANA_CLOUD_LOKI_PASSWORD"],
+    "grafana_management_credentials_not_for_worker_services": ["GRAFANA_SERVICE_ACCOUNT_TOKEN", "GRAFANA_URL"],
+    "grafana_resource_management_owner": "ramideltoro/nutsnews-infra",
+    "disposition": "current"
   },
   "rotation_policy": {
-    "rabbitmq_service_identity_rotation": "Create a second username/password with the same route-scoped regex permissions, deploy consumers/producers with dual credentials where supported, drain old connections, then revoke the old user.",
-    "rabbitmq_erlang_cookie_rotation": "Requires planned broker maintenance or rolling node procedure; do not rotate through app deployment alone.",
-    "postgres_stage_role_rotation": "Create or update only the affected stage role password, deploy that stage, confirm reconnect, then revoke old password if dual credentials are used.",
-    "shadow_validation_rotation": "Replace token in production-backend, update protected workflows, and invalidate old token after the next successful shadow smoke.",
-    "qwen_gateway_rotation": "Rotate LOCAL_AI_API_KEY in production-backend, use protected Ansible check/apply to rematerialize approval-qwen-api-key and translation-qwen-api-key, verify both shadow services, then revoke the prior gateway credential."
+    "scope": "documented_only_no_rotation_by_issue_160",
+    "rabbitmq_service_identity_rotation": "Use protected backend workflows; verify the affected shadow service before revoking an old identity.",
+    "postgres_stage_role_rotation": "Use protected backend workflows; update only the affected stage and verify reconnect before revocation.",
+    "qwen_gateway_rotation": "Update the retained source credential through the protected backend workflow and verify both mapped shadow services."
   },
   "validation": {
     "local_validator": "python3 scripts/validate_worker_uplift_runtime_identities.py",
-    "readiness_validator": "python3 scripts/validate_worker_uplift_runtime_readiness.py",
-    "value_free_live_check": "gh secret list/gh variable list against production-backend, names only"
+    "focused_tests": "python3 -m unittest tests.test_worker_uplift_runtime_identities",
+    "full_suite": "python3 -m unittest discover -s tests -p 'test_*.py'",
+    "live_evidence_policy": "Use value-free status artifacts; never emit credential values or connection strings."
   }
 }

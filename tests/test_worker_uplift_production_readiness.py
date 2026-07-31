@@ -63,8 +63,20 @@ class WorkerUpliftProductionReadinessTests(unittest.TestCase):
 
         errors = self.validate(decision=decision)
 
-        self.assertTrue(any("must remain blocked" in error for error in errors))
-        self.assertTrue(any("must not fabricate owner decisions" in error for error in errors))
+        self.assertTrue(any("closure_ready must match" in error for error in errors))
+        self.assertTrue(any("owner decisions must match" in error for error in errors))
+
+    def test_security_gate_tracks_only_current_pending_dispositions(self):
+        decision = copy.deepcopy(self.decision)
+        decision["security_gate"]["residual_findings_requiring_gate_disposition"].append(
+            "SEC-124-002"
+        )
+
+        errors = self.validate(decision=decision)
+
+        self.assertTrue(
+            any("must match the disposition artifact" in error for error in errors)
+        )
 
     def test_failover_analytics_cannot_be_inferred_from_documentation(self):
         proof = copy.deepcopy(self.binding_proof)

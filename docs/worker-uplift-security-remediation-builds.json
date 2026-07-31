@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "tracking_issue": "ramideltoro/nutsnews-worker#164",
-  "captured_at_utc": "2026-07-31T18:05:00Z",
+  "captured_at_utc": "2026-07-31T18:43:42Z",
   "safety": {
     "legacy_worker_is_production_ingestion_owner": true,
     "uplift_services_are_shadow_only": true,
@@ -159,5 +159,65 @@
       "minimal_runtime_validated": true,
       "signed": true
     }
-  ]
+  ],
+  "protected_shadow_deployment": {
+    "backend_merge_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18",
+    "protected_check_run": 30654352991,
+    "protected_check_artifact": {
+      "artifact_id": 8802776269,
+      "artifact_digest": "sha256:56efa59a52b2dd55d92d402cc571c68d711dc51143dad5768b5352ed3b3a5638"
+    },
+    "protected_apply_run": 30654848549,
+    "protected_apply_artifact": {
+      "artifact_id": 8803000983,
+      "artifact_digest": "sha256:bae34fa2837a7a802726c2c352345a9893783e6a76cb8a4b7c7bd54c778e0008",
+      "pre_report_sha256": "707dd7c30b066bb850f17c0785601042affcfec209e9dc1411619e991c91ddf1",
+      "post_report_sha256": "ea126a5186af444ee800672fc2743260f6bef9747c7ce2bcd4c10900c1fe945d",
+      "pre_status": "pass",
+      "post_status": "pass",
+      "pre_blockers": [],
+      "post_blockers": []
+    },
+    "service_deploy_runs": {
+      "scheduler": 30655582222,
+      "fetcher": 30655683990,
+      "canonicalizer": 30655874225,
+      "enrichment": 30655921484,
+      "approval": 30655959048,
+      "translation": 30655999806,
+      "persistence": 30656028849,
+      "publication": 30656073845
+    },
+    "status_run": 30656141654,
+    "status_artifact": {
+      "artifact_id": 8803290341,
+      "artifact_digest": "sha256:538b6b65c68305492daca956487f71caaa9ef903ff7915105dc713d87a6ade81",
+      "report_sha256": "9356539e7e85ebb8ab8cf332b43d7e989c01e2d02be9cf41b2770c971025c872"
+    },
+    "runtime_status": "pass",
+    "mode": "shadow",
+    "production_writes_enabled": false,
+    "healthy_service_count": 8,
+    "required_consumer_queue_count": 7,
+    "missing_consumers": [],
+    "unverifiable_consumers": [],
+    "queue_messages_total": 0,
+    "deployed_images": [
+      {"stage": "scheduler", "source_commit": "938009f7ed7529a28eda81c8189c207b6e449a32", "image": "ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler@sha256:cfbb3247914a623bb60362d5e983d02c5936987571e72f5ac910391e1602ef8c"},
+      {"stage": "fetcher", "source_commit": "501ededcad48924b632b0547679f4dcb54ed4a90", "image": "ghcr.io/ramideltoro/nutsnews-worker-feed-fetcher@sha256:7ee6f7a8155b959f01ff265c9b3b8861be5ef5f9bcef5616d5eba88a48e0fbaa"},
+      {"stage": "canonicalizer", "source_commit": "64dea55ad8f0e9b67e746b5d4363d43762fea792", "image": "ghcr.io/ramideltoro/nutsnews-worker-article-canonicalizer@sha256:6d9fa787412697767a4b8af0eecef43b7c333fdcbae4ad41bda34ce94a2da4c9"},
+      {"stage": "enrichment", "source_commit": "c7a464e54eda1ed9e5f82d8dc545b1f7f7a36ec0", "image": "ghcr.io/ramideltoro/nutsnews-worker-article-enrichment@sha256:c00bec63cc7a410d8ba228e72b0616d561e64d05ae9316f871183fe5b2a840dc"},
+      {"stage": "approval", "source_commit": "6597030ffcc07c51fb1259b3152d2645f5927d75", "image": "ghcr.io/ramideltoro/nutsnews-worker-article-approval@sha256:b977adb932647808b73f62dc84bee69a52dca88e4198566d9e0c30180fdb2407"},
+      {"stage": "translation", "source_commit": "d1206b73157305128b3bf5dc6bf5a7bcbb4c818d", "image": "ghcr.io/ramideltoro/nutsnews-worker-article-translation@sha256:926dc46ac29f9e6661ee8baa83171aca7a4e9941edbe93af6dbd19708a614da9"},
+      {"stage": "persistence", "source_commit": "e646a51bfea5142d769e0980608dc86f6c7623f7", "image": "ghcr.io/ramideltoro/nutsnews-worker-article-persistence@sha256:3d158826415f1ad602436aebd21280dd35b1fa34a8f44303b6f39a814ba2b9b9"},
+      {"stage": "publication", "source_commit": "47f05a5e177d63c43f18ac203ec773d606a2fbf4", "image": "ghcr.io/ramideltoro/nutsnews-worker-article-publication@sha256:3e9fbebb7e345b7928f94de37e646e4829e81732f5153b6da06246f7618adf4a"}
+    ],
+    "safety": {
+      "legacy_worker_is_production_ingestion_owner": true,
+      "cutover_authorized": false,
+      "dns_or_failover_changed": false,
+      "queue_mutation_performed": false,
+      "production_infrastructure_changed": false
+    }
+  }
 }

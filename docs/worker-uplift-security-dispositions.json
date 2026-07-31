@@ -2,7 +2,7 @@
   "schema_version": 1,
   "tracking_issue": "ramideltoro/nutsnews-worker#164",
   "implementation_repository": "ramideltoro/nutsnews-backend",
-  "captured_at_utc": "2026-07-31T17:30:12Z",
+  "captured_at_utc": "2026-07-31T18:43:42Z",
   "decision": "blocked_pending_dispositions",
   "source_review": {
     "tracking_issue": "ramideltoro/nutsnews-worker#124",
@@ -62,26 +62,26 @@
       ],
       "current_evidence": {
         "source_heads": [
-          {"repository": "ramideltoro/nutsnews-worker-contracts", "commit": "bf10f4257a1ac7f3e5aef0c5a14f62ec51ae4bb2", "paths": [".github/workflows"]},
-          {"repository": "ramideltoro/nutsnews-worker-runtime", "commit": "43e7883554e250b2297d40266374cb4ff87d141c", "paths": [".github/workflows"]},
-          {"repository": "ramideltoro/nutsnews-worker-feed-scheduler", "commit": "ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396", "paths": [".github/workflows"]},
-          {"repository": "ramideltoro/nutsnews-worker-feed-fetcher", "commit": "5b82b3e27ef85e57fc9aec23a0815cde584758eb", "paths": [".github/workflows"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-canonicalizer", "commit": "64d6f59920ec6aa5fb56028de99f7600ecb5be2d", "paths": [".github/workflows"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-enrichment", "commit": "edd63d8acd4a46a33aea4b043e3dc8dfd95af310", "paths": [".github/workflows"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-approval", "commit": "38185c74717221453c662f4ba1b093315eff5b83", "paths": [".github/workflows"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-translation", "commit": "d3b68668c7b714500d7efd204ecf33987a34e3ee", "paths": [".github/workflows"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-persistence", "commit": "6dae69d96b4b081b23b5e1d85e10133ee36a6674", "paths": [".github/workflows"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-publication", "commit": "5a9e3c09a8572a7978687bcb7afec548e3934a63", "paths": [".github/workflows"]}
+          {"repository": "ramideltoro/nutsnews-worker-contracts", "commit": "663e5b6053666ebf5fbcf9ed79c02d34193d215c", "paths": [".github/workflows", "scripts/validate_security_baseline.py"]},
+          {"repository": "ramideltoro/nutsnews-worker-runtime", "commit": "9d3ad5998eaa2c2d2d157293f77e86a8c22a38b5", "paths": [".github/workflows", "scripts/validate_security_baseline.py"]},
+          {"repository": "ramideltoro/nutsnews-worker-feed-scheduler", "commit": "938009f7ed7529a28eda81c8189c207b6e449a32", "paths": [".github/workflows", "scripts/validate_security_baseline.py"]},
+          {"repository": "ramideltoro/nutsnews-worker-feed-fetcher", "commit": "501ededcad48924b632b0547679f4dcb54ed4a90", "paths": [".github/workflows", "scripts/validate_security_baseline.py"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-canonicalizer", "commit": "64dea55ad8f0e9b67e746b5d4363d43762fea792", "paths": [".github/workflows", "scripts/validate_security_baseline.py"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-enrichment", "commit": "c7a464e54eda1ed9e5f82d8dc545b1f7f7a36ec0", "paths": [".github/workflows", "scripts/validate_security_baseline.py"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-approval", "commit": "6597030ffcc07c51fb1259b3152d2645f5927d75", "paths": [".github/workflows", "scripts/validate_security_baseline.py"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-translation", "commit": "d1206b73157305128b3bf5dc6bf5a7bcbb4c818d", "paths": [".github/workflows", "scripts/validate_security_baseline.py"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-persistence", "commit": "e646a51bfea5142d769e0980608dc86f6c7623f7", "paths": [".github/workflows", "scripts/validate_security_baseline.py"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-publication", "commit": "47f05a5e177d63c43f18ac203ec773d606a2fbf4", "paths": [".github/workflows", "scripts/validate_security_baseline.py"]}
         ],
-        "observation": "All ten heads still contain one or more external actions referenced by a release tag instead of a reviewed 40-character commit SHA."
+        "observation": "The repository-local security baseline validator passes at all ten immutable merge commits and rejects any external action reference that is not a reviewed 40-character commit SHA."
       },
       "accountable_owner": {
         "login": "ramideltoro",
         "basis": "named owner of every affected repository",
         "acceptance_inferred": false
       },
-      "status": "pending",
-      "owner_action_required": true,
+      "status": "remediated",
+      "owner_action_required": false,
       "planned_remediation": "Pin every external action in all affected workflows to reviewed immutable commit SHAs and pass each repository's required checks.",
       "compensating_controls": [
         "workflows default to read-only permissions unless a publishing job declares narrower writes",
@@ -90,7 +90,34 @@
       ],
       "review_by": "2026-08-31",
       "reopen_trigger": "Any external action reference is introduced without a reviewed immutable commit SHA.",
-      "remediation": null,
+      "remediation": {
+        "summary": "Pinned every external action in all ten uplift repositories to a reviewed immutable commit SHA and added a fail-closed repository validator.",
+        "verification": "Post-merge CI passed the security baseline validator in every affected repository.",
+        "rollback": "Revert an affected repository merge through a new protected pull request; never restore mutable action tags.",
+        "deployment_required": false,
+        "immutable_evidence": [
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-contracts/pull/19", "head_commit": "663e5b6053666ebf5fbcf9ed79c02d34193d215c"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-contracts/actions/runs/30653472765", "head_commit": "663e5b6053666ebf5fbcf9ed79c02d34193d215c", "run_id": 30653472765, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-runtime/pull/15", "head_commit": "9d3ad5998eaa2c2d2d157293f77e86a8c22a38b5"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-runtime/actions/runs/30653508285", "head_commit": "9d3ad5998eaa2c2d2d157293f77e86a8c22a38b5", "run_id": 30653508285, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-feed-scheduler/pull/19", "head_commit": "938009f7ed7529a28eda81c8189c207b6e449a32"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-feed-scheduler/actions/runs/30653471970", "head_commit": "938009f7ed7529a28eda81c8189c207b6e449a32", "run_id": 30653471970, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-feed-fetcher/pull/20", "head_commit": "501ededcad48924b632b0547679f4dcb54ed4a90"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-feed-fetcher/actions/runs/30653472634", "head_commit": "501ededcad48924b632b0547679f4dcb54ed4a90", "run_id": 30653472634, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-article-canonicalizer/pull/21", "head_commit": "64dea55ad8f0e9b67e746b5d4363d43762fea792"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-article-canonicalizer/actions/runs/30653509070", "head_commit": "64dea55ad8f0e9b67e746b5d4363d43762fea792", "run_id": 30653509070, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-article-enrichment/pull/20", "head_commit": "c7a464e54eda1ed9e5f82d8dc545b1f7f7a36ec0"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-article-enrichment/actions/runs/30653511645", "head_commit": "c7a464e54eda1ed9e5f82d8dc545b1f7f7a36ec0", "run_id": 30653511645, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-article-approval/pull/23", "head_commit": "6597030ffcc07c51fb1259b3152d2645f5927d75"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-article-approval/actions/runs/30653472756", "head_commit": "6597030ffcc07c51fb1259b3152d2645f5927d75", "run_id": 30653472756, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-article-translation/pull/26", "head_commit": "d1206b73157305128b3bf5dc6bf5a7bcbb4c818d"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-article-translation/actions/runs/30653471920", "head_commit": "d1206b73157305128b3bf5dc6bf5a7bcbb4c818d", "run_id": 30653471920, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-article-persistence/pull/23", "head_commit": "e646a51bfea5142d769e0980608dc86f6c7623f7"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-article-persistence/actions/runs/30653472028", "head_commit": "e646a51bfea5142d769e0980608dc86f6c7623f7", "run_id": 30653472028, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-article-publication/pull/21", "head_commit": "47f05a5e177d63c43f18ac203ec773d606a2fbf4"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-article-publication/actions/runs/30653473633", "head_commit": "47f05a5e177d63c43f18ac203ec773d606a2fbf4", "run_id": 30653473633, "conclusion": "success"}
+        ]
+      },
       "risk_acceptance": null
     },
     {
@@ -107,22 +134,22 @@
       ],
       "current_evidence": {
         "source_heads": [
-          {"repository": "ramideltoro/nutsnews-worker-contracts", "commit": "bf10f4257a1ac7f3e5aef0c5a14f62ec51ae4bb2", "paths": [".github/workflows/publish-package.yml"]},
-          {"repository": "ramideltoro/nutsnews-worker-runtime", "commit": "43e7883554e250b2297d40266374cb4ff87d141c", "paths": [".github/workflows/publish-package.yml"]},
-          {"repository": "ramideltoro/nutsnews-worker-feed-scheduler", "commit": "ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396", "paths": [".github/workflows/publish-container.yml"]},
-          {"repository": "ramideltoro/nutsnews-worker-feed-fetcher", "commit": "5b82b3e27ef85e57fc9aec23a0815cde584758eb", "paths": [".github/workflows/publish-container.yml"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-canonicalizer", "commit": "64d6f59920ec6aa5fb56028de99f7600ecb5be2d", "paths": [".github/workflows/publish-container.yml"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-enrichment", "commit": "edd63d8acd4a46a33aea4b043e3dc8dfd95af310", "paths": [".github/workflows/publish-container.yml"]}
+          {"repository": "ramideltoro/nutsnews-worker-contracts", "commit": "663e5b6053666ebf5fbcf9ed79c02d34193d215c", "paths": [".github/workflows/publish-package.yml", "scripts/validate_security_baseline.py"]},
+          {"repository": "ramideltoro/nutsnews-worker-runtime", "commit": "9d3ad5998eaa2c2d2d157293f77e86a8c22a38b5", "paths": [".github/workflows/publish-package.yml", "scripts/validate_security_baseline.py"]},
+          {"repository": "ramideltoro/nutsnews-worker-feed-scheduler", "commit": "938009f7ed7529a28eda81c8189c207b6e449a32", "paths": [".github/workflows/publish-container.yml", "scripts/validate_security_baseline.py"]},
+          {"repository": "ramideltoro/nutsnews-worker-feed-fetcher", "commit": "501ededcad48924b632b0547679f4dcb54ed4a90", "paths": [".github/workflows/publish-container.yml", "scripts/validate_security_baseline.py"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-canonicalizer", "commit": "64dea55ad8f0e9b67e746b5d4363d43762fea792", "paths": [".github/workflows/publish-container.yml", "scripts/validate_security_baseline.py"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-enrichment", "commit": "c7a464e54eda1ed9e5f82d8dc545b1f7f7a36ec0", "paths": [".github/workflows/publish-container.yml", "scripts/validate_security_baseline.py"]}
         ],
-        "observation": "The artifact-producing job in each listed workflow configures the setup-node npm dependency cache."
+        "observation": "Artifact-producing jobs in all six affected workflows perform locked clean installs without restoring an npm dependency cache; repository validators fail closed if cache restore returns."
       },
       "accountable_owner": {
         "login": "ramideltoro",
         "basis": "named owner of every affected repository",
         "acceptance_inferred": false
       },
-      "status": "pending",
-      "owner_action_required": true,
+      "status": "remediated",
+      "owner_action_required": false,
       "planned_remediation": "Remove dependency-cache restore from artifact-producing package and image publication jobs while retaining locked npm ci installs and normal validation-job caching where appropriate.",
       "compensating_controls": [
         "package lockfiles are enforced",
@@ -131,7 +158,26 @@
       ],
       "review_by": "2026-08-31",
       "reopen_trigger": "An artifact-producing workflow restores a dependency cache from a namespace writable by less-trusted execution.",
-      "remediation": null,
+      "remediation": {
+        "summary": "Removed setup-node npm cache restore from all six affected artifact-producing publish jobs while retaining package-lock enforcement.",
+        "verification": "Post-merge CI passed each repository security baseline validator and normal package or container validation.",
+        "rollback": "Revert an affected repository merge through a new protected pull request; cache restore must not be reintroduced into artifact-producing jobs.",
+        "deployment_required": false,
+        "immutable_evidence": [
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-contracts/pull/19", "head_commit": "663e5b6053666ebf5fbcf9ed79c02d34193d215c"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-contracts/actions/runs/30653472765", "head_commit": "663e5b6053666ebf5fbcf9ed79c02d34193d215c", "run_id": 30653472765, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-runtime/pull/15", "head_commit": "9d3ad5998eaa2c2d2d157293f77e86a8c22a38b5"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-runtime/actions/runs/30653508285", "head_commit": "9d3ad5998eaa2c2d2d157293f77e86a8c22a38b5", "run_id": 30653508285, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-feed-scheduler/pull/19", "head_commit": "938009f7ed7529a28eda81c8189c207b6e449a32"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-feed-scheduler/actions/runs/30653471970", "head_commit": "938009f7ed7529a28eda81c8189c207b6e449a32", "run_id": 30653471970, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-feed-fetcher/pull/20", "head_commit": "501ededcad48924b632b0547679f4dcb54ed4a90"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-feed-fetcher/actions/runs/30653472634", "head_commit": "501ededcad48924b632b0547679f4dcb54ed4a90", "run_id": 30653472634, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-article-canonicalizer/pull/21", "head_commit": "64dea55ad8f0e9b67e746b5d4363d43762fea792"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-article-canonicalizer/actions/runs/30653509070", "head_commit": "64dea55ad8f0e9b67e746b5d4363d43762fea792", "run_id": 30653509070, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-article-enrichment/pull/20", "head_commit": "c7a464e54eda1ed9e5f82d8dc545b1f7f7a36ec0"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-article-enrichment/actions/runs/30653511645", "head_commit": "c7a464e54eda1ed9e5f82d8dc545b1f7f7a36ec0", "run_id": 30653511645, "conclusion": "success"}
+        ]
+      },
       "risk_acceptance": null
     },
     {
@@ -150,24 +196,24 @@
       ],
       "current_evidence": {
         "source_heads": [
-          {"repository": "ramideltoro/nutsnews-worker-feed-scheduler", "commit": "ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396", "paths": ["Dockerfile"]},
-          {"repository": "ramideltoro/nutsnews-worker-feed-fetcher", "commit": "5b82b3e27ef85e57fc9aec23a0815cde584758eb", "paths": ["Dockerfile"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-canonicalizer", "commit": "64d6f59920ec6aa5fb56028de99f7600ecb5be2d", "paths": ["Dockerfile"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-enrichment", "commit": "edd63d8acd4a46a33aea4b043e3dc8dfd95af310", "paths": ["Dockerfile"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-approval", "commit": "38185c74717221453c662f4ba1b093315eff5b83", "paths": ["Dockerfile"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-translation", "commit": "d3b68668c7b714500d7efd204ecf33987a34e3ee", "paths": ["Dockerfile"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-persistence", "commit": "6dae69d96b4b081b23b5e1d85e10133ee36a6674", "paths": ["Dockerfile"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-publication", "commit": "5a9e3c09a8572a7978687bcb7afec548e3934a63", "paths": ["Dockerfile"]}
+          {"repository": "ramideltoro/nutsnews-worker-feed-scheduler", "commit": "938009f7ed7529a28eda81c8189c207b6e449a32", "paths": ["Dockerfile", ".github/workflows/ci.yml"]},
+          {"repository": "ramideltoro/nutsnews-worker-feed-fetcher", "commit": "501ededcad48924b632b0547679f4dcb54ed4a90", "paths": ["Dockerfile", ".github/workflows/ci.yml"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-canonicalizer", "commit": "64dea55ad8f0e9b67e746b5d4363d43762fea792", "paths": ["Dockerfile", ".github/workflows/ci.yml"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-enrichment", "commit": "c7a464e54eda1ed9e5f82d8dc545b1f7f7a36ec0", "paths": ["Dockerfile", ".github/workflows/ci.yml"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-approval", "commit": "6597030ffcc07c51fb1259b3152d2645f5927d75", "paths": ["Dockerfile", ".github/workflows/ci.yml"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-translation", "commit": "d1206b73157305128b3bf5dc6bf5a7bcbb4c818d", "paths": ["Dockerfile", ".github/workflows/ci.yml"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-persistence", "commit": "e646a51bfea5142d769e0980608dc86f6c7623f7", "paths": ["Dockerfile", ".github/workflows/ci.yml"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-publication", "commit": "47f05a5e177d63c43f18ac203ec773d606a2fbf4", "paths": ["Dockerfile", ".github/workflows/ci.yml"]}
         ],
-        "observation": "Every runtime stage copies node_modules from the full dependency stage and uses a Node base image that retains the npm CLI."
+        "observation": "All eight runtime stages copy pruned production dependencies, remove npm/npx/global npm content, and pass container assertions that npm, npx, TypeScript, and Vitest are absent. The exact rebuilt digests are deployed in shadow mode."
       },
       "accountable_owner": {
         "login": "ramideltoro",
         "basis": "named owner of every affected repository",
         "acceptance_inferred": false
       },
-      "status": "pending",
-      "owner_action_required": true,
+      "status": "remediated",
+      "owner_action_required": false,
       "planned_remediation": "Build production-only node_modules, remove the npm CLI from the runtime layer, rebuild all eight images, rescan the exact digests, and deploy them only through the protected shadow workflow.",
       "compensating_controls": [
         "containers run as a non-root user",
@@ -177,7 +223,42 @@
       ],
       "review_by": "2026-08-31",
       "reopen_trigger": "A deployed worker image contains npm, npx, or dependencies absent from the production dependency graph.",
-      "remediation": null,
+      "remediation": {
+        "summary": "Built production-only dependency layers, removed npm/npx and global npm content from all eight runtime images, and deployed the exact rebuilt digests through protected shadow operations.",
+        "verification": "All eight post-merge CI runs passed minimal-container assertions; signed image publication passed; protected deployments recreated each service; final status proved exact digests, eight healthy services, seven healthy consumers, empty queues, shadow mode, and production writes disabled.",
+        "rollback": "Use the fixed protected rollback action for the affected service to its prior digest, then rerun read-only status; do not alter legacy ingestion or production-write policy.",
+        "deployment_required": true,
+        "immutable_evidence": [
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-feed-scheduler/pull/19", "head_commit": "938009f7ed7529a28eda81c8189c207b6e449a32"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-feed-scheduler/actions/runs/30653471970", "head_commit": "938009f7ed7529a28eda81c8189c207b6e449a32", "run_id": 30653471970, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-feed-fetcher/pull/20", "head_commit": "501ededcad48924b632b0547679f4dcb54ed4a90"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-feed-fetcher/actions/runs/30653472634", "head_commit": "501ededcad48924b632b0547679f4dcb54ed4a90", "run_id": 30653472634, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-article-canonicalizer/pull/21", "head_commit": "64dea55ad8f0e9b67e746b5d4363d43762fea792"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-article-canonicalizer/actions/runs/30653509070", "head_commit": "64dea55ad8f0e9b67e746b5d4363d43762fea792", "run_id": 30653509070, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-article-enrichment/pull/20", "head_commit": "c7a464e54eda1ed9e5f82d8dc545b1f7f7a36ec0"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-article-enrichment/actions/runs/30653511645", "head_commit": "c7a464e54eda1ed9e5f82d8dc545b1f7f7a36ec0", "run_id": 30653511645, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-article-approval/pull/23", "head_commit": "6597030ffcc07c51fb1259b3152d2645f5927d75"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-article-approval/actions/runs/30653472756", "head_commit": "6597030ffcc07c51fb1259b3152d2645f5927d75", "run_id": 30653472756, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-article-translation/pull/26", "head_commit": "d1206b73157305128b3bf5dc6bf5a7bcbb4c818d"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-article-translation/actions/runs/30653471920", "head_commit": "d1206b73157305128b3bf5dc6bf5a7bcbb4c818d", "run_id": 30653471920, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-article-persistence/pull/23", "head_commit": "e646a51bfea5142d769e0980608dc86f6c7623f7"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-article-persistence/actions/runs/30653472028", "head_commit": "e646a51bfea5142d769e0980608dc86f6c7623f7", "run_id": 30653472028, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-article-publication/pull/21", "head_commit": "47f05a5e177d63c43f18ac203ec773d606a2fbf4"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-article-publication/actions/runs/30653473633", "head_commit": "47f05a5e177d63c43f18ac203ec773d606a2fbf4", "run_id": 30653473633, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-backend/pull/460", "head_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30654291216", "head_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "run_id": 30654291216, "conclusion": "success"},
+          {"kind": "deployment_run", "url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30655582222", "head_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "run_id": 30655582222, "conclusion": "success"},
+          {"kind": "deployment_run", "url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30655683990", "head_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "run_id": 30655683990, "conclusion": "success"},
+          {"kind": "deployment_run", "url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30655874225", "head_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "run_id": 30655874225, "conclusion": "success"},
+          {"kind": "deployment_run", "url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30655921484", "head_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "run_id": 30655921484, "conclusion": "success"},
+          {"kind": "deployment_run", "url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30655959048", "head_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "run_id": 30655959048, "conclusion": "success"},
+          {"kind": "deployment_run", "url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30655999806", "head_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "run_id": 30655999806, "conclusion": "success"},
+          {"kind": "deployment_run", "url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30656028849", "head_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "run_id": 30656028849, "conclusion": "success"},
+          {"kind": "deployment_run", "url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30656073845", "head_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "run_id": 30656073845, "conclusion": "success"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30656141654", "head_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "run_id": 30656141654, "conclusion": "success"},
+          {"kind": "artifact", "url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30656141654/artifacts/8803290341", "head_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "artifact_id": 8803290341, "artifact_digest": "sha256:538b6b65c68305492daca956487f71caaa9ef903ff7915105dc713d87a6ade81"}
+        ]
+      },
       "risk_acceptance": null
     },
     {
@@ -192,20 +273,20 @@
       ],
       "current_evidence": {
         "source_heads": [
-          {"repository": "ramideltoro/nutsnews-worker-article-approval", "commit": "38185c74717221453c662f4ba1b093315eff5b83", "paths": [".github/workflows/publish-container.yml"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-translation", "commit": "d3b68668c7b714500d7efd204ecf33987a34e3ee", "paths": [".github/workflows/publish-container.yml"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-persistence", "commit": "6dae69d96b4b081b23b5e1d85e10133ee36a6674", "paths": [".github/workflows/publish-container.yml"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-publication", "commit": "5a9e3c09a8572a7978687bcb7afec548e3934a63", "paths": [".github/workflows/publish-container.yml"]}
+          {"repository": "ramideltoro/nutsnews-worker-article-approval", "commit": "6597030ffcc07c51fb1259b3152d2645f5927d75", "paths": [".github/workflows/publish-container.yml", "scripts/validate_security_baseline.py"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-translation", "commit": "d1206b73157305128b3bf5dc6bf5a7bcbb4c818d", "paths": [".github/workflows/publish-container.yml", "scripts/validate_security_baseline.py"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-persistence", "commit": "e646a51bfea5142d769e0980608dc86f6c7623f7", "paths": [".github/workflows/publish-container.yml", "scripts/validate_security_baseline.py"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-publication", "commit": "47f05a5e177d63c43f18ac203ec773d606a2fbf4", "paths": [".github/workflows/publish-container.yml", "scripts/validate_security_baseline.py"]}
         ],
-        "observation": "The four listed build-push steps omit both sbom=true and provenance=mode=max."
+        "observation": "All four build-push steps enable sbom=true and provenance=mode=max; each exact published image index has retrievable SBOM and provenance attestation manifests and is deployed by digest in shadow mode."
       },
       "accountable_owner": {
         "login": "ramideltoro",
         "basis": "named owner of every affected repository",
         "acceptance_inferred": false
       },
-      "status": "pending",
-      "owner_action_required": true,
+      "status": "remediated",
+      "owner_action_required": false,
       "planned_remediation": "Enable BuildKit SBOM and maximum provenance attestations, publish new exact-digest images, and verify the attestations before protected shadow deployment.",
       "compensating_controls": [
         "all four services generate dependency SBOMs in CI",
@@ -214,7 +295,27 @@
       ],
       "review_by": "2026-08-31",
       "reopen_trigger": "A published or deployed service image lacks a retrievable SBOM attestation.",
-      "remediation": null,
+      "remediation": {
+        "summary": "Enabled BuildKit SBOM and maximum provenance attestations for approval, translation, persistence, and publication, then published and deployed new exact-digest images.",
+        "verification": "All four publish workflows completed successfully, the GHCR indexes expose SBOM and provenance attestation manifests, and protected runtime status proved the expected deployed digests with healthy shadow services.",
+        "rollback": "Use the fixed protected rollback action to a previously signed digest; a replacement image must retain SBOM and provenance attestations.",
+        "deployment_required": true,
+        "immutable_evidence": [
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-article-approval/pull/23", "head_commit": "6597030ffcc07c51fb1259b3152d2645f5927d75"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-article-approval/actions/runs/30653472671", "head_commit": "6597030ffcc07c51fb1259b3152d2645f5927d75", "run_id": 30653472671, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-article-translation/pull/26", "head_commit": "d1206b73157305128b3bf5dc6bf5a7bcbb4c818d"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-article-translation/actions/runs/30653472030", "head_commit": "d1206b73157305128b3bf5dc6bf5a7bcbb4c818d", "run_id": 30653472030, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-article-persistence/pull/23", "head_commit": "e646a51bfea5142d769e0980608dc86f6c7623f7"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-article-persistence/actions/runs/30653472024", "head_commit": "e646a51bfea5142d769e0980608dc86f6c7623f7", "run_id": 30653472024, "conclusion": "success"},
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-article-publication/pull/21", "head_commit": "47f05a5e177d63c43f18ac203ec773d606a2fbf4"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-article-publication/actions/runs/30653474652", "head_commit": "47f05a5e177d63c43f18ac203ec773d606a2fbf4", "run_id": 30653474652, "conclusion": "success"},
+          {"kind": "deployment_run", "url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30655959048", "head_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "run_id": 30655959048, "conclusion": "success"},
+          {"kind": "deployment_run", "url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30655999806", "head_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "run_id": 30655999806, "conclusion": "success"},
+          {"kind": "deployment_run", "url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30656028849", "head_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "run_id": 30656028849, "conclusion": "success"},
+          {"kind": "deployment_run", "url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30656073845", "head_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "run_id": 30656073845, "conclusion": "success"},
+          {"kind": "artifact", "url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30656141654/artifacts/8803290341", "head_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "artifact_id": 8803290341, "artifact_digest": "sha256:538b6b65c68305492daca956487f71caaa9ef903ff7915105dc713d87a6ade81"}
+        ]
+      },
       "risk_acceptance": null
     },
     {
@@ -226,22 +327,23 @@
       ],
       "current_evidence": {
         "source_heads": [
-          {"repository": "ramideltoro/nutsnews-worker-feed-fetcher", "commit": "5b82b3e27ef85e57fc9aec23a0815cde584758eb", "paths": ["src/network.ts", "src/ingestion.ts", "src/dependencies.ts"]}
+          {"repository": "ramideltoro/nutsnews-worker-feed-fetcher", "commit": "501ededcad48924b632b0547679f4dcb54ed4a90", "paths": ["src/network.ts", "src/ingestion.ts", "src/dependencies.ts", "test/network.integration.test.ts"]}
         ],
         "file_sha256": {
-          "src/network.ts": "998c5964e08b2264f9a31178516989cdaed22ef7ee9dcaeca1665ceca0a64f38",
-          "src/ingestion.ts": "4b50b28cf14d9dba044563f0c47060148afca6d98770ecc0eea265d37fbcc686",
-          "src/dependencies.ts": "dda6526c7ee57c6ec2d47d5e102d9866bf155e529d5e0edd2e38b390304b336d"
+          "src/network.ts": "6562a35699134e144a1a96a87724207a591bf41b615e6aba131fe2c48ff65cdd",
+          "src/ingestion.ts": "86b6a0e53c53e51067b5efa470787f11ffe640956c4bbf4defec97b4934b77e3",
+          "src/dependencies.ts": "0f1b131a82f130cd001d63acbdc82acc6ce20ae8d55518bf3964b6018ae10172",
+          "test/network.integration.test.ts": "64ba70fa59700d49599a12a6ac87b4336eaa93fe2b62eb5f47d11c05a618fc7f"
         },
-        "observation": "The policy validates dns.lookup results, but the subsequent global fetch call performs an independent connection resolution; redirects repeat the same split validation and connection path."
+        "observation": "Every initial request and redirect hop connects through an Undici dispatcher whose lookup returns only the addresses validated by the DNS policy; missing or invalid address evidence fails before connection. Integration tests prove no independent connection resolution occurs."
       },
       "accountable_owner": {
         "login": "ramideltoro",
         "basis": "named owner of the affected repository",
         "acceptance_inferred": false
       },
-      "status": "pending",
-      "owner_action_required": true,
+      "status": "remediated",
+      "owner_action_required": false,
       "planned_remediation": "Bind each outbound connection, including every redirect hop, to the address set returned by the policy validation and add rebinding-focused integration tests.",
       "compensating_controls": [
         "feed URLs originate from the controlled scheduler path",
@@ -251,7 +353,20 @@
       ],
       "review_by": "2026-08-31",
       "reopen_trigger": "Any fetch or redirect connection can resolve an address independently after policy validation.",
-      "remediation": null,
+      "remediation": {
+        "summary": "Bound the fetcher's initial request and every redirect hop to the address set returned by policy validation and fail closed when validated address evidence is unavailable.",
+        "verification": "Fetcher post-merge CI passed 29 unit tests and 9 integration tests, including policy-address connection and pre-connect failure cases; the signed image was published and deployed in shadow mode; final status proved the exact digest healthy with one consumer and an empty queue.",
+        "rollback": "Use the fixed protected rollback action for fetcher only; any replacement must preserve address-bound dispatch and rebinding tests.",
+        "deployment_required": true,
+        "immutable_evidence": [
+          {"kind": "pull_request_merge", "url": "https://github.com/ramideltoro/nutsnews-worker-feed-fetcher/pull/20", "head_commit": "501ededcad48924b632b0547679f4dcb54ed4a90"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-feed-fetcher/actions/runs/30653472634", "head_commit": "501ededcad48924b632b0547679f4dcb54ed4a90", "run_id": 30653472634, "conclusion": "success"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-worker-feed-fetcher/actions/runs/30653472929", "head_commit": "501ededcad48924b632b0547679f4dcb54ed4a90", "run_id": 30653472929, "conclusion": "success"},
+          {"kind": "deployment_run", "url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30655683990", "head_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "run_id": 30655683990, "conclusion": "success"},
+          {"kind": "workflow_run", "url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30656141654", "head_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "run_id": 30656141654, "conclusion": "success"},
+          {"kind": "artifact", "url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30656141654/artifacts/8803290341", "head_commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "artifact_id": 8803290341, "artifact_digest": "sha256:538b6b65c68305492daca956487f71caaa9ef903ff7915105dc713d87a6ade81"}
+        ]
+      },
       "risk_acceptance": null
     },
     {
@@ -265,7 +380,7 @@
       ],
       "current_evidence": {
         "source_heads": [
-          {"repository": "ramideltoro/nutsnews-backend", "commit": "232d2a924a4677a7919fe8c4ca4a01aff6fcf749", "paths": [".github/workflows/protected-backend-ansible-apply.yml", "docs/worker-uplift-runtime-identities.json", "runbooks/WORKER_UPLIFT_SERVICE_RUNTIME.md"]}
+          {"repository": "ramideltoro/nutsnews-backend", "commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "paths": [".github/workflows/protected-backend-ansible-apply.yml", "docs/worker-uplift-runtime-identities.json", "runbooks/WORKER_UPLIFT_SERVICE_RUNTIME.md"]}
         ],
         "file_sha256": {
           ".github/workflows/protected-backend-ansible-apply.yml": "d6cb2737cf91a03fdc394326abbbbcb0a42d4230d630279bbc3f9ac48f9ce44e",
@@ -308,7 +423,7 @@
       ],
       "current_evidence": {
         "source_heads": [
-          {"repository": "ramideltoro/nutsnews-backend", "commit": "232d2a924a4677a7919fe8c4ca4a01aff6fcf749", "paths": [".github/workflows/backend-health-report.yml", ".github/workflows/backend-worker-runtime-operations.yml", "docs/worker-uplift-runtime-identities.json"]}
+          {"repository": "ramideltoro/nutsnews-backend", "commit": "b90cc40c4f89257676ad968b2818aea5375c6f18", "paths": [".github/workflows/backend-health-report.yml", ".github/workflows/backend-worker-runtime-operations.yml", "docs/worker-uplift-runtime-identities.json"]}
         ],
         "file_sha256": {
           ".github/workflows/backend-worker-runtime-operations.yml": "36452b44c2457e3b188104c7307934e38b824ac8b9b49491fefa8e1b224182b4",
@@ -359,16 +474,16 @@
       ],
       "current_evidence": {
         "source_heads": [
-          {"repository": "ramideltoro/nutsnews-worker-contracts", "commit": "bf10f4257a1ac7f3e5aef0c5a14f62ec51ae4bb2", "paths": [".github/workflows"]},
-          {"repository": "ramideltoro/nutsnews-worker-runtime", "commit": "43e7883554e250b2297d40266374cb4ff87d141c", "paths": [".github/workflows"]},
-          {"repository": "ramideltoro/nutsnews-worker-feed-scheduler", "commit": "ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396", "paths": [".github/workflows"]},
-          {"repository": "ramideltoro/nutsnews-worker-feed-fetcher", "commit": "5b82b3e27ef85e57fc9aec23a0815cde584758eb", "paths": [".github/workflows"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-canonicalizer", "commit": "64d6f59920ec6aa5fb56028de99f7600ecb5be2d", "paths": [".github/workflows"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-enrichment", "commit": "edd63d8acd4a46a33aea4b043e3dc8dfd95af310", "paths": [".github/workflows"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-approval", "commit": "38185c74717221453c662f4ba1b093315eff5b83", "paths": [".github/workflows"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-translation", "commit": "d3b68668c7b714500d7efd204ecf33987a34e3ee", "paths": [".github/workflows"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-persistence", "commit": "6dae69d96b4b081b23b5e1d85e10133ee36a6674", "paths": [".github/workflows"]},
-          {"repository": "ramideltoro/nutsnews-worker-article-publication", "commit": "5a9e3c09a8572a7978687bcb7afec548e3934a63", "paths": [".github/workflows"]}
+          {"repository": "ramideltoro/nutsnews-worker-contracts", "commit": "663e5b6053666ebf5fbcf9ed79c02d34193d215c", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-runtime", "commit": "9d3ad5998eaa2c2d2d157293f77e86a8c22a38b5", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-feed-scheduler", "commit": "938009f7ed7529a28eda81c8189c207b6e449a32", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-feed-fetcher", "commit": "501ededcad48924b632b0547679f4dcb54ed4a90", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-canonicalizer", "commit": "64dea55ad8f0e9b67e746b5d4363d43762fea792", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-enrichment", "commit": "c7a464e54eda1ed9e5f82d8dc545b1f7f7a36ec0", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-approval", "commit": "6597030ffcc07c51fb1259b3152d2645f5927d75", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-translation", "commit": "d1206b73157305128b3bf5dc6bf5a7bcbb4c818d", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-persistence", "commit": "e646a51bfea5142d769e0980608dc86f6c7623f7", "paths": [".github/workflows"]},
+          {"repository": "ramideltoro/nutsnews-worker-article-publication", "commit": "47f05a5e177d63c43f18ac203ec773d606a2fbf4", "paths": [".github/workflows"]}
         ],
         "ruleset_snapshot": [
           {"repository": "ramideltoro/nutsnews-worker-contracts", "ruleset_id": 19594883, "name": "protect-main", "enforcement": "active", "required_approving_review_count": 0},
@@ -409,11 +524,6 @@
     "ready": false,
     "status": "blocked",
     "unresolved_findings": [
-      "SEC-124-002",
-      "SEC-124-003",
-      "SEC-124-004",
-      "SEC-124-005",
-      "SEC-124-006",
       "SEC-124-007",
       "SEC-124-008",
       "SEC-124-009"

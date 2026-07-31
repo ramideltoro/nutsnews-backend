@@ -350,7 +350,7 @@
     },
     {
       "path": "docs/worker-uplift-security-dispositions.json",
-      "sha256": "8cac00ac351bee664a9a8cd5478491550e31e253add079995217e8051cbea78d"
+      "sha256": "6a72368c042430daf8a26f8b91403d80f24d9180f5e7595f9d0456a111fcb415"
     },
     {
       "path": "docs/worker-uplift-shadow-soak-capacity-report.json",
@@ -625,18 +625,13 @@
     "review_merge_commit": "b619cf91504eafca21f70c5d68888563f5fca7a9",
     "post_merge_checks_run": 30484088483,
     "disposition_artifact": "docs/worker-uplift-security-dispositions.json",
-    "disposition_artifact_sha256": "8cac00ac351bee664a9a8cd5478491550e31e253add079995217e8051cbea78d",
+    "disposition_artifact_sha256": "6a72368c042430daf8a26f8b91403d80f24d9180f5e7595f9d0456a111fcb415",
     "disposition_tracking_issue": "ramideltoro/nutsnews-worker#164",
     "current_record_validator": "python3 scripts/validate_worker_uplift_security_dispositions.py",
     "closure_validator": "python3 scripts/validate_worker_uplift_security_dispositions.py --enforce-closure",
     "closure_ready": false,
     "unresolved_critical_or_high_findings": [],
     "residual_findings_requiring_gate_disposition": [
-      "SEC-124-002",
-      "SEC-124-003",
-      "SEC-124-004",
-      "SEC-124-005",
-      "SEC-124-006",
       "SEC-124-007",
       "SEC-124-008",
       "SEC-124-009"

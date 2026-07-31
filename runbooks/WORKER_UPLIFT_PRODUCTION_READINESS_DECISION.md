@@ -196,6 +196,20 @@ workflow. In particular:
 - implementation of scheduling and reversible owner/write controls belongs
   to downstream issues `#150` and `#126`, not #125.
 
+The current #164 record is
+`docs/worker-uplift-security-dispositions.json`. Its normal validator confirms
+that all eight findings have current scope, evidence, an accountable named
+owner, controls, a review date, and a remediation path without treating a
+pending entry as acceptance. Its closure form is deliberately stricter:
+
+```bash
+python3 scripts/validate_worker_uplift_security_dispositions.py --enforce-closure
+```
+
+That command must pass before the security-residual readiness item can pass.
+While it fails, #125 remains NO-GO. Neither repository ownership nor the
+historical generic #124 owner strings supply residual-risk acceptance.
+
 ## Cloudflare failover rule
 
 The current read-only API evidence proves:

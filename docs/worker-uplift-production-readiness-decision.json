@@ -349,6 +349,10 @@
       "sha256": "89c837e7375a04629d4d3e33cf65e1a5b8661365a05eaaaff7c722c8d22e2d56"
     },
     {
+      "path": "docs/worker-uplift-security-dispositions.json",
+      "sha256": "8cac00ac351bee664a9a8cd5478491550e31e253add079995217e8051cbea78d"
+    },
+    {
       "path": "docs/worker-uplift-shadow-soak-capacity-report.json",
       "sha256": "e327379b89c66022ca17e85100c7da8355b7efe12bb0485103de08911df84f46"
     },
@@ -616,10 +620,16 @@
     }
   },
   "security_gate": {
-    "status": "blocked_pending_named_owner_disposition",
+    "status": "blocked_pending_validated_dispositions",
     "review_artifact": "docs/worker-uplift-security-review.json",
     "review_merge_commit": "b619cf91504eafca21f70c5d68888563f5fca7a9",
     "post_merge_checks_run": 30484088483,
+    "disposition_artifact": "docs/worker-uplift-security-dispositions.json",
+    "disposition_artifact_sha256": "8cac00ac351bee664a9a8cd5478491550e31e253add079995217e8051cbea78d",
+    "disposition_tracking_issue": "ramideltoro/nutsnews-worker#164",
+    "current_record_validator": "python3 scripts/validate_worker_uplift_security_dispositions.py",
+    "closure_validator": "python3 scripts/validate_worker_uplift_security_dispositions.py --enforce-closure",
+    "closure_ready": false,
     "unresolved_critical_or_high_findings": [],
     "residual_findings_requiring_gate_disposition": [
       "SEC-124-002",
@@ -727,7 +737,7 @@
     {
       "id": "security_residuals",
       "status": "block",
-      "evidence": "Eight medium/low #124 residual findings expired at #125 and have no named owner remediation or acceptance decision."
+      "evidence": "The source-controlled #164 disposition contract records all eight medium/low #124 residuals with current immutable source evidence and a named accountable repository owner, but every decision remains pending. Its strict closure validator fails closed until each finding has remediation evidence or explicit non-expired owner acceptance."
     },
     {
       "id": "operations_runbook",
@@ -805,7 +815,7 @@
       "status": "open",
       "owner_repository": "ramideltoro/nutsnews-backend",
       "issue": "ramideltoro/nutsnews-worker#164",
-      "required_resolution": "A named owner must record remediation or explicit bounded residual-risk acceptance for every #124 finding that expires at #125."
+      "required_resolution": "Make the #164 closure validator pass by recording immutable remediation evidence or explicit bounded, non-expired, named-owner residual-risk acceptance for every #124 finding."
     },
     {
       "id": "control_implementation_plan",

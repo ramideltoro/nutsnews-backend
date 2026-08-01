@@ -17,6 +17,7 @@ GRAFANA_WORKFLOW = ROOT / ".github" / "workflows" / "backend-grafana-metrics.yml
 CREDENTIAL_WORKFLOW = ROOT / ".github" / "workflows" / "backend-credential-readiness.yml"
 CHECKS_WORKFLOW = ROOT / ".github" / "workflows" / "backend-checks.yml"
 PROVISION_SCRIPT = ROOT / "scripts" / "provision_grafana_metrics.py"
+METRICS_EXPORTER = ROOT / "ansible" / "roles" / "backend_baseline" / "files" / "nutsnews_metrics_textfile.py"
 WORKFLOW_DIR = ROOT / ".github" / "workflows"
 
 MANAGEMENT_NAMES = {"GRAFANA_URL", "GRAFANA_SERVICE_ACCOUNT_TOKEN"}
@@ -51,6 +52,7 @@ def main() -> int:
     credential_workflow = text(CREDENTIAL_WORKFLOW)
     checks_workflow = text(CHECKS_WORKFLOW)
     provision_script = text(PROVISION_SCRIPT)
+    metrics_exporter = text(METRICS_EXPORTER)
     workflows = workflow_texts()
 
     if handoff.get("resource_management_owner") != "ramideltoro/nutsnews-infra":
@@ -141,6 +143,23 @@ def main() -> int:
     for credential in MANAGEMENT_NAMES:
         if credential in provision_script:
             errors.append(f"backend Grafana script must not reference {credential}")
+
+    for fragment in (
+        "available = identity_valid and expected_valid and mode_valid and pairing_valid",
+        'if available and raw_mode == "production":',
+        'ingestion_owner = "worker-uplift"',
+        'write_gate = "enabled"',
+        'elif available and raw_mode == "shadow":',
+        'ingestion_owner = "legacy-worker"',
+        'write_gate = "disabled"',
+        'ingestion_owner = "unknown"',
+        'write_gate = "unknown"',
+        '"nutsnews_backend_worker_uplift_deployment_info"',
+        '"ingestion_owner": ingestion_owner',
+        '"write_gate": write_gate',
+    ):
+        if fragment not in metrics_exporter:
+            errors.append(f"backend ownership telemetry missing fragment: {fragment}")
 
     if "python3 scripts/validate_backend_grafana_handoff.py" not in checks_workflow:
         errors.append("backend checks must run the Grafana handoff validator")

@@ -351,6 +351,15 @@ def worker_uplift_ownership_metric_lines() -> list[str]:
     available = identity_valid and expected_valid and mode_valid and pairing_valid
     normalized_mode = raw_mode if mode_valid else "unknown"
     expected_active = int(raw_expected_active) if available else 0
+    if available and raw_mode == "production":
+        ingestion_owner = "worker-uplift"
+        write_gate = "enabled"
+    elif available and raw_mode == "shadow":
+        ingestion_owner = "legacy-worker"
+        write_gate = "disabled"
+    else:
+        ingestion_owner = "unknown"
+        write_gate = "unknown"
     return [
         "# HELP nutsnews_backend_worker_uplift_ownership_available Whether the protected host ownership signal is valid.",
         "# TYPE nutsnews_backend_worker_uplift_ownership_available gauge",
@@ -363,7 +372,11 @@ def worker_uplift_ownership_metric_lines() -> list[str]:
         metric(
             "nutsnews_backend_worker_uplift_deployment_info",
             1,
-            {"mode": normalized_mode},
+            {
+                "ingestion_owner": ingestion_owner,
+                "mode": normalized_mode,
+                "write_gate": write_gate,
+            },
         ),
     ]
 

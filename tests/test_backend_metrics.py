@@ -71,6 +71,24 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertIn("nutsnews_backend_worker_uplift_ownership_available 1", output)
         self.assertNotIn("exported_host", output)
         self.assertIn('mode="production"', output)
+        self.assertIn('ingestion_owner="worker-uplift"', output)
+        self.assertIn('write_gate="enabled"', output)
+
+        with mock.patch.dict(
+            "os.environ",
+            {
+                "NUTSNEWS_WORKER_UPLIFT_EXPECTED_ACTIVE": "0",
+                "NUTSNEWS_WORKER_UPLIFT_DEPLOYMENT_MODE": "shadow",
+                "NUTSNEWS_DEPLOYMENT_ENVIRONMENT": "production",
+                "NUTSNEWS_TELEMETRY_HOST": "backend.nutsnews.com",
+            },
+            clear=False,
+        ):
+            shadow = "\n".join(metrics.worker_uplift_ownership_metric_lines())
+        self.assertIn("nutsnews_backend_worker_uplift_ownership_available 1", shadow)
+        self.assertIn('mode="shadow"', shadow)
+        self.assertIn('ingestion_owner="legacy-worker"', shadow)
+        self.assertIn('write_gate="disabled"', shadow)
 
         with mock.patch.dict(
             "os.environ",
@@ -81,8 +99,10 @@ class BackendMetricsTests(unittest.TestCase):
             clear=False,
         ):
             invalid = "\n".join(metrics.worker_uplift_ownership_metric_lines())
-        self.assertIn("nutsnews_backend_worker_uplift_ownership_available", invalid)
-        self.assertIn(" 0", invalid)
+        self.assertIn("nutsnews_backend_worker_uplift_ownership_available 0", invalid)
+        self.assertIn("nutsnews_backend_worker_uplift_expected_active 0", invalid)
+        self.assertIn('ingestion_owner="unknown"', invalid)
+        self.assertIn('write_gate="unknown"', invalid)
 
     def test_worker_uplift_deployed_identity_is_exact_bounded_and_fail_closed(self):
         metrics = load_metrics_module()

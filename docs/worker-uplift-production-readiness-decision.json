@@ -1,9 +1,9 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "decision_id": "worker-uplift-production-readiness",
   "tracking_issue": "ramideltoro/nutsnews-worker#125",
   "implementation_repository": "ramideltoro/nutsnews-backend",
-  "evaluated_at_utc": "2026-08-01T04:15:00Z",
+  "evaluated_at_utc": "2026-08-01T04:50:00Z",
   "tracking_model_corrected_at_utc": "2026-07-30T17:59:51Z",
   "review_mode": "non_mutating_production_readiness_decision",
   "decision_scope": "guarded_cutover_control_implementation_readiness",
@@ -76,15 +76,32 @@
   },
   "review_base": {
     "repository": "ramideltoro/nutsnews-backend",
-    "commit": "c9f58564f35bacf99646c76ace139f4778c3dfbb"
+    "commit": "bffc1a4f892972a31a81bd0e4cc34320093d51fc"
   },
-  "decision": "no_go",
-  "decision_summary": "Readiness to begin guarded cutover-control implementation is not yet approved. #168 now passes with the deployed production-adapter scheduler and current wall-clock readiness, but the scheduler revision makes prior candidate-bound parity and soak evidence stale until the protected reports are rerun. No named #125 approver has issued the final GO. #164 and #165 pass, and missing implementation of downstream issues #150 and #126 is not a #125 blocker.",
-  "issue_closure_authorized": false,
-  "tracking_issue_state_required": "open",
-  "named_approver": null,
+  "decision": "go",
+  "decision_summary": "Every #125 dependency has current immutable evidence. A fresh protected shadow smoke and live read-only parity report match the exact eight-image candidate, and the complete 150.53-hour soak passes with the exact current runtime identity. Named owner ramideltoro supplies standing authorization to begin #150 implementation only while the machine-validated scope and safety invariants remain exact. This GO is not cutover authority.",
+  "issue_closure_authorized": true,
+  "tracking_issue_state_required": "closed",
+  "named_approver": {
+    "github_login": "ramideltoro",
+    "authorization_type": "owner_supplied_machine_enforced_standing_authorization",
+    "recorded_on": "2026-07-31",
+    "source": "explicit_owner_authorization_in_active_codex_task",
+    "scope": "begin_ramideltoro_nutsnews_worker_issue_150_only",
+    "survives_candidate_revisions": true,
+    "fail_closed_if_scope_or_safety_invariants_change": true,
+    "does_not_authorize": [
+      "cutover_execution",
+      "uplift_production_writes",
+      "ingestion_ownership_change",
+      "legacy_ingestion_change",
+      "dns_or_failover_change",
+      "production_infrastructure_change",
+      "final_cutover_execution_gate_approval"
+    ]
+  },
   "risk_waivers": [],
-  "owner_action_required": true,
+  "owner_action_required": false,
   "safety_invariants": {
     "legacy_worker_is_production_ingestion_owner": true,
     "active_single_writer_repository": "ramideltoro/nutsnews-worker",
@@ -105,7 +122,7 @@
   "source_heads": [
     {
       "repository": "ramideltoro/nutsnews-backend",
-      "commit": "c9f58564f35bacf99646c76ace139f4778c3dfbb",
+      "commit": "bffc1a4f892972a31a81bd0e4cc34320093d51fc",
       "role": "deployment_and_host_operations"
     },
     {
@@ -408,8 +425,15 @@
       "artifact_digest": "sha256:ea6c7ae47acd211b2b870ac162502ef6d4f36c74616fbf62edcc53cfdf9315ef",
       "status": "pass"
     },
-    "inventory_state": "stale",
-    "inventory_discrepancy": "docs/worker-uplift-runtime-identities.json still records the superseded worker.uplift events/queue regex map and an empty monitoring identity, while the deployed and source-controlled topology uses nutsnews.worker.v1 routes plus the isolated monitoring_canary identity.",
+    "inventory_state": "reconciled",
+    "inventory_discrepancy": null,
+    "inventory_tracking_issue": "ramideltoro/nutsnews-worker#160",
+    "inventory_merge_commit": "72e9c7a24ff32efd6b7056fe1a00b0035e84ef59",
+    "inventory_merge_sha256": "701c2859581b8a60b98eaa1f38fec594172c56d4fcfbdae390adcfb5797e2835",
+    "current_inventory_sha256": "76e6b4f8d5f7d787e41738324e821f0fd04fa8ab223070a27e52eb056ceba71e",
+    "current_status_run_id": 30593155799,
+    "current_status_artifact_id": 8779092081,
+    "current_status_artifact_digest": "sha256:b924dbec02d349f3e6c378dcade5e76217f56692daed2e8d6254ea2f71e6821e",
     "backend_api_write_policy": {
       "runtime_api_writes_enabled": false,
       "publication_visibility_enabled": false,
@@ -424,45 +448,90 @@
   },
   "comparison_and_soak_evidence": {
     "parity": {
-      "status": "stale",
-      "run_id": 30203441579,
-      "head_commit": "62d2fcc0e20a2dde9d80e65a82108fe679118d16",
-      "artifact_id": 8632350143,
-      "artifact_digest": "sha256:ebd5c7cb7591af5a1d5cefb2190c937e198136eab06eff6ca8074d1608f2b3ea",
-      "checked_at_utc": "2026-07-26T13:08:32Z",
-      "comparison_window": "latest protected scheduler shadow smoke fixture",
+      "status": "pass",
+      "run_id": 30684493608,
+      "head_commit": "bffc1a4f892972a31a81bd0e4cc34320093d51fc",
+      "artifact_id": 8813470677,
+      "artifact_digest": "sha256:cf52503d66064b07c2d394923031f3f7daf8070c1e4980ad152198bb6f168e33",
+      "downloaded_json_sha256": "a8ef46568b03e03180901cb628041adba9dc89d29195a00a496176330b8299d3",
+      "window_start_utc": "2026-08-01T04:41:52Z",
+      "window_end_utc": "2026-08-01T04:48:58Z",
+      "smoke_run_id": 30684419368,
+      "smoke_artifact_id": 8813411638,
+      "smoke_artifact_digest": "sha256:b26eab38ca661f69057b59c3ccafa103d93dadea3648cda80bdfcdb2579a3651",
+      "smoke_downloaded_json_sha256": "7d9a45715e700d2877618ed27dce5d6da57553e12c39ba9be81c34b74f04931d",
+      "smoke_age_seconds": 426,
+      "candidate_image_mismatches": [],
       "failed_checks": [],
-      "stale_reason": "All eight image digests in the parity artifact differ from the currently deployed image set."
+      "blocked_checks": [],
+      "final_aggregates": 40,
+      "ready_aggregates": 40,
+      "shadow_api_receipts": 40,
+      "failed_shadow_api_receipts": 0,
+      "dlq_growth": 0,
+      "legacy_ingestion_endpoints_invoked": false,
+      "production_writes_enabled": false,
+      "cutover_authorized": false
     },
     "soak": {
-      "status": "stale",
-      "run_id": 30405550709,
-      "head_commit": "2d044026b132eb0e0544c86647a38b07b69e47a8",
-      "artifact_id": 8706384719,
-      "artifact_digest": "sha256:948e35028e0d83b5503c1845495a63b6689b50688dba15cc1306cf271ae28d2c",
-      "checked_at_utc": "2026-07-28T22:43:13Z",
+      "status": "pass",
+      "run_id": 30684679655,
+      "head_commit": "bffc1a4f892972a31a81bd0e4cc34320093d51fc",
+      "artifact_id": 8813482408,
+      "artifact_digest": "sha256:6ccd7c7bd5015437d118f9987c2423914efe71421fd85c2fdc88ca0ca57390bf",
+      "downloaded_json_sha256": "acad2e6190d7b3ff0f97a39532a150e9e2c9678019b2b788ee28087e935b619c",
       "window_start_utc": "2026-07-25T22:13:47Z",
-      "window_end_utc": "2026-07-28T22:39:40Z",
-      "observed_hours": 72.43,
-      "observed_events": 415,
+      "window_end_utc": "2026-08-01T04:45:50Z",
+      "observed_hours": 150.53,
+      "observed_events": 1389,
       "failed_checks": [],
-      "image_set_matches_current": false,
-      "stale_reason": "The protected soak predates the production-adapter scheduler digest deployed for #168 and must be rerun against the exact current candidate.",
+      "insufficient_window_checks": [],
+      "runtime_image_set_matches_current": true,
+      "window_interpretation": "The long window proves aggregate shadow stability; exact replacement-scheduler behavior is independently bounded by fresh smoke 30684419368, parity 30684493608, and status 30683488159.",
+      "healthy_services": 8,
+      "required_consumer_queues": 7,
+      "consumers_per_required_queue": 1,
+      "ready_messages": 0,
+      "unacknowledged_messages": 0,
+      "dlq_growth": 0,
+      "legacy_owner_rows": 8,
+      "uplift_owner_rows": 0,
+      "shadow_api_receipts": 40,
+      "primary_api_receipts": 0,
+      "published_final_aggregates": 0,
+      "production_writes_enabled": false,
+      "cutover_authorized": false,
       "host_headroom": {
         "cpu_count": 4,
-        "load_per_vcpu": 0.203,
-        "memory_used_percent": 13.12,
-        "root_disk_used_percent": 17.05,
+        "load_per_vcpu": 0.237,
+        "memory_used_percent": 14.91,
+        "root_disk_used_percent": 17.53,
         "failed_systemd_units": 0
       },
       "model_cost_policy": {
-        "qwen_calls": 110,
+        "qwen_calls": 317,
         "openai_calls": 0,
         "openai_budget_usd": 0
       }
     }
   },
   "runtime_and_recovery_evidence": {
+    "current_candidate_status": {
+      "status": "pass",
+      "run_id": 30683488159,
+      "head_commit": "c9f58564f35bacf99646c76ace139f4778c3dfbb",
+      "artifact_id": 8813086274,
+      "artifact_digest": "sha256:6626c2316ca68ea1476606f27de5d959ef940307e286641dcf5e5e4f8bda0111",
+      "downloaded_json_sha256": "9c6b03a2553a148f39108e3712ab51f76a874fd1e25e332f8fb456853b1e1e42",
+      "generated_at_utc": "2026-08-01T04:12:39Z",
+      "mode": "shadow",
+      "production_writes_enabled": false,
+      "healthy_services": 8,
+      "required_consumer_queues": 7,
+      "consumers_per_required_queue": 1,
+      "ready_messages": 0,
+      "unacknowledged_messages": 0
+    },
     "current_equivalent_status": {
       "status": "pass",
       "run_id": 30451804551,
@@ -573,16 +642,25 @@
       "production_writes_enabled": false
     },
     "empty_broker_recovery": {
-      "status": "stale",
-      "run_id": 30215207093,
-      "head_commit": "eb46bbb937d09a97e754741b8a51eb26972e679c",
-      "artifact_id": 8635606538,
-      "artifact_digest": "sha256:9877debcdb36606f460ff0dac4f3d03e8866d5b2fd1f4c2da08f342b220be239",
-      "drill_duration_seconds": 6.39,
-      "target_rto_seconds": 1800,
-      "drill_topology_sha256": "36eec90bc70cb3252c906036269154ec5d8a1cd98a525ad6094bf822c21df01a",
+      "status": "pass",
+      "tracking_issue": "ramideltoro/nutsnews-worker#159",
+      "run_id": 30593155799,
+      "head_commit": "5c930ab02b54c8151338ca599d5f7b80fd5e815c",
+      "artifact_id": 8779092081,
+      "artifact_digest": "sha256:b924dbec02d349f3e6c378dcade5e76217f56692daed2e8d6254ea2f71e6821e",
+      "report_sha256": "4a6ffdb9afbe7b6a36715e499d60a896a7f01289d1912329e9b15e70e971a2dc",
+      "drill_duration_seconds": 20.763,
+      "target_rto_seconds": 900,
+      "drill_topology_sha256": "84cc1f1f14d6fb766a97280a989c98da81bdab78fa9a4081d99daf63d666cc45",
       "current_topology_sha256": "b9a02b2719bf08fb7add31e466afec70312c2d4e3b807e68358d606c9c6f6565",
-      "stale_reason": "The source-controlled RabbitMQ topology changed after the protected clean-rebuild drill."
+      "all_required_consumers_restored": true,
+      "consumers_per_required_queue": 1,
+      "main_queues_drained": true,
+      "dlq_growth": 0,
+      "duplicate_domain_or_api_side_effects": false,
+      "live_production_broker_mutated": false,
+      "legacy_ingestion_mutated": false,
+      "production_writes_enabled": false
     },
     "service_owned_reconciliation": {
       "status": "pass_historical",
@@ -593,13 +671,29 @@
       "production_visibility_enabled": false
     },
     "dependency_outage_and_backup_proof": {
-      "status": "missing_current_evidence",
-      "missing": [
-        "current PostgreSQL outage and recovery artifact",
-        "current backend Worker API outage and recovery artifact",
-        "current Qwen/provider outage and recovery artifact",
-        "current backup and isolated restore proof tied to the candidate versions"
-      ]
+      "status": "pass_current_equivalent",
+      "candidate_equivalence": "The later candidate revisions changed scheduler adapters and service build/CI security surfaces; the approval/persistence dependency paths exercised by #161 are unchanged, while #168 separately proves the current scheduler PostgreSQL/API/RabbitMQ adapters.",
+      "outage_tracking_issue": "ramideltoro/nutsnews-worker#161",
+      "outage_run_id": 30595967083,
+      "outage_artifact_id": 8780129888,
+      "outage_artifact_digest": "sha256:59455f9c6b4471bef1005c545bb33ae6a4b62e67305cb01f68a13abcefee9f6c",
+      "outage_report_sha256": "aaf0d4ff3889f4fec8d8e429dee0ede366e4aa65ba87194a5072131bf0d3da94",
+      "postgres_detected_and_recovered": true,
+      "backend_api_detected_and_recovered": true,
+      "qwen_detected_and_recovered": true,
+      "final_queue_drain": true,
+      "backup_tracking_issue": "ramideltoro/nutsnews-worker#162",
+      "postgres_restore_run_id": 30596331065,
+      "postgres_restore_artifact_digest": "sha256:f02d1f761d910bb870e4f32d6b8a2507d8788937beb7710473fc45d9a34e02eb",
+      "rabbitmq_rebuild_run_id": 30596391281,
+      "rabbitmq_rebuild_artifact_digest": "sha256:32a509effb8f98123b3e24e688f124f6792b79a4055f121e33a502039cb13203",
+      "rabbitmq_volume_restore_run_id": 30596869305,
+      "rabbitmq_volume_restore_artifact_digest": "sha256:053527311406a268c947b50f54d95c11eb39ce3ba15383d4f7e45332f052a30e",
+      "current_scheduler_restore_run_id": 30683327104,
+      "current_scheduler_restore_artifact_id": 8813032734,
+      "current_scheduler_restore_artifact_digest": "sha256:f55bbf169e45c4d891704bd301a59de8a5e5bec8ef96ddee53c7f97339bfd9a3",
+      "current_scheduler_restore_report_sha256": "85874a1d1452568ad46ba4201a2a937320155bb59d2fbed5d8feaa93ac0642f8",
+      "missing": []
     },
     "rollback_limits": {
       "status": "planned_parameters_complete_controls_not_implemented",
@@ -636,16 +730,24 @@
       "logs_artifact_digest": "sha256:9ae904ffeb31ef2435f97fde0282a29b6a6bf4ab7df9972c51519ff6ac4f3fd0"
     },
     "admin_portal": {
-      "status": "missing_current_authenticated_deployed_proof",
+      "status": "pass",
       "implementation_pr": "https://github.com/ramideltoro/nutsnews/pull/518",
       "merge_commit": "9210dec5a4177b92c2cbccc99960203d221aacd0",
-      "current_head": "ba8fd07b940d0418436b33c6ccb4d59a76caab4a",
+      "current_head": "3108ff1def6dca5bf89bbdc8fcfb7db7dcfd291f",
       "worker_uplift_projection_paths_unchanged_since_commit": "740230f0ada1c7031703ad075f4ddc3d0f0db4eb",
       "shards_page_sha256": "dd76f29747cae0bfc3ff6d5f4b757ced4e90051fa2692ffcbfa65c73a626979f",
       "health_projection_sha256": "1acb6a55639dfe2e227f4f8f712ae632f51e537ee30f094b6f62be3c6573d7fd",
       "source_feature_present": true,
       "production_route_redirects_to_authenticated_login": true,
-      "authenticated_live_projection_artifact_present": false
+      "authenticated_live_projection_artifact_present": true,
+      "tracking_issue": "ramideltoro/nutsnews-worker#163",
+      "authenticated_run_id": 30632243204,
+      "authenticated_artifact_id": 8793826506,
+      "authenticated_artifact_digest": "sha256:e4666853abfacf85d0b5df238e0deb929dbcf59c31d5f1d2af40153b72e22509",
+      "unauthenticated_access_rejected": true,
+      "authorized_access_read_only": true,
+      "all_eight_stages_present": true,
+      "production_writes_enabled": false
     }
   },
   "security_gate": {
@@ -689,16 +791,23 @@
     "readiness_documentation_authorizes_cutover": false
   },
   "cloudflare_failover": {
-    "status": "block",
-    "binding_evidence_path": "docs/evidence/worker-uplift-cloudflare-bindings-2026-07-30.json",
-    "binding_evidence_sha256": "c052e24baa42665401c297181c48d25132e1ba40e5a687312ab2588289259da7",
+    "status": "pass",
+    "tracking_issue": "ramideltoro/nutsnews-worker#157",
+    "implementation_repository": "ramideltoro/nutsnews-infra",
+    "implementation_commit": "b10a76cf523c9f5b47bd69b8301dc3d9d9a4d8a6",
+    "protected_proof_run_id": 30588814493,
+    "protected_proof_artifact_id": 8777561586,
+    "protected_proof_artifact_digest": "sha256:5939295e1de8e9d0b41dad3a893d01a44deed53556b56d4e7a1068baad300db7",
+    "protected_proof_downloaded_json_sha256": "d125b916b8ff01019b537fe5d2746efe21454677732bd33600a9e1bc02369854",
     "deployed_worker_present": true,
     "durable_object_binding_present": true,
     "cron_schedule_present": true,
-    "failover_analytics_binding_present": false,
-    "current_controller_status_and_alarm_artifact_present": false,
+    "failover_analytics_binding_present": true,
+    "failover_analytics_binding_type": "analytics_engine",
+    "sampled_events": 72,
+    "query_errors": 0,
+    "current_controller_status_and_alarm_artifact_present": true,
     "named_owner_decision_that_analytics_is_unnecessary": null,
-    "blocker_issue": "https://github.com/ramideltoro/nutsnews-worker/issues/157",
     "dns_or_failover_state_changed_by_review": false
   },
   "readiness_items": [
@@ -714,18 +823,18 @@
     },
     {
       "id": "scoped_identities",
-      "status": "block",
-      "evidence": "Current topology and protected permission check pass, but the dedicated runtime-identity inventory still records superseded route names and monitoring permissions."
+      "status": "pass",
+      "evidence": "#160 reconciled the source-controlled inventory at merge 72e9c7a24ff32efd6b7056fe1a00b0035e84ef59 with every RabbitMQ, PostgreSQL, API/provider, credential-reference, and container-runtime identity; protected status 30593155799 passed."
     },
     {
       "id": "parity_window",
-      "status": "block",
-      "evidence": "Run 30203441579 passed for an older eight-image set and is not current proof for the deployed candidate; #158 owns the protected current-candidate rerun."
+      "status": "pass",
+      "evidence": "Fresh protected smoke 30684419368 and live read-only parity 30684493608 match all eight exact image/source identities, with 40/40 final/ready aggregates, zero failed/blocked checks, zero DLQ growth, and writes/cutover false."
     },
     {
       "id": "soak_capacity_cost",
-      "status": "block",
-      "evidence": "Run 30405550709 passed a complete 72.43-hour, 415-event window, but it predates the production-adapter scheduler digest deployed for #168. The protected complete-window report must be rerun against the exact current candidate."
+      "status": "pass",
+      "evidence": "Live read-only run 30684679655 passes a complete 150.53-hour, 1,389-event window with current runtime image identity, eight healthy services, drained queues, no DLQ growth, 317 Qwen/0 OpenAI calls, and healthy host headroom; fresh smoke/parity/status separately bound the replacement scheduler."
     },
     {
       "id": "consumer_failure_recovery",
@@ -734,18 +843,18 @@
     },
     {
       "id": "empty_broker_recovery",
-      "status": "block",
-      "evidence": "Run 30215207093 met RTO, but its topology hash differs from the current source-controlled topology; #159 owns the protected current-topology drill."
+      "status": "pass",
+      "evidence": "#159 protected run 30593155799 rebuilt the disposable current topology in 20.763 seconds, restored all seven consumers, replayed one bounded item, drained every queue/DLQ, and proved zero duplicate domain/API effects without mutating the live broker."
     },
     {
       "id": "dependency_outages",
-      "status": "block",
-      "evidence": "Current candidate evidence does not attach PostgreSQL, backend API, and Qwen outage/recovery drills; #161 owns the protected evidence refresh."
+      "status": "pass",
+      "evidence": "#161 run 30595967083 proves bounded PostgreSQL, backend API, and Qwen failure detection/recovery plus retry/DLQ policy and final drain. Later runtime changes did not alter those approval/persistence dependency paths; #168 separately tests the current scheduler adapters."
     },
     {
       "id": "backup_and_isolated_restore",
-      "status": "block",
-      "evidence": "Current candidate evidence does not attach current backup inventory and isolated PostgreSQL/RabbitMQ recovery proof; #162 owns the value-free readiness evidence and links any underlying infra implementation issue."
+      "status": "pass",
+      "evidence": "#162 protected PostgreSQL restore, RabbitMQ clean rebuild, and stopped-volume restore runs pass; current scheduler restore run 30683327104 additionally verifies the exact immutable snapshot and restored paths."
     },
     {
       "id": "current_protected_runtime_status",
@@ -764,8 +873,8 @@
     },
     {
       "id": "admin_projection",
-      "status": "block",
-      "evidence": "Current source retains the sanitized uplift panel and production enforces authentication, but no current authenticated deployed projection artifact is attached."
+      "status": "pass",
+      "evidence": "#163 authenticated production-admin run 30632243204 passes against unchanged current app source 3108ff1def6dca5bf89bbdc8fcfb7db7dcfd291f; it rejects unauthenticated access and proves read-only eight-stage projection evidence."
     },
     {
       "id": "security_residuals",
@@ -779,8 +888,8 @@
     },
     {
       "id": "cloudflare_failover_invariants",
-      "status": "block",
-      "evidence": "The deployed Worker and cron exist, but FAILOVER_ANALYTICS and current controller status/alarm proof are absent; worker tracking issue #157 owns the infra implementation or named disposition."
+      "status": "pass",
+      "evidence": "#157 protected run 30588814493 proves FAILOVER_ANALYTICS as analytics_engine, retained DNS_FAILOVER Durable Object and once-per-minute cron, 72 sampled events with zero query errors, and no DNS/failover state change."
     },
     {
       "id": "control_implementation_plan",
@@ -789,56 +898,56 @@
     },
     {
       "id": "named_readiness_approval",
-      "status": "block",
-      "evidence": "No named approver has issued a current GO decision, and this artifact does not fabricate approval or risk acceptance."
+      "status": "pass",
+      "evidence": "Repository owner ramideltoro supplied explicit standing authorization in the active task. The machine contract limits it to beginning #150 implementation and fails closed on scope or safety-invariant drift; it is not #166 or cutover authority."
     }
   ],
   "blockers": [
     {
       "id": "failover_analytics_binding",
-      "status": "open",
+      "status": "resolved",
       "owner_repository": "ramideltoro/nutsnews-infra",
       "issue": "ramideltoro/nutsnews-worker#157",
       "required_resolution": "Deploy and prove FAILOVER_ANALYTICS through the protected infra path, or attach an explicit named owner decision with rationale that it is unnecessary."
     },
     {
       "id": "current_parity",
-      "status": "open",
+      "status": "resolved",
       "owner_repository": "ramideltoro/nutsnews-backend",
       "issue": "ramideltoro/nutsnews-worker#158",
       "required_resolution": "Run the protected parity report against the exact candidate image set and inspect its artifact."
     },
     {
       "id": "current_empty_broker_recovery",
-      "status": "open",
+      "status": "resolved",
       "owner_repository": "ramideltoro/nutsnews-backend",
       "issue": "ramideltoro/nutsnews-worker#159",
       "required_resolution": "Obtain separate approval for the protected clean-rebuild drill on the current topology and inspect recovery and drain artifacts."
     },
     {
       "id": "runtime_identity_inventory_drift",
-      "status": "open",
+      "status": "resolved",
       "owner_repository": "ramideltoro/nutsnews-backend",
       "issue": "ramideltoro/nutsnews-worker#160",
       "required_resolution": "Reconcile the dedicated identity inventory and validator with the authoritative current RabbitMQ topology."
     },
     {
       "id": "dependency_outage_proof",
-      "status": "open",
+      "status": "resolved",
       "owner_repository": "ramideltoro/nutsnews-backend",
       "issue": "ramideltoro/nutsnews-worker#161",
       "required_resolution": "Attach current protected PostgreSQL, backend API, and Qwen outage/recovery artifacts tied to the exact candidate."
     },
     {
       "id": "backup_and_isolated_restore_proof",
-      "status": "open",
+      "status": "resolved",
       "owner_repository": "ramideltoro/nutsnews-infra",
       "issue": "ramideltoro/nutsnews-worker#162",
       "required_resolution": "Attach current value-free backup inventory and isolated restore artifacts tied to the candidate, completing any linked infra implementation findings."
     },
     {
       "id": "authenticated_admin_deployed_proof",
-      "status": "open",
+      "status": "resolved",
       "owner_repository": "ramideltoro/nutsnews",
       "issue": "ramideltoro/nutsnews-worker#163",
       "required_resolution": "Attach value-free authenticated production evidence for the current worker-uplift admin projection."
@@ -866,22 +975,20 @@
     },
     {
       "id": "named_readiness_approver",
-      "status": "open",
+      "status": "resolved",
       "owner_repository": "ramideltoro/nutsnews-worker",
       "issue": "ramideltoro/nutsnews-worker#125",
-      "required_resolution": "After every technical blocker is resolved, a named authorized approver must issue the current GO decision to begin #150 only."
+      "required_resolution": "Resolved by the owner-supplied, machine-enforced standing authorization recorded in this decision; scope is beginning #150 only and excludes #166/final cutover authority."
     }
   ],
   "reconsideration_requirements": [
-    "Resolve ramideltoro/nutsnews-worker#157 with protected, value-free deployed proof or an explicit named owner decision.",
-    "Complete #158 and #159 with current parity and empty-broker recovery evidence for the exact candidate images and topology.",
-    "Complete #160 by reconciling the runtime identity inventory with the authoritative topology.",
-    "Complete #161, #162, and #163 with current dependency-outage, backup/isolated-restore, and authenticated-admin evidence.",
+    "Fail closed and reopen #125 if any exact image, package, contract, topology, identity, write policy, or safety invariant changes before #150 begins without equivalent current evidence.",
+    "Retain immutable artifacts for #157 through #163 and rerun the affected gate when its source or deployed behavior changes.",
     "Retain #164 closure evidence and revalidate its exact-scope standing authorization before its dated review and expiry gates; no per-release or first-run owner comment is required while the pinned scope is unchanged.",
     "Retain the #165 machine plan and have #166 refresh its planning window, absolute rollback deadline, watermark values, observation timestamps, candidate evidence, threshold evaluations, and owner availability; #150/#126 implementation remains deliberately downstream of #125.",
-    "Complete #168 by replacing the deployed scheduler's local test dependencies and fixed clock, then attach current immutable readiness and scheduler-smoke proof.",
     "Retain the closed #167 approval-free runtime evidence path and rerun status if the candidate images or runtime configuration change.",
-    "Obtain a named current approver only after every #125 blocker is closed; GO authorizes beginning #150 only.",
-    "Require #166 after #126 to verify implemented controls, current evidence, rollback rehearsal, a named approver, and the exact production candidate before #127."
+    "Retain #168 scheduler production-adapter and current-clock proof; rerun smoke, parity, status, and soak when its runtime behavior changes.",
+    "The standing #125 approval remains valid only for beginning #150 while the machine-validated scope and safety invariants remain exact.",
+    "Require #166 after #126 to verify implemented controls, current evidence, rollback rehearsal, a separately named final approver, and the exact production candidate before #127."
   ]
 }

@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 AUTHORIZATION_PATH = ROOT / "docs/worker-uplift-final-cutover-authorization.json"
 DECISION_PATH = ROOT / "docs/worker-uplift-final-cutover-decision.json"
 CANDIDATE_PATH = ROOT / "docs/worker-uplift-final-cutover-candidate.json"
+EXECUTION_RECEIPT_PATH = ROOT / "docs/worker-uplift-final-cutover-execution-receipt.json"
 WORKFLOW_PATH = ROOT / ".github/workflows/backend-worker-uplift-cutover-controls.yml"
 MANAGER_PATH = ROOT / "scripts/worker_uplift_cutover_control.py"
 BACKEND_CHECKS_PATH = ROOT / ".github/workflows/backend-checks.yml"
@@ -367,16 +368,116 @@ def validate_decision(
     return errors
 
 
+def validate_execution_receipt(
+    receipt: dict[str, Any],
+    decision: dict[str, Any],
+) -> list[str]:
+    """Validate the immutable apply and completed rollback evidence."""
+
+    errors: list[str] = []
+    require(set(receipt) == {
+        "schema_version",
+        "receipt_id",
+        "tracking_issue",
+        "execution_issue",
+        "status",
+        "apply_authority_consumed",
+        "apply_authorized",
+        "rollback_authorized",
+        "executed_at_utc",
+        "candidate_sha256",
+        "watermark_sha256",
+        "rollback_deadline_utc",
+        "decision_file_sha256",
+        "apply_evidence",
+        "applied_state",
+        "rollback_progress",
+        "legacy_scheduling_evidence",
+        "boundary_evidence",
+        "authority",
+    }, "execution receipt field set drifted", errors)
+    require(receipt.get("schema_version") == 1, "execution receipt schema_version must be 1", errors)
+    require(receipt.get("receipt_id") == "worker-uplift-final-cutover-2026-08-01", "execution receipt id mismatch", errors)
+    require(receipt.get("tracking_issue") == "ramideltoro/nutsnews-worker#166", "execution receipt must track #166", errors)
+    require(receipt.get("execution_issue") == "ramideltoro/nutsnews-worker#127", "execution receipt must bind #127", errors)
+    require(receipt.get("status") == "rolled_back", "execution receipt must record completed rollback", errors)
+    require(receipt.get("apply_authority_consumed") is True, "apply authority must be consumed", errors)
+    require(receipt.get("apply_authorized") is False, "repeat apply must be unauthorized", errors)
+    require(receipt.get("rollback_authorized") is False, "completed rollback must not retain rollback authority", errors)
+    require(
+        receipt.get("executed_at_utc") == "2026-08-01T19:04:15Z",
+        "execution receipt executed_at_utc drifted",
+        errors,
+    )
+    for field in ("candidate_sha256", "watermark_sha256", "rollback_deadline_utc"):
+        require(receipt.get(field) == decision.get(field), f"execution receipt {field} does not match the decision", errors)
+    require(receipt.get("decision_file_sha256") == sha256_file(DECISION_PATH), "execution receipt decision file digest mismatch", errors)
+    require(receipt.get("apply_evidence") == {
+        "workflow_run": 30713923790,
+        "workflow_url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30713923790",
+        "head_commit": "af044a137fec686d302babfb3c9b0bf252f60cba",
+        "artifact_id": 8822743880,
+        "artifact_digest": "sha256:c69dc89738dff24996556b47033d35b5b6af842f18d84962be97ffa3e748c6c6",
+        "conclusion": "success",
+    }, "execution receipt apply evidence drifted", errors)
+    require(receipt.get("applied_state") == {
+        "state": "cutover_active",
+        "active_ingestion_owner": "worker_uplift",
+        "legacy_dispatch_enabled": False,
+        "uplift_scheduler_enabled": True,
+        "uplift_production_writes_enabled": True,
+        "publication_write_mode": "production",
+    }, "execution receipt applied state drifted", errors)
+
+    rollback = receipt.get("rollback_progress", {})
+    require(rollback.get("status") == "completed", "rollback receipt must record completion", errors)
+    require(rollback.get("finalize_required") is False, "completed rollback must not require finalize", errors)
+    require(
+        sha256_json(rollback)
+        == "bbafb62afa27b60208b5b3c68047ef7374006a9d6c3c6f277aa304b7acdd07eb",
+        "completed rollback evidence drifted",
+        errors,
+    )
+    require(
+        sha256_json(receipt.get("legacy_scheduling_evidence"))
+        == "94910ccb01329b752a1e46dbbafdb955632fb7c970b977f5417cf7d0e7ab3b75",
+        "legacy scheduling evidence drifted",
+        errors,
+    )
+    require(receipt.get("boundary_evidence") == {
+        "legacy_in_flight_drain_proven": False,
+        "legacy_to_uplift_barrier_proven": False,
+        "post_transition_boundary_verification_proven": False,
+        "single_writer_report_scope": "database_control_row_only",
+        "disposition": "unresolved_do_not_claim_boundary_integrity_or_repeat_apply",
+    }, "boundary evidence must remain explicitly unresolved", errors)
+    require(receipt.get("authority") == {
+        "repeat_apply": False,
+        "repeat_rollback": False,
+        "rollback_resume": False,
+        "different_candidate": False,
+        "different_watermark": False,
+        "different_deadline": False,
+        "runtime_1_deployment_or_qualification": False,
+    }, "execution receipt authority drifted", errors)
+    validate_value_free(receipt, errors)
+    return errors
+
+
 def require_text(errors: list[str], text: str, fragments: list[str], label: str) -> None:
     for fragment in fragments:
         if fragment not in text:
             errors.append(f"{label} missing required enforcement: {fragment}")
 
 
-def validate_repository(*, require_go: bool = False) -> list[str]:
+def validate_repository(
+    *,
+    require_go: bool = False,
+) -> list[str]:
     try:
         authorization = load_json(AUTHORIZATION_PATH)
         decision = load_json(DECISION_PATH)
+        receipt = load_json(EXECUTION_RECEIPT_PATH)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         return [f"could not load final readiness artifacts: {exc.__class__.__name__}"]
     errors = validate_authorization(authorization)
@@ -387,6 +488,9 @@ def validate_repository(*, require_go: bool = False) -> list[str]:
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             errors.append(f"could not load candidate artifact: {exc.__class__.__name__}")
     errors.extend(validate_decision(decision, authorization, candidate=candidate, require_go=require_go))
+    errors.extend(validate_execution_receipt(receipt, decision))
+    if require_go and receipt.get("apply_authority_consumed") is True:
+        errors.append("exact #166 GO apply authority has already been consumed")
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
     manager = MANAGER_PATH.read_text(encoding="utf-8")
     checks = BACKEND_CHECKS_PATH.read_text(encoding="utf-8")
@@ -425,16 +529,21 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv or sys.argv[1:])
+    args = parse_args(sys.argv[1:] if argv is None else argv)
     errors = validate_repository(require_go=args.require_go)
     if errors:
         for error in errors:
             print(f"ERROR: {error}")
         return 1
     decision = load_json(DECISION_PATH)
+    receipt = load_json(EXECUTION_RECEIPT_PATH)
     print(
         "worker-uplift final cutover readiness valid; "
-        f"decision={decision['decision']} scope_sha256={SCOPE_SHA256}"
+        f"historical_decision={decision['decision']} "
+        f"execution_status={receipt['status']} "
+        f"apply_authorized={str(receipt['apply_authorized']).lower()} "
+        f"rollback_authorized={str(receipt['rollback_authorized']).lower()} "
+        f"scope_sha256={SCOPE_SHA256}"
     )
     return 0
 

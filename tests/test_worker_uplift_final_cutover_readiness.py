@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import contextlib
+import io
 import unittest
 
 from scripts import validate_worker_uplift_final_cutover_readiness as readiness
@@ -11,6 +13,7 @@ class WorkerUpliftFinalCutoverReadinessTests(unittest.TestCase):
         self.authorization = readiness.load_json(readiness.AUTHORIZATION_PATH)
         self.decision = readiness.load_json(readiness.DECISION_PATH)
         self.candidate = readiness.load_json(readiness.CANDIDATE_PATH)
+        self.receipt = readiness.load_json(readiness.EXECUTION_RECEIPT_PATH)
 
     def test_committed_go_is_valid_and_bound_to_exact_candidate(self):
         self.assertEqual(
@@ -123,6 +126,45 @@ class WorkerUpliftFinalCutoverReadinessTests(unittest.TestCase):
 
         self.assertTrue(any("forbidden value-bearing key" in error for error in errors))
         self.assertNotIn("not-a-real-secret", "\n".join(errors))
+
+    def test_execution_receipt_consumes_apply_and_rollback_authority(self):
+        self.assertEqual(
+            readiness.validate_execution_receipt(self.receipt, self.decision),
+            [],
+        )
+        self.assertEqual(readiness.validate_repository(), [])
+        self.assertIn(
+            "exact #166 GO apply authority has already been consumed",
+            readiness.validate_repository(require_go=True),
+        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(readiness.main([]), 0)
+        self.assertIn("historical_decision=GO", output.getvalue())
+        self.assertIn("execution_status=rolled_back", output.getvalue())
+        self.assertIn("apply_authorized=false", output.getvalue())
+        self.assertIn("rollback_authorized=false", output.getvalue())
+        self.assertNotIn("valid; decision=GO", output.getvalue())
+
+    def test_execution_receipt_drift_fails_closed(self):
+        receipt = copy.deepcopy(self.receipt)
+        receipt["rollback_progress"]["post_finalize_reconfirmation"][
+            "controller_status"
+        ]["artifact_id"] += 1
+
+        errors = readiness.validate_execution_receipt(receipt, self.decision)
+
+        self.assertIn("completed rollback evidence drifted", errors)
+
+    def test_legacy_transition_chain_drift_fails_closed(self):
+        receipt = copy.deepcopy(self.receipt)
+        receipt["legacy_scheduling_evidence"]["transition_chain"][0][
+            "workflow_run"
+        ] += 1
+
+        errors = readiness.validate_execution_receipt(receipt, self.decision)
+
+        self.assertIn("legacy scheduling evidence drifted", errors)
 
 
 if __name__ == "__main__":

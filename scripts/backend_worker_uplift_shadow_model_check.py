@@ -15,6 +15,7 @@ from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "ansible/roles/backend_baseline/templates/worker-uplift-shadow-data-model.sql.j2"
+FETCHER_CONTRACT_TEMPLATE = ROOT / "ansible/roles/backend_baseline/templates/worker-uplift-fetcher-state-contract.sql.j2"
 DEFAULTS = ROOT / "ansible/roles/backend_baseline/defaults/main.yml"
 POSTGRES_TASKS = ROOT / "ansible/roles/backend_baseline/tasks/postgres.yml"
 PROTECTED_APPLY_WORKFLOW = ROOT / ".github/workflows/protected-backend-ansible-apply.yml"
@@ -46,7 +47,7 @@ PUBLIC_DOMAIN_TABLES = [
 COMMON_TABLES = ["inbox", "outbox", "attempts", "transition_ledger", "reconciliation_watermarks"]
 STAGE_SPECIFIC_TABLES = {
     "worker_uplift_scheduler": ["feed_schedules", "feed_leases"],
-    "worker_uplift_fetcher": ["fetch_versions", "feed_health_projections"],
+    "worker_uplift_fetcher": ["fetch_versions", "fetch_outcomes", "feed_health_projections", "state_contract"],
     "worker_uplift_canonicalizer": ["article_identities", "article_aliases"],
     "worker_uplift_enrichment": ["enrichment_records"],
     "worker_uplift_approval": ["approval_decisions"],
@@ -79,6 +80,8 @@ def run_psql(db_url: str, query: str, *, timeout: int = 30) -> tuple[int, str, s
 
 def check_static_files() -> list[dict]:
     template = TEMPLATE.read_text(encoding="utf-8")
+    fetcher_contract = FETCHER_CONTRACT_TEMPLATE.read_text(encoding="utf-8")
+    model_templates = template + "\n" + fetcher_contract
     defaults = DEFAULTS.read_text(encoding="utf-8")
     tasks = POSTGRES_TASKS.read_text(encoding="utf-8")
     workflow = PROTECTED_APPLY_WORKFLOW.read_text(encoding="utf-8")
@@ -86,10 +89,10 @@ def check_static_files() -> list[dict]:
 
     for stage, role, schema in STAGES:
         for token in (stage, role, schema):
-            if token not in defaults and token not in template and token not in workflow:
+            if token not in defaults and token not in model_templates and token not in workflow:
                 failures.append(f"missing_static_token:{token}")
         for table in COMMON_TABLES + STAGE_SPECIFIC_TABLES[schema]:
-            if table not in template:
+            if table not in model_templates:
                 failures.append(f"missing_table_template:{schema}.{table}")
 
     for token in (
@@ -113,6 +116,24 @@ def check_static_files() -> list[dict]:
             failures.append(f"missing_template_guardrail:{token}")
 
     for token in (
+        "claim_owner_message_id",
+        "claim_owner_key",
+        "claim_token",
+        "claim_acquired_at",
+        "claim_expires_at",
+        "publication_command",
+        "content_fingerprint",
+        "fetch_outcomes",
+        "state_contract",
+        "fetcher_state_store', 2",
+        "worker_uplift_fetcher_inbox_claim_lease_check",
+        "worker_uplift_fetcher_outbox_claim_lease_check",
+        "interval '5 minutes'",
+    ):
+        if token not in fetcher_contract:
+            failures.append(f"missing_fetcher_state_contract:{token}")
+
+    for token in (
         "backend_worker_uplift_postgres_enabled: false",
         'backend_worker_uplift_postgres_database: "{{ backend_postgres_primary_shadow_database }}"',
         f"backend_worker_uplift_postgres_final_schema: {FINAL_SCHEMA}",
@@ -128,6 +149,8 @@ def check_static_files() -> list[dict]:
         "Allow worker-uplift stage roles to connect to the future-primary shadow database",
         "Install worker-uplift shadow PostgreSQL data model",
         "worker-uplift-shadow-data-model.sql.j2",
+        "Install worker-uplift fetcher PostgreSQL state contract",
+        "worker-uplift-fetcher-state-contract.sql.j2",
     ):
         if token not in tasks:
             failures.append(f"missing_task:{token}")
@@ -143,7 +166,7 @@ def check_static_files() -> list[dict]:
 
     forbidden_payload_markers = ["article_body", "full_prompt", "raw_provider_response", "bearer_token"]
     for marker in forbidden_payload_markers:
-        if marker in template:
+        if marker in model_templates:
             failures.append(f"forbidden_payload_marker:{marker}")
 
     return [

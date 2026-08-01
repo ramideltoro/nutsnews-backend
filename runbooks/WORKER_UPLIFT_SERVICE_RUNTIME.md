@@ -169,6 +169,34 @@ If a dependency fails closed after deployment, use the protected `rollback`
 operation for the scheduler only; do not change the dependency mode, queue
 topology, DNS/failover state, or production-write gate to make readiness pass.
 
+### Corrected candidate materialization rollout
+
+The corrected #127 candidate uses current digest-pinned images for fetcher,
+canonicalizer, enrichment, approval, translation, persistence, and publication.
+The image and source-commit values in
+`ansible/roles/backend_worker_runtime/defaults/main.yml` are authoritative; do
+not substitute mutable tags or a locally built image.
+
+Before rotating any service, run the protected baseline Ansible `check` and
+`apply`. The baseline installs
+`worker-uplift-fetcher-state-contract.sql.j2` after the common shadow model. Its
+version-2 contract adds the fetcher's opaque claim fencing, stored publication
+command, fetch outcome, and content-fingerprint fields, and grants only the
+existing fetcher and read-only roles. The fetcher readiness probe must report
+that exact contract before it registers a consumer. Canonicalizer and
+enrichment similarly require their PostgreSQL state, transaction, and outbox
+probes to pass before consumer registration.
+
+After the baseline apply, rotate services only through the protected,
+service-scoped `deploy` operation. Then run read-only `status`, queue inspection,
+and bounded logs. Require eight healthy services, one consumer on every required
+main queue, zero DLQ growth, `mode=shadow`, and
+`production_writes_enabled=false`. A schema or adapter probe failure is a
+deployment failure: use the source-controlled rollback image for only the
+affected service and leave legacy ingestion ownership unchanged. Do not relax a
+probe, switch to a local adapter, enable writes, or change DNS/failover to make
+the candidate pass.
+
 ### Qwen credential inventory reconciliation
 
 `LOCAL_AI_API_KEY` is the active protected source credential; it was not

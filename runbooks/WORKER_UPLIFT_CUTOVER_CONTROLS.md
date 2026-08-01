@@ -15,7 +15,9 @@ The #126 standing policy never authorizes #166 GO, #127 execution, a writer or o
 - Audit: `worker_uplift_final.cutover_control_audit`, populated by a security-definer trigger. The control role cannot write it.
 - Role: `nutsnews_worker_uplift_cutover`, with only schema usage, control-row select, and column-level update. It has no insert, delete, truncate, create, domain-table, queue, or schema authority.
 - Manager: `/usr/local/sbin/nutsnews-worker-uplift-cutover-control`.
-- Decision: `/etc/nutsnews-worker-uplift/final-cutover-decision.json`, deployed as NO-GO until #166 freezes an exact candidate.
+- Decision: `/etc/nutsnews-worker-uplift/final-cutover-decision.json`, deployed as NO-GO until the final readiness gate freezes an exact candidate.
+- Persistence production materialization: the controller can add only `NUTSNEWS_PERSISTENCE_PRODUCTION_WRITES_ENABLED=true` plus the fixed `backend-protected-persistence-cutover-approved` confirmation. The service must then issue one idempotent accepted-article command and one idempotent five-summary command through the scoped backend API. The base Compose file contains neither activation value.
+- Publication production materialization: the same generated override activates the existing fixed publication confirmation. Persistence and publication are recreated together while the database control row is still fenced, so neither API command is authorized before the compare-and-swap activates the exact candidate.
 - Legacy scheduling: the fixed protected workflow in `ramideltoro/nutsnews-worker`; it toggles only the `INGESTION_SCHEDULING_ENABLED` controller variable and retains cron, Durable Object, Analytics Engine, health/status/actions, DNS readback, live-origin readiness, alerts, and manual failover surfaces.
 
 ## Read-only and rehearsal operations
@@ -46,7 +48,7 @@ Use the protected worker-runtime `restart` operation for a healthy deployed imag
 1. captures preflight evidence;
 2. disables only legacy ingestion scheduling through the #150 workflow and verifies retained failover surfaces;
 3. stops the uplift scheduler and requires the separately recorded drain/watermark evidence;
-4. prepares the API/publication production configuration while the database row still denies writes;
+4. prepares the API, persistence, and publication production configuration while the database row still denies writes;
 5. compare-and-swaps `fenced` to `cutover_active` for the exact generation, candidate, and watermark;
 6. starts the uplift scheduler and verifies one writer.
 
@@ -54,6 +56,6 @@ The database gate is required in addition to the API environment and publication
 
 ## Future rollback sequence (only for the exact eligible cutover)
 
-`rollback` requires `rollback-worker-uplift-cutover:<watermark_sha256>` before the absolute deadline. It stops the uplift scheduler, moves the row to `rollback_pending` with uplift writes denied, removes the production API/publication overlays, verifies zero uplift output, re-enables legacy scheduling through #150, verifies all failover surfaces, then finalizes `shadow` and restarts the uplift scheduler in shadow. Preserve queues, DLQs, audit rows, and watermark evidence.
+`rollback` requires `rollback-worker-uplift-cutover:<watermark_sha256>` before the absolute deadline. It stops the uplift scheduler, moves the row to `rollback_pending` with uplift writes denied, removes the production API/persistence/publication overlay, recreates persistence and publication from the source-controlled shadow Compose file, verifies zero uplift output, re-enables legacy scheduling through #150, verifies all failover surfaces, then finalizes `shadow` and restarts the uplift scheduler in shadow. Preserve queues, DLQs, audit rows, and watermark evidence.
 
 If the deadline has passed, the manager rejects rollback and operators must use the named forward-recovery plan from #166/#127. Never modify DNS or the Cloudflare failover controller as part of this procedure.

@@ -15,19 +15,26 @@ class WorkerUpliftFinalCutoverReadinessTests(unittest.TestCase):
         self.candidate = readiness.load_json(readiness.CANDIDATE_PATH)
         self.receipt = readiness.load_json(readiness.EXECUTION_RECEIPT_PATH)
 
-    def test_committed_go_is_valid_and_bound_to_exact_candidate(self):
+    def test_committed_decision_is_no_go_after_the_consumed_candidate_rollback(self):
         self.assertEqual(
+            readiness.validate_decision(
+                self.decision,
+                self.authorization,
+                candidate=self.candidate,
+            ),
+            [],
+        )
+        self.assertEqual(self.decision["decision"], "NO-GO")
+        self.assertFalse(self.decision["authorized_for_execution"])
+        self.assertIsNone(self.decision["candidate_sha256"])
+        self.assertIn(
+            "exact #166 GO is absent",
             readiness.validate_decision(
                 self.decision,
                 self.authorization,
                 candidate=self.candidate,
                 require_go=True,
             ),
-            [],
-        )
-        self.assertEqual(
-            self.decision["candidate_sha256"],
-            self.candidate["manifest_sha256"],
         )
         self.assertEqual(
             self.decision["decision_scope"]["authorizes_issue"],
@@ -65,7 +72,7 @@ class WorkerUpliftFinalCutoverReadinessTests(unittest.TestCase):
         self.assertIn("standing authorization exclusions changed", errors)
 
     def test_go_cannot_use_reviewer_or_automation_metadata_instead_of_contract(self):
-        decision = copy.deepcopy(self.decision)
+        decision = self.historical_go_decision()
         decision["authorization"]["kind"] = "advisory_environment_approval"
         decision["authorized_for_execution"] = True
         decision["decision"] = "GO"
@@ -103,7 +110,7 @@ class WorkerUpliftFinalCutoverReadinessTests(unittest.TestCase):
         self.assertIn("NO-GO must not freeze candidate_sha256", errors)
 
     def test_threshold_digest_drift_fails_closed(self):
-        decision = copy.deepcopy(self.decision)
+        decision = self.historical_go_decision()
         decision["thresholds"]["sha256"] = "a" * 64
 
         errors = readiness.validate_decision(
@@ -117,6 +124,25 @@ class WorkerUpliftFinalCutoverReadinessTests(unittest.TestCase):
             "threshold digest does not match the source-controlled plan",
             errors,
         )
+
+    def historical_go_decision(self):
+        decision = copy.deepcopy(self.decision)
+        decision.update({
+            "decision": "GO",
+            "authorized_for_execution": True,
+            "candidate_sha256": self.candidate["manifest_sha256"],
+            "watermark_sha256": self.receipt["watermark_sha256"],
+            "rollback_deadline_utc": self.receipt["rollback_deadline_utc"],
+            "observation_start_utc": "2026-08-01T21:00:00Z",
+            "observation_end_utc": "2026-08-03T21:00:00Z",
+            "execution_window": {
+                "start_utc": "2026-08-01T19:00:00Z",
+                "end_utc": "2026-08-01T21:00:00Z",
+            },
+            "control_commit": self.candidate["manifest"]["control_commit"],
+            "blockers": [],
+        })
+        return decision
 
     def test_value_bearing_keys_are_rejected_without_echoing_values(self):
         contract = copy.deepcopy(self.authorization)
@@ -140,7 +166,8 @@ class WorkerUpliftFinalCutoverReadinessTests(unittest.TestCase):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             self.assertEqual(readiness.main([]), 0)
-        self.assertIn("historical_decision=GO", output.getvalue())
+        self.assertIn("current_decision=NO-GO", output.getvalue())
+        self.assertIn("historical_execution_decision=GO", output.getvalue())
         self.assertIn("execution_status=rolled_back", output.getvalue())
         self.assertIn("apply_authorized=false", output.getvalue())
         self.assertIn("rollback_authorized=false", output.getvalue())

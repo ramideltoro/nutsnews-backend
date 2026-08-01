@@ -403,6 +403,17 @@ Expected state:
 - legacy Cloudflare ingestion remains the only production writer and public
   visibility/snapshot state is unchanged.
 
+The only production exception is the fixed `Backend Worker-Uplift Cutover
+Controls` apply path after a fresh final-readiness GO. Its generated override
+recreates persistence with the exact protected confirmation, while the database
+control row is still fenced, and authorizes only one idempotent
+`translation_pending` article plus the declared five localized summary rows per
+ready aggregate. Rollback first denies uplift writes in the database, removes
+the override, and recreates persistence and publication in their default shadow
+configuration. A protected `restart` restores a healthy process or consumer;
+only protected deployment/apply repairs image, view, API, or configuration
+drift.
+
 ## Queue, DLQ, Drain, And Reconciliation
 
 Queue and DLQ inspection reads only declared queues from the source-controlled

@@ -440,10 +440,17 @@ def production_api_dropin(candidate: str, watermark: str) -> str:
     )
 
 
+PERSISTENCE_PRODUCTION_WRITE_CONFIRMATION = "backend-protected-persistence-cutover-approved"
+
+
 def production_compose_override(candidate: str, watermark: str, confirmation: str) -> str:
     return (
         "# Managed by ramideltoro/nutsnews-backend #126.\n"
         "services:\n"
+        "  persistence:\n"
+        "    environment:\n"
+        "      NUTSNEWS_PERSISTENCE_PRODUCTION_WRITES_ENABLED: \"true\"\n"
+        f"      NUTSNEWS_PERSISTENCE_PRODUCTION_WRITE_CONFIRMATION: {PERSISTENCE_PRODUCTION_WRITE_CONFIRMATION}\n"
         "  publication:\n"
         "    environment:\n"
         "      NUTSNEWS_PUBLICATION_WRITE_MODE: production\n"
@@ -463,8 +470,8 @@ def restore_shadow_files() -> list[CommandResult]:
         run_fixed(["systemctl", "daemon-reload"], "reload-api-unit"),
         run_fixed(["systemctl", "restart", "nutsnews-worker-db-api.service"], "restart-api-shadow"),
         run_fixed(
-            ["docker", "compose", "-f", str(BASE_COMPOSE), "up", "-d", "--no-deps", "publication"],
-            "start-publication-shadow",
+            ["docker", "compose", "-f", str(BASE_COMPOSE), "up", "-d", "--no-deps", "persistence", "publication"],
+            "start-persistence-publication-shadow",
             timeout=300,
         ),
     ]
@@ -488,9 +495,10 @@ def prepare_production_files(candidate: str, watermark: str, confirmation: str) 
                 "up",
                 "-d",
                 "--no-deps",
+                "persistence",
                 "publication",
             ],
-            "start-publication-production-fenced",
+            "start-persistence-publication-production-fenced",
             timeout=300,
         ),
     ]

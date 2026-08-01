@@ -159,6 +159,8 @@ class WorkerUpliftCutoverWatermarkTests(unittest.TestCase):
         self.assertTrue(all(row["lag_count"] == 0 for row in artifact["candidate"]["rows"]))
         self.assertEqual(artifact["retained_failure_aggregates"]["translation"]["count"], 2)
         self.assertEqual(artifact["retained_failure_aggregates"]["persistence"]["count"], 50)
+        self.assertEqual(list(artifact["pre_state"]), list(STAGES))
+        self.assertTrue(all(state["watermark_row_count"] == 0 for state in artifact["pre_state"].values()))
         self.assertFalse(artifact["safety"]["production_writes_enabled"])
         self.assertEqual(artifact["safety"]["active_ingestion_owner"], "legacy_shards")
 
@@ -246,6 +248,7 @@ class WorkerUpliftCutoverWatermarkTests(unittest.TestCase):
         self.assertEqual(report["status"], "applied")
         self.assertEqual(report["mutation"]["upserted_rows"], 8)
         self.assertTrue(report["schema_fingerprints"]["unchanged"])
+        self.assertTrue(report["non_target_database_state"]["unchanged"])
         self.assertEqual(report["database_evidence"]["rows"], expected)
 
     def test_wrong_confirmation_blocks_before_database_access(self):
@@ -258,6 +261,41 @@ class WorkerUpliftCutoverWatermarkTests(unittest.TestCase):
                 with self.assertRaisesRegex(watermarks.WatermarkError, "exact typed confirmation"):
                     watermarks.apply_candidate(contract_value(), artifact_path, "fixture-password", "wrong")
                 psql.assert_not_called()
+
+    def test_post_apply_proof_matches_exact_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = WatermarkFixture(root)
+            artifact = fixture.build()
+            artifact_path = root / "candidate.json"
+            artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+            expected = watermarks.expected_db_rows(artifact)
+            current = {stage: row for stage, row in zip(STAGES, expected)}
+            after = database_snapshot(fixture.observed, current_rows=current)
+            non_target_sha = watermarks.sha256_json(watermarks.non_target_db_state(after))
+            apply_report = {
+                "status": "applied",
+                "candidate_artifact_sha256": watermarks.sha256_file(artifact_path),
+                "workflow": {"run_id": "local", "commit": "local"},
+                "schema_fingerprints": {"unchanged": True},
+                "non_target_database_state": {
+                    "before_sha256": non_target_sha,
+                    "after_sha256": non_target_sha,
+                    "unchanged": True,
+                },
+            }
+            apply_report_path = root / "apply.json"
+            apply_report_path.write_text(json.dumps(apply_report), encoding="utf-8")
+            with mock.patch.object(watermarks, "utc_now", return_value=fixture.observed + timedelta(seconds=20)):
+                with mock.patch.object(watermarks, "psql_json", side_effect=[privilege_proof(), after]):
+                    proof = watermarks.verify_post_apply(
+                        contract_value(),
+                        artifact_path,
+                        apply_report_path,
+                        fixture.followup_path,
+                        "fixture-password",
+                    )
+        self.assertEqual(proof["proof"], contract_value()["post_apply_proof"])
 
     def test_scope_drift_invalidates_standing_authorization(self):
         contract = copy.deepcopy(contract_value())

@@ -473,6 +473,16 @@ def build_candidate(
             "database_snapshot_sha256": sha256_json(snapshot),
             "privilege_proof_sha256": sha256_json(privilege),
         },
+        "pre_state": {
+            item["stage"]: {
+                "watermark_row_count": item["watermark_row_count"],
+                "target_watermark_count": item["target_watermark_count"],
+                "current_target_sha256": sha256_json(item["current_target"])
+                if item.get("current_target") is not None
+                else None,
+            }
+            for item in snapshot_stages(snapshot)
+        },
         "candidate": {
             "row_count": 8,
             "watermark_name": WATERMARK_NAME,
@@ -591,6 +601,23 @@ def validate_candidate_artifact(artifact: dict[str, Any], contract: dict[str, An
     }
     if artifact.get("retained_failure_aggregates") != expected_retained:
         raise WatermarkError("retained failure aggregates are not exact")
+    pre_state = artifact.get("pre_state")
+    if not isinstance(pre_state, dict) or list(pre_state) != list(STAGES):
+        raise WatermarkError("watermark candidate pre-state does not cover exactly eight stages")
+    for stage, state in pre_state.items():
+        if not isinstance(state, dict) or set(state) != {
+            "watermark_row_count",
+            "target_watermark_count",
+            "current_target_sha256",
+        }:
+            raise WatermarkError(f"{stage} watermark candidate pre-state is invalid")
+        if state["watermark_row_count"] not in (0, 1) or state["target_watermark_count"] != state["watermark_row_count"]:
+            raise WatermarkError(f"{stage} watermark candidate pre-state row counts are invalid")
+        digest = state["current_target_sha256"]
+        if (digest is None) != (state["watermark_row_count"] == 0):
+            raise WatermarkError(f"{stage} watermark candidate pre-state digest is inconsistent")
+        if digest is not None and not SAFE_SHA_RE.fullmatch(str(digest)):
+            raise WatermarkError(f"{stage} watermark candidate pre-state digest is invalid")
     source_digests = artifact.get("source_digests")
     if not isinstance(source_digests, dict) or not source_digests or not all(SAFE_SHA_RE.fullmatch(str(value)) for value in source_digests.values()):
         raise WatermarkError("watermark source digests are incomplete")
@@ -723,6 +750,17 @@ def current_db_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def non_target_db_state(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            key: value
+            for key, value in item.items()
+            if key not in {"watermark_row_count", "target_watermark_count", "current_target"}
+        }
+        for item in snapshot_stages(snapshot)
+    ]
+
+
 def apply_candidate(
     contract: dict[str, Any],
     artifact_path: Path,
@@ -764,6 +802,10 @@ def apply_candidate(
             raise WatermarkError(f"{item.get('stage')} does not contain exactly the declared watermark")
     if [item["schema_fingerprint"] for item in before_stages] != [item["schema_fingerprint"] for item in after_stages]:
         raise WatermarkError("a reconciliation watermark schema changed during apply")
+    before_non_target = non_target_db_state(before)
+    after_non_target = non_target_db_state(after)
+    if before_non_target != after_non_target:
+        raise WatermarkError("non-target database state changed during apply")
     if current_db_rows(after) != expected_db_rows(artifact):
         raise WatermarkError("database watermarks do not exactly match the authorized candidate")
     result = {
@@ -792,6 +834,11 @@ def apply_candidate(
         "schema_fingerprints": {
             "before": [item["schema_fingerprint"] for item in before_stages],
             "after": [item["schema_fingerprint"] for item in after_stages],
+            "unchanged": True,
+        },
+        "non_target_database_state": {
+            "before_sha256": sha256_json(before_non_target),
+            "after_sha256": sha256_json(after_non_target),
             "unchanged": True,
         },
         "database_evidence": {
@@ -851,6 +898,13 @@ def verify_post_apply(
             raise WatermarkError(f"{item.get('stage')} post-apply watermark row is missing")
     if current_db_rows(snapshot) != expected_db_rows(artifact):
         raise WatermarkError("post-apply database watermarks differ from the exact candidate")
+    non_target_state = apply_report.get("non_target_database_state", {})
+    if (
+        non_target_state.get("unchanged") is not True
+        or non_target_state.get("before_sha256") != non_target_state.get("after_sha256")
+        or non_target_state.get("after_sha256") != sha256_json(non_target_db_state(snapshot))
+    ):
+        raise WatermarkError("non-target database state changed during or after watermark apply")
     result = {
         "schema_version": 1,
         "status": "pass",
@@ -866,10 +920,11 @@ def verify_post_apply(
             "all_lag_counts_zero": True,
             "candidate_rows_match_database": True,
             "non_target_watermark_rows_unchanged": True,
+            "non_target_database_state_unchanged": True,
             "target_schema_fingerprints_unchanged": apply_report.get("schema_fingerprints", {}).get("unchanged") is True,
             "runtime_mode_unchanged": True,
             "production_writes_enabled_false": True,
-            "active_ingestion_owner_legacy_shards": True,
+            "active_ingestion_owner_unchanged": True,
             "consumer_counts_unchanged": True,
             "queue_counts_unchanged": True,
             "runtime_manifest_digest_unchanged": True,
@@ -894,6 +949,8 @@ def verify_post_apply(
             "schema_change_performed": False,
         },
     }
+    if result["proof"] != contract.get("post_apply_proof"):
+        raise WatermarkError("post-apply proof does not match the exact authorization contract")
     ensure_value_free(result, "watermark post-apply evidence")
     return result
 

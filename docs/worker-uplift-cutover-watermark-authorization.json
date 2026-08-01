@@ -111,6 +111,7 @@
     "all_lag_counts_zero": true,
     "candidate_rows_match_database": true,
     "non_target_watermark_rows_unchanged": true,
+    "non_target_database_state_unchanged": true,
     "target_schema_fingerprints_unchanged": true,
     "runtime_mode_unchanged": true,
     "production_writes_enabled_false": true,

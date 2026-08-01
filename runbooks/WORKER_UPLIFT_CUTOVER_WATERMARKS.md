@@ -94,9 +94,10 @@ dedicated role for aggregate evidence only. It fails closed unless:
 
 Inspect `backend-worker-uplift-cutover-watermarks-dry-run` and validate
 `watermark-candidate.sha256`. The candidate contains the exact eight rows,
-source digests, aggregate retained-failure classification, immutable workflow
-identity, and safety state. It contains no payloads, connection strings,
-endpoints, credentials, or article/domain values.
+value-free current-row counts and digests, source digests, aggregate
+retained-failure classification, immutable workflow identity, and safety state.
+It contains no payloads, connection strings, endpoints, credentials, or
+article/domain values.
 
 ## Protected apply
 
@@ -115,7 +116,7 @@ After apply, the workflow recollects runtime and queue evidence and proves:
 
 - exactly the eight declared watermark rows exist and match the candidate;
 - every `lag_count` is zero;
-- no other watermark row or target schema changed;
+- no other watermark row, non-target database state, or target schema changed;
 - images, manifest, compose, consumers, queue counts, shadow mode, write policy,
   and legacy ownership are unchanged; and
 - the workflow has no RabbitMQ mutation, DNS/failover, infrastructure, or

@@ -54,17 +54,28 @@ class WorkerUpliftProductionReadinessTests(unittest.TestCase):
         self.assertTrue(any("must not fabricate a named approver" in error for error in errors))
         self.assertTrue(any("must not fabricate risk waivers" in error for error in errors))
 
-    def test_pending_security_dispositions_cannot_satisfy_gate(self):
+    def test_security_gate_cannot_ignore_complete_dispositions(self):
         decision = copy.deepcopy(self.decision)
-        decision["security_gate"]["closure_ready"] = True
-        decision["security_gate"]["named_owner_decisions"] = [
-            {"finding": "SEC-124-007", "owner": "ramideltoro"}
-        ]
+        decision["security_gate"]["closure_ready"] = False
+        decision["security_gate"]["named_owner_decisions"] = []
 
         errors = self.validate(decision=decision)
 
         self.assertTrue(any("closure_ready must match" in error for error in errors))
         self.assertTrue(any("owner decisions must match" in error for error in errors))
+
+    def test_resolved_security_blocker_tracks_complete_dispositions(self):
+        decision = copy.deepcopy(self.decision)
+        blocker = next(
+            item
+            for item in decision["blockers"]
+            if item["id"] == "security_residual_owner_disposition"
+        )
+        blocker["status"] = "open"
+
+        errors = self.validate(decision=decision)
+
+        self.assertTrue(any("status must be resolved" in error for error in errors))
 
     def test_security_gate_tracks_only_current_pending_dispositions(self):
         decision = copy.deepcopy(self.decision)

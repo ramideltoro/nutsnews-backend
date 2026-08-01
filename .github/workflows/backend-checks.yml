@@ -88,9 +88,9 @@ jobs:
         shell: bash
         run: python3 -m unittest tests.test_worker_uplift_security_review
 
-      - name: Validate worker uplift security dispositions
+      - name: Enforce complete worker uplift security dispositions
         shell: bash
-        run: python3 scripts/validate_worker_uplift_security_dispositions.py
+        run: python3 scripts/validate_worker_uplift_security_dispositions.py --enforce-closure
 
       - name: Run worker uplift security disposition tests
         shell: bash

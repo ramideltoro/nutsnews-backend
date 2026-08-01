@@ -32,9 +32,9 @@ python3 scripts/validate_worker_uplift_security_dispositions.py
 python3 -m unittest tests.test_worker_uplift_security_dispositions
 ```
 
-The normal validator accepts an accurate `pending` record so that CI can carry
-the unresolved gate without inventing a decision. Before closing #164, run the
-strict form:
+The normal validator accepts an accurate `pending` record so CI can carry an
+unresolved gate without inventing a decision. The committed record is now
+complete, so both the normal and strict forms must pass:
 
 ```bash
 python3 scripts/validate_worker_uplift_security_dispositions.py --enforce-closure
@@ -43,7 +43,8 @@ python3 scripts/validate_worker_uplift_security_dispositions.py --enforce-closur
 That command fails unless all eight findings are either remediated with an
 immutable PR merge and successful CI evidence, plus deployment proof when the
 runtime or deployed configuration changed, or explicitly accepted by a named
-authorized owner. A current pending record keeps #125 NO-GO.
+authorized owner. #164 closure does not change #125 from NO-GO while its other
+independent blockers remain.
 
 The GitHub Actions validator requires exact commit SHAs for external actions and
 exact digests for container actions. Dispatch inputs, repository variables, and
@@ -97,8 +98,41 @@ signed artifact and must state:
 - the trigger that reopens the finding.
 
 Issue closure, a merged PR, advisory approval metadata, and automation output do
-not supply that decision. No disposition authorizes cutover, production writes,
-ingestion ownership changes, legacy-worker changes, or DNS/failover changes.
+not supply the initial decision. No disposition authorizes cutover, production
+writes, ingestion ownership changes, legacy-worker changes, or DNS/failover
+changes.
+
+### Standing revalidation authorization
+
+Owner comment
+`https://github.com/ramideltoro/nutsnews-worker/issues/164#issuecomment-5148872751`
+explicitly accepts the bounded `SEC-124-007`, `SEC-124-008`, and
+`SEC-124-009` scopes and authorizes source-controlled revalidation for current
+and future release revisions. It removes per-release, first-run, and periodic
+review-refresh owner comments only while the exact accepted scope remains
+machine-identical.
+
+The validator pins the owner-authorized scope fingerprint in code and in
+`docs/worker-uplift-security-dispositions.json`. The fingerprint covers the
+three finding IDs, affected repositories, residual conditions, rationales,
+compensating controls, reopen triggers, all shadow safety invariants, and the
+explicitly excluded authorities. Updating both the JSON digest and the
+underlying scope cannot broaden the standing authorization because the
+validator also pins the owner-authorized digest as a constant. Release commit
+and image revisions are deliberately outside the fingerprint, but every
+revalidation must refresh their value-free current evidence through a protected
+pull request.
+
+The current acceptance is reviewed by `2026-08-31` and expires on
+`2026-09-30`. A later protected PR may refresh those dates without another
+owner comment only after current value-free evidence confirms the fingerprinted
+scope and controls are unchanged. The validator limits review dates to 31 days
+and expiry dates to 61 days from validation, so an unattended record still
+fails closed. Any scope/control/invariant drift, missing evidence, or lapsed
+date requires remediation or a new explicit named-owner decision.
+
+This standing authorization does not cover the named GO decision at #125, the
+final execution-readiness decision at #166, or cutover execution at #127.
 
 The image scan detections recorded by this review are not reachable from the
 service entry point because they are confined to the unused npm CLI dependency
@@ -151,10 +185,10 @@ The current immutable proof is recorded in the build record:
   digests, eight healthy services, seven active consumers, zero queued or
   unacknowledged messages, shadow mode, and writes disabled.
 
-This evidence remediates `SEC-124-002` through `SEC-124-006`. Findings
-`SEC-124-007` through `SEC-124-009` remain pending and keep #164 and #125
-blocked until actual remediation or an explicit, bounded, owner-authored
-disposition satisfies the strict validator.
+This evidence remediates `SEC-124-002` through `SEC-124-006`. The explicit
+bounded owner decision above accepts `SEC-124-007` through `SEC-124-009` under
+the fail-closed standing authorization. The strict validator therefore permits
+#164 closure, while #125 remains NO-GO on its independent readiness blockers.
 
 This refresh changes only the eight shadow container revisions. It does not
 authorize cutover, alter the legacy worker, change ingestion ownership, enable

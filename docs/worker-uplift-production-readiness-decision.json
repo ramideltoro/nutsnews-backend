@@ -79,7 +79,7 @@
     "commit": "ba26e7bb9fa7a4f30773216da1e69bfe7ec3bf0d"
   },
   "decision": "no_go",
-  "decision_summary": "Readiness to begin guarded cutover-control implementation is not approved. FAILOVER_ANALYTICS is absent from both the deployed Cloudflare Worker and current infra source; current parity and empty-broker recovery proof do not match the deployed image/topology set; the deployed scheduler uses local test dependencies and a fixed readiness clock; current dependency-outage, backup/restore, identity, and authenticated-admin evidence is missing or stale; security residual risks lack named dispositions; exact planned watermark, rollback deadline, observation window, and operational ownership are not recorded; and no named approver has issued GO. Missing implementation of downstream issues #150 and #126 is not a #125 blocker.",
+  "decision_summary": "Readiness to begin guarded cutover-control implementation is not approved. FAILOVER_ANALYTICS is absent from both the deployed Cloudflare Worker and current infra source; current parity and empty-broker recovery proof do not match the deployed image/topology set; the deployed scheduler uses local test dependencies and a fixed readiness clock; current dependency-outage, backup/restore, identity, and authenticated-admin evidence is missing or stale; exact planned watermark, rollback deadline, observation window, and operational ownership are not recorded; and no named approver has issued GO. The #164 security disposition gate now passes under bounded, dated owner acceptance and an exact-scope standing authorization. Missing implementation of downstream issues #150 and #126 is not a #125 blocker.",
   "issue_closure_authorized": false,
   "tracking_issue_state_required": "open",
   "named_approver": null,
@@ -350,7 +350,7 @@
     },
     {
       "path": "docs/worker-uplift-security-dispositions.json",
-      "sha256": "6a72368c042430daf8a26f8b91403d80f24d9180f5e7595f9d0456a111fcb415"
+      "sha256": "a457bd1acabeb48e2a85f30a8bd8e5e0e1b5b4509961354f84795e2b74a39d48"
     },
     {
       "path": "docs/worker-uplift-shadow-soak-capacity-report.json",
@@ -620,23 +620,32 @@
     }
   },
   "security_gate": {
-    "status": "blocked_pending_validated_dispositions",
+    "status": "pass",
     "review_artifact": "docs/worker-uplift-security-review.json",
     "review_merge_commit": "b619cf91504eafca21f70c5d68888563f5fca7a9",
     "post_merge_checks_run": 30484088483,
     "disposition_artifact": "docs/worker-uplift-security-dispositions.json",
-    "disposition_artifact_sha256": "6a72368c042430daf8a26f8b91403d80f24d9180f5e7595f9d0456a111fcb415",
+    "disposition_artifact_sha256": "a457bd1acabeb48e2a85f30a8bd8e5e0e1b5b4509961354f84795e2b74a39d48",
     "disposition_tracking_issue": "ramideltoro/nutsnews-worker#164",
     "current_record_validator": "python3 scripts/validate_worker_uplift_security_dispositions.py",
     "closure_validator": "python3 scripts/validate_worker_uplift_security_dispositions.py --enforce-closure",
-    "closure_ready": false,
+    "closure_ready": true,
     "unresolved_critical_or_high_findings": [],
-    "residual_findings_requiring_gate_disposition": [
-      "SEC-124-007",
-      "SEC-124-008",
-      "SEC-124-009"
-    ],
-    "named_owner_decisions": []
+    "residual_findings_requiring_gate_disposition": [],
+    "named_owner_decisions": [
+      {
+        "finding": "SEC-124-007",
+        "owner": "ramideltoro"
+      },
+      {
+        "finding": "SEC-124-008",
+        "owner": "ramideltoro"
+      },
+      {
+        "finding": "SEC-124-009",
+        "owner": "ramideltoro"
+      }
+    ]
   },
   "operations_guide": {
     "status": "pass_as_built_no_cutover_authority",
@@ -731,8 +740,8 @@
     },
     {
       "id": "security_residuals",
-      "status": "block",
-      "evidence": "The source-controlled #164 disposition contract records all eight medium/low #124 residuals with current immutable source evidence and a named accountable repository owner, but every decision remains pending. Its strict closure validator fails closed until each finding has remediation evidence or explicit non-expired owner acceptance."
+      "status": "pass",
+      "evidence": "The source-controlled #164 contract records immutable remediation for SEC-124-002 through SEC-124-006 and explicit bounded, dated owner acceptance for SEC-124-007 through SEC-124-009. The standing authorization pins the exact accepted scope and safety invariants, removes per-release or first-run owner comments only while they remain unchanged, and the strict closure validator passes."
     },
     {
       "id": "operations_runbook",
@@ -807,10 +816,10 @@
     },
     {
       "id": "security_residual_owner_disposition",
-      "status": "open",
+      "status": "resolved",
       "owner_repository": "ramideltoro/nutsnews-backend",
       "issue": "ramideltoro/nutsnews-worker#164",
-      "required_resolution": "Make the #164 closure validator pass by recording immutable remediation evidence or explicit bounded, non-expired, named-owner residual-risk acceptance for every #124 finding."
+      "required_resolution": "Resolved by the complete #164 disposition contract, explicit owner comment, exact-scope standing authorization, and passing strict closure validator."
     },
     {
       "id": "control_implementation_plan",
@@ -839,7 +848,7 @@
     "Complete #158 and #159 with current parity and empty-broker recovery evidence for the exact candidate images and topology.",
     "Complete #160 by reconciling the runtime identity inventory with the authoritative topology.",
     "Complete #161, #162, and #163 with current dependency-outage, backup/isolated-restore, and authenticated-admin evidence.",
-    "Complete #164 by dispositioning every #124 residual risk through remediation or explicit named authorized owner acceptance.",
+    "Retain #164 closure evidence and revalidate its exact-scope standing authorization before its dated review and expiry gates; no per-release or first-run owner comment is required while the pinned scope is unchanged.",
     "Complete #165 with exact planned watermark, rollback deadline, observation window, thresholds, and named owners; #150/#126 implementation is deliberately downstream of #125.",
     "Complete #168 by replacing the deployed scheduler's local test dependencies and fixed clock, then attach current immutable readiness and scheduler-smoke proof.",
     "Retain the closed #167 approval-free runtime evidence path and rerun status if the candidate images or runtime configuration change.",

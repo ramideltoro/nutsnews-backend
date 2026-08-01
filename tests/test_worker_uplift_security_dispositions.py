@@ -13,11 +13,12 @@ class WorkerUpliftSecurityDispositionTests(unittest.TestCase):
         self.document = dispositions.load_json(dispositions.DEFAULT_DISPOSITIONS_PATH)
         self.today = date(2026, 7, 31)
 
-    def validate(self, document=None, *, enforce_closure=False):
+    def validate(self, document=None, *, enforce_closure=False, backend_checks_text=None):
         return dispositions.validate_dispositions(
             document or self.document,
             today=self.today,
             enforce_closure=enforce_closure,
+            backend_checks_text=backend_checks_text,
         )
 
     def sync_closure(self, document):
@@ -89,11 +90,24 @@ class WorkerUpliftSecurityDispositionTests(unittest.TestCase):
             },
         }
 
-    def test_committed_blocked_record_is_structurally_valid(self):
+    def test_committed_complete_record_is_structurally_valid(self):
         self.assertEqual(self.validate(), [])
 
-    def test_closure_mode_rejects_every_pending_finding(self):
-        errors = self.validate(enforce_closure=True)
+    def test_committed_complete_record_passes_closure(self):
+        self.assertEqual(self.validate(enforce_closure=True), [])
+
+    def test_closure_mode_rejects_a_pending_finding(self):
+        document = copy.deepcopy(self.document)
+        finding = next(item for item in document["findings"] if item["id"] == "SEC-124-007")
+        finding["status"] = "pending"
+        finding["owner_action_required"] = True
+        finding["risk_acceptance"] = None
+        self.sync_closure(document)
+        document["standing_authorization"]["scope_sha256"] = (
+            dispositions.standing_scope_sha256(document)
+        )
+
+        errors = self.validate(document, enforce_closure=True)
 
         self.assertTrue(any("closure enforcement failed" in error for error in errors))
 
@@ -161,13 +175,91 @@ class WorkerUpliftSecurityDispositionTests(unittest.TestCase):
 
         self.assertTrue(any("requires deployment proof" in error for error in errors))
 
-    def test_complete_named_dispositions_can_pass_closure(self):
+    def test_all_remediated_fixture_still_has_no_pending_dispositions(self):
         document = copy.deepcopy(self.document)
         for finding in document["findings"]:
             self.make_remediated(finding)
         self.sync_closure(document)
 
+        self.assertEqual(document["closure_gate"]["unresolved_findings"], [])
+        self.assertTrue(document["closure_gate"]["issue_closure_authorized"])
+
+    def test_standing_authorization_survives_release_revision_only(self):
+        document = copy.deepcopy(self.document)
+        finding = next(item for item in document["findings"] if item["id"] == "SEC-124-007")
+        finding["current_evidence"]["source_heads"][0]["commit"] = "f" * 40
+
         self.assertEqual(self.validate(document, enforce_closure=True), [])
+
+    def test_scope_drift_is_rejected_even_if_fingerprint_is_recomputed(self):
+        document = copy.deepcopy(self.document)
+        finding = next(item for item in document["findings"] if item["id"] == "SEC-124-007")
+        finding["risk_acceptance"]["compensating_controls"].append(
+            "a newly claimed control"
+        )
+        document["standing_authorization"]["scope_sha256"] = (
+            dispositions.standing_scope_sha256(document)
+        )
+
+        errors = self.validate(document, enforce_closure=True)
+
+        self.assertTrue(any("not owner-authorized" in error for error in errors))
+
+    def test_standing_authorization_removes_per_release_and_first_run_approval(self):
+        authorization = self.document["standing_authorization"]
+
+        self.assertFalse(authorization["per_release_owner_approval_required"])
+        self.assertFalse(authorization["first_run_owner_approval_required"])
+        self.assertFalse(authorization["review_refresh_requires_new_owner_approval"])
+        self.assertEqual(self.validate(enforce_closure=True), [])
+
+    def test_standing_authorization_cannot_cover_readiness_or_cutover(self):
+        document = copy.deepcopy(self.document)
+        document["disposition_policy"][
+            "final_readiness_or_cutover_approval_is_covered"
+        ] = True
+
+        errors = self.validate(document)
+
+        self.assertTrue(any("must be false" in error for error in errors))
+
+    def test_standing_authorization_still_expires_fail_closed(self):
+        errors = dispositions.validate_dispositions(
+            self.document,
+            today=date(2026, 10, 1),
+            enforce_closure=True,
+        )
+
+        self.assertTrue(any("risk acceptance is expired" in error for error in errors))
+
+    def test_standing_owner_evidence_cannot_be_replaced_by_automation(self):
+        document = copy.deepcopy(self.document)
+        document["standing_authorization"]["owner_evidence"]["author_login"] = (
+            "github-actions[bot]"
+        )
+
+        errors = self.validate(document)
+
+        self.assertTrue(any("anonymous, generic, or automation" in error for error in errors))
+
+    def test_standing_owner_comment_digest_is_pinned(self):
+        document = copy.deepcopy(self.document)
+        document["standing_authorization"]["owner_evidence"]["body_sha256"] = "0" * 64
+
+        errors = self.validate(document)
+
+        self.assertTrue(any("comment digest is not authorized" in error for error in errors))
+
+    def test_backend_checks_must_enforce_closure(self):
+        workflow = dispositions.BACKEND_CHECKS_PATH.read_text(encoding="utf-8")
+        workflow = workflow.replace(
+            "run: python3 scripts/validate_worker_uplift_security_dispositions.py --enforce-closure",
+            "run: python3 scripts/validate_worker_uplift_security_dispositions.py",
+        )
+
+        errors = self.validate(backend_checks_text=workflow)
+
+        self.assertIn("Backend Checks must enforce security disposition closure", errors)
 
     def test_production_write_or_value_bearing_evidence_is_rejected(self):
         document = copy.deepcopy(self.document)

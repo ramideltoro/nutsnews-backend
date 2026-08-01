@@ -84,7 +84,7 @@ apply mode, `#127`, production writes, or an ingestion-owner change.
 | Runtime status | Pass | Approved run `30513933114` and approval-free merged-main run `30573044860` passed with eight healthy services, seven required consumers at one each, zero backlog, shadow mode, and writes false |
 | Scheduler production dependencies | Block | Scheduler readiness is fixed at `2026-07-23T00:00:00.000Z` and reports `local-feed-source`; deployed source uses local test adapters, so `#168` owns remediation/current proof |
 | Admin deployed proof | Block | Source and access control are present; `#163` owns current authenticated production projection proof |
-| Security residuals | Block | `SEC-124-002` through `SEC-124-009` lack named disposition; `#164` owns the record |
+| Security residuals | Pass | `SEC-124-002` through `SEC-124-006` are remediated; `SEC-124-007` through `SEC-124-009` have bounded, dated owner acceptance under the exact-scope standing authorization owned by `#164` |
 | Cloudflare failover | Block | Deployed and source config omit `FAILOVER_ANALYTICS`; worker tracker `#157` owns the infra fix/decision |
 | Control implementation plan | Block | Exact planned watermark, rollback deadline, observation window, thresholds, and named owners are missing; `#165` owns the non-mutating plan |
 | Named readiness approval | Block | No named GO approver exists |
@@ -190,8 +190,8 @@ workflow. In particular:
 - current parity, empty-broker, identity, and outage evidence belongs to
   `#158` through `#161`;
 - backup/restore and admin proof belongs to `#162` and `#163`;
-- named security dispositions and the control implementation plan belong to
-  `#164` and `#165`;
+- the completed named security dispositions belong to `#164`; the control
+  implementation plan belongs to `#165`;
 - scheduler production-adapter remediation and current proof belongs to `#168`;
 - implementation of scheduling and reversible owner/write controls belongs
   to downstream issues `#150` and `#126`, not #125.
@@ -199,16 +199,21 @@ workflow. In particular:
 The current #164 record is
 `docs/worker-uplift-security-dispositions.json`. Its normal validator confirms
 that all eight findings have current scope, evidence, an accountable named
-owner, controls, a review date, and a remediation path without treating a
-pending entry as acceptance. Its closure form is deliberately stricter:
+owner, controls, a review date, and a remediation path. Findings 002 through
+006 are remediated. Findings 007 through 009 use the explicit owner comment and
+the exact-scope standing authorization described in the security runbook. Its
+closure form is deliberately stricter:
 
 ```bash
 python3 scripts/validate_worker_uplift_security_dispositions.py --enforce-closure
 ```
 
-That command must pass before the security-residual readiness item can pass.
-While it fails, #125 remains NO-GO. Neither repository ownership nor the
-historical generic #124 owner strings supply residual-risk acceptance.
+That command passes for the current record and must continue to pass. It pins
+the owner-authorized fingerprint, rejects scope or safety-invariant drift, and
+enforces the dated review/expiry window. No per-release or first-run owner
+comment is required while those machine-validated invariants remain exact.
+This security gate does not supply the separate named #125 or #166 decision,
+and #125 remains NO-GO on its other blockers.
 
 ## Cloudflare failover rule
 

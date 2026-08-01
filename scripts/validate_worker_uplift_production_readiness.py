@@ -902,8 +902,16 @@ def validate_decision(
             f"extra={sorted(set(blocker_ids) - REQUIRED_BLOCKERS)}"
         )
     for item in blockers:
-        if item.get("status") != "open":
-            errors.append(f"{item.get('id')} must remain open")
+        expected_blocker_status = (
+            "resolved"
+            if item.get("id") == "security_residual_owner_disposition"
+            and decision.get("security_gate", {}).get("closure_ready") is True
+            else "open"
+        )
+        if item.get("status") != expected_blocker_status:
+            errors.append(
+                f"{item.get('id')} status must be {expected_blocker_status} for current evidence"
+            )
         if not item.get("owner_repository") or not item.get("required_resolution"):
             errors.append(f"{item.get('id')} must record owner and resolution")
         expected_issue = REQUIRED_BLOCKER_ISSUES.get(str(item.get("id", "")))

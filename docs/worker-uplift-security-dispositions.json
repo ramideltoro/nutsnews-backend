@@ -1,9 +1,9 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "tracking_issue": "ramideltoro/nutsnews-worker#164",
   "implementation_repository": "ramideltoro/nutsnews-backend",
-  "captured_at_utc": "2026-07-31T18:43:42Z",
-  "decision": "blocked_pending_dispositions",
+  "captured_at_utc": "2026-08-01T01:33:25Z",
+  "decision": "complete",
   "source_review": {
     "tracking_issue": "ramideltoro/nutsnews-worker#124",
     "artifact": "docs/worker-uplift-security-review.json",
@@ -41,7 +41,76 @@
     "advisory_approval_metadata_is_acceptance": false,
     "automation_is_acceptance": false,
     "expired_acceptance_is_valid": false,
+    "standing_authorization_may_replace_per_release_owner_comment": true,
+    "standing_authorization_requires_exact_scope_fingerprint": true,
+    "standing_authorization_survives_release_revisions_only": true,
+    "standing_authorization_requires_protected_source_change_and_current_evidence": true,
+    "standing_authorization_invalid_on_scope_or_invariant_change": true,
+    "final_readiness_or_cutover_approval_is_covered": false,
     "no_disposition_authorizes_cutover_or_production_writes": true
+  },
+  "standing_authorization": {
+    "id": "SEC-124-007-009-STANDING-2026-08-01",
+    "status": "active",
+    "authorized_owner_login": "ramideltoro",
+    "authorized_at_utc": "2026-08-01T01:33:25Z",
+    "owner_evidence": {
+      "kind": "issue_comment",
+      "url": "https://github.com/ramideltoro/nutsnews-worker/issues/164#issuecomment-5148872751",
+      "author_login": "ramideltoro",
+      "authored_at_utc": "2026-08-01T01:33:25Z",
+      "body_sha256": "c16828dab3ecefe4c01c5468288a575b5c16a39349af17d5806f459d6fb0d507"
+    },
+    "applies_to_findings": [
+      "SEC-124-007",
+      "SEC-124-008",
+      "SEC-124-009"
+    ],
+    "applies_to_current_and_future_release_revisions": true,
+    "per_release_owner_approval_required": false,
+    "first_run_owner_approval_required": false,
+    "review_refresh_requires_new_owner_approval": false,
+    "scope_fingerprint_fields": [
+      "finding.id",
+      "finding.affected_scope",
+      "finding.risk_acceptance.scope",
+      "finding.risk_acceptance.rationale",
+      "finding.risk_acceptance.compensating_controls",
+      "finding.risk_acceptance.reopen_trigger",
+      "safety_invariants",
+      "standing_authorization.excluded_authorities"
+    ],
+    "scope_sha256": "917a1b18d80619c15bfac4cf8eac401a7be2eff989a1b3f7d5068fc68a44027f",
+    "revalidation": {
+      "value_free": true,
+      "current_evidence_required": true,
+      "protected_pull_request_required": true,
+      "review_and_expiry_dates_remain_fail_closed": true,
+      "validator": "python3 scripts/validate_worker_uplift_security_dispositions.py --enforce-closure",
+      "focused_tests": "python3 -m unittest tests.test_worker_uplift_security_dispositions"
+    },
+    "invalidated_by": [
+      "accepted finding set changes",
+      "affected repository scope changes",
+      "residual condition, rationale, compensating control, or reopen trigger changes",
+      "a safety invariant changes",
+      "current value-free evidence is missing",
+      "review or expiry date lapses",
+      "the protected source-control path or fail-closed validation weakens"
+    ],
+    "excluded_authorities": [
+      "cutover",
+      "production writes",
+      "DNS changes",
+      "failover changes",
+      "legacy-worker changes",
+      "ingestion-ownership changes",
+      "production infrastructure mutation",
+      "secret-value retrieval",
+      "#125 production-readiness approval",
+      "#166 final cutover-execution approval",
+      "#127 cutover execution"
+    ]
   },
   "findings": [
     {
@@ -400,8 +469,8 @@
         "basis": "named owner of the backend and affected service repositories",
         "acceptance_inferred": false
       },
-      "status": "pending",
-      "owner_action_required": true,
+      "status": "accepted_residual_risk",
+      "owner_action_required": false,
       "planned_remediation": "If the Qwen provider supports independently scoped credentials, provision and rotate to distinct approval and translation sources through protected credential workflows; otherwise obtain an explicit bounded named-owner acceptance for the provider-only shared scope.",
       "compensating_controls": [
         "the credential authorizes only Qwen provider requests",
@@ -412,7 +481,28 @@
       "review_by": "2026-08-31",
       "reopen_trigger": "The shared provider credential gains broader authority, is used by another service, or existing provider isolation controls weaken.",
       "remediation": null,
-      "risk_acceptance": null
+      "risk_acceptance": {
+        "authorized_owner_login": "ramideltoro",
+        "decided_at_utc": "2026-08-01T01:33:25Z",
+        "scope": "The shadow approval and translation services share the single retained LOCAL_AI_API_KEY source for Qwen requests.",
+        "rationale": "The currently deployed Qwen gateway exposes one source credential; distinct provider credentials are not presently available without changing the legacy-hosted provider implementation.",
+        "compensating_controls": [
+          "separate runtime files and environment keys",
+          "provider-only authority with bounded concurrency and timeouts",
+          "no RabbitMQ, PostgreSQL, deployment, DNS, failover, or production-write authority",
+          "approval and translation remain shadow-only"
+        ],
+        "review_on": "2026-08-31",
+        "expires_on": "2026-09-30",
+        "reopen_trigger": "Distinct gateway credentials become available, another service gains access, provider authority expands, or any compensating control weakens.",
+        "acceptance_evidence": {
+          "kind": "standing_authorization",
+          "authorization_id": "SEC-124-007-009-STANDING-2026-08-01",
+          "initial_owner_evidence_url": "https://github.com/ramideltoro/nutsnews-worker/issues/164#issuecomment-5148872751",
+          "author_login": "ramideltoro",
+          "authored_at_utc": "2026-08-01T01:33:25Z"
+        }
+      }
     },
     {
       "id": "SEC-124-008",
@@ -442,8 +532,8 @@
         "basis": "named owner of the affected repository and backend host automation",
         "acceptance_inferred": false
       },
-      "status": "pending",
-      "owner_action_required": true,
+      "status": "accepted_residual_risk",
+      "owner_action_required": false,
       "planned_remediation": "Provision and prove a dedicated forced-command or equivalently restricted read-only host identity and least-privilege API identity, then route scheduled monitoring to those credentials through reviewed protected configuration.",
       "compensating_controls": [
         "scheduled workflows execute fixed source-controlled read-only programs",
@@ -454,7 +544,27 @@
       "review_by": "2026-08-31",
       "reopen_trigger": "A scheduled or approval-free workflow can invoke an unrestricted host command or a write-capable API operation.",
       "remediation": null,
-      "risk_acceptance": null
+      "risk_acceptance": {
+        "authorized_owner_login": "ramideltoro",
+        "decided_at_utc": "2026-08-01T01:33:25Z",
+        "scope": "Scheduled and approval-free read-only backend evidence uses repository-scoped host and API credentials.",
+        "rationale": "Current workflows execute fixed, source-controlled read-only operations, but a dedicated forced-command host identity and separately scoped monitoring API credential are not currently deployed.",
+        "compensating_controls": [
+          "read-only workflow permissions and fixed source-controlled commands",
+          "forced dry_run=true with strict host-key verification and bounded output",
+          "mutating routes require the protected production-backend environment and typed confirmation"
+        ],
+        "review_on": "2026-08-31",
+        "expires_on": "2026-09-30",
+        "reopen_trigger": "An approval-free workflow gains arbitrary-command or write capability, credential scope expands, or dedicated monitoring identities become available.",
+        "acceptance_evidence": {
+          "kind": "standing_authorization",
+          "authorization_id": "SEC-124-007-009-STANDING-2026-08-01",
+          "initial_owner_evidence_url": "https://github.com/ramideltoro/nutsnews-worker/issues/164#issuecomment-5148872751",
+          "author_login": "ramideltoro",
+          "authored_at_utc": "2026-08-01T01:33:25Z"
+        }
+      }
     },
     {
       "id": "SEC-124-009",
@@ -504,8 +614,8 @@
         "basis": "named owner of every affected repository",
         "acceptance_inferred": false
       },
-      "status": "pending",
-      "owner_action_required": true,
+      "status": "accepted_residual_risk",
+      "owner_action_required": false,
       "planned_remediation": "Require at least one independent approving review when an authorized independent maintainer is available; until then, any bounded residual decision must be explicit, named, time-limited, and preserve all existing ruleset controls.",
       "compensating_controls": [
         "active protect-main rulesets require pull requests",
@@ -517,21 +627,52 @@
       "review_by": "2026-08-31",
       "reopen_trigger": "An independent maintainer becomes available, required validation weakens, or the repositories cease to be single-owner shadow repositories.",
       "remediation": null,
-      "risk_acceptance": null
+      "risk_acceptance": {
+        "authorized_owner_login": "ramideltoro",
+        "decided_at_utc": "2026-08-01T01:33:25Z",
+        "scope": "The active protect-main rulesets in the ten worker-uplift repositories require pull requests but zero approving reviews.",
+        "rationale": "ramideltoro is currently the only repository collaborator; requiring one independent review now would deadlock the remaining protected implementation sequence.",
+        "compensating_controls": [
+          "pull requests remain mandatory and required CI must pass",
+          "conversations must resolve",
+          "deletion and non-fast-forward updates are blocked",
+          "exact images are signed and digest-pinned",
+          "uplift remains shadow-only"
+        ],
+        "review_on": "2026-08-31",
+        "expires_on": "2026-09-30",
+        "reopen_trigger": "An independent maintainer becomes available, branch protections weaken, or before any final cutover-execution approval.",
+        "acceptance_evidence": {
+          "kind": "standing_authorization",
+          "authorization_id": "SEC-124-007-009-STANDING-2026-08-01",
+          "initial_owner_evidence_url": "https://github.com/ramideltoro/nutsnews-worker/issues/164#issuecomment-5148872751",
+          "author_login": "ramideltoro",
+          "authored_at_utc": "2026-08-01T01:33:25Z"
+        }
+      }
     }
   ],
   "closure_gate": {
-    "ready": false,
-    "status": "blocked",
-    "unresolved_findings": [
-      "SEC-124-007",
-      "SEC-124-008",
-      "SEC-124-009"
+    "ready": true,
+    "status": "pass",
+    "unresolved_findings": [],
+    "named_owner_decisions": [
+      {
+        "finding": "SEC-124-007",
+        "owner": "ramideltoro"
+      },
+      {
+        "finding": "SEC-124-008",
+        "owner": "ramideltoro"
+      },
+      {
+        "finding": "SEC-124-009",
+        "owner": "ramideltoro"
+      }
     ],
-    "named_owner_decisions": [],
-    "issue_closure_authorized": false,
+    "issue_closure_authorized": true,
     "production_readiness_effect": "ramideltoro/nutsnews-worker#125 remains NO-GO",
-    "owner_action_required": true
+    "owner_action_required": false
   },
   "validation": {
     "current_record": "python3 scripts/validate_worker_uplift_security_dispositions.py",

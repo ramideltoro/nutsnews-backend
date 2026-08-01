@@ -265,6 +265,11 @@ prometheus.relabel "worker_uplift" {
   }
 
   rule {
+    target_label = "service_namespace"
+    replacement  = "nutsnews"
+  }
+
+  rule {
     regex  = "^(article|article_id|feed|feed_id|message|message_id|idempotency|idempotency_key|trace_id|span_id|correlation_id|causation_id|payload|url|path|user|ip|token|secret|prompt|model_output)$"
     action = "labeldrop"
   }
@@ -272,7 +277,7 @@ prometheus.relabel "worker_uplift" {
   // result/retry/token_kind remain temporarily for metrics already emitted by
   // the shadow images; all are finite enums and are removed at image rollout.
   rule {
-    regex  = "^(__name__|job|instance|environment|deployment_environment|host|service|version|revision|stage|queue|outcome|dependency|language|provider|probe|check|le|expected_active|deployment|deployment_mode|adapter|result|retry|retry_class|token_kind)$"
+    regex  = "^(__name__|job|instance|environment|deployment_environment|host|service|service_namespace|version|revision|stage|queue|outcome|dependency|language|provider|probe|check|le|expected_active|deployment|deployment_mode|adapter|result|retry|retry_class|token_kind)$"
     action = "labelkeep"
   }
 }

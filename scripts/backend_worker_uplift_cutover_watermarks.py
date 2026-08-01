@@ -178,7 +178,25 @@ def validate_runtime_pair(
     return followup_at, followup_state
 
 
-def psql_json(sql: str, password: str, *, timeout: int = 45) -> dict[str, Any]:
+def classify_psql_failure(stderr: str) -> str:
+    """Return a value-free failure class without echoing database diagnostics."""
+    lowered = stderr.lower()
+    classifications = (
+        ("password authentication failed", "authentication_failed"),
+        ("no pg_hba.conf entry", "connection_policy_rejected"),
+        ("permission denied", "insufficient_privilege"),
+        ("does not exist", "missing_database_object"),
+        ("syntax error", "invalid_query_shape"),
+        ("connection refused", "connection_unavailable"),
+        ("server closed the connection", "connection_unavailable"),
+    )
+    for marker, classification in classifications:
+        if marker in lowered:
+            return classification
+    return "query_rejected"
+
+
+def psql_json(sql: str, password: str, *, context: str, timeout: int = 45) -> dict[str, Any]:
     env = os.environ.copy()
     env["PGPASSWORD"] = password
     env["PGCONNECT_TIMEOUT"] = "10"
@@ -215,7 +233,8 @@ def psql_json(sql: str, password: str, *, timeout: int = 45) -> dict[str, Any]:
     except subprocess.TimeoutExpired as exc:
         raise WatermarkError("bounded watermark query timed out") from exc
     except subprocess.CalledProcessError as exc:
-        raise WatermarkError("bounded watermark query failed closed") from exc
+        failure_class = classify_psql_failure(exc.stderr or "")
+        raise WatermarkError(f"bounded {context} query failed closed ({failure_class})") from exc
     lines = [line for line in completed.stdout.splitlines() if line.strip()]
     if not lines:
         raise WatermarkError("bounded watermark query returned no evidence")
@@ -391,9 +410,9 @@ def build_candidate(
     runtime_first = load_json(runtime_first_path)
     runtime_followup = load_json(runtime_followup_path)
     observed_at, runtime = validate_runtime_pair(runtime_first, runtime_followup, contract, now=current_time)
-    privilege = psql_json(PRIVILEGE_SQL, password)
+    privilege = psql_json(PRIVILEGE_SQL, password, context="privilege-proof")
     validate_privilege_proof(privilege)
-    snapshot = psql_json(DB_SNAPSHOT_SQL, password)
+    snapshot = psql_json(DB_SNAPSHOT_SQL, password, context="pre-state-snapshot")
     rows: list[dict[str, Any]] = []
     for item in snapshot_stages(snapshot):
         validate_stage_boundary(item)
@@ -778,9 +797,9 @@ def apply_candidate(
     age = (utc_now() - observed).total_seconds()
     if age < -60 or age > int(contract["evidence"]["maximum_age_seconds"]):
         raise WatermarkError("apply candidate is outside the authorized freshness window")
-    privilege = psql_json(PRIVILEGE_SQL, password)
+    privilege = psql_json(PRIVILEGE_SQL, password, context="privilege-proof")
     validate_privilege_proof(privilege)
-    before = psql_json(DB_SNAPSHOT_SQL, password)
+    before = psql_json(DB_SNAPSHOT_SQL, password, context="pre-apply-snapshot")
     before_stages = snapshot_stages(before)
     for item in before_stages:
         validate_stage_boundary(item)
@@ -789,12 +808,16 @@ def apply_candidate(
             captured = target.get("diagnostic_metadata", {}).get("capturedAtUtc")
             if parse_utc(captured or target.get("confirmed_at"), f"{item['stage']}.current_target") > observed:
                 raise WatermarkError("stale evidence cannot overwrite a newer watermark")
-    mutation = psql_json(apply_sql(artifact["candidate"]["rows"]), password)
+    mutation = psql_json(
+        apply_sql(artifact["candidate"]["rows"]),
+        password,
+        context="bounded-upsert",
+    )
     if mutation.get("upserted_rows") != 8 or mutation.get("expected_rows") != 8 or mutation.get("exact_row_guard") != 1:
         raise WatermarkError("bounded watermark upsert did not affect exactly eight rows")
     if mutation.get("per_stage") != {stage: 1 for stage in STAGES}:
         raise WatermarkError("bounded watermark upsert did not affect one row per stage")
-    after = psql_json(DB_SNAPSHOT_SQL, password)
+    after = psql_json(DB_SNAPSHOT_SQL, password, context="post-apply-snapshot")
     after_stages = snapshot_stages(after)
     for item in after_stages:
         validate_stage_boundary(item)
@@ -889,9 +912,9 @@ def verify_post_apply(
         raise WatermarkError("runtime manifest changed during watermark apply")
     if artifact["source_digests"]["runtime_compose_sha256"] != post_runtime["source_digests"]["runtime_compose_sha256"]:
         raise WatermarkError("runtime compose changed during watermark apply")
-    privilege = psql_json(PRIVILEGE_SQL, password)
+    privilege = psql_json(PRIVILEGE_SQL, password, context="privilege-proof")
     validate_privilege_proof(privilege)
-    snapshot = psql_json(DB_SNAPSHOT_SQL, password)
+    snapshot = psql_json(DB_SNAPSHOT_SQL, password, context="post-apply-snapshot")
     for item in snapshot_stages(snapshot):
         validate_stage_boundary(item)
         if item.get("watermark_row_count") != 1 or item.get("target_watermark_count") != 1:

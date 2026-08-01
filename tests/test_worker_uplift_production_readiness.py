@@ -90,6 +90,19 @@ class WorkerUpliftProductionReadinessTests(unittest.TestCase):
 
         self.assertTrue(any("status must be resolved" in error for error in errors))
 
+    def test_resolved_scheduler_blocker_tracks_current_runtime_proof(self):
+        decision = copy.deepcopy(self.decision)
+        blocker = next(
+            item
+            for item in decision["blockers"]
+            if item["id"] == "scheduler_local_test_dependencies"
+        )
+        blocker["status"] = "open"
+
+        errors = self.validate(decision=decision)
+
+        self.assertTrue(any("status must be resolved" in error for error in errors))
+
     def test_cutover_plan_hash_drift_is_rejected(self):
         decision = copy.deepcopy(self.decision)
         rollback = decision["runtime_and_recovery_evidence"]["rollback_limits"]
@@ -250,15 +263,26 @@ class WorkerUpliftProductionReadinessTests(unittest.TestCase):
         self.assertTrue(any("preserve the observed checkedAt" in error for error in errors))
         self.assertTrue(any("must not be silently normalized" in error for error in errors))
 
-    def test_scheduler_defect_must_link_independent_blocker(self):
+    def test_scheduler_completion_must_reject_test_adapters_and_link_issue(self):
         decision = copy.deepcopy(self.decision)
-        decision["runtime_and_recovery_evidence"]["scheduler_readiness"][
-            "blocker_issue"
-        ] = "ramideltoro/nutsnews-worker#125"
+        scheduler = decision["runtime_and_recovery_evidence"]["scheduler_readiness"]
+        scheduler["source_uses_local_test_dependencies"] = True
+        scheduler["tracking_issue"] = "ramideltoro/nutsnews-worker#125"
 
         errors = self.validate(decision=decision)
 
-        self.assertTrue(any("must link blocker #168" in error for error in errors))
+        self.assertTrue(any("must reject local test adapters" in error for error in errors))
+        self.assertTrue(any("must link completed #168" in error for error in errors))
+
+    def test_stale_soak_cannot_claim_current_candidate(self):
+        decision = copy.deepcopy(self.decision)
+        decision["comparison_and_soak_evidence"]["soak"][
+            "image_set_matches_current"
+        ] = True
+
+        errors = self.validate(decision=decision)
+
+        self.assertTrue(any("must not claim to match" in error for error in errors))
 
     def test_runtime_tracking_issue_85_must_remain_historical_provenance(self):
         proof = copy.deepcopy(self.runtime_status_proof)

@@ -676,10 +676,12 @@ def validate_decision(
     if comparison.get("parity", {}).get("status") != "stale":
         errors.append("superseded-image parity evidence must remain marked stale")
     soak = comparison.get("soak", {})
-    if soak.get("status") != "pass" or soak.get("observed_hours", 0) < 48:
-        errors.append("soak evidence must record a complete passing window")
-    if soak.get("image_set_matches_current") is not True:
-        errors.append("passing soak must match the current deployed image set")
+    if soak.get("status") != "stale" or soak.get("observed_hours", 0) < 48:
+        errors.append("superseded-image soak evidence must remain marked stale")
+    if soak.get("image_set_matches_current") is not False:
+        errors.append("stale soak must not claim to match the current deployed image set")
+    if not soak.get("stale_reason"):
+        errors.append("stale soak must record why the current candidate requires a rerun")
 
     recovery = decision.get("runtime_and_recovery_evidence", {})
     fresh_status = recovery.get("fresh_status_dispatch", {})
@@ -755,16 +757,38 @@ def validate_decision(
         errors.append("both status dispatches must pin the same runtime evidence digest")
 
     scheduler = recovery.get("scheduler_readiness", {})
-    if scheduler.get("status") != "blocked_confirmed_evidence_defect":
-        errors.append("scheduler readiness defect must remain an explicit blocker")
-    if scheduler.get("checked_at_utc") != "2026-07-23T00:00:00.000Z":
-        errors.append("scheduler readiness defect must preserve the stale checkedAt")
-    if scheduler.get("source_uses_local_test_dependencies") is not True:
-        errors.append("scheduler readiness defect must record the verified local test adapters")
+    if scheduler.get("status") != "pass":
+        errors.append("scheduler readiness must record completed #168 evidence")
+    if scheduler.get("source_commit") != "f627a6014a43cadba89cffc31a40565c2d00f001":
+        errors.append("scheduler readiness must pin the deployed #168 source commit")
+    if scheduler.get("image") != (
+        "ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler@"
+        "sha256:f489c7bdf60433b44c21a69224b10e62a1b39203119da53378b2018c17ce1452"
+    ):
+        errors.append("scheduler readiness must pin the deployed #168 image")
+    if scheduler.get("source_uses_local_test_dependencies") is not False:
+        errors.append("scheduler readiness must reject local test adapters")
     if scheduler.get("silently_normalized") is not False:
-        errors.append("scheduler readiness defect must not be silently normalized")
-    if scheduler.get("blocker_issue") != "ramideltoro/nutsnews-worker#168":
-        errors.append("scheduler readiness defect must link blocker #168")
+        errors.append("scheduler readiness evidence must not be silently normalized")
+    if scheduler.get("tracking_issue") != "ramideltoro/nutsnews-worker#168":
+        errors.append("scheduler readiness must link completed #168")
+    if scheduler.get("status_run_id") != 30683488159:
+        errors.append("scheduler readiness must identify current status run 30683488159")
+    if scheduler.get("freshness_bound_ms") != 5000:
+        errors.append("scheduler readiness must retain the five-second clock bound")
+    if set(scheduler.get("dependencies", [])) != {
+        "rabbitmq-payload-publisher",
+        "backend-api-feed-source",
+        "postgres-schedule-lease-store",
+        "system-runtime-clock",
+    }:
+        errors.append("scheduler readiness must name only the production adapters")
+    if scheduler.get("scheduled_count") != 1 or scheduler.get("confirmed_count") != 1:
+        errors.append("scheduler readiness must record one bounded confirmed publish")
+    if scheduler.get("failed_count") != 0:
+        errors.append("scheduler readiness must record zero failed publishes")
+    if scheduler.get("fetch_queue_consumers") != 1 or scheduler.get("fetch_queue_messages") != 0:
+        errors.append("scheduler readiness must record one consumer and a drained fetch queue")
 
     report_tracker = recovery.get("runtime_report_tracking_issue", {})
     if report_tracker.get("reported_number") != 85:
@@ -957,6 +981,12 @@ def validate_decision(
         ) or (
             item.get("id") == "control_implementation_plan"
             and cutover_plan_ready
+        ) or (
+            item.get("id") == "scheduler_local_test_dependencies"
+            and decision.get("runtime_and_recovery_evidence", {})
+            .get("scheduler_readiness", {})
+            .get("status")
+            == "pass"
         )
         expected_blocker_status = "resolved" if resolved_by_current_evidence else "open"
         if item.get("status") != expected_blocker_status:

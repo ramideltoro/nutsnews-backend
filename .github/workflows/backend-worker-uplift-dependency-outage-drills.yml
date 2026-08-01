@@ -65,7 +65,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           repository: ramideltoro/nutsnews-worker-article-approval
-          ref: 38185c74717221453c662f4ba1b093315eff5b83
+          ref: 70c51a65123a4990c6a756d41bbb7566eb3f326b
           path: _candidate/approval
           persist-credentials: false
 
@@ -73,7 +73,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           repository: ramideltoro/nutsnews-worker-article-persistence
-          ref: 6dae69d96b4b081b23b5e1d85e10133ee36a6674
+          ref: e646a51bfea5142d769e0980608dc86f6c7623f7
           path: _candidate/persistence
           persist-credentials: false
 
@@ -219,8 +219,8 @@ jobs:
       - name: Record tested source and delivery-policy identities
         shell: bash
         env:
-          APPROVAL_COMMIT: 38185c74717221453c662f4ba1b093315eff5b83
-          PERSISTENCE_COMMIT: 6dae69d96b4b081b23b5e1d85e10133ee36a6674
+          APPROVAL_COMMIT: 70c51a65123a4990c6a756d41bbb7566eb3f326b
+          PERSISTENCE_COMMIT: e646a51bfea5142d769e0980608dc86f6c7623f7
           INFRA_COMMIT: b10a76cf523c9f5b47bd69b8301dc3d9d9a4d8a6
           SOURCE_OUTPUT: ${{ runner.temp }}/source-checkouts.json
           POLICY_OUTPUT: ${{ runner.temp }}/delivery-policy.json

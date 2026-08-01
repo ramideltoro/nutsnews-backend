@@ -249,6 +249,34 @@
     - backend_postgres_manageable | bool
     - backend_worker_uplift_postgres_enabled | bool
 
+- name: Validate worker-uplift cutover role boundary
+  ansible.builtin.assert:
+    that:
+      - backend_worker_uplift_cutover_user is match('^[A-Za-z_][A-Za-z0-9_]*$')
+      - backend_worker_uplift_cutover_password | length > 0
+      - backend_worker_uplift_cutover_user not in (backend_worker_uplift_postgres_stage_roles | map(attribute='user') | list)
+      - backend_worker_uplift_cutover_user != backend_postgres_app_user
+      - backend_worker_uplift_cutover_user != backend_postgres_worker_api_user
+      - backend_worker_uplift_cutover_user != backend_worker_uplift_projection_user
+    fail_msg: Worker-uplift cutover role must be dedicated and use a configured protected password.
+  no_log: true
+  when:
+    - backend_postgres_manageable | bool
+    - backend_worker_uplift_postgres_enabled | bool
+
+- name: Ensure worker-uplift cutover role exists
+  community.postgresql.postgresql_user:
+    name: "{{ backend_worker_uplift_cutover_user }}"
+    password: "{{ backend_worker_uplift_cutover_password }}"
+    role_attr_flags: LOGIN,NOSUPERUSER,NOCREATEDB,NOCREATEROLE,NOREPLICATION
+    state: present
+  become_user: postgres
+  register: backend_worker_uplift_cutover_user_result
+  no_log: true
+  when:
+    - backend_postgres_manageable | bool
+    - backend_worker_uplift_postgres_enabled | bool
+
 - name: Track whether PostgreSQL role-dependent tasks can run in this check
   ansible.builtin.set_fact:
     backend_postgres_database_manageable: >-
@@ -276,6 +304,10 @@
           or (
             backend_worker_uplift_projection_user_result is defined
             and (backend_worker_uplift_projection_user_result is changed)
+          )
+          or (
+            backend_worker_uplift_cutover_user_result is defined
+            and (backend_worker_uplift_cutover_user_result is changed)
           )
         )
       }}
@@ -423,6 +455,21 @@
     objs: "{{ backend_worker_uplift_postgres_database }}"
     privs: CONNECT
     roles: "{{ backend_worker_uplift_projection_user }}"
+    state: present
+  become_user: postgres
+  when:
+    - backend_postgres_manageable | bool
+    - backend_worker_uplift_postgres_enabled | bool
+    - backend_postgres_database_dependents_manageable | default(false) | bool
+    - backend_postgres_privilege_roles_manageable | default(false) | bool
+
+- name: Allow worker-uplift cutover role to connect to the future-primary shadow database
+  community.postgresql.postgresql_privs:
+    db: "{{ backend_worker_uplift_postgres_database }}"
+    type: database
+    objs: "{{ backend_worker_uplift_postgres_database }}"
+    privs: CONNECT
+    roles: "{{ backend_worker_uplift_cutover_user }}"
     state: present
   become_user: postgres
   when:

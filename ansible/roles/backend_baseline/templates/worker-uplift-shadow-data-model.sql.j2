@@ -7,6 +7,7 @@ DECLARE
   worker_api_role constant text := '{{ backend_postgres_worker_api_user }}';
   app_role constant text := '{{ backend_postgres_app_user }}';
   projection_role constant text := '{{ backend_worker_uplift_projection_user }}';
+  cutover_role constant text := '{{ backend_worker_uplift_cutover_user }}';
 BEGIN
 {% for item in backend_worker_uplift_postgres_stage_roles %}
   EXECUTE format('CREATE SCHEMA IF NOT EXISTS %I', '{{ item.schema }}');
@@ -392,6 +393,96 @@ BEGIN
   $ddl$, final_schema);
 
   EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.cutover_control (
+      control_id text PRIMARY KEY CHECK (control_id = 'production'),
+      generation bigint NOT NULL DEFAULT 1 CHECK (generation > 0),
+      state text NOT NULL DEFAULT 'shadow' CHECK (state IN ('shadow', 'fenced', 'cutover_active', 'rollback_pending')),
+      active_ingestion_owner text NOT NULL DEFAULT 'legacy_shards' CHECK (active_ingestion_owner IN ('legacy_shards', 'worker_uplift')),
+      legacy_dispatch_enabled boolean NOT NULL DEFAULT true,
+      uplift_scheduler_enabled boolean NOT NULL DEFAULT true,
+      uplift_production_writes_enabled boolean NOT NULL DEFAULT false,
+      publication_write_mode text NOT NULL DEFAULT 'shadow_comparison' CHECK (publication_write_mode IN ('shadow_comparison', 'production')),
+      candidate_sha256 text CHECK (candidate_sha256 IS NULL OR candidate_sha256 ~ '^[0-9a-f]{64}$'),
+      watermark_sha256 text CHECK (watermark_sha256 IS NULL OR watermark_sha256 ~ '^[0-9a-f]{64}$'),
+      rollback_deadline timestamptz,
+      observation_start timestamptz,
+      observation_end timestamptz,
+      last_transition_id text NOT NULL DEFAULT 'bootstrap-shadow',
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      CHECK (NOT uplift_production_writes_enabled OR active_ingestion_owner = 'worker_uplift'),
+      CHECK (NOT uplift_production_writes_enabled OR NOT legacy_dispatch_enabled),
+      CHECK (NOT legacy_dispatch_enabled OR NOT uplift_production_writes_enabled),
+      CHECK ((publication_write_mode = 'production') = uplift_production_writes_enabled),
+      CHECK (
+        (state = 'shadow' AND active_ingestion_owner = 'legacy_shards' AND legacy_dispatch_enabled AND uplift_scheduler_enabled AND NOT uplift_production_writes_enabled AND publication_write_mode = 'shadow_comparison')
+        OR (state = 'fenced' AND active_ingestion_owner = 'legacy_shards' AND NOT legacy_dispatch_enabled AND NOT uplift_scheduler_enabled AND NOT uplift_production_writes_enabled AND publication_write_mode = 'shadow_comparison')
+        OR (state = 'cutover_active' AND active_ingestion_owner = 'worker_uplift' AND NOT legacy_dispatch_enabled AND uplift_scheduler_enabled AND uplift_production_writes_enabled AND publication_write_mode = 'production')
+        OR (state = 'rollback_pending' AND active_ingestion_owner = 'legacy_shards' AND NOT legacy_dispatch_enabled AND NOT uplift_scheduler_enabled AND NOT uplift_production_writes_enabled AND publication_write_mode = 'shadow_comparison')
+      )
+    )
+  $ddl$, final_schema);
+
+  EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS %I.cutover_control_audit (
+      id bigserial PRIMARY KEY,
+      control_id text NOT NULL,
+      transition_id text NOT NULL,
+      previous_generation bigint NOT NULL,
+      next_generation bigint NOT NULL,
+      previous_state jsonb NOT NULL CHECK (jsonb_typeof(previous_state) = 'object'),
+      next_state jsonb NOT NULL CHECK (jsonb_typeof(next_state) = 'object'),
+      changed_at timestamptz NOT NULL DEFAULT now()
+    )
+  $ddl$, final_schema);
+
+  EXECUTE format($ddl$
+    CREATE OR REPLACE FUNCTION %I.audit_cutover_control_transition()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = pg_catalog
+    AS $cutover_audit$
+    BEGIN
+      IF NEW.generation <> OLD.generation + 1 THEN
+        RAISE EXCEPTION 'cutover control generation must advance exactly once';
+      END IF;
+      IF NOT (
+        (OLD.state = 'shadow' AND NEW.state = 'fenced' AND NEW.last_transition_id = 'fence')
+        OR (OLD.state = 'fenced' AND NEW.state = 'cutover_active' AND NEW.last_transition_id = 'activate')
+        OR (OLD.state = 'cutover_active' AND NEW.state = 'rollback_pending' AND NEW.last_transition_id = 'rollback-prepare')
+        OR (OLD.state = 'rollback_pending' AND NEW.state = 'shadow' AND NEW.last_transition_id = 'rollback-finalize')
+      ) THEN
+        RAISE EXCEPTION 'cutover control transition is not in the fixed state graph';
+      END IF;
+      IF NEW.candidate_sha256 IS NULL OR NEW.watermark_sha256 IS NULL OR NEW.rollback_deadline IS NULL THEN
+        RAISE EXCEPTION 'cutover control transition requires exact candidate, watermark, and rollback deadline';
+      END IF;
+      INSERT INTO %I.cutover_control_audit (
+        control_id, transition_id, previous_generation, next_generation,
+        previous_state, next_state
+      ) VALUES (
+        NEW.control_id, NEW.last_transition_id, OLD.generation, NEW.generation,
+        to_jsonb(OLD), to_jsonb(NEW)
+      );
+      RETURN NEW;
+    END
+    $cutover_audit$
+  $ddl$, final_schema, final_schema);
+
+  EXECUTE format('DROP TRIGGER IF EXISTS worker_uplift_cutover_control_audit ON %I.cutover_control', final_schema);
+  EXECUTE format('REVOKE ALL ON FUNCTION %I.audit_cutover_control_transition() FROM PUBLIC', final_schema);
+  EXECUTE format(
+    'CREATE TRIGGER worker_uplift_cutover_control_audit BEFORE UPDATE ON %I.cutover_control FOR EACH ROW EXECUTE FUNCTION %I.audit_cutover_control_transition()',
+    final_schema,
+    final_schema
+  );
+
+  EXECUTE format(
+    'INSERT INTO %I.cutover_control (control_id) VALUES (''production'') ON CONFLICT (control_id) DO NOTHING',
+    final_schema
+  );
+
+  EXECUTE format($ddl$
     CREATE TABLE IF NOT EXISTS %I.publication_readiness (
       id bigserial PRIMARY KEY,
       article_identity_hash text NOT NULL,
@@ -429,7 +520,7 @@ BEGIN
   EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I, %I', final_schema, worker_api_role, app_role);
   EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.article_shadow_aggregates TO %I, %I', final_schema, worker_api_role, app_role);
   EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.api_command_receipts TO %I, %I', final_schema, worker_api_role, app_role);
-  EXECUTE format('GRANT SELECT ON TABLE %I.stage_health_projections TO %I, %I', final_schema, worker_api_role, app_role);
+  EXECUTE format('GRANT SELECT ON TABLE %I.stage_health_projections, %I.cutover_control TO %I, %I', final_schema, final_schema, worker_api_role, app_role);
   EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I, %I', final_schema, worker_api_role, app_role);
   EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %I.%I TO %I, %I', final_schema, 'article_shadow_aggregates_id_seq', worker_api_role, app_role);
   EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %I.%I TO %I, %I', final_schema, 'api_command_receipts_id_seq', worker_api_role, app_role);
@@ -450,7 +541,7 @@ BEGIN
   EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I, %I', final_schema, worker_api_role, app_role);
   EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.article_shadow_aggregates TO %I, %I', final_schema, worker_api_role, app_role);
   EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.api_command_receipts TO %I, %I', final_schema, worker_api_role, app_role);
-  EXECUTE format('GRANT SELECT ON TABLE %I.stage_health_projections TO %I, %I', final_schema, worker_api_role, app_role);
+  EXECUTE format('GRANT SELECT ON TABLE %I.stage_health_projections, %I.cutover_control TO %I, %I', final_schema, final_schema, worker_api_role, app_role);
   EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I, %I', final_schema, worker_api_role, app_role);
   EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %I.%I TO %I, %I', final_schema, 'article_shadow_aggregates_id_seq', worker_api_role, app_role);
   EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %I.%I TO %I, %I', final_schema, 'api_command_receipts_id_seq', worker_api_role, app_role);
@@ -468,6 +559,24 @@ BEGIN
   EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', final_schema, projection_role);
   EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.stage_health_projections TO %I', final_schema, projection_role);
   EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %I.%I TO %I', final_schema, 'stage_health_projections_id_seq', projection_role);
+
+  EXECUTE format('REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA %I FROM %I', final_schema, cutover_role);
+  EXECUTE format('REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA %I FROM %I', final_schema, cutover_role);
+  EXECUTE format('REVOKE CREATE ON SCHEMA %I FROM %I', final_schema, cutover_role);
+  EXECUTE format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA public FROM %I', cutover_role);
+  EXECUTE format('REVOKE CREATE ON SCHEMA public FROM %I', cutover_role);
+{% for item in backend_worker_uplift_postgres_stage_roles %}
+  EXECUTE format('REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA %I FROM %I', '{{ item.schema }}', cutover_role);
+  EXECUTE format('REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA %I FROM %I', '{{ item.schema }}', cutover_role);
+  EXECUTE format('REVOKE CREATE ON SCHEMA %I FROM %I', '{{ item.schema }}', cutover_role);
+{% endfor %}
+  EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', final_schema, cutover_role);
+  EXECUTE format('GRANT SELECT ON TABLE %I.cutover_control TO %I', final_schema, cutover_role);
+  EXECUTE format(
+    'GRANT UPDATE (generation, state, active_ingestion_owner, legacy_dispatch_enabled, uplift_scheduler_enabled, uplift_production_writes_enabled, publication_write_mode, candidate_sha256, watermark_sha256, rollback_deadline, observation_start, observation_end, last_transition_id, updated_at) ON TABLE %I.cutover_control TO %I',
+    final_schema,
+    cutover_role
+  );
 
   EXECUTE format($ddl$
     CREATE SCHEMA IF NOT EXISTS %I

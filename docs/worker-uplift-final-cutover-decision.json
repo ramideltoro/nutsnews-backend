@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "decision_id": "worker-uplift-final-cutover-decision",
+  "tracking_issue": "ramideltoro/nutsnews-worker#166",
+  "execution_issue": "ramideltoro/nutsnews-worker#127",
+  "decision": "NO-GO",
+  "authorized_for_execution": false,
+  "approver_login": null,
+  "approved_at_utc": null,
+  "candidate_sha256": null,
+  "watermark_sha256": null,
+  "rollback_deadline_utc": null,
+  "observation_start_utc": null,
+  "observation_end_utc": null,
+  "control_commit": null,
+  "legacy_scheduling_commit": "a073e351e5716a97e0759cca17096851cbb80261",
+  "blockers": [
+    "#126 controls are not yet merged, deployed, and rehearsed",
+    "#166 has not frozen and approved the exact production candidate"
+  ],
+  "safety": {
+    "active_ingestion_owner": "legacy_shards",
+    "legacy_dispatch_enabled": true,
+    "uplift_mode": "shadow",
+    "production_writes_enabled": false,
+    "dns_failover_unchanged": true
+  }
+}

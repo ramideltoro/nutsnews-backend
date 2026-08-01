@@ -112,6 +112,17 @@ jobs:
         shell: bash
         run: python3 -m unittest tests.test_worker_uplift_cutover_control_plan
 
+      - name: Validate reversible worker uplift cutover controls
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_cutover_controls.py
+
+      - name: Run reversible worker uplift cutover control tests
+        shell: bash
+        run: >-
+          python3 -m unittest
+          tests.test_worker_uplift_cutover_controls
+          tests.test_validate_worker_uplift_cutover_controls
+
       - name: Validate worker uplift production readiness decision
         shell: bash
         run: python3 scripts/validate_worker_uplift_production_readiness.py

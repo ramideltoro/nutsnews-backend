@@ -8,6 +8,15 @@ backend_worker_runtime_report_dir: "{{ backend_worker_runtime_state_dir }}/repor
 backend_worker_runtime_manifest_path: "{{ backend_worker_runtime_config_dir }}/services.json"
 backend_worker_runtime_compose_path: "{{ backend_worker_runtime_base_dir }}/compose.yml"
 backend_worker_runtime_manager_path: /usr/local/sbin/nutsnews-worker-runtime
+backend_worker_runtime_cutover_manager_path: /usr/local/sbin/nutsnews-worker-uplift-cutover-control
+backend_worker_runtime_cutover_contract_path: /etc/nutsnews-worker-uplift/cutover-controls.json
+backend_worker_runtime_cutover_decision_path: /etc/nutsnews-worker-uplift/final-cutover-decision.json
+backend_worker_runtime_cutover_env_path: /etc/nutsnews-worker-uplift/cutover.env
+backend_worker_runtime_cutover_db_host: 127.0.0.1
+backend_worker_runtime_cutover_db_port: 5432
+backend_worker_runtime_cutover_db_name: "{{ backend_worker_uplift_postgres_database | default('nutsnews_primary_shadow') }}"
+backend_worker_runtime_cutover_db_user: "{{ backend_worker_uplift_cutover_user | default('nutsnews_worker_uplift_cutover') }}"
+backend_worker_runtime_cutover_db_password: "{{ backend_worker_uplift_cutover_password | default('') }}"
 backend_worker_runtime_default_mode: shadow
 backend_worker_runtime_production_writes_enabled: false
 backend_worker_runtime_cutover_state: shadow

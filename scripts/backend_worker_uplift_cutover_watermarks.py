@@ -319,19 +319,25 @@ def privilege_sql() -> str:
       'role_inherit', (select rolinherit from pg_roles where rolname = current_user),
       'row_level_security_bypass', (select rolbypassrls from pg_roles where rolname = current_user),
       'role_memberships', coalesce((select json_agg(granted.rolname order by granted.rolname)
-        from pg_auth_members membership
-        join pg_roles granted on granted.oid = membership.roleid
-        join pg_roles member on member.oid = membership.member
-        where member.rolname = current_user), '[]'::json),
+        from pg_roles granted
+        where granted.rolname <> current_user
+          and pg_has_role(current_user, granted.oid, 'MEMBER')), '[]'::json),
       'schema_create_grants', coalesce((select json_agg(n.nspname order by n.nspname) from pg_namespace n
         where n.nspname !~ '^pg_' and n.nspname <> 'information_schema' and has_schema_privilege(current_user, n.oid, 'CREATE')), '[]'::json),
-      'other_mutation_grants', coalesce((select json_agg(json_build_object('schema',tables.schemaname,'table',tables.tablename,'privilege',privileges.privilege)
-        order by tables.schemaname,tables.tablename,privileges.privilege)
-        from pg_tables tables
-        cross join unnest(array['INSERT','UPDATE','DELETE','TRUNCATE','TRIGGER','REFERENCES']::text[]) privileges(privilege)
-        where tables.schemaname !~ '^pg_' and tables.schemaname <> 'information_schema'
-          and has_table_privilege(current_user, format('%I.%I', tables.schemaname, tables.tablename), privileges.privilege)
-          and not ({allowed.replace('table_schema', 'tables.schemaname').replace('table_name', 'tables.tablename').replace('privilege_type', 'privileges.privilege')})), '[]'::json),
+      'owned_relations', coalesce((select json_agg(json_build_object('schema',namespaces.nspname,'relation',relations.relname)
+        order by namespaces.nspname,relations.relname)
+        from pg_class relations
+        join pg_namespace namespaces on namespaces.oid = relations.relnamespace
+        join pg_roles owner_role on owner_role.oid = relations.relowner
+        where owner_role.rolname = current_user
+          and relations.relkind in ('r','p','v','m','f','S')
+          and namespaces.nspname !~ '^pg_' and namespaces.nspname <> 'information_schema'), '[]'::json),
+      'other_mutation_grants', coalesce((select json_agg(json_build_object('schema',table_schema,'table',table_name,'privilege',privilege_type)
+        order by table_schema,table_name,privilege_type)
+        from information_schema.role_table_grants
+        where grantee = current_user
+          and privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE','TRIGGER','REFERENCES')
+          and not ({allowed})), '[]'::json),
       'targets', json_build_array({targets})
     )::text;
     """
@@ -346,7 +352,12 @@ def validate_privilege_proof(proof: dict[str, Any]) -> None:
     for field in ("database_create", "role_create", "superuser", "role_inherit", "row_level_security_bypass"):
         if proof.get(field) is not False:
             raise WatermarkError(f"watermark role has forbidden capability: {field}")
-    if proof.get("role_memberships") != [] or proof.get("schema_create_grants") != [] or proof.get("other_mutation_grants") != []:
+    if (
+        proof.get("role_memberships") != []
+        or proof.get("schema_create_grants") != []
+        or proof.get("owned_relations") != []
+        or proof.get("other_mutation_grants") != []
+    ):
         raise WatermarkError("watermark role has a grant outside the exact authorized tables")
     targets = proof.get("targets")
     if not isinstance(targets, list) or [item.get("stage") for item in targets if isinstance(item, dict)] != list(STAGES):

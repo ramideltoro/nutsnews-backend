@@ -273,6 +273,7 @@ def validate_implementation(text: str) -> list[str]:
         "stale evidence cannot overwrite a newer watermark",
         "exact authorized consumer count",
         "other_mutation_grants",
+        "owned_relations",
         "role_memberships",
         "row_level_security_bypass",
         "statement_timeout = '30s'",

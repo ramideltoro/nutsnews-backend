@@ -13,6 +13,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from urllib.parse import urlsplit
 
 
 READ_OPERATIONS = {
@@ -1102,8 +1103,23 @@ def internal_error_payload(error: Exception) -> dict[str, Any]:
     return payload
 
 
+WORKER_UPLIFT_DELIVERY_METADATA_FIELDS = {
+    "correlationId",
+    "idempotencyKey",
+    "messageId",
+    "pipelineRunId",
+    "sourceMessageId",
+    "stageExecutionId",
+}
+
+
 def uplift_payload_digest(operation: str, body: dict[str, Any]) -> str:
-    return hashlib.sha256(canonical_json({"operation": operation, "body": body}).encode("utf-8")).hexdigest()
+    business_body = {
+        key: value
+        for key, value in body.items()
+        if key not in WORKER_UPLIFT_DELIVERY_METADATA_FIELDS
+    }
+    return hashlib.sha256(canonical_json({"operation": operation, "body": business_body}).encode("utf-8")).hexdigest()
 
 
 def assert_worker_uplift_scope(operation: str, auth_scope: str, actor_service: str) -> None:
@@ -1174,6 +1190,22 @@ def worker_uplift_metadata(operation: str, body: dict[str, Any], auth_scope: str
     }
     assert_worker_uplift_scope(operation, auth_scope, metadata["actor_service"])
     return metadata
+
+
+def assert_worker_uplift_publication_payload(operation: str, body: dict[str, Any]) -> None:
+    if operation != "uplift-publish-articles-batch":
+        return
+    original_urls = string_list(body, "originalUrls", maximum=2)
+    if len(original_urls) != 1 or len(set(original_urls)) != 1:
+        raise ApiError(400, "worker-uplift publication requires exactly one originalUrls entry")
+    parsed_url = urlsplit(original_urls[0])
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.hostname:
+        raise ApiError(400, "worker-uplift publication originalUrls entry must be an HTTP(S) URL")
+    if article_status(body) != "published":
+        raise ApiError(400, "worker-uplift publication status must be published")
+    language_codes = summary_translation_language_codes(body)
+    if language_codes != list(SUMMARY_TRANSLATION_LANGUAGE_CODES):
+        raise ApiError(400, "worker-uplift publication languageCodes must match the protected policy")
 
 
 def load_worker_uplift_receipt(store: PostgresStore, idempotency_key: str) -> dict[str, Any] | None:
@@ -1354,11 +1386,13 @@ def publish_articles_with_translation_guard(
         """,
         (original_urls,),
     )
+    published_count = len(published_rows)
+    missing_count = max(0, len(original_urls) - published_count)
     return {
-        "ok": True,
+        "ok": missing_count == 0,
         "requestedCount": len(original_urls),
-        "publishedCount": len(published_rows),
-        "blockedCount": 0,
+        "publishedCount": published_count,
+        "blockedCount": missing_count,
         "missingTranslations": [],
     }
 
@@ -1456,6 +1490,7 @@ def handle_worker_uplift_operation(
 ) -> dict[str, Any]:
     provider_mode = assert_provider_mode(body)
     metadata = worker_uplift_metadata(operation, body, auth_scope)
+    assert_worker_uplift_publication_payload(operation, body)
     payload_digest = uplift_payload_digest(operation, body)
     existing_receipt = load_worker_uplift_receipt(store, metadata["idempotency_key"])
     if existing_receipt is not None:
@@ -1500,6 +1535,14 @@ def handle_worker_uplift_operation(
         delegate_operation = WORKER_UPLIFT_DELEGATE_OPERATIONS[operation]
         delegate_result = handle_operation(delegate_operation, body, store, auth_scope=LEGACY_WORKER_API_SCOPE)
         response = delegate_result if isinstance(delegate_result, dict) else {"ok": True, "result": delegate_result}
+        if operation == "uplift-publish-articles-batch" and (
+            response.get("ok") is not True
+            or response.get("requestedCount") != 1
+            or response.get("publishedCount") != 1
+            or response.get("blockedCount") != 0
+            or response.get("missingTranslations") != []
+        ):
+            raise ApiError(409, "worker-uplift publication did not confirm one published article")
     record_worker_uplift_receipt(
         store,
         metadata,

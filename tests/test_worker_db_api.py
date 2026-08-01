@@ -103,6 +103,21 @@ def uplift_shadow_aggregate_body(overrides: dict | None = None) -> dict:
     return body
 
 
+def uplift_publication_body(overrides: dict | None = None) -> dict:
+    body = uplift_metadata(
+        {
+            "providerMode": "backend_postgres_primary",
+            "actorService": "worker-uplift-publication",
+            "originalUrls": ["https://example.com/article-1"],
+            "status": "published",
+            "languageCodes": ["fr", "ja", "de-CH", "de", "el"],
+        }
+    )
+    if overrides:
+        body.update(overrides)
+    return body
+
+
 def worker_uplift_stage_health_row(stage: str, overrides: dict | None = None) -> dict:
     row = {
         "stage_name": stage,
@@ -886,6 +901,31 @@ class StaleAggregateStore(FakeStore):
         return None
 
 
+class ActiveCutoverStore(FakeStore):
+    writes_enabled = True
+    worker_uplift_cutover_state = "cutover-approved"
+    worker_uplift_production_writes_enabled = True
+    worker_uplift_expected_candidate_sha256 = "a" * 64
+    worker_uplift_expected_watermark_sha256 = "b" * 64
+
+    def fetch_one(self, query: str, params: tuple = ()) -> dict | None:
+        self.fetches.append((query, params))
+        if "from worker_uplift_final.api_command_receipts" in query:
+            return None
+        if "from worker_uplift_final.cutover_control" in query:
+            return {
+                "state": "cutover_active",
+                "active_ingestion_owner": "worker_uplift",
+                "legacy_dispatch_enabled": False,
+                "uplift_scheduler_enabled": True,
+                "uplift_production_writes_enabled": True,
+                "publication_write_mode": "production",
+                "candidate_sha256": self.worker_uplift_expected_candidate_sha256,
+                "watermark_sha256": self.worker_uplift_expected_watermark_sha256,
+            }
+        return None
+
+
 class WorkerDbApiTests(unittest.TestCase):
     def test_internal_error_payload_uses_safe_exception_metadata_only(self) -> None:
         class FakeDiag:
@@ -1253,6 +1293,136 @@ class WorkerDbApiTests(unittest.TestCase):
         with self.assertRaises(worker_db_api.ApiError) as error:
             worker_db_api.assert_worker_uplift_production_allowed(store)
         self.assertEqual(403, error.exception.status)
+
+    def test_uplift_publication_requires_exact_single_article_scope(self) -> None:
+        invalid_bodies = [
+            uplift_publication_body({"originalUrls": []}),
+            uplift_publication_body({
+                "originalUrls": [
+                    "https://example.com/article-1",
+                    "https://example.com/article-2",
+                ]
+            }),
+            uplift_publication_body({"status": "translation_pending"}),
+            uplift_publication_body({"languageCodes": ["fr", "ja"]}),
+            uplift_publication_body({"originalUrls": ["shadow://article/article-1"]}),
+        ]
+
+        for body in invalid_bodies:
+            store = FakeStore()
+            with self.subTest(body=body):
+                with self.assertRaises(worker_db_api.ApiError) as error:
+                    worker_db_api.handle_operation(
+                        "uplift-publish-articles-batch",
+                        body,
+                        store,
+                        auth_scope="worker-uplift-publication",
+                    )
+                self.assertEqual(400, error.exception.status)
+                self.assertEqual([], store.fetches)
+                self.assertEqual([], store.executes)
+
+    def test_uplift_publication_confirms_one_published_article_before_receipt(self) -> None:
+        store = ActiveCutoverStore(
+            fetch_all_results=[
+                [],
+                [{"original_url": "https://example.com/article-1"}],
+            ]
+        )
+
+        result = worker_db_api.handle_operation(
+            "uplift-publish-articles-batch",
+            uplift_publication_body(),
+            store,
+            auth_scope="worker-uplift-publication",
+        )
+
+        self.assertEqual(
+            {
+                "ok": True,
+                "requestedCount": 1,
+                "publishedCount": 1,
+                "blockedCount": 0,
+                "missingTranslations": [],
+            },
+            result,
+        )
+        self.assertEqual(1, len(store.executes))
+        receipt_query, receipt_params = store.executes[0]
+        self.assertIn("worker_uplift_final.api_command_receipts", receipt_query)
+        self.assertEqual("worker-uplift-publication", receipt_params[5])
+        self.assertEqual("applied_success", receipt_params[15])
+
+    def test_uplift_publication_retry_ignores_delivery_metadata_in_business_digest(self) -> None:
+        first_body = uplift_publication_body()
+        retry_body = uplift_publication_body({
+            "messageId": "message-retry",
+            "correlationId": "correlation-retry",
+            "pipelineRunId": "pipeline-retry",
+            "stageExecutionId": "stage-retry",
+            "sourceMessageId": "source-retry",
+        })
+        existing_response = {
+            "ok": True,
+            "requestedCount": 1,
+            "publishedCount": 1,
+            "blockedCount": 0,
+            "missingTranslations": [],
+        }
+        store = ReceiptStore({
+            "operation": "uplift-publish-articles-batch",
+            "payload_digest": worker_db_api.uplift_payload_digest(
+                "uplift-publish-articles-batch",
+                first_body,
+            ),
+            "response_json": existing_response,
+        })
+
+        result = worker_db_api.handle_operation(
+            "uplift-publish-articles-batch",
+            retry_body,
+            store,
+            auth_scope="worker-uplift-publication",
+        )
+
+        self.assertEqual({**existing_response, "duplicate": True}, result)
+        self.assertEqual([], store.executes)
+
+    def test_uplift_publication_retry_rejects_changed_business_scope(self) -> None:
+        first_body = uplift_publication_body()
+        store = ReceiptStore({
+            "operation": "uplift-publish-articles-batch",
+            "payload_digest": worker_db_api.uplift_payload_digest(
+                "uplift-publish-articles-batch",
+                first_body,
+            ),
+            "response_json": {"ok": True},
+        })
+
+        with self.assertRaises(worker_db_api.ApiError) as error:
+            worker_db_api.handle_operation(
+                "uplift-publish-articles-batch",
+                uplift_publication_body({"originalUrls": ["https://example.com/article-2"]}),
+                store,
+                auth_scope="worker-uplift-publication",
+            )
+
+        self.assertEqual(409, error.exception.status)
+        self.assertEqual([], store.executes)
+
+    def test_uplift_publication_rejects_missing_domain_row_without_receipt(self) -> None:
+        store = ActiveCutoverStore(fetch_all_results=[[], []])
+
+        with self.assertRaises(worker_db_api.ApiError) as error:
+            worker_db_api.handle_operation(
+                "uplift-publish-articles-batch",
+                uplift_publication_body(),
+                store,
+                auth_scope="worker-uplift-publication",
+            )
+
+        self.assertEqual(409, error.exception.status)
+        self.assertEqual([], store.executes)
 
     def test_scoped_tokens_are_distinct_and_resolve_to_scope(self) -> None:
         with patch.dict(

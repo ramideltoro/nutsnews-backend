@@ -478,6 +478,25 @@ def validate_inventory(
         errors.append("PostgreSQL projection writer credential reference is missing")
     if "backend_worker_uplift_projection_password" not in workflow_text:
         errors.append("protected workflow must inject the bounded projection role credential")
+    watermark_writer = postgres.get("watermark_writer", {})
+    expected_watermark_writer = {
+        "role": "nutsnews_worker_uplift_watermark",
+        "credential_reference": "NUTSNEWS_WORKER_UPLIFT_WATERMARK_PASSWORD",
+        "credential_reused_from_read_only_role": False,
+        "runtime_service_injection": False,
+        "targets": [f"worker_uplift_{stage}.reconciliation_watermarks" for stage in STAGES],
+        "read_only_sources": ["eight stage inbox tables", "eight stage outbox tables"],
+        "privileges": ["SELECT", "INSERT", "UPDATE"],
+        "fixed_row_key": "cutover-boundary-v1",
+        "other_table_mutation_privileges_allowed": False,
+        "disposition": "current",
+    }
+    if watermark_writer != expected_watermark_writer:
+        errors.append("PostgreSQL watermark writer identity must remain exact and bounded")
+    if watermark_writer.get("credential_reference") not in reference_map:
+        errors.append("PostgreSQL watermark writer credential reference is missing")
+    if "backend_worker_uplift_watermark_password" not in workflow_text:
+        errors.append("protected workflow must inject the bounded watermark role credential")
     pg_policy = postgres.get("least_privilege_evidence", {})
     for key in ("shared_role_allowed", "cross_stage_grants_allowed", "public_schema_write_allowed"):
         if pg_policy.get(key) is not False:

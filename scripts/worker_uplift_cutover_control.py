@@ -34,6 +34,15 @@ RUNTIME_REPORT_DIR = Path("/var/lib/nutsnews/worker-uplift-runtime/reports")
 DB_ENV_FILE = Path("/etc/nutsnews-worker-uplift/cutover.env")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 STATES = {"shadow", "fenced", "cutover_active", "rollback_pending"}
+FINAL_AUTH_COMMENT_URL = (
+    "https://github.com/ramideltoro/nutsnews-worker/issues/166#issuecomment-5151195619"
+)
+FINAL_AUTH_COMMENT_SHA256 = (
+    "738fb59be36e11889c75fe06f18797cf02a3466d7a4477d1cbc638856c24190c"
+)
+FINAL_AUTH_SCOPE_SHA256 = (
+    "0a6a390ddec8fd10ebad039dccb6a768726d494839b0bcfdfabff63b9e3b78eb"
+)
 
 
 class ControlError(RuntimeError):
@@ -509,13 +518,24 @@ def validate_final_decision(
     candidate: str,
     watermark: str,
     deadline: str,
+    require_execution_window: bool = False,
+    now: datetime | None = None,
 ) -> None:
+    authorization = decision.get("authorization", {})
     if (
         decision.get("decision") != "GO"
         or decision.get("authorized_for_execution") is not True
-        or decision.get("approver_login") != "ramideltoro"
         or decision.get("tracking_issue") != "ramideltoro/nutsnews-worker#166"
         or decision.get("execution_issue") != "ramideltoro/nutsnews-worker#127"
+        or authorization.get("kind") != "standing_bounded_authorization"
+        or authorization.get("contract")
+        != "docs/worker-uplift-final-cutover-authorization.json"
+        or authorization.get("owner_login") != "ramideltoro"
+        or authorization.get("owner_comment_url") != FINAL_AUTH_COMMENT_URL
+        or authorization.get("owner_comment_body_sha256")
+        != FINAL_AUTH_COMMENT_SHA256
+        or authorization.get("scope_sha256") != FINAL_AUTH_SCOPE_SHA256
+        or authorization.get("recurring_owner_approval_required") is not False
     ):
         raise ControlError("exact #166 GO is absent")
     if decision.get("candidate_sha256") != candidate or decision.get("watermark_sha256") != watermark:
@@ -526,8 +546,25 @@ def validate_final_decision(
         raise ControlError("#166 decision still contains blockers")
     if not decision.get("control_commit"):
         raise ControlError("#166 decision does not bind the control commit")
-    parse_utc(str(decision.get("approved_at_utc")), "approved_at_utc")
-    parse_utc(deadline, "rollback_deadline_utc")
+    if decision.get("decision_scope") != {
+        "authorizes_issue": "ramideltoro/nutsnews-worker#127",
+        "performs_cutover": False,
+        "enables_production_writes_now": False,
+        "changes_ingestion_owner_now": False,
+        "changes_dns_or_failover": False,
+    }:
+        raise ControlError("#166 decision scope is not limited to #127")
+    parse_utc(str(decision.get("evaluated_at_utc")), "evaluated_at_utc")
+    rollback_deadline = parse_utc(deadline, "rollback_deadline_utc")
+    if require_execution_window:
+        window = decision.get("execution_window", {})
+        start = parse_utc(str(window.get("start_utc")), "execution_window.start_utc")
+        end = parse_utc(str(window.get("end_utc")), "execution_window.end_utc")
+        observed_now = now or datetime.now(timezone.utc)
+        if not start <= observed_now <= end:
+            raise ControlError("current time is outside the #166 execution window")
+        if rollback_deadline <= end:
+            raise ControlError("rollback deadline must follow the execution window")
 
 
 def simulated_initial() -> dict[str, Any]:
@@ -666,7 +703,13 @@ def execute_apply(
     confirmation: str,
     scheduling_status_url: str,
 ) -> dict[str, Any]:
-    validate_final_decision(decision, candidate=candidate, watermark=watermark, deadline=deadline)
+    validate_final_decision(
+        decision,
+        candidate=candidate,
+        watermark=watermark,
+        deadline=deadline,
+        require_execution_window=True,
+    )
     if confirmation != f"execute-worker-uplift-cutover:{candidate}":
         raise ControlError("apply typed confirmation mismatch")
     legacy_status = validate_legacy_status(fetch_public_json(scheduling_status_url), expected_enabled=False)

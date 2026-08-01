@@ -113,6 +113,7 @@
     {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_USERNAME", "kind": "variable", "disposition": "current", "scope": "publication schema"},
     {"name": "NUTSNEWS_WORKER_UPLIFT_POSTGRES_PUBLICATION_PASSWORD", "kind": "secret", "disposition": "current", "scope": "publication schema"},
     {"name": "NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD", "kind": "secret", "disposition": "retained", "scope": "source credential for the read-only validation role and the separately bounded stage-health projection role"},
+    {"name": "NUTSNEWS_WORKER_UPLIFT_WATERMARK_PASSWORD", "kind": "secret", "disposition": "current", "scope": "dedicated protected credential for the fixed eight-stage cutover-watermark role"},
     {"name": "NUTSNEWS_BACKEND_API_TOKEN", "kind": "secret", "disposition": "retained", "scope": "scheduler shadow feed-source reads; explicitly shared, not a dedicated uplift identity"},
     {"name": "NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN", "kind": "secret", "disposition": "current", "scope": "persistence-scoped backend API commands"},
     {"name": "NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN", "kind": "secret", "disposition": "current", "scope": "publication-scoped backend API commands"},
@@ -200,6 +201,27 @@
       "runtime_service_injection": false,
       "target": "worker_uplift_final.stage_health_projections",
       "privileges": ["SELECT", "INSERT", "UPDATE"],
+      "other_table_mutation_privileges_allowed": false,
+      "disposition": "current"
+    },
+    "watermark_writer": {
+      "role": "nutsnews_worker_uplift_watermark",
+      "credential_reference": "NUTSNEWS_WORKER_UPLIFT_WATERMARK_PASSWORD",
+      "credential_reused_from_read_only_role": false,
+      "runtime_service_injection": false,
+      "targets": [
+        "worker_uplift_scheduler.reconciliation_watermarks",
+        "worker_uplift_fetcher.reconciliation_watermarks",
+        "worker_uplift_canonicalizer.reconciliation_watermarks",
+        "worker_uplift_enrichment.reconciliation_watermarks",
+        "worker_uplift_approval.reconciliation_watermarks",
+        "worker_uplift_translation.reconciliation_watermarks",
+        "worker_uplift_persistence.reconciliation_watermarks",
+        "worker_uplift_publication.reconciliation_watermarks"
+      ],
+      "read_only_sources": ["eight stage inbox tables", "eight stage outbox tables"],
+      "privileges": ["SELECT", "INSERT", "UPDATE"],
+      "fixed_row_key": "cutover-boundary-v1",
       "other_table_mutation_privileges_allowed": false,
       "disposition": "current"
     },

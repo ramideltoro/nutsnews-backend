@@ -123,6 +123,14 @@ jobs:
           tests.test_worker_uplift_cutover_controls
           tests.test_validate_worker_uplift_cutover_controls
 
+      - name: Validate worker uplift final cutover readiness
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_final_cutover_readiness.py
+
+      - name: Run worker uplift final cutover readiness tests
+        shell: bash
+        run: python3 -m unittest tests.test_worker_uplift_final_cutover_readiness
+
       - name: Validate worker uplift production readiness decision
         shell: bash
         run: python3 scripts/validate_worker_uplift_production_readiness.py
@@ -142,6 +150,14 @@ jobs:
       - name: Run worker uplift stage health projection tests
         shell: bash
         run: python3 -m unittest tests.test_worker_uplift_stage_health_projection
+
+      - name: Validate worker uplift cutover watermark authorization
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_cutover_watermarks.py
+
+      - name: Run worker uplift cutover watermark tests
+        shell: bash
+        run: python3 -m unittest tests.test_worker_uplift_cutover_watermarks
 
       - name: Validate service baseline inventory
         shell: bash

@@ -6,7 +6,7 @@ This runbook describes the as-built controls from `ramideltoro/nutsnews-worker#1
 
 The owner standing authorization at `nutsnews-worker#126` comment `5150510712` removes repeated per-release, first-run, and routine environment-wait approval for source-validated preflight, value-free dry-run, isolated rehearsal, verification, and safe control deployment. `scripts/validate_worker_uplift_cutover_controls.py` pins the authorized operation set, confirmations, production-backend environment, mutation target, database role, workflow, current safe state, and exclusions to scope digest `17dffe06f80ec9266761a84a2c738517c57da31e57ad8936dce16d003c021804`. Any change fails closed and needs a new reviewed authorization.
 
-The standing policy never authorizes #166 GO, #127 execution, a writer or owner switch, disabling legacy scheduling, enabling uplift writes, DNS/failover/Cloudflare changes, arbitrary SQL, secret retrieval, or risk acceptance. Final cutover remains an exact-candidate, named-approver decision.
+The #126 standing policy never authorizes #166 GO, #127 execution, a writer or owner switch, disabling legacy scheduling, enabling uplift writes, DNS/failover/Cloudflare changes, arbitrary SQL, secret retrieval, or risk acceptance. Final readiness is now governed by the separate, owner-recorded standing bounded authorization in `docs/worker-uplift-final-cutover-authorization.json`; it removes recurring owner prompts only for an exact machine-validated candidate and fails closed on drift.
 
 ## Fixed surfaces
 
@@ -41,7 +41,7 @@ Use the protected worker-runtime `restart` operation for a healthy deployed imag
 
 ## Future apply sequence (only after #166 GO)
 
-`apply` requires `execute-worker-uplift-cutover:<candidate_sha256>`. The fixed manager validates that the source-controlled decision is GO for the same candidate, watermark, deadline, control commit, #166, #127, and named approver. The protected workflow then:
+`apply` requires `execute-worker-uplift-cutover:<candidate_sha256>`. The fixed manager validates that the source-controlled decision is GO for the same candidate, watermark, deadline, control commit, #166, #127, standing authorization scope, and frozen execution window. The protected workflow then:
 
 1. captures preflight evidence;
 2. disables only legacy ingestion scheduling through the #150 workflow and verifies retained failover surfaces;

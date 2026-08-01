@@ -139,19 +139,38 @@ class WorkerUpliftCutoverControlTests(unittest.TestCase):
         with self.assertRaisesRegex(control.ControlError, "missing failover surface"):
             control.validate_legacy_status(payload, expected_enabled=True)
 
-    def test_final_decision_requires_exact_named_go(self):
+    def test_final_decision_requires_exact_standing_authorization(self):
         decision = {
             "decision": "GO",
             "authorized_for_execution": True,
-            "approver_login": "ramideltoro",
+            "authorization": {
+                "kind": "standing_bounded_authorization",
+                "contract": "docs/worker-uplift-final-cutover-authorization.json",
+                "owner_login": "ramideltoro",
+                "owner_comment_url": control.FINAL_AUTH_COMMENT_URL,
+                "owner_comment_body_sha256": control.FINAL_AUTH_COMMENT_SHA256,
+                "scope_sha256": control.FINAL_AUTH_SCOPE_SHA256,
+                "recurring_owner_approval_required": False,
+            },
             "tracking_issue": "ramideltoro/nutsnews-worker#166",
             "execution_issue": "ramideltoro/nutsnews-worker#127",
             "candidate_sha256": CANDIDATE,
             "watermark_sha256": WATERMARK,
             "rollback_deadline_utc": DEADLINE,
-            "approved_at_utc": "2026-08-02T01:00:00Z",
+            "evaluated_at_utc": "2026-08-02T01:00:00Z",
             "control_commit": "c" * 40,
             "blockers": [],
+            "decision_scope": {
+                "authorizes_issue": "ramideltoro/nutsnews-worker#127",
+                "performs_cutover": False,
+                "enables_production_writes_now": False,
+                "changes_ingestion_owner_now": False,
+                "changes_dns_or_failover": False,
+            },
+            "execution_window": {
+                "start_utc": "2026-08-02T02:00:00Z",
+                "end_utc": "2026-08-02T03:00:00Z",
+            },
         }
 
         control.validate_final_decision(
@@ -161,13 +180,65 @@ class WorkerUpliftCutoverControlTests(unittest.TestCase):
             deadline=DEADLINE,
         )
 
-        decision["approver_login"] = "automation"
+        decision["authorization"]["scope_sha256"] = "d" * 64
         with self.assertRaisesRegex(control.ControlError, "exact #166 GO"):
             control.validate_final_decision(
                 decision,
                 candidate=CANDIDATE,
                 watermark=WATERMARK,
                 deadline=DEADLINE,
+            )
+
+    def test_apply_requires_the_frozen_execution_window(self):
+        decision = {
+            "decision": "GO",
+            "authorized_for_execution": True,
+            "authorization": {
+                "kind": "standing_bounded_authorization",
+                "contract": "docs/worker-uplift-final-cutover-authorization.json",
+                "owner_login": "ramideltoro",
+                "owner_comment_url": control.FINAL_AUTH_COMMENT_URL,
+                "owner_comment_body_sha256": control.FINAL_AUTH_COMMENT_SHA256,
+                "scope_sha256": control.FINAL_AUTH_SCOPE_SHA256,
+                "recurring_owner_approval_required": False,
+            },
+            "tracking_issue": "ramideltoro/nutsnews-worker#166",
+            "execution_issue": "ramideltoro/nutsnews-worker#127",
+            "candidate_sha256": CANDIDATE,
+            "watermark_sha256": WATERMARK,
+            "rollback_deadline_utc": DEADLINE,
+            "evaluated_at_utc": "2026-08-02T01:00:00Z",
+            "control_commit": "c" * 40,
+            "blockers": [],
+            "decision_scope": {
+                "authorizes_issue": "ramideltoro/nutsnews-worker#127",
+                "performs_cutover": False,
+                "enables_production_writes_now": False,
+                "changes_ingestion_owner_now": False,
+                "changes_dns_or_failover": False,
+            },
+            "execution_window": {
+                "start_utc": "2026-08-02T02:00:00Z",
+                "end_utc": "2026-08-02T03:00:00Z",
+            },
+        }
+
+        control.validate_final_decision(
+            decision,
+            candidate=CANDIDATE,
+            watermark=WATERMARK,
+            deadline=DEADLINE,
+            require_execution_window=True,
+            now=datetime(2026, 8, 2, 2, 30, tzinfo=timezone.utc),
+        )
+        with self.assertRaisesRegex(control.ControlError, "outside"):
+            control.validate_final_decision(
+                decision,
+                candidate=CANDIDATE,
+                watermark=WATERMARK,
+                deadline=DEADLINE,
+                require_execution_window=True,
+                now=datetime(2026, 8, 2, 1, 59, tzinfo=timezone.utc),
             )
 
     def test_current_committed_decision_fails_closed(self):

@@ -7,6 +7,7 @@ DECLARE
   worker_api_role constant text := '{{ backend_postgres_worker_api_user }}';
   app_role constant text := '{{ backend_postgres_app_user }}';
   projection_role constant text := '{{ backend_worker_uplift_projection_user }}';
+  watermark_role constant text := '{{ backend_worker_uplift_watermark_user }}';
   cutover_role constant text := '{{ backend_worker_uplift_cutover_user }}';
 BEGIN
 {% for item in backend_worker_uplift_postgres_stage_roles %}
@@ -606,6 +607,21 @@ BEGIN
   EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', final_schema, projection_role);
   EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE %I.stage_health_projections TO %I', final_schema, projection_role);
   EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %I.%I TO %I', final_schema, 'stage_health_projections_id_seq', projection_role);
+
+  EXECUTE format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA public FROM %I', watermark_role);
+  EXECUTE format('REVOKE CREATE ON SCHEMA public FROM %I', watermark_role);
+  EXECUTE format('REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA %I FROM %I', final_schema, watermark_role);
+  EXECUTE format('REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA %I FROM %I', final_schema, watermark_role);
+  EXECUTE format('REVOKE CREATE ON SCHEMA %I FROM %I', final_schema, watermark_role);
+{% for item in backend_worker_uplift_postgres_stage_roles %}
+  EXECUTE format('REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA %I FROM %I', '{{ item.schema }}', watermark_role);
+  EXECUTE format('REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA %I FROM %I', '{{ item.schema }}', watermark_role);
+  EXECUTE format('REVOKE CREATE ON SCHEMA %I FROM %I', '{{ item.schema }}', watermark_role);
+  EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', '{{ item.schema }}', watermark_role);
+  EXECUTE format('GRANT SELECT ON TABLE %I.inbox, %I.outbox, %I.reconciliation_watermarks TO %I', '{{ item.schema }}', '{{ item.schema }}', '{{ item.schema }}', watermark_role);
+  EXECUTE format('GRANT INSERT, UPDATE ON TABLE %I.reconciliation_watermarks TO %I', '{{ item.schema }}', watermark_role);
+  EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %I.%I TO %I', '{{ item.schema }}', 'reconciliation_watermarks_id_seq', watermark_role);
+{% endfor %}
 
   EXECUTE format('REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA %I FROM %I', final_schema, cutover_role);
   EXECUTE format('REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA %I FROM %I', final_schema, cutover_role);

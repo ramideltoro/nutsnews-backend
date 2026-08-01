@@ -632,9 +632,10 @@ def validate_candidate_artifact(artifact: dict[str, Any], contract: dict[str, An
     if artifact.get("retained_failure_aggregates") != expected_retained:
         raise WatermarkError("retained failure aggregates are not exact")
     pre_state = artifact.get("pre_state")
-    if not isinstance(pre_state, dict) or list(pre_state) != list(STAGES):
+    if not isinstance(pre_state, dict) or len(pre_state) != len(STAGES) or set(pre_state) != set(STAGES):
         raise WatermarkError("watermark candidate pre-state does not cover exactly eight stages")
-    for stage, state in pre_state.items():
+    for stage in STAGES:
+        state = pre_state[stage]
         if not isinstance(state, dict) or set(state) != {
             "watermark_row_count",
             "target_watermark_count",

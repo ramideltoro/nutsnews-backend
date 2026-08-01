@@ -158,6 +158,12 @@ class WorkerUpliftCutoverWatermarkTests(unittest.TestCase):
     def test_committed_contract_workflow_implementation_and_ansible_validate(self):
         self.assertEqual(validator.validate_contract(contract_value()), [])
         self.assertEqual(validator.validate_workflow(WORKFLOW.read_text(encoding="utf-8")), [])
+
+    def test_canonical_json_round_trip_preserves_exact_pre_state_validation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = WatermarkFixture(Path(tmp)).build()
+        canonical_artifact = json.loads(watermarks.canonical_json(artifact))
+        watermarks.validate_candidate_artifact(canonical_artifact, contract_value())
         self.assertEqual(validator.validate_implementation(IMPLEMENTATION.read_text(encoding="utf-8")), [])
         self.assertEqual(
             validator.validate_ansible(

@@ -32,11 +32,13 @@ class WorkerUpliftSecurityRemediationBuildTests(unittest.TestCase):
         self.assertTrue(any("sbom_digest must be a SHA-256 digest" in error for error in errors))
         self.assertTrue(any("image must be signed" in error for error in errors))
 
-    def test_runtime_candidate_drift_is_rejected(self):
-        defaults = builds.DEFAULT_RUNTIME_DEFAULTS_PATH.read_text(encoding="utf-8")
-        defaults = defaults.replace(self.document["service_images"][0]["source_commit"], "0" * 40)
+    def test_historical_evidence_remains_self_consistent_after_runtime_candidate_rotation(self):
+        document = copy.deepcopy(self.document)
+        document["service_images"][0]["source_commit"] = "0" * 40
 
-        self.assertTrue(any("source commit" in error for error in builds.validate(self.document, defaults)))
+        errors = builds.validate(document)
+
+        self.assertTrue(any("deployed source commit does not match" in error for error in errors))
 
     def test_fetcher_dns_binding_proof_is_required(self):
         document = copy.deepcopy(self.document)

@@ -71,8 +71,8 @@ backend_worker_runtime_services:
   - name: scheduler
     stage: scheduler
     tracking_issue: 117
-    image: ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler@sha256:cfbb3247914a623bb60362d5e983d02c5936987571e72f5ac910391e1602ef8c
-    image_tag: 938009f7ed7529a28eda81c8189c207b6e449a32
+    image: ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler@sha256:f489c7bdf60433b44c21a69224b10e62a1b39203119da53378b2018c17ce1452
+    image_tag: f627a6014a43cadba89cffc31a40565c2d00f001
     contract_version: "0.3.1"
     runtime_package_version: "0.4.0"
     runtime_mode: shadow
@@ -96,7 +96,7 @@ backend_worker_runtime_services:
       required: true
       signed: true
       source_repository: ramideltoro/nutsnews-worker-feed-scheduler
-      subject_digest: sha256:cfbb3247914a623bb60362d5e983d02c5936987571e72f5ac910391e1602ef8c
+      subject_digest: sha256:f489c7bdf60433b44c21a69224b10e62a1b39203119da53378b2018c17ce1452
     env:
       NUTSNEWS_ENVIRONMENT: production
       NUTSNEWS_SCHEDULER_HTTP_HOST: 127.0.0.1
@@ -132,8 +132,8 @@ backend_worker_runtime_services:
         - worker_uplift_scheduler
       production_write_path: false
     rollback:
-      image: ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler@sha256:a879649cbab22bd87233fbdd8ae95c87c7c71aabde26e04219773f425bd11a25
-      reason: initial-shadow-deploy
+      image: ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler@sha256:cfbb3247914a623bb60362d5e983d02c5936987571e72f5ac910391e1602ef8c
+      reason: pre-production-adapters-shadow-candidate
 
   - name: fetcher
     stage: fetcher

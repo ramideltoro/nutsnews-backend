@@ -13,7 +13,6 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EVIDENCE_PATH = ROOT / "docs" / "worker-uplift-security-remediation-builds.json"
-DEFAULT_RUNTIME_DEFAULTS_PATH = ROOT / "ansible" / "roles" / "backend_worker_runtime" / "defaults" / "main.yml"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 PACKAGE_REPOSITORIES = {
@@ -45,18 +44,15 @@ def positive_integer(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
-def validate(document: dict[str, Any], defaults_text: str | None = None) -> list[str]:
+def validate(document: dict[str, Any]) -> list[str]:
     errors: list[str] = []
-    runtime_defaults = (
-        DEFAULT_RUNTIME_DEFAULTS_PATH.read_text(encoding="utf-8")
-        if defaults_text is None
-        else defaults_text
-    )
 
     if document.get("schema_version") != 1:
         errors.append("schema_version must be 1")
     if document.get("tracking_issue") != "ramideltoro/nutsnews-worker#164":
         errors.append("tracking_issue must identify nutsnews-worker#164")
+    if document.get("evidence_scope") != "immutable_issue_164_security_remediation_build_and_deployment":
+        errors.append("evidence_scope must preserve the immutable #164 security remediation proof")
     try:
         captured = datetime.fromisoformat(str(document.get("captured_at_utc", "")).replace("Z", "+00:00"))
         if captured.tzinfo is None:
@@ -124,12 +120,6 @@ def validate(document: dict[str, Any], defaults_text: str | None = None) -> list
             errors.append(f"{stage} must prove minimal runtime validation")
         if image.get("signed") is not True:
             errors.append(f"{stage} image must be signed")
-        if f"image: {image_reference}" not in runtime_defaults:
-            errors.append(f"{stage} image is not the source-controlled runtime candidate")
-        if f"image_tag: {source_commit}" not in runtime_defaults:
-            errors.append(f"{stage} source commit is not the source-controlled runtime candidate")
-        if f"subject_digest: {image_digest}" not in runtime_defaults:
-            errors.append(f"{stage} provenance subject does not match the image digest")
 
     fetcher = next((item for item in images if item.get("stage") == "fetcher"), {})
     if fetcher.get("dns_resolution_bound_to_connect") is not True:

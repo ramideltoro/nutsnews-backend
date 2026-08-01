@@ -151,6 +151,24 @@ production-backend secrets:
   `NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN`; both must be distinct from
   `NUTSNEWS_BACKEND_API_TOKEN`.
 
+### Scheduler production-adapter rollout
+
+Tracking issue `ramideltoro/nutsnews-worker#168` replaces the scheduler's
+deployed local test bundle with the system clock, read-only backend feed source,
+stage-owned PostgreSQL lease store, and RabbitMQ publisher-confirm adapter. The
+source-controlled scheduler image remains shadow-only and its previous digest is
+the explicit single-service rollback image.
+
+Apply a scheduler image rotation only through a merged digest pin followed by
+the protected `deploy` operation for `scheduler`. Verification is read-only:
+run `status`, inspect the scheduler readiness dependencies and current
+`checkedAt`, inspect bounded scheduler logs for one publisher-confirm event, and
+inspect the fetch queue for consumer health and drain. The evidence must retain
+`mode=shadow`, `production_writes_enabled=false`, and legacy ingestion ownership.
+If a dependency fails closed after deployment, use the protected `rollback`
+operation for the scheduler only; do not change the dependency mode, queue
+topology, DNS/failover state, or production-write gate to make readiness pass.
+
 ### Qwen credential inventory reconciliation
 
 `LOCAL_AI_API_KEY` is the active protected source credential; it was not

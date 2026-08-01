@@ -79,6 +79,8 @@ class WorkerUpliftCutoverControlTests(unittest.TestCase):
         self.assertEqual(report["status"], "pass")
         self.assertFalse(report["mutation_performed"])
         self.assertTrue(report["unchanged_failover_resources"])
+        self.assertTrue(report["dns_failover_unchanged"])
+        self.assertTrue(report["single_writer_invariants_pass"])
         self.assertEqual(
             [item["transition"] for item in report["transitions"]],
             ["fence", "activate", "rollback-prepare", "rollback-finalize"],

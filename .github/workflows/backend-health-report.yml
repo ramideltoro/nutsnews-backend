@@ -31,7 +31,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Prepare read-only SSH material
+      - name: Prepare restricted SSH material
         shell: bash
         env:
           NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
@@ -86,6 +86,7 @@ jobs:
           fi
 
       - name: Generate report
+        id: health_report
         shell: bash
         env:
           NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
@@ -110,6 +111,7 @@ jobs:
             --output "$RUNNER_TEMP/backend-health-report.json"
             --summary "$GITHUB_STEP_SUMMARY"
             --previous-state "$RUNNER_TEMP/previous-health/backend-health-report.json"
+            --fail-on-critical
           )
 
           if [[ "$SEND_EMAIL_INPUT" == "true" ]]; then
@@ -117,6 +119,70 @@ jobs:
           fi
 
           python3 scripts/backend_health_report.py "${args[@]}"
+
+      - name: Publish bounded health audit state to host metrics
+        if: always()
+        shell: bash
+        env:
+          HEALTH_REPORT_STEP_OUTCOME: ${{ steps.health_report.outcome }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+
+          ssh_host="$NUTSNEWS_BACKEND_HOST"
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          if [[ ! "$ssh_host" =~ ^[A-Za-z0-9.-]+$ ]]; then
+            echo "NUTSNEWS_BACKEND_HOST is not a safe SSH host." >&2
+            exit 1
+          fi
+          if [[ ! "$ssh_user" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+            echo "NUTSNEWS_BACKEND_ANSIBLE_USER is not a safe SSH user." >&2
+            exit 1
+          fi
+
+          ssh_options=(
+            -i "$HOME/.ssh/nutsnews_backend_report"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+          )
+          previous_host_state="$RUNNER_TEMP/previous-host-health-audit-state.json"
+          if ! ssh "${ssh_options[@]}" "$ssh_user@$ssh_host" \
+            'if test -r /var/lib/nutsnews/health-audit/last-run.json; then cat /var/lib/nutsnews/health-audit/last-run.json; else printf "{}\n"; fi' \
+            > "$previous_host_state"; then
+            echo "Unable to read prior bounded host state; refusing to overwrite it." >&2
+            exit 1
+          fi
+
+          python3 scripts/backend_health_audit_state.py \
+            --report "$RUNNER_TEMP/backend-health-report.json" \
+            --previous-report "$RUNNER_TEMP/previous-health/backend-health-report.json" \
+            --previous-state "$previous_host_state" \
+            --step-outcome "$HEALTH_REPORT_STEP_OUTCOME" \
+            --output "$RUNNER_TEMP/backend-health-audit-state.json"
+
+          if ! remote_tmp="$(
+            ssh "${ssh_options[@]}" "$ssh_user@$ssh_host" \
+              'mktemp /tmp/nutsnews-health-audit.XXXXXXXX.json'
+          )"; then
+            echo "Unable to allocate bounded remote health-audit state." >&2
+            exit 1
+          fi
+          if [[ ! "$remote_tmp" =~ ^/tmp/nutsnews-health-audit\.[A-Za-z0-9]+\.json$ ]]; then
+            echo "Remote health-audit state path failed validation." >&2
+            exit 1
+          fi
+
+          scp "${ssh_options[@]}" \
+            "$RUNNER_TEMP/backend-health-audit-state.json" \
+            "$ssh_user@$ssh_host:$remote_tmp"
+          # The only client-expanded value in the remote command is constrained
+          # above to the fixed mktemp path grammar.
+          # shellcheck disable=SC2029
+          ssh "${ssh_options[@]}" "$ssh_user@$ssh_host" \
+            "set -eu; test -f '$remote_tmp'; sudo -n install -d -m 0755 -o root -g root /var/lib/nutsnews/health-audit; stage=\$(sudo -n mktemp /var/lib/nutsnews/health-audit/.last-run.XXXXXXXX.json); case \"\$stage\" in /var/lib/nutsnews/health-audit/.last-run.*.json) ;; *) exit 1 ;; esac; sudo -n install -m 0644 -o root -g root '$remote_tmp' \"\$stage\"; sudo -n mv -T -- \"\$stage\" /var/lib/nutsnews/health-audit/last-run.json; rm -- '$remote_tmp'"
 
       - name: Upload health report
         if: always()

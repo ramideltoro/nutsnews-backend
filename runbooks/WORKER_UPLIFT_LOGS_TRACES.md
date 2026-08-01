@@ -39,16 +39,26 @@ Docker socket. The package-managed `alloy` user remains limited to
 Allowed Loki stream labels for worker-uplift logs are bounded:
 
 ```text
-environment, host, source, service, version, queue, outcome
+deployment_environment, service, service_version, host, source, severity
 ```
 
-System and backend host logs can also retain the existing low-cardinality
-`unit`, `severity`, `filename`, and `job` labels.
+The common Alloy processing boundary applies this same exact-six indexed-label
+contract to system, backend-host, and container logs. It does not retain
+source-specific context as additional indexed stream labels.
 
-Correlation fields remain structured metadata or log body fields only:
+Worker `service_version` is read from the running container's immutable Docker
+label. Git `revision` and `image_digest`, plus `queue` and `outcome`, are stored
+as structured metadata rather than indexed stream labels. The expected identity
+triples in the backend log defaults must exactly match the worker runtime image
+pins; validation fails on promotion drift.
+
+Alloy normalizes camelCase or snake_case application fields to these
+snake_case structured-metadata keys:
 
 ```text
-correlationId, causationId, messageId, idempotencyKey, traceparent, tracestate
+request_id, correlation_id, causation_id, message_id, idempotency_key,
+trace_id, article_id, feed_id, pipeline_run_id, traceparent, tracestate,
+queue, outcome, revision, image_digest
 ```
 
 Do not promote article, feed, message, idempotency, trace, span, correlation,
@@ -81,8 +91,11 @@ gh workflow run backend-worker-uplift-logs-check.yml \
   -f require_loki_data=false
 ```
 
-After protected apply, require fresh RabbitMQ container logs in Grafana Cloud
-Loki:
+After protected apply, recreate each worker container with the fixed runtime
+manager `deploy` action. A plain container restart does not apply new Docker
+labels or journald options. Then require fresh RabbitMQ logs and fresh logs from
+all eight workers with valid `revision` and `image_digest` metadata in Grafana
+Cloud Loki:
 
 ```bash
 gh workflow run backend-worker-uplift-logs-check.yml \
@@ -93,11 +106,13 @@ gh workflow run backend-worker-uplift-logs-check.yml \
 
 The report contains safe metadata only: local Alloy status/config status,
 container source count, trace-export-disabled proof, recent RabbitMQ journal log
-count, and Loki result counts. It must not print log lines, credentials,
-headers, article content, prompts, or provider responses.
+count, and per-service Loki result counts. It must not print log lines,
+credentials, headers, article content, prompts, or provider responses.
 
-Worker service Loki queries can be `not_configured` until the service containers
-exist. RabbitMQ container logs must be queryable for this issue to close.
+Worker service Loki queries can be `not_configured` during predeployment checks.
+With `require_loki_data=true`, RabbitMQ plus every worker service must be
+queryable, and worker results must carry valid deployed revision and image-digest
+metadata.
 
 ## Rollback
 

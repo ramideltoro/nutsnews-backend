@@ -12,6 +12,11 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULTS = ROOT / "ansible/roles/backend_baseline/defaults/main.yml"
 POSTGRES_TASKS = ROOT / "ansible/roles/backend_baseline/tasks/postgres.yml"
 MODEL_TEMPLATE = ROOT / "ansible/roles/backend_baseline/templates/worker-uplift-shadow-data-model.sql.j2"
+FETCHER_MIGRATION = (
+    ROOT
+    / "ansible/roles/backend_baseline/files/worker-uplift-migrations/001_fetcher_durable_state_contract.sql"
+)
+RUNTIME_DEFAULTS = ROOT / "ansible/roles/backend_worker_runtime/defaults/main.yml"
 CHECK_SCRIPT = ROOT / "scripts/backend_worker_uplift_shadow_model_check.py"
 PROTECTED_APPLY = ROOT / ".github/workflows/protected-backend-ansible-apply.yml"
 PROOF_WORKFLOW = ROOT / ".github/workflows/backend-worker-uplift-shadow-data-model.yml"
@@ -36,6 +41,8 @@ class WorkerUpliftShadowModelTests(unittest.TestCase):
         self.assertIn('backend_worker_uplift_postgres_database: "{{ backend_postgres_primary_shadow_database }}"', defaults)
         self.assertIn("backend_worker_uplift_postgres_final_schema: worker_uplift_final", defaults)
         self.assertIn("backend_worker_uplift_postgres_views_schema: worker_uplift_views", defaults)
+        self.assertIn("backend_worker_uplift_postgres_migrations:", defaults)
+        self.assertIn("001_fetcher_durable_state_contract.sql", defaults)
         for stage in STAGES:
             self.assertIn(f"backend_worker_uplift_postgres_{stage}_user: nutsnews_worker_uplift_{stage}", defaults)
             self.assertIn(f"backend_worker_uplift_postgres_{stage}_password: \"\"", defaults)
@@ -48,6 +55,12 @@ class WorkerUpliftShadowModelTests(unittest.TestCase):
         self.assertIn("Allow worker-uplift stage roles to connect to the future-primary shadow database", tasks)
         self.assertIn("Install worker-uplift shadow PostgreSQL data model", tasks)
         self.assertIn("worker-uplift-shadow-data-model.sql.j2", tasks)
+        self.assertIn("Validate required worker-uplift PostgreSQL migrations", tasks)
+        self.assertIn("Validate versioned worker-uplift PostgreSQL migration filenames", tasks)
+        self.assertIn("^[0-9]{3}_[a-z0-9_]+[.]sql$", tasks)
+        self.assertIn("Apply versioned worker-uplift PostgreSQL migrations", tasks)
+        self.assertIn("files/worker-uplift-migrations/", tasks)
+        self.assertIn("loop: \"{{ backend_worker_uplift_postgres_migrations }}\"", tasks)
         self.assertIn('"direct_public_domain_writes_allowed": false', tasks)
         self.assertIn("backend_worker_uplift_postgres_stage_user_results is changed", tasks)
 
@@ -61,7 +74,9 @@ class WorkerUpliftShadowModelTests(unittest.TestCase):
             "feed_schedules",
             "feed_leases",
             "fetch_versions",
+            "fetch_outcomes",
             "feed_health_projections",
+            "state_contract",
             "article_identities",
             "article_aliases",
             "enrichment_records",
@@ -88,6 +103,23 @@ class WorkerUpliftShadowModelTests(unittest.TestCase):
         self.assertIn("worker_api_role", template)
         self.assertIn("app_role", template)
         self.assertIn("worker_api_role, app_role", template)
+        self.assertIn(
+            "REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE %I.state_contract FROM %I",
+            template,
+        )
+        for column in (
+            "claim_owner_message_id",
+            "claim_owner_key",
+            "claim_expires_at",
+            "publication_command",
+            "content_fingerprint",
+            "feed_id",
+            "updated_at",
+        ):
+            self.assertIn(column, template)
+        self.assertNotIn("VALUES ('fetcher_state_store', 1)", template)
+        self.assertIn("worker_uplift_fetcher_fetch_outcomes_feed_idx", template)
+        self.assertIn("worker_uplift_fetcher_fetch_outcomes_redact_idx", template)
         self.assertIn("CREATE OR REPLACE VIEW %I.enrichment_projection", template)
         self.assertIn("canonical_url_hash AS article_identity_hash", template)
         self.assertIn("diagnostic_metadata->>'sourceFeedUrl' AS source_feed_url", template)
@@ -95,6 +127,41 @@ class WorkerUpliftShadowModelTests(unittest.TestCase):
         self.assertIn("translation_version, quality_status, translated_at, summary_ref", template)
         for forbidden in ("article_body", "full_prompt", "raw_provider_response", "bearer_token"):
             self.assertNotIn(forbidden, template)
+
+    def test_fetcher_migration_is_additive_bounded_and_idempotent(self):
+        migration = FETCHER_MIGRATION.read_text(encoding="utf-8")
+        for token in (
+            "SET LOCAL lock_timeout = '5s'",
+            "SET LOCAL statement_timeout = '30s'",
+            "pg_advisory_xact_lock",
+            "ALTER TABLE worker_uplift_fetcher.inbox",
+            "ALTER TABLE worker_uplift_fetcher.outbox",
+            "ALTER TABLE worker_uplift_fetcher.fetch_versions",
+            "ADD COLUMN IF NOT EXISTS claim_owner_message_id",
+            "ADD COLUMN IF NOT EXISTS claim_owner_key",
+            "ADD COLUMN IF NOT EXISTS publication_command",
+            "CREATE TABLE IF NOT EXISTS worker_uplift_fetcher.fetch_outcomes",
+            "ADD COLUMN IF NOT EXISTS redact_after",
+            "CREATE TABLE IF NOT EXISTS worker_uplift_fetcher.state_contract",
+            "VALUES ('fetcher_state_store', 1)",
+            "ON CONFLICT (component) DO UPDATE",
+            "CREATE INDEX IF NOT EXISTS worker_uplift_fetcher_fetch_outcomes_feed_idx",
+            "CREATE INDEX IF NOT EXISTS worker_uplift_fetcher_fetch_outcomes_redact_idx",
+        ):
+            self.assertIn(token, migration)
+        for destructive_statement in ("DROP TABLE", "DROP SCHEMA", "TRUNCATE TABLE", "DELETE FROM"):
+            self.assertNotIn(destructive_statement, migration.upper())
+        contract_marker = migration.index("VALUES ('fetcher_state_store', 1)")
+        self.assertGreater(contract_marker, migration.index("worker_uplift_fetcher_feed_health_latest_idx"))
+        self.assertLess(contract_marker, migration.rindex("COMMIT;"))
+
+    def test_fetcher_runtime_wires_bounded_database_settings_and_live_health(self):
+        defaults = RUNTIME_DEFAULTS.read_text(encoding="utf-8")
+        self.assertIn('NUTSNEWS_FETCHER_DATABASE_POOL_MAX: "10"', defaults)
+        self.assertIn('NUTSNEWS_FETCHER_DATABASE_TIMEOUT_MS: "5000"', defaults)
+        self.assertIn('NUTSNEWS_FETCHER_IDEMPOTENCY_LEASE_MS: "1800000"', defaults)
+        self.assertIn("http://127.0.0.1:18081/live", defaults)
+        self.assertIn("http://127.0.0.1:18082/live", defaults)
 
     def test_protected_apply_wires_worker_uplift_credentials_without_second_database(self):
         workflow = PROTECTED_APPLY.read_text(encoding="utf-8")
@@ -124,6 +191,10 @@ class WorkerUpliftShadowModelTests(unittest.TestCase):
         self.assertIn("worker_api_final_grant_failures", check_script)
         self.assertIn("missing_worker_api_final_grant_row", check_script)
         self.assertIn("receipt_sequence_usage", check_script)
+        self.assertIn("fetch_outcomes_insert", check_script)
+        self.assertIn("fetch_outcomes_sequence_usage", check_script)
+        self.assertIn("state_contract_select", check_script)
+        self.assertIn("worker_uplift_fetcher_fetch_outcomes_redact_idx", check_script)
 
     def test_offline_validator_passes_and_reports_safe_metadata(self):
         proc = subprocess.run(

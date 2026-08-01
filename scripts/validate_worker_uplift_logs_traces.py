@@ -3,12 +3,14 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULTS = ROOT / "ansible" / "roles" / "backend_baseline" / "defaults" / "main.yml"
+RUNTIME_DEFAULTS = ROOT / "ansible" / "roles" / "backend_worker_runtime" / "defaults" / "main.yml"
 ALLOY_TEMPLATE = ROOT / "ansible" / "roles" / "backend_baseline" / "templates" / "alloy-config.alloy.j2"
 RABBITMQ_COMPOSE = ROOT / "ansible" / "roles" / "backend_rabbitmq" / "templates" / "rabbitmq-compose.yml.j2"
 WORKER_COMPOSE = ROOT / "ansible" / "roles" / "backend_worker_runtime" / "templates" / "worker-uplift-compose.yml.j2"
@@ -29,6 +31,7 @@ SERVICES = (
     "persistence",
     "publication",
 )
+WORKER_SERVICES = SERVICES[1:]
 
 FORBIDDEN_STREAM_LABELS = (
     "article",
@@ -61,9 +64,25 @@ def require(label: str, text: str, fragments: tuple[str, ...], errors: list[str]
             errors.append(f"{label} missing required fragment: {fragment}")
 
 
+def service_block(text: str, list_key: str, item_key: str, service: str) -> str:
+    section = text.split(f"{list_key}:\n", 1)[1]
+    start_match = re.search(rf"^  - {re.escape(item_key)}: {re.escape(service)}$", section, re.MULTILINE)
+    if start_match is None:
+        return ""
+    end_match = re.search(rf"^  - {re.escape(item_key)}: ", section[start_match.end():], re.MULTILINE)
+    end = start_match.end() + end_match.start() if end_match else len(section)
+    return section[start_match.start():end]
+
+
+def block_value(block: str, key: str) -> str:
+    match = re.search(rf'^    {re.escape(key)}: "?([^"\n]+)"?$', block, re.MULTILINE)
+    return match.group(1).strip() if match else ""
+
+
 def validate() -> list[str]:
     errors: list[str] = []
     defaults = read(DEFAULTS)
+    runtime_defaults = read(RUNTIME_DEFAULTS)
     alloy = read(ALLOY_TEMPLATE)
     rabbitmq_compose = read(RABBITMQ_COMPOSE)
     worker_compose = read(WORKER_COMPOSE)
@@ -82,12 +101,17 @@ def validate() -> list[str]:
             "backend_logs_worker_uplift_traces_enabled: false",
             'backend_logs_worker_uplift_trace_sample_ratio: "0"',
             "backend_logs_worker_uplift_container_sources:",
+            "expected_service_version:",
+            "expected_revision:",
+            "expected_image_digest:",
             "nutsnews-worker-uplift-rabbitmq",
             "nutsnews.worker.fetch.v1",
             "nutsnews.worker.publication.v1",
         ),
         errors,
     )
+    if "backend_logs_worker_uplift_contract_version" in defaults:
+        errors.append("worker log service_version must not be derived from the telemetry contract version")
     for service in SERVICES:
         if f"service: {service}" not in defaults:
             errors.append(f"backend logs defaults must declare worker-uplift service source: {service}")
@@ -101,17 +125,24 @@ def validate() -> list[str]:
             'loki.write "grafana_cloud_loki"',
             'loki.source.journal "container_',
             "CONTAINER_TAG={{ source.tag }}",
-            'source      = "container"',
+            'source                 = "container"',
             "stage.json",
             "stage.structured_metadata",
+            "__journal_com_nutsnews_service_version",
+            "__journal_com_nutsnews_revision",
+            "__journal_com_nutsnews_image_digest",
+            'regex         = "^([0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?)$"',
+            'revision        = "deployed_revision"',
+            'image_digest    = "deployed_image_digest"',
             "correlationId",
             "idempotencyKey",
             "traceparent",
             "drop_counter_reason = \"debug_trace_log_level\"",
             "stage.label_keep",
-            '"version"',
+            '"service_version"',
             '"queue"',
             '"outcome"',
+            'values = ["deployment_environment", "service", "service_version", "host", "source", "severity"]',
         ),
         errors,
     )
@@ -122,6 +153,28 @@ def validate() -> list[str]:
     for forbidden in ("loki.source.docker", "/var/run/docker.sock", "otelcol.receiver.otlp", "otelcol.exporter.otlp", "tempo.write"):
         if forbidden in alloy:
             errors.append(f"Alloy logs template contains forbidden fragment while traces are deferred: {forbidden}")
+
+    journal_context = alloy.split('loki.relabel "journal_context" {', 1)[-1].split(
+        'local.file_match "backend_logs"', 1
+    )[0]
+    worker_context = alloy.split('loki.relabel "worker_uplift_container_context" {', 1)[-1].split(
+        "{% for source in backend_logs_worker_uplift_container_sources %}", 1
+    )[0]
+    worker_identity_sources = (
+        "__journal_com_nutsnews_service_version",
+        "__journal_com_nutsnews_revision",
+        "__journal_com_nutsnews_image_digest",
+    )
+    for source_label in worker_identity_sources:
+        if source_label not in worker_context:
+            errors.append(f"worker container relabel rules must extract deployed identity: {source_label}")
+        if source_label in journal_context:
+            errors.append(f"generic journal relabel rules must not apply worker identity: {source_label}")
+    worker_sources = alloy.split(
+        "{% for source in backend_logs_worker_uplift_container_sources %}", 1
+    )[-1].split("{% endfor %}", 1)[0]
+    if "relabel_rules = loki.relabel.worker_uplift_container_context.rules" not in worker_sources:
+        errors.append("worker container journals must use the worker identity relabel rules")
 
     require(
         "RabbitMQ Compose",
@@ -141,11 +194,45 @@ def validate() -> list[str]:
             "driver: journald",
             'tag: "nutsnews-worker-uplift-{{ service.name }}"',
             "com.nutsnews.service",
-            "com.nutsnews.version",
+            "com.nutsnews.service_version",
+            "com.nutsnews.revision",
+            "com.nutsnews.image_digest",
             "com.nutsnews.queue",
         ),
         errors,
     )
+
+    for service in WORKER_SERVICES:
+        log_block = service_block(
+            defaults,
+            "backend_logs_worker_uplift_container_sources",
+            "service",
+            service,
+        )
+        runtime_block = service_block(
+            runtime_defaults,
+            "backend_worker_runtime_services",
+            "name",
+            service,
+        )
+        expected_identity = (
+            block_value(log_block, "expected_service_version"),
+            block_value(log_block, "expected_revision"),
+            block_value(log_block, "expected_image_digest"),
+        )
+        runtime_identity = (
+            block_value(runtime_block, "service_version"),
+            block_value(runtime_block, "build_revision"),
+            block_value(runtime_block, "image_digest"),
+        )
+        if not log_block or not runtime_block or expected_identity != runtime_identity:
+            errors.append(
+                f"{service} log identity must exactly match worker runtime service version/revision/image digest"
+            )
+        if block_value(runtime_block, "image_tag") != runtime_identity[1]:
+            errors.append(f"{service} build_revision must match the compatibility image_tag")
+        if not block_value(runtime_block, "image").endswith(f"@{runtime_identity[2]}"):
+            errors.append(f"{service} image_digest must match its immutable image reference")
 
     require(
         "protected apply",

@@ -21,12 +21,12 @@ services must use.
 
 The #117 deployment registers only the non-AI services:
 
-| Service | Image source | Health endpoint | Shadow input/output |
+| Service | Image source | Container liveness | Shadow input/output |
 | --- | --- | --- | --- |
-| `scheduler` | `ramideltoro/nutsnews-worker-feed-scheduler` | `127.0.0.1:18081/ready` | publishes `nutsnews.worker.fetch.v1` |
-| `fetcher` | `ramideltoro/nutsnews-worker-feed-fetcher` | `127.0.0.1:18082/ready` | consumes fetch, publishes canonicalization |
-| `canonicalizer` | `ramideltoro/nutsnews-worker-article-canonicalizer` | `127.0.0.1:18083/ready` | consumes canonicalization, publishes enrichment |
-| `enrichment` | `ramideltoro/nutsnews-worker-article-enrichment` | `127.0.0.1:18084/ready` | consumes enrichment, publishes the approval queue |
+| `scheduler` | `ramideltoro/nutsnews-worker-feed-scheduler` | `127.0.0.1:18081/live` | publishes `nutsnews.worker.fetch.v1` |
+| `fetcher` | `ramideltoro/nutsnews-worker-feed-fetcher` | `127.0.0.1:18082/live` | consumes fetch, publishes canonicalization |
+| `canonicalizer` | `ramideltoro/nutsnews-worker-article-canonicalizer` | `127.0.0.1:18083/live` | consumes canonicalization, publishes enrichment |
+| `enrichment` | `ramideltoro/nutsnews-worker-article-enrichment` | `127.0.0.1:18084/live` | consumes enrichment, publishes the approval queue |
 
 No approval, translation, persistence, or publication container is deployed by
 #117. A successful fixture may reach `nutsnews.worker.approval.v1`, where it
@@ -34,10 +34,10 @@ must stop until the later AI approval deployment is reviewed.
 
 The #118 deployment preparation adds the AI-backed shadow services:
 
-| Service | Image source | Health endpoint | Shadow input/output |
+| Service | Image source | Container liveness | Shadow input/output |
 | --- | --- | --- | --- |
-| `approval` | `ramideltoro/nutsnews-worker-article-approval` | `127.0.0.1:18085/ready` | consumes approval, publishes translation tasks for accepted fixtures |
-| `translation` | `ramideltoro/nutsnews-worker-article-translation` | `127.0.0.1:18086/ready` | consumes translation tasks, stops before persistence |
+| `approval` | `ramideltoro/nutsnews-worker-article-approval` | `127.0.0.1:18085/live` | consumes approval, publishes translation tasks for accepted fixtures |
+| `translation` | `ramideltoro/nutsnews-worker-article-translation` | `127.0.0.1:18086/live` | consumes translation tasks, stops before persistence |
 
 No persistence or publication container is deployed by #118. A successful
 translation fixture may reach `nutsnews.worker.persistence.v1`, where it must
@@ -45,10 +45,14 @@ stop until the persistence deployment is reviewed.
 
 The #119 deployment preparation adds the final-shadow services:
 
-| Service | Image source | Health endpoint | Shadow input/output |
+| Service | Image source | Container liveness | Shadow input/output |
 | --- | --- | --- | --- |
-| `persistence` | `ramideltoro/nutsnews-worker-article-persistence` | `127.0.0.1:18087/ready` | consumes persistence, writes final shadow aggregate state, publishes publication readiness |
-| `publication` | `ramideltoro/nutsnews-worker-article-publication` | `127.0.0.1:18088/ready` | consumes publication readiness, records shadow comparison decisions only |
+| `persistence` | `ramideltoro/nutsnews-worker-article-persistence` | `127.0.0.1:18087/live` | consumes persistence, writes final shadow aggregate state, publishes publication readiness |
+| `publication` | `ramideltoro/nutsnews-worker-article-publication` | `127.0.0.1:18088/live` | consumes publication readiness, records shadow comparison decisions only |
+
+Container health deliberately uses `/live`. `/ready` remains a truthful
+ownership-and-dependency probe and may return `503` while a split worker is
+shadowed, disabled by configuration, or lacks a production adapter.
 
 ## Source-Controlled Contract
 
@@ -85,6 +89,48 @@ ghcr.io/<allow-listed-repository>/<service>@sha256:<64 hex>
 Mutable tags are rejected. Untrusted repositories are rejected. Each service
 entry must include signed provenance metadata whose `subject_digest` matches the
 image digest and whose source repository is allow-listed.
+
+Each manifest entry also carries an immutable deployed identity:
+
+```text
+service_version=<semantic version>
+build_revision=<full 40-character Git revision>
+image_digest=sha256:<64 hex>
+```
+
+Compose passes that identity to the service and records it in the Docker labels
+`com.nutsnews.service_version`, `com.nutsnews.revision`, and
+`com.nutsnews.image_digest`. After a protected apply changes any identity or
+logging label, run the protected `deploy` action for every changed service. A
+plain `restart` preserves the old container configuration and cannot satisfy
+the identity checks.
+
+The backend textfile exporter publishes identity only after the actual running
+containers match all eight reviewed manifest entries:
+
+```promql
+nutsnews_backend_worker_uplift_deployed_identity_available
+nutsnews_backend_worker_uplift_deployed_service_info{
+  worker_service="scheduler",
+  service_version="0.1.0",
+  revision="<git revision>",
+  image_digest="sha256:<digest>"
+}
+```
+
+`nutsnews_backend_worker_uplift_deployed_identity_available` must be `1`, and
+the info metric must contain exactly one identity per `worker_service`. The
+exporter fails closed and emits no configured-only identity rows when Docker is
+unavailable, a service is absent, or a running image/label differs from the
+reviewed manifest.
+
+When the runtime is enabled, the protected Ansible post-apply gate also queries
+Grafana Cloud and fails unless all eight `up` series are `1`, every scrape is
+less than three minutes old, deployed identity availability is `1`, and all
+eight `worker_service` identity rows are present. `/live` and `/metrics` remain
+mandatory in shadow and production. `/ready=ok` and consumer availability are
+blocking only after the protected ownership contract derives
+`expected_active=true`.
 
 Secret values are not stored in the service manifest, Compose file, image
 layers, or workflow artifacts. Service secrets are mounted as root-owned files
@@ -260,17 +306,22 @@ After changing the workflow, dispatch `status` from merged `main` with
 `dry_run=true`. The run must start without a pending deployment, complete
 through `Read-only worker runtime evidence`, and emit a report with
 `action=status`, `status=pass`, `mode=shadow`,
-`production_writes_enabled=false`, healthy services, and positive consumers
-on every required queue. A mutating action still requires the protected job;
+`production_writes_enabled=false`, `expected_active=false`, healthy `/live`
+responses, and valid ownership/readiness series from every `/metrics` endpoint.
+A mutating action still requires the protected job;
 do not exercise one merely to test the environment boundary.
 
 ### Zero-Consumer Detection And Recovery
 
-`status` evaluates `/ready` for every configured service and RabbitMQ consumer
-count for every queue listed in that service's `queues.consumes`. The scheduler
-is producer-only and reports consumer readiness as `not_applicable`. A consuming
-service is not ready when its main queue has zero consumers; `status` and a
-main-queue `queue-inspect` return failure evidence for that condition.
+`status` always evaluates `/live`, `/ready`, and `/metrics` for every configured
+service and records RabbitMQ consumer count for every queue listed in that
+service's `queues.consumes`. The scheduler is producer-only and reports consumer
+readiness as `not_applicable`. Liveness, metrics reachability, the three one-hot
+readiness outcomes, and the worker's ownership gauge are required in every
+mode. `/ready=ok` and positive consumers become blocking only when the protected
+manifest derives `expected_active=true`. Shadow consumer/readiness failures stay
+visible but do not page as production-owner failures; an explicit main-queue
+`queue-inspect` still fails when a declared consumer count is zero.
 
 Use a protected restart only when the source-controlled image, configuration,
 and credentials are still correct and the evidence shows a runtime-only
@@ -282,8 +333,10 @@ self-recover:
 2. Select `restart` for only the affected service, provide
    `confirm_target=backend.nutsnews.com`, and obtain `production-backend`
    approval.
-3. Rerun `status` and `queue-inspect`; require `/ready` healthy, at least one
-   main-queue consumer, no DLQ growth, and the queued work drained.
+3. Rerun `status` and `queue-inspect`; require `/live` and `/metrics` healthy,
+   the intended main-queue consumer restored, no DLQ growth, and queued work
+   drained. Require `/ready=ok` whenever `expected_active=true`; in shadow,
+   retain its truthful disabled or dependency-unavailable outcome.
 
 Use deployment recovery when the image or configuration must change. Merge the
 service and backend manifest PRs first, run protected backend Ansible check and

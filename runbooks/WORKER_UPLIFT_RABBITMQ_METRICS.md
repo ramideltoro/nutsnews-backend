@@ -28,6 +28,7 @@ The detailed endpoint is requested with only the approved queue families:
 queue_coarse_metrics
 queue_consumer_count
 queue_delivery_metrics
+queue_exchange_metrics
 ```
 
 The request includes the worker-uplift vhost and a source-controlled queue regex
@@ -39,7 +40,7 @@ Approved metric labels are bounded to:
 
 ```text
 environment, host, instance, job, service_namespace, rabbitmq_endpoint, node,
-cluster, vhost, queue
+cluster, vhost, queue, exchange
 ```
 
 Article, feed, message, idempotency, trace, span, correlation, causation,
@@ -76,7 +77,7 @@ After protected apply, verify:
 
 ```bash
 curl -fsS http://127.0.0.1:15692/metrics >/tmp/rabbitmq-aggregate.prom
-curl -fsS 'http://127.0.0.1:15692/metrics/detailed?family=queue_coarse_metrics&family=queue_consumer_count&family=queue_delivery_metrics&vhost=nutsnews-worker-uplift&queue=^nutsnews\\.worker\\.' >/tmp/rabbitmq-detailed.prom
+curl -fsS 'http://127.0.0.1:15692/metrics/detailed?family=queue_coarse_metrics&family=queue_consumer_count&family=queue_delivery_metrics&family=queue_exchange_metrics&vhost=nutsnews-worker-uplift&queue=^nutsnews\\.worker\\.' >/tmp/rabbitmq-detailed.prom
 sudo -n alloy validate /etc/alloy/config.alloy
 systemctl is-active alloy
 ```
@@ -88,6 +89,7 @@ up{job=~"nutsnews-rabbitmq|nutsnews-rabbitmq-queues", environment="production"}
 scrape_samples_post_metric_relabeling{job=~"nutsnews-rabbitmq|nutsnews-rabbitmq-queues"}
 rabbitmq_detailed_queue_messages{queue=~"nutsnews\\.worker\\..+"}
 rabbitmq_detailed_queue_consumers{queue=~"nutsnews\\.worker\\..+"}
+rabbitmq_detailed_queue_exchange_messages_published_total{queue=~"nutsnews\\.worker\\..+"}
 ```
 
 The #91 private AMQP canary writes low-cardinality textfile metrics into

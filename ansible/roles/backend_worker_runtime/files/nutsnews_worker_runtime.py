@@ -30,6 +30,10 @@ from urllib import error, parse, request
 
 IMAGE_RE = re.compile(r"^(?P<repo>ghcr\.io/[a-z0-9_.-]+/[a-z0-9_.-]+(?:/[a-z0-9_.-]+)*)@sha256:(?P<digest>[0-9a-f]{64})$")
 SERVICE_RE = re.compile(r"^[a-z][a-z0-9-]{2,48}$")
+SERVICE_VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
+BUILD_REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
+DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+PROMETHEUS_LABEL_RE = re.compile(r'(?P<name>[A-Za-z_][A-Za-z0-9_]*)="(?P<value>(?:\\.|[^"\\])*)"')
 ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,127}$")
 SECRET_KEY_RE = re.compile(r"(PASSWORD|PASS|TOKEN|SECRET|PRIVATE|KEY|COOKIE)", re.IGNORECASE)
 TOKEN_RE = re.compile(r"(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+|[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})")
@@ -87,6 +91,7 @@ PIPELINE_SMOKE_STAGES = ["fetcher", "canonicalizer", "enrichment", "approval", "
 RECONCILIATION_STALE_AFTER_SECONDS = 900
 RECONCILIATION_MAX_CANDIDATES = 100
 RECONCILIATION_ENDPOINT_PATH = "/reconcile/outbox"
+MAX_PROMETHEUS_PROBE_BYTES = 1024 * 1024
 RECONCILIATION_CONFIRMATIONS = {
     "scheduler": "scheduler:fail-closed:v1",
     "fetcher": "fetcher:fail-closed:v1",
@@ -165,6 +170,18 @@ def repository_allowed(repository: str, allowed: list[str]) -> bool:
     return any(repository == item.rstrip("/") or repository.startswith(item) for item in allowed)
 
 
+def manifest_expected_active(manifest: dict[str, Any]) -> bool:
+    """Derive production ownership only from the protected manifest controls."""
+    backend_api = manifest.get("backend_api")
+    return bool(
+        manifest.get("mode") == "production"
+        and manifest.get("cutover_state") == "cutover-approved"
+        and manifest.get("production_writes_enabled") is True
+        and isinstance(backend_api, dict)
+        and backend_api.get("writes_enabled") is True
+    )
+
+
 def validate_manifest(manifest: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     if manifest.get("schema_version") != 1:
@@ -221,6 +238,19 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
             errors.append(f"service {name} uses untrusted image repository: {repository}")
         if ":" in str(service.get("image") or "").split("@", 1)[0]:
             errors.append(f"service {name} image must not include a mutable tag")
+        service_version = str(service.get("service_version") or "")
+        if not SERVICE_VERSION_RE.fullmatch(service_version):
+            errors.append(f"service {name} service_version must be a semantic version")
+        build_revision = str(service.get("build_revision") or "")
+        if not BUILD_REVISION_RE.fullmatch(build_revision):
+            errors.append(f"service {name} build_revision must be a full lower-case Git revision")
+        if service.get("image_tag") != build_revision:
+            errors.append(f"service {name} image_tag must match build_revision")
+        image_digest = str(service.get("image_digest") or "")
+        if not DIGEST_RE.fullmatch(image_digest):
+            errors.append(f"service {name} image_digest must be a sha256 digest")
+        if digest and image_digest != digest:
+            errors.append(f"service {name} image_digest must match image digest reference")
         if service.get("runtime_mode", "shadow") != "shadow":
             errors.append(f"service {name} runtime_mode must remain shadow")
         network_mode = service.get("network_mode")
@@ -232,8 +262,13 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
         resources = service.get("resources", {})
         if not isinstance(resources, dict) or not resources.get("memory") or not resources.get("cpus"):
             errors.append(f"service {name} must declare memory and CPU limits")
-        if not service.get("healthcheck"):
+        healthcheck = service.get("healthcheck")
+        if not isinstance(healthcheck, dict):
             errors.append(f"service {name} must declare a healthcheck")
+        else:
+            healthcheck_test = json.dumps(healthcheck.get("test", []), separators=(",", ":"))
+            if "/live" not in healthcheck_test or "/ready" in healthcheck_test:
+                errors.append(f"service {name} container healthcheck must use /live, not readiness")
         provenance = service.get("provenance", {})
         if not isinstance(provenance, dict):
             errors.append(f"service {name} provenance must be an object")
@@ -629,6 +664,128 @@ def http_get_local(path: str, port: int, timeout: int = 10) -> dict[str, Any]:
             "status": "critical",
             "error": type(exc).__name__,
         }
+
+
+def health_probe_local(path: str, port: int, expected_probe: str) -> dict[str, Any]:
+    """Return only bounded, value-free health metadata from a worker probe."""
+    response = http_get_local(path, port)
+    payload = parse_json_body(str(response.get("body") or ""))
+    probe = payload.get("probe") if isinstance(payload, dict) else None
+    outcome = payload.get("status") if isinstance(payload, dict) else None
+    checks = payload.get("checks") if isinstance(payload, dict) else None
+    healthy = bool(response.get("status") == "healthy" and probe == expected_probe and outcome == "ok")
+    result: dict[str, Any] = {
+        "status": "healthy" if healthy else "critical",
+        "http_status": response.get("http_status"),
+        "probe": probe if probe in {"liveness", "startup", "readiness"} else "unknown",
+        "outcome": outcome if outcome in {"ok", "degraded", "unhealthy"} else "unknown",
+        "check_count": len(checks) if isinstance(checks, list) else 0,
+    }
+    if "error" in response:
+        result["error"] = response["error"]
+    return result
+
+
+def prometheus_samples(body: str, metric_name: str) -> list[tuple[dict[str, str], float]]:
+    """Parse the small numeric subset needed for the worker status contract."""
+    samples: list[tuple[dict[str, str], float]] = []
+    for raw_line in body.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or not line.startswith(metric_name):
+            continue
+        suffix = line[len(metric_name):]
+        if suffix and suffix[0] not in "{ \t":
+            continue
+        labels: dict[str, str] = {}
+        if suffix.startswith("{"):
+            closing = suffix.find("}")
+            if closing < 0:
+                continue
+            label_text = suffix[1:closing]
+            labels = {
+                match.group("name"): match.group("value")
+                for match in PROMETHEUS_LABEL_RE.finditer(label_text)
+            }
+            value_text = suffix[closing + 1:].strip().split(maxsplit=1)[0]
+        else:
+            parts = suffix.strip().split(maxsplit=1)
+            if not parts:
+                continue
+            value_text = parts[0]
+        try:
+            value = float(value_text)
+        except ValueError:
+            continue
+        samples.append((labels, value))
+    return samples
+
+
+def prometheus_probe_local(port: int, expected_active: bool, timeout: int = 10) -> dict[str, Any]:
+    """Validate bounded worker ownership/readiness series without retaining exposition text."""
+    url = f"http://127.0.0.1:{port}/metrics"
+    base: dict[str, Any] = {
+        "status": "critical",
+        "http_status": None,
+        "response_bytes": 0,
+        "expected_active_series_present": False,
+        "reported_expected_active": None,
+        "expected_active_matches": False,
+        "readiness_series_present": False,
+        "readiness_one_hot": False,
+        "readiness_outcome": "unknown",
+        "readiness_ok": False,
+    }
+    try:
+        with request.urlopen(url, timeout=timeout) as response:
+            body_bytes = response.read(MAX_PROMETHEUS_PROBE_BYTES + 1)
+            base["http_status"] = response.status
+    except error.HTTPError as exc:
+        base["http_status"] = exc.code
+        return base
+    except OSError as exc:
+        base["error"] = type(exc).__name__
+        return base
+    base["response_bytes"] = len(body_bytes)
+    if not 200 <= int(base["http_status"] or 0) < 300 or len(body_bytes) > MAX_PROMETHEUS_PROBE_BYTES:
+        return base
+    body = body_bytes.decode("utf-8", errors="replace")
+
+    ownership_samples = prometheus_samples(body, "nutsnews_worker_expected_active")
+    ownership_valid = bool(
+        len(ownership_samples) == 1
+        and ownership_samples[0][1] in {0.0, 1.0}
+    )
+    base["expected_active_series_present"] = bool(ownership_samples)
+    if ownership_valid:
+        reported_expected_active = ownership_samples[0][1] == 1.0
+        base["reported_expected_active"] = reported_expected_active
+        base["expected_active_matches"] = reported_expected_active == expected_active
+
+    readiness_samples = [
+        (labels, value)
+        for labels, value in prometheus_samples(body, "nutsnews_worker_health_probe")
+        if labels.get("probe") == "readiness"
+    ]
+    active_readiness = [
+        labels.get("outcome", "unknown")
+        for labels, value in readiness_samples
+        if value == 1.0
+    ]
+    readiness_outcomes = {labels.get("outcome") for labels, _ in readiness_samples}
+    readiness_valid = bool(
+        readiness_outcomes == {"ok", "degraded", "unhealthy"}
+        and all(value in {0.0, 1.0} for _, value in readiness_samples)
+        and len(active_readiness) == 1
+    )
+    base["readiness_series_present"] = readiness_outcomes == {"ok", "degraded", "unhealthy"}
+    base["readiness_one_hot"] = readiness_valid
+    if readiness_valid:
+        base["readiness_outcome"] = active_readiness[0]
+        base["readiness_ok"] = active_readiness[0] == "ok"
+
+    if ownership_valid and base["expected_active_matches"] and readiness_valid:
+        base["status"] = "healthy"
+    return base
 
 
 def http_post_json_local(path: str, port: int, payload: dict[str, Any], token: str, timeout: int = 30) -> dict[str, Any]:
@@ -1887,6 +2044,7 @@ def write_report(path: Path | None, report: dict[str, Any]) -> None:
 
 def build_report(args: argparse.Namespace, manifest: dict[str, Any]) -> dict[str, Any]:
     errors = validate_manifest(manifest)
+    expected_active = manifest_expected_active(manifest)
     report: dict[str, Any] = {
         "status": "pass" if not errors else "fail",
         "action": args.action,
@@ -1895,6 +2053,7 @@ def build_report(args: argparse.Namespace, manifest: dict[str, Any]) -> dict[str
         "tracking_issue": 85,
         "mode": manifest.get("mode"),
         "production_writes_enabled": manifest.get("production_writes_enabled"),
+        "expected_active": expected_active,
         "errors": errors,
         "commands": [],
     }
@@ -1922,18 +2081,49 @@ def build_report(args: argparse.Namespace, manifest: dict[str, Any]) -> dict[str
             report["errors"].append(f"compose file not found: {args.compose}")
         else:
             command = compose_base(args) + ["ps", "--format", "json"]
-            report["commands"].append(run_command(command))
+            compose_status = run_command(command)
+            report["commands"].append(compose_status)
             service_status: dict[str, Any] = {}
             missing_consumers: list[str] = []
             unverifiable_consumers: list[str] = []
+            unhealthy_liveness: list[str] = []
+            unhealthy_metrics: list[str] = []
+            unhealthy_readiness: list[str] = []
             for configured_service in manifest["services"]:
                 name = str(configured_service["name"])
                 consumer_readiness = service_consumer_readiness(args, configured_service)
                 port = SERVICE_HTTP_PORTS.get(str(configured_service.get("stage")))
+                liveness = (
+                    health_probe_local("/live", port, "liveness")
+                    if port is not None
+                    else {"status": "not_configured"}
+                )
+                readiness = (
+                    health_probe_local("/ready", port, "readiness")
+                    if port is not None
+                    else {"status": "not_configured"}
+                )
+                metrics = (
+                    prometheus_probe_local(port, expected_active)
+                    if port is not None
+                    else {"status": "not_configured"}
+                )
                 service_status[name] = {
-                    "readiness": http_get_local("/ready", port) if port is not None else {"status": "not_configured"},
+                    "expected_active": expected_active,
+                    "liveness": liveness,
+                    "readiness": readiness,
+                    "metrics": metrics,
                     "consumer_readiness": consumer_readiness,
                 }
+                if liveness.get("status") != "healthy":
+                    unhealthy_liveness.append(name)
+                if metrics.get("status") != "healthy":
+                    unhealthy_metrics.append(name)
+                if expected_active and (
+                    readiness.get("status") != "healthy"
+                    or metrics.get("readiness_ok") is not True
+                ):
+                    unhealthy_readiness.append(name)
                 if consumer_readiness["status"] == "critical":
                     missing_consumers.append(name)
                 elif consumer_readiness["status"] == "unknown":
@@ -1941,9 +2131,18 @@ def build_report(args: argparse.Namespace, manifest: dict[str, Any]) -> dict[str
             report["services"] = service_status
             report["missing_consumers"] = missing_consumers
             report["unverifiable_consumers"] = unverifiable_consumers
-            if missing_consumers or unverifiable_consumers:
+            report["unhealthy_liveness"] = unhealthy_liveness
+            report["unhealthy_metrics"] = unhealthy_metrics
+            report["unhealthy_readiness"] = unhealthy_readiness
+            if compose_status.get("returncode") != 0:
                 report["status"] = "fail"
-                report["errors"].append("required RabbitMQ consumer readiness is not healthy")
+                report["errors"].append("Docker Compose worker status is not available")
+            if unhealthy_liveness or unhealthy_metrics:
+                report["status"] = "fail"
+                report["errors"].append("required worker liveness or metrics observability is not healthy")
+            if expected_active and (unhealthy_readiness or missing_consumers or unverifiable_consumers):
+                report["status"] = "fail"
+                report["errors"].append("production-active worker readiness or RabbitMQ consumers are not healthy")
     elif args.action == "logs":
         command = compose_base(args) + ["logs", "--no-color", "--tail", str(args.tail), service["name"]]
         report["commands"].append(run_command(command))

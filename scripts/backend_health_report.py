@@ -71,7 +71,7 @@ REMOTE_COMMANDS: dict[str, str] = {
         "if command -v curl >/dev/null 2>&1 && systemctl is-active caddy >/dev/null 2>&1; then "
         "curl -fsS --connect-timeout 5 "
         "--resolve backend.nutsnews.com:443:127.0.0.1 "
-        "https://backend.nutsnews.com/healthz 2>/dev/null || true; "
+        "https://backend.nutsnews.com/readyz 2>/dev/null || true; "
         "else echo unavailable; fi"
     ),
     "backend_units": "systemctl list-units --type=service --type=timer --all --no-legend 'nutsnews*' 2>/dev/null || true",
@@ -559,9 +559,17 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
             status = "warning" if state in {"inactive", "unavailable"} else "critical"
         checks.append({"name": f"service_{service}", "status": status, "summary": f"{service}={state}"})
 
-    endpoint_health = command_stdout(report, "backend_health").strip()
+    endpoint_raw = command_stdout(report, "backend_health").strip()
+    endpoint = parse_json_object(endpoint_raw)
     caddy_state = services.get("caddy", "unavailable")
-    if endpoint_health == "ok":
+    dependencies = endpoint.get("dependencies", {})
+    postgres_ready = dependencies.get("postgresql") if isinstance(dependencies, dict) else None
+    if (
+        endpoint.get("ready") is True
+        and endpoint.get("status") == "ready"
+        and endpoint.get("deploymentEnvironment") == "production"
+        and postgres_ready == "ready"
+    ):
         endpoint_status = "healthy"
     elif caddy_state == "active":
         endpoint_status = "critical"
@@ -569,9 +577,13 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
         endpoint_status = "not_configured"
     checks.append(
         {
-            "name": "backend_endpoint_health",
+            "name": "backend_endpoint_readiness",
             "status": endpoint_status,
-            "summary": f"backend_endpoint_health={endpoint_health or 'empty'}",
+            "summary": (
+                f"backend_endpoint_readiness={endpoint.get('status', 'unavailable')} "
+                f"postgresql={postgres_ready or 'unavailable'} "
+                f"deployment={endpoint.get('deploymentEnvironment', 'unavailable')}"
+            ),
         }
     )
 
@@ -863,11 +875,16 @@ def smtp_config_from_env() -> tuple[SmtpConfig | None, list[str], list[str]]:
 
 
 def render_text(report: dict[str, Any]) -> str:
+    workflow = report.get("workflow", {})
+    last_success_age = workflow.get("last_success_age_seconds")
     lines = [
         "NutsNews backend health report",
         f"Run: {report['last_report_run_at']}",
         f"Next expected run: {report['next_report_run_at']}",
         f"Host: {report['target']['user']}@{report['target']['host']}",
+        f"Workflow conclusion: {workflow.get('conclusion', 'unknown')}",
+        f"Last successful audit: {workflow.get('last_success_at') or 'none'}",
+        f"Last-success age seconds: {last_success_age if last_success_age is not None else 'unknown'}",
         "",
         "Summary:",
     ]
@@ -908,6 +925,8 @@ def render_text(report: dict[str, Any]) -> str:
 
 
 def write_summary(report: dict[str, Any], path: Path) -> None:
+    workflow = report.get("workflow", {})
+    last_success_age = workflow.get("last_success_age_seconds")
     lines = [
         "# Backend Health Report",
         "",
@@ -915,6 +934,9 @@ def write_summary(report: dict[str, Any], path: Path) -> None:
         f"- Next expected run: `{report['next_report_run_at']}`",
         f"- Target: `{report['target']['user']}@{report['target']['host']}`",
         f"- Delivery: `{report['delivery']['status']}`",
+        f"- Workflow conclusion: `{workflow.get('conclusion', 'unknown')}`",
+        f"- Last successful audit: `{workflow.get('last_success_at') or 'none'}`",
+        f"- Last-success age seconds: `{last_success_age if last_success_age is not None else 'unknown'}`",
         "",
         "| Status | Count |",
         "| --- | ---: |",
@@ -977,8 +999,8 @@ def failure_class_for_check(check: dict[str, Any]) -> str:
         return "disk_pressure"
     if name.startswith("service_"):
         return "service_down"
-    if name == "backend_endpoint_health":
-        return "backend_health"
+    if name == "backend_endpoint_readiness":
+        return "backend_readiness"
     if name in {"reboot_required", "package_updates", "kernel_alignment", "sudo_nopasswd"}:
         return "maintenance"
     return name or "unknown"
@@ -1004,6 +1026,7 @@ def current_alerts_from_checks(checks: list[dict[str, Any]]) -> list[dict[str, A
 
 def build_report(args: argparse.Namespace) -> dict[str, Any]:
     run_at = utc_now()
+    previous_report = load_previous_report(args.previous_state)
     report: dict[str, Any] = {
         "version": 1,
         "last_report_run_at": run_at,
@@ -1027,7 +1050,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     report["checks"] = checks
     report["summary"] = summary
     alerting = backend_alert_state.evaluate_alerts(
-        load_previous_report(args.previous_state),
+        previous_report,
         current_alerts_from_checks(checks),
         run_at,
         cooldown_seconds=args.alert_cooldown_hours * 60 * 60,
@@ -1061,8 +1084,30 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     else:
         report["delivery"] = {"status": "skipped", "detail": "send_email=false"}
 
-    if report["last_error"] is None and report["delivery"]["status"] != "error":
+    has_critical_checks = int(report["summary"].get("critical", 0)) > 0
+    workflow_failed = has_critical_checks or report["delivery"]["status"] == "error" or report["last_error"] is not None
+    if report["last_error"] is None and not workflow_failed:
         report["last_report_success_at"] = run_at
+    else:
+        previous_success = previous_report.get("last_report_success_at")
+        report["last_report_success_at"] = previous_success if parse_utc_datetime(str(previous_success or "")) else None
+
+    previous_workflow = previous_report.get("workflow", {})
+    previous_failure_count = (
+        previous_workflow.get("consecutive_failure_count", 0)
+        if isinstance(previous_workflow, dict)
+        else 0
+    )
+    if isinstance(previous_failure_count, bool) or not isinstance(previous_failure_count, int):
+        previous_failure_count = 0
+    previous_failure_count = max(0, min(previous_failure_count, 10_000))
+    report["workflow"] = {
+        "conclusion": "failure" if workflow_failed else "success",
+        "critical_check_count": int(report["summary"].get("critical", 0)),
+        "last_success_at": report["last_report_success_at"],
+        "last_success_age_seconds": seconds_since(run_at, report["last_report_success_at"]),
+        "consecutive_failure_count": min(previous_failure_count + 1, 10_000) if workflow_failed else 0,
+    }
 
     return report
 
@@ -1080,6 +1125,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--previous-state", default="")
     parser.add_argument("--alert-cooldown-hours", type=int, default=24)
     parser.add_argument("--send-email", action="store_true")
+    parser.add_argument(
+        "--fail-on-critical",
+        action="store_true",
+        help="Return a failing exit code when any classified health check is critical.",
+    )
     return parser.parse_args(argv)
 
 
@@ -1095,7 +1145,11 @@ def main(argv: list[str] | None = None) -> int:
         write_summary(report, Path(args.summary))
 
     print(render_text(report))
-    return 0 if report["delivery"]["status"] != "error" else 1
+    if report["delivery"]["status"] == "error":
+        return 1
+    if args.fail_on_critical and report.get("workflow", {}).get("conclusion") == "failure":
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

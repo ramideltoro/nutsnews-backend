@@ -1,6 +1,6 @@
 # Backend Health Report
 
-This runbook covers backend issue #38 for recurring read-only health reporting.
+This runbook covers backend issue #38 for recurring bounded health reporting.
 
 ## What It Does
 
@@ -8,18 +8,31 @@ The `Backend Health Report` GitHub Actions workflow runs daily at `12:17 UTC` an
 
 The workflow:
 
-- uses repository secrets for read-only SSH to `65.75.201.18`;
+- uses repository secrets for fixed-purpose SSH to `65.75.201.18`;
 - runs `scripts/backend_health_report.py`;
 - collects a fixed set of read-only host, service, backup, RabbitMQ drift,
   smoke, canary status, timer, listener, update, and recent-error signals;
 - writes a sanitized JSON report artifact and GitHub step summary;
 - loads the previous completed report artifact to maintain alert fingerprints, cooldown state, suppression counts, and recovery notices;
+- publishes only a bounded, safe-metadata state projection to
+  `/var/lib/nutsnews/health-audit/last-run.json` so the five-minute host
+  textfile collector can expose the current health-report run age and report-step
+  conclusion in Grafana;
 - sends email through SMTP when reporting credentials are configured and there are unsuppressed alert notifications.
 
-It does not run arbitrary remote commands, restart services, change packages,
-edit files, run RabbitMQ smoke, or call the protected Ansible apply workflow.
+Its audit probes remain read-only. The only remote write is an atomic root-owned
+replacement of the bounded health-audit state file; the projection contains no
+host evidence, check names, errors, identifiers, or secrets. It does not run
+arbitrary remote commands, restart services, change packages, run RabbitMQ
+smoke, or call the protected Ansible apply workflow.
 RabbitMQ smoke remains a separate protected workflow because it creates isolated
 probe resources and restarts the broker.
+
+The projected conclusion is scoped to the `Generate report` step. It does not
+claim to be the final GitHub workflow conclusion because bounded state
+publication and artifact upload occur later. If prior report-artifact retrieval
+fails, the projector reads the previous bounded host state; if that host-state
+read also fails, publication aborts rather than overwriting known history.
 
 ## Required Repository Secrets
 
@@ -27,7 +40,7 @@ These secrets are required for unattended scheduled reporting:
 
 | Secret | Purpose |
 | --- | --- |
-| `NUTSNEWS_BACKEND_SSH_PRIVATE_KEY` | SSH key for the read-only `rami` backend audit session |
+| `NUTSNEWS_BACKEND_SSH_PRIVATE_KEY` | SSH key for the fixed audit probes and bounded state publication |
 | `NUTSNEWS_BACKEND_KNOWN_HOSTS` | Verified known_hosts entry for `65.75.201.18` |
 
 These secrets enable email delivery:
@@ -59,6 +72,11 @@ The JSON report includes:
 - `next_report_run_at`
 - `last_report_success_at`
 - `last_error`
+- `workflow.conclusion`
+- `workflow.last_success_at`
+- `workflow.last_success_age_seconds`
+- `workflow.critical_check_count`
+- `workflow.consecutive_failure_count`
 - delivery status
 - `alerting.summary.active_alert_count`
 - `alerting.summary.notification_count`
@@ -108,6 +126,18 @@ Statuses are:
 
 Missing SMTP credentials degrade to `not_configured`. Missing SSH credentials are a workflow configuration error because the report cannot inspect the host.
 
+The host textfile collector recomputes, every five minutes:
+
+- `nutsnews_backend_health_audit_available`;
+- bounded `nutsnews_backend_health_audit_conclusion{conclusion=...}`;
+- last-run timestamp and age;
+- last-success timestamp and age;
+- consecutive failure and critical-check counts;
+- the expected daily interval.
+
+Because ages are recomputed on the host instead of frozen in a workflow
+artifact, a missed schedule or failed state publication remains observable.
+
 ## Alert Deduplication
 
 The report turns every warning, critical, or unknown check into an alert candidate. Healthy and `not_configured` checks are not alert candidates.
@@ -148,7 +178,7 @@ python3 scripts/backend_health_report.py \
 Run unit tests:
 
 ```bash
-python3 -m unittest tests.test_backend_health_report
+python3 -m unittest tests.test_backend_health_report tests.test_backend_health_audit_state
 ```
 
 Run full backend validation:

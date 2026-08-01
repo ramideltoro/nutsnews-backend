@@ -39,10 +39,14 @@ def valid_manifest() -> dict:
                 "name": "fetcher",
                 "stage": "fetcher",
                 "image": f"ghcr.io/ramideltoro/nutsnews-worker-uplift/fetcher@{digest}",
+                "image_tag": "b" * 40,
+                "service_version": "0.1.0",
+                "build_revision": "b" * 40,
+                "image_digest": digest,
                 "runtime_mode": "shadow",
                 "replicas": 1,
                 "resources": {"memory": "256m", "cpus": "0.50"},
-                "healthcheck": {"test": ["CMD", "/app/healthcheck"]},
+                "healthcheck": {"test": ["CMD", "node", "-e", "fetch('http://127.0.0.1:18082/live')"]},
                 "provenance": {
                     "required": True,
                     "signed": True,
@@ -94,11 +98,15 @@ def ai_manifest() -> dict:
             "name": "approval",
             "stage": "approval",
             "image": f"ghcr.io/ramideltoro/nutsnews-worker-article-approval@{approval_digest}",
+            "image_tag": "d" * 40,
+            "service_version": "0.1.0",
+            "build_revision": "d" * 40,
+            "image_digest": approval_digest,
             "runtime_mode": "shadow",
             "network_mode": "host",
             "replicas": 1,
             "resources": {"memory": "512m", "cpus": "0.75"},
-            "healthcheck": {"test": ["CMD", "node", "-e", "fetch('http://127.0.0.1:18085/ready')"]},
+            "healthcheck": {"test": ["CMD", "node", "-e", "fetch('http://127.0.0.1:18085/live')"]},
             "provenance": {
                 "required": True,
                 "signed": True,
@@ -126,11 +134,15 @@ def ai_manifest() -> dict:
             "name": "translation",
             "stage": "translation",
             "image": f"ghcr.io/ramideltoro/nutsnews-worker-article-translation@{translation_digest}",
+            "image_tag": "e" * 40,
+            "service_version": "0.1.0",
+            "build_revision": "e" * 40,
+            "image_digest": translation_digest,
             "runtime_mode": "shadow",
             "network_mode": "host",
             "replicas": 1,
             "resources": {"memory": "768m", "cpus": "0.75"},
-            "healthcheck": {"test": ["CMD", "node", "-e", "fetch('http://127.0.0.1:18086/ready')"]},
+            "healthcheck": {"test": ["CMD", "node", "-e", "fetch('http://127.0.0.1:18086/live')"]},
             "provenance": {
                 "required": True,
                 "signed": True,
@@ -172,11 +184,15 @@ def scheduler_manifest() -> dict:
             "name": "scheduler",
             "stage": "scheduler",
             "image": f"ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler@{digest}",
+            "image_tag": "f" * 40,
+            "service_version": "0.1.0",
+            "build_revision": "f" * 40,
+            "image_digest": digest,
             "runtime_mode": "shadow",
             "network_mode": "host",
             "replicas": 1,
             "resources": {"memory": "256m", "cpus": "0.35"},
-            "healthcheck": {"test": ["CMD", "node", "-e", "fetch('http://127.0.0.1:18081/ready')"]},
+            "healthcheck": {"test": ["CMD", "node", "-e", "fetch('http://127.0.0.1:18081/live')"]},
             "provenance": {
                 "required": True,
                 "signed": True,
@@ -201,6 +217,31 @@ def scheduler_manifest() -> dict:
         }
     ]
     return manifest
+
+
+def health_probe_result(probe: str, outcome: str = "ok") -> dict:
+    return {
+        "status": "healthy" if outcome == "ok" else "critical",
+        "http_status": 200 if outcome != "unhealthy" else 503,
+        "probe": probe,
+        "outcome": outcome,
+        "check_count": 1,
+    }
+
+
+def metrics_probe_result(*, expected_active: bool = False, readiness_outcome: str = "unhealthy") -> dict:
+    return {
+        "status": "healthy",
+        "http_status": 200,
+        "response_bytes": 512,
+        "expected_active_series_present": True,
+        "reported_expected_active": expected_active,
+        "expected_active_matches": True,
+        "readiness_series_present": True,
+        "readiness_one_hot": True,
+        "readiness_outcome": readiness_outcome,
+        "readiness_ok": readiness_outcome == "ok",
+    }
 
 
 class WorkerRuntimeManagerTests(unittest.TestCase):
@@ -277,7 +318,7 @@ class WorkerRuntimeManagerTests(unittest.TestCase):
         self.assertIn("no services are configured", report["summary"])
         self.assertEqual(report["commands"], [])
 
-    def test_status_fails_when_required_queue_has_zero_consumers(self):
+    def test_shadow_status_records_zero_consumers_without_falsely_failing_readiness(self):
         manager = load_manager()
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -302,14 +343,25 @@ class WorkerRuntimeManagerTests(unittest.TestCase):
             with (
                 mock.patch.object(manager, "run_command", return_value={"returncode": 0, "stdout": "[]", "stderr": ""}),
                 mock.patch.object(manager, "rabbitmq_get_json", return_value=queue_snapshot),
-                mock.patch.object(manager, "http_get_local", return_value={"status": "healthy"}),
+                mock.patch.object(
+                    manager,
+                    "health_probe_local",
+                    side_effect=lambda path, _port, probe: health_probe_result(
+                        probe,
+                        "ok" if path == "/live" else "unhealthy",
+                    ),
+                ),
+                mock.patch.object(manager, "prometheus_probe_local", return_value=metrics_probe_result()),
             ):
                 report = manager.build_report(args, manager.load_json(manifest_path))
-        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["status"], "pass")
+        self.assertFalse(report["expected_active"])
         self.assertEqual(report["missing_consumers"], ["fetcher"])
         readiness = report["services"]["fetcher"]["consumer_readiness"]
         self.assertEqual(readiness["status"], "critical")
         self.assertEqual(readiness["zero_consumer_queues"], ["nutsnews.worker.fetch.v1"])
+        self.assertEqual(report["services"]["fetcher"]["readiness"]["outcome"], "unhealthy")
+        self.assertEqual(report["unhealthy_readiness"], [])
 
     def test_status_does_not_require_scheduler_consumer(self):
         manager = load_manager()
@@ -331,13 +383,110 @@ class WorkerRuntimeManagerTests(unittest.TestCase):
             with (
                 mock.patch.object(manager, "run_command", return_value={"returncode": 0, "stdout": "[]", "stderr": ""}),
                 mock.patch.object(manager, "rabbitmq_get_json") as rabbitmq,
-                mock.patch.object(manager, "http_get_local", return_value={"status": "healthy"}),
+                mock.patch.object(
+                    manager,
+                    "health_probe_local",
+                    side_effect=lambda path, _port, probe: health_probe_result(
+                        probe,
+                        "ok" if path == "/live" else "unhealthy",
+                    ),
+                ),
+                mock.patch.object(manager, "prometheus_probe_local", return_value=metrics_probe_result()),
             ):
                 report = manager.build_report(args, manager.load_json(manifest_path))
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["missing_consumers"], [])
         self.assertEqual(report["services"]["scheduler"]["consumer_readiness"]["status"], "not_applicable")
         rabbitmq.assert_not_called()
+
+    def test_status_requires_liveness_and_metrics_even_while_shadowed(self):
+        manager = load_manager()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            manifest_path = root / "services.json"
+            compose_path = root / "compose.yml"
+            manifest_path.write_text(json.dumps(scheduler_manifest()), encoding="utf-8")
+            compose_path.write_text("services: {}\n", encoding="utf-8")
+            args = manager.parse_args(
+                ["status", "--manifest", str(manifest_path), "--compose", str(compose_path)]
+            )
+            with (
+                mock.patch.object(manager, "run_command", return_value={"returncode": 0, "stdout": "[]", "stderr": ""}),
+                mock.patch.object(
+                    manager,
+                    "health_probe_local",
+                    side_effect=lambda path, _port, probe: health_probe_result(
+                        probe,
+                        "unhealthy" if path == "/live" else "ok",
+                    ),
+                ),
+                mock.patch.object(manager, "prometheus_probe_local", return_value=metrics_probe_result()),
+            ):
+                report = manager.build_report(args, manager.load_json(manifest_path))
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["unhealthy_liveness"], ["scheduler"])
+
+    def test_production_active_status_requires_ready_ok(self):
+        manager = load_manager()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            manifest_path = root / "services.json"
+            compose_path = root / "compose.yml"
+            manifest_path.write_text(json.dumps(scheduler_manifest()), encoding="utf-8")
+            compose_path.write_text("services: {}\n", encoding="utf-8")
+            args = manager.parse_args(
+                ["status", "--manifest", str(manifest_path), "--compose", str(compose_path)]
+            )
+            with (
+                mock.patch.object(manager, "manifest_expected_active", return_value=True),
+                mock.patch.object(manager, "run_command", return_value={"returncode": 0, "stdout": "[]", "stderr": ""}),
+                mock.patch.object(
+                    manager,
+                    "health_probe_local",
+                    side_effect=lambda path, _port, probe: health_probe_result(
+                        probe,
+                        "ok" if path == "/live" else "degraded",
+                    ),
+                ),
+                mock.patch.object(
+                    manager,
+                    "prometheus_probe_local",
+                    return_value=metrics_probe_result(
+                        expected_active=True,
+                        readiness_outcome="degraded",
+                    ),
+                ),
+            ):
+                report = manager.build_report(args, manager.load_json(manifest_path))
+        self.assertEqual(report["status"], "fail")
+        self.assertTrue(report["expected_active"])
+        self.assertEqual(report["unhealthy_readiness"], ["scheduler"])
+
+    def test_prometheus_probe_requires_matching_ownership_and_one_hot_readiness(self):
+        manager = load_manager()
+        body = "\n".join(
+            [
+                'nutsnews_worker_expected_active{service="scheduler"} 0',
+                'nutsnews_worker_health_probe{outcome="ok",service="scheduler",probe="readiness"} 0',
+                'nutsnews_worker_health_probe{probe="readiness",outcome="degraded",service="scheduler"} 0',
+                'nutsnews_worker_health_probe{service="scheduler",probe="readiness",outcome="unhealthy"} 1',
+            ]
+        )
+        response = mock.MagicMock()
+        response.status = 200
+        response.read.return_value = body.encode("utf-8")
+        context = mock.MagicMock()
+        context.__enter__.return_value = response
+        context.__exit__.return_value = False
+        with mock.patch.object(manager.request, "urlopen", return_value=context):
+            valid = manager.prometheus_probe_local(18081, False)
+            mismatch = manager.prometheus_probe_local(18081, True)
+        self.assertEqual(valid["status"], "healthy")
+        self.assertEqual(valid["readiness_outcome"], "unhealthy")
+        self.assertFalse(valid["readiness_ok"])
+        self.assertNotIn("body", valid)
+        self.assertEqual(mismatch["status"], "critical")
+        self.assertFalse(mismatch["expected_active_matches"])
 
     def test_queue_inspect_fails_when_declared_consumer_count_is_zero(self):
         manager = load_manager()

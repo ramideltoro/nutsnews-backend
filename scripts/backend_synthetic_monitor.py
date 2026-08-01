@@ -39,6 +39,8 @@ class SyntheticCheck:
     expected_statuses: tuple[int, ...]
     failure_class: str
     body_contains: str | None = None
+    expected_json: tuple[tuple[str, Any], ...] = ()
+    expected_header_contains: tuple[tuple[str, str], ...] = ()
     follow_redirects: bool = True
     expected_location_prefix: str | None = None
     timeout: int = 10
@@ -95,11 +97,18 @@ def public_checks() -> list[SyntheticCheck]:
             failure_class="frontend_redirect",
         ),
         SyntheticCheck(
-            name="backend_healthz",
-            url="https://backend.nutsnews.com/healthz",
+            name="backend_readyz",
+            url="https://backend.nutsnews.com/readyz",
             expected_statuses=(200,),
-            body_contains="ok",
-            failure_class="backend_health",
+            expected_json=(
+                ("status", "ready"),
+                ("ready", True),
+                ("service", "nutsnews-worker-db-api"),
+                ("deploymentEnvironment", "production"),
+                ("dependencies.postgresql", "ready"),
+            ),
+            expected_header_contains=(("cache-control", "no-store"), ("pragma", "no-cache")),
+            failure_class="backend_readiness",
         ),
         SyntheticCheck(
             name="backend_tls_known_404",
@@ -263,6 +272,15 @@ def classify_error(exc: BaseException) -> str:
     return "unknown"
 
 
+def json_path_value(payload: Any, path: str) -> Any:
+    current = payload
+    for segment in path.split("."):
+        if not isinstance(current, dict) or segment not in current:
+            return None
+        current = current[segment]
+    return current
+
+
 def run_check(check: SyntheticCheck, previous_success: str | None, generated_at: str) -> dict[str, Any]:
     request = urllib.request.Request(
         check.url,
@@ -296,6 +314,23 @@ def run_check(check: SyntheticCheck, previous_success: str | None, generated_at:
     checks.append(http_status in check.expected_statuses if http_status is not None else False)
     if check.body_contains is not None:
         checks.append(check.body_contains in body)
+    json_matches = True
+    if check.expected_json:
+        try:
+            parsed_body = json.loads(body)
+        except (json.JSONDecodeError, TypeError):
+            parsed_body = None
+        json_matches = all(
+            json_path_value(parsed_body, path) == expected
+            for path, expected in check.expected_json
+        )
+        checks.append(json_matches)
+    header_matches = all(
+        expected.lower() in str(headers.get(header.lower(), "")).lower()
+        for header, expected in check.expected_header_contains
+    )
+    if check.expected_header_contains:
+        checks.append(header_matches)
     if check.expected_location_prefix is not None:
         checks.append(str(headers.get("location", "")).startswith(check.expected_location_prefix))
 
@@ -310,6 +345,10 @@ def run_check(check: SyntheticCheck, previous_success: str | None, generated_at:
         failure_detail = error_detail or f"expected_status={expected} observed_status={http_status}"
         if check.body_contains is not None and check.body_contains not in body:
             failure_detail += " body_match=false"
+        if check.expected_json and not json_matches:
+            failure_detail += " json_match=false"
+        if check.expected_header_contains and not header_matches:
+            failure_detail += " header_match=false"
         if check.expected_location_prefix is not None and not str(headers.get("location", "")).startswith(check.expected_location_prefix):
             failure_detail += f" location={redact(str(headers.get('location', '')))}"
         last_success_at = previous_success

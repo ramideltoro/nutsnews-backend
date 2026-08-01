@@ -15,6 +15,10 @@ from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "ansible/roles/backend_baseline/templates/worker-uplift-shadow-data-model.sql.j2"
+FETCHER_MIGRATION = (
+    ROOT
+    / "ansible/roles/backend_baseline/files/worker-uplift-migrations/001_fetcher_durable_state_contract.sql"
+)
 DEFAULTS = ROOT / "ansible/roles/backend_baseline/defaults/main.yml"
 POSTGRES_TASKS = ROOT / "ansible/roles/backend_baseline/tasks/postgres.yml"
 PROTECTED_APPLY_WORKFLOW = ROOT / ".github/workflows/protected-backend-ansible-apply.yml"
@@ -46,7 +50,12 @@ PUBLIC_DOMAIN_TABLES = [
 COMMON_TABLES = ["inbox", "outbox", "attempts", "transition_ledger", "reconciliation_watermarks"]
 STAGE_SPECIFIC_TABLES = {
     "worker_uplift_scheduler": ["feed_schedules", "feed_leases"],
-    "worker_uplift_fetcher": ["fetch_versions", "feed_health_projections"],
+    "worker_uplift_fetcher": [
+        "fetch_versions",
+        "fetch_outcomes",
+        "feed_health_projections",
+        "state_contract",
+    ],
     "worker_uplift_canonicalizer": ["article_identities", "article_aliases"],
     "worker_uplift_enrichment": ["enrichment_records"],
     "worker_uplift_approval": ["approval_decisions"],
@@ -54,6 +63,14 @@ STAGE_SPECIFIC_TABLES = {
     "worker_uplift_persistence": ["write_requests"],
     "worker_uplift_publication": ["publication_readiness", "publication_decisions"],
     FINAL_SCHEMA: ["article_shadow_aggregates", "api_command_receipts", "stage_health_projections"],
+}
+FETCHER_REQUIRED_COLUMNS = {
+    "inbox": ["claim_owner_message_id", "claim_expires_at", "updated_at"],
+    "outbox": ["claim_owner_key", "claim_expires_at", "publication_command", "updated_at"],
+    "fetch_versions": ["feed_id", "content_fingerprint"],
+}
+NON_REDACTED_TABLES = {
+    "worker_uplift_fetcher.state_contract",
 }
 
 
@@ -79,6 +96,7 @@ def run_psql(db_url: str, query: str, *, timeout: int = 30) -> tuple[int, str, s
 
 def check_static_files() -> list[dict]:
     template = TEMPLATE.read_text(encoding="utf-8")
+    fetcher_migration = FETCHER_MIGRATION.read_text(encoding="utf-8")
     defaults = DEFAULTS.read_text(encoding="utf-8")
     tasks = POSTGRES_TASKS.read_text(encoding="utf-8")
     workflow = PROTECTED_APPLY_WORKFLOW.read_text(encoding="utf-8")
@@ -118,6 +136,8 @@ def check_static_files() -> list[dict]:
         f"backend_worker_uplift_postgres_final_schema: {FINAL_SCHEMA}",
         f"backend_worker_uplift_postgres_views_schema: {VIEWS_SCHEMA}",
         "backend_worker_uplift_postgres_stage_roles:",
+        "backend_worker_uplift_postgres_migrations:",
+        "001_fetcher_durable_state_contract.sql",
     ):
         if token not in defaults:
             failures.append(f"missing_default:{token}")
@@ -128,6 +148,10 @@ def check_static_files() -> list[dict]:
         "Allow worker-uplift stage roles to connect to the future-primary shadow database",
         "Install worker-uplift shadow PostgreSQL data model",
         "worker-uplift-shadow-data-model.sql.j2",
+        "Validate required worker-uplift PostgreSQL migrations",
+        "Validate versioned worker-uplift PostgreSQL migration filenames",
+        "Apply versioned worker-uplift PostgreSQL migrations",
+        "files/worker-uplift-migrations/",
     ):
         if token not in tasks:
             failures.append(f"missing_task:{token}")
@@ -141,9 +165,23 @@ def check_static_files() -> list[dict]:
         if token not in workflow:
             failures.append(f"missing_workflow_wiring:{token}")
 
+    for token in (
+        "ALTER TABLE worker_uplift_fetcher.inbox",
+        "ALTER TABLE worker_uplift_fetcher.outbox",
+        "ALTER TABLE worker_uplift_fetcher.fetch_versions",
+        "ADD COLUMN IF NOT EXISTS publication_command",
+        "CREATE TABLE IF NOT EXISTS worker_uplift_fetcher.fetch_outcomes",
+        "CREATE TABLE IF NOT EXISTS worker_uplift_fetcher.state_contract",
+        "VALUES ('fetcher_state_store', 1)",
+        "ON CONFLICT (component) DO UPDATE",
+        "worker_uplift_fetcher_fetch_outcomes_redact_idx",
+    ):
+        if token not in fetcher_migration:
+            failures.append(f"missing_fetcher_migration_guardrail:{token}")
+
     forbidden_payload_markers = ["article_body", "full_prompt", "raw_provider_response", "bearer_token"]
     for marker in forbidden_payload_markers:
-        if marker in template:
+        if marker in template or marker in fetcher_migration:
             failures.append(f"forbidden_payload_marker:{marker}")
 
     return [
@@ -177,7 +215,13 @@ def live_catalog_query(stages: list[tuple[str, str, str]]) -> str:
     role_schema_values = ",".join(f"('{stage}','{role}','{schema}')" for stage, role, schema in stages)
     role_csv = ",".join(role for _stage, role, _schema in stages)
     worker_api_final_role_csv = ",".join(WORKER_API_FINAL_ROLES)
+    fetcher_role = next(role for stage, role, _schema in stages if stage == "fetcher")
     domain_table_values = ",".join(f"('{table}')" for table in PUBLIC_DOMAIN_TABLES)
+    fetcher_column_values = ",".join(
+        f"('{table_name}','{column_name}')"
+        for table_name, column_names in FETCHER_REQUIRED_COLUMNS.items()
+        for column_name in column_names
+    )
     return f"""
 select 'schema=' || n.nspname
 from pg_namespace n
@@ -208,6 +252,36 @@ join information_schema.columns col
  and col.table_name = e.table_name
  and col.column_name = 'redact_after'
 order by e.schema_name, e.table_name;
+
+with expected(table_name, column_name) as (values {fetcher_column_values})
+select 'fetcher_column=' || e.table_name || '.' || e.column_name
+from expected e
+join information_schema.columns col
+  on col.table_schema = 'worker_uplift_fetcher'
+ and col.table_name = e.table_name
+ and col.column_name = e.column_name
+order by e.table_name, e.column_name;
+
+select 'fetcher_contract=' || contract_version::text
+from worker_uplift_fetcher.state_contract
+where component = 'fetcher_state_store';
+
+select 'fetcher_cleanup_index=' || (
+  to_regclass(
+    'worker_uplift_fetcher.worker_uplift_fetcher_fetch_outcomes_redact_idx'
+  ) is not null
+)::text;
+
+select 'fetcher_state_grant=' || r.rolname
+  || ':fetch_outcomes_insert=' || has_table_privilege(r.rolname, 'worker_uplift_fetcher.fetch_outcomes', 'INSERT')::text
+  || ':fetch_outcomes_sequence_usage=' || has_sequence_privilege(r.rolname, 'worker_uplift_fetcher.fetch_outcomes_id_seq', 'USAGE')::text
+  || ':state_contract_select=' || has_table_privilege(r.rolname, 'worker_uplift_fetcher.state_contract', 'SELECT')::text
+  || ':state_contract_insert_denied=' || (not has_table_privilege(r.rolname, 'worker_uplift_fetcher.state_contract', 'INSERT'))::text
+  || ':state_contract_update_denied=' || (not has_table_privilege(r.rolname, 'worker_uplift_fetcher.state_contract', 'UPDATE'))::text
+  || ':state_contract_delete_denied=' || (not has_table_privilege(r.rolname, 'worker_uplift_fetcher.state_contract', 'DELETE'))::text
+from pg_roles r
+where r.rolname = '{fetcher_role}'
+order by r.rolname;
 
 with expected(stage, role_name, schema_name) as (values {role_schema_values})
 select 'own_grant=' || e.stage || ':' || e.role_name || ':' || e.schema_name
@@ -264,15 +338,31 @@ def check_live_catalog(db_url: str, stages: list[tuple[str, str, str]]) -> list[
         for _stage, _role, schema in stages
         for table in COMMON_TABLES + STAGE_SPECIFIC_TABLES[schema]
     } | {f"{FINAL_SCHEMA}.{table}" for table in STAGE_SPECIFIC_TABLES[FINAL_SCHEMA]}
-    expected_redaction_tables = expected_tables - {
-        f"{schema}.transition_ledger" for _stage, _role, schema in stages
+    expected_redaction_tables = expected_tables - NON_REDACTED_TABLES
+    expected_fetcher_columns = {
+        f"{table_name}.{column_name}"
+        for table_name, column_names in FETCHER_REQUIRED_COLUMNS.items()
+        for column_name in column_names
     }
-    expected_redaction_tables |= {f"{schema}.transition_ledger" for _stage, _role, schema in stages}
     persistence_role = next(role for stage, role, _schema in stages if stage == "persistence")
 
     schemas = {line.split("=", 1)[1] for line in stdout.splitlines() if line.startswith("schema=")}
     tables = {line.split("=", 1)[1] for line in stdout.splitlines() if line.startswith("table=")}
     redaction_tables = {line.split("=", 1)[1] for line in stdout.splitlines() if line.startswith("redact=")}
+    fetcher_columns = {
+        line.split("=", 1)[1] for line in stdout.splitlines() if line.startswith("fetcher_column=")
+    }
+    fetcher_contract_versions = [
+        int(line.split("=", 1)[1])
+        for line in stdout.splitlines()
+        if line.startswith("fetcher_contract=")
+    ]
+    fetcher_cleanup_index_ready = any(
+        parse_bool_token(line.split("=", 1)[1])
+        for line in stdout.splitlines()
+        if line.startswith("fetcher_cleanup_index=")
+    )
+    fetcher_state_grant_ready = False
     unique_failures = []
     own_grant_failures = []
     public_write_failures = []
@@ -291,6 +381,13 @@ def check_live_catalog(db_url: str, stages: list[tuple[str, str, str]]) -> list[
             values = [part.split("=", 1)[1] for part in parts[3:]]
             if not all(parse_bool_token(value) for value in values):
                 own_grant_failures.append(":".join(parts[:3]))
+        elif line.startswith("fetcher_state_grant="):
+            payload = line.split("=", 1)[1]
+            parts = payload.split(":")
+            values = [part.split("=", 1)[1] for part in parts[1:]]
+            fetcher_state_grant_ready = bool(values) and all(
+                parse_bool_token(value) for value in values
+            )
         elif line.startswith("public_write="):
             payload = line.split("=", 1)[1]
             role_name, table_name, insert_value, update_value, delete_value = payload.split(":")
@@ -325,6 +422,16 @@ def check_live_catalog(db_url: str, stages: list[tuple[str, str, str]]) -> list[
         "missing_schemas": sorted(expected_schemas - schemas),
         "missing_tables": sorted(expected_tables - tables),
         "missing_redact_after": sorted(expected_redaction_tables - redaction_tables),
+        "missing_fetcher_contract_columns": sorted(expected_fetcher_columns - fetcher_columns),
+        "invalid_fetcher_contract_version": []
+        if fetcher_contract_versions and max(fetcher_contract_versions) >= 1
+        else ["fetcher_state_store:v1"],
+        "missing_fetcher_cleanup_index": []
+        if fetcher_cleanup_index_ready
+        else ["worker_uplift_fetcher_fetch_outcomes_redact_idx"],
+        "fetcher_state_grant_failures": []
+        if fetcher_state_grant_ready
+        else ["fetcher_durable_state_contract"],
         "missing_unique_or_primary_constraints": unique_failures,
         "own_grant_failures": own_grant_failures,
         "public_write_failures": public_write_failures,

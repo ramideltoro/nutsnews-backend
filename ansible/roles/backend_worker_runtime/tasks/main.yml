@@ -121,6 +121,9 @@
       NUTSNEWS_RUNTIME_MODE={{ item.runtime_mode | default('shadow') }}
       NUTSNEWS_SERVICE_NAME={{ item.name }}
       NUTSNEWS_SERVICE_STAGE={{ item.stage }}
+      NUTSNEWS_SERVICE_VERSION={{ item.service_version }}
+      NUTSNEWS_BUILD_REVISION={{ item.build_revision }}
+      NUTSNEWS_IMAGE_DIGEST={{ item.image_digest }}
       NUTSNEWS_CONTRACT_VERSION={{ item.contract_version | default(backend_worker_runtime_contract_version) }}
       NUTSNEWS_BACKEND_API_URL={{ backend_worker_runtime_backend_api_url }}
       NUTSNEWS_BACKEND_API_WRITES_ENABLED={{ backend_worker_runtime_backend_api_writes_enabled | bool | ternary('true', 'false') }}

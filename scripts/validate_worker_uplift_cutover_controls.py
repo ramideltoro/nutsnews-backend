@@ -8,6 +8,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+try:
+    from scripts import validate_worker_uplift_final_cutover_readiness as final_readiness
+except ModuleNotFoundError:  # Direct execution adds scripts/, not the repository root.
+    import validate_worker_uplift_final_cutover_readiness as final_readiness
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = ROOT / "docs/worker-uplift-cutover-controls.json"
@@ -119,11 +124,13 @@ def validate_repository() -> list[str]:
         "execute-worker-uplift-cutover:$CANDIDATE", "rollback-worker-uplift-cutover:$WATERMARK",
         "docs/worker-uplift-final-cutover-decision.json", "retention-days: 90",
         "controller-ingestion-scheduling-operations.yml", "NUTSNEWS_MAINTENANCE_GITHUB_TOKEN",
+        "scripts/validate_worker_uplift_final_cutover_readiness.py --require-go",
     ], "protected workflow")
     require_text(errors, manager, [
         "where control_id = 'production'", "and generation = %s", "and state = %s",
         "validate_final_decision", "exact #166 GO is absent", "dns_failover_unchanged",
-        "production_targets_reachable",
+        "production_targets_reachable", "standing_bounded_authorization",
+        final_readiness.COMMENT_URL, final_readiness.SCOPE_SHA256,
     ], "fixed manager")
     if "shell=True" in manager or "os.system(" in manager:
         errors.append("fixed manager must not expose arbitrary shell execution")
@@ -156,8 +163,23 @@ def validate_repository() -> list[str]:
     }
     if "NUTSNEWS_WORKER_UPLIFT_CUTOVER_PASSWORD" not in names:
         errors.append("credential inventory is missing the dedicated cutover role secret")
-    if decision.get("decision") != "NO-GO" or decision.get("authorized_for_execution") is not False:
-        errors.append("#126 must commit a fail-closed NO-GO final decision")
+    try:
+        authorization = final_readiness.load_json(final_readiness.AUTHORIZATION_PATH)
+        candidate = (
+            final_readiness.load_json(final_readiness.CANDIDATE_PATH)
+            if final_readiness.CANDIDATE_PATH.exists()
+            else None
+        )
+        errors.extend(final_readiness.validate_authorization(authorization))
+        errors.extend(
+            final_readiness.validate_decision(
+                decision,
+                authorization,
+                candidate=candidate,
+            )
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        errors.append(f"could not validate final cutover readiness: {exc.__class__.__name__}")
     if decision.get("safety") != {
         "active_ingestion_owner": "legacy_shards", "legacy_dispatch_enabled": True,
         "uplift_mode": "shadow", "production_writes_enabled": False,

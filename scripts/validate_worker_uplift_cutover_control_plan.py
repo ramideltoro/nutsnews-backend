@@ -73,7 +73,7 @@ OWNERSHIP_REPOSITORIES = {
     "cloudflare_failover": "ramideltoro/nutsnews-infra",
     "incident_command": "ramideltoro/nutsnews-worker",
     "rollback": "ramideltoro/nutsnews-backend",
-    "final_approval": "ramideltoro/nutsnews-worker",
+    "final_readiness": "ramideltoro/nutsnews-worker",
 }
 FINAL_GATE_FIELDS = {
     "planned_execution_window.start_utc",
@@ -340,8 +340,9 @@ def validate_plan(
         errors.append("ownership must accurately record the single-human operator model")
     if ownership.get("independent_human_backup_available") is not False:
         errors.append("ownership must not fabricate an independent human backup")
-    if "NO-GO" not in str(ownership.get("owner_unavailable_policy", "")):
-        errors.append("owner unavailability must be an explicit NO-GO")
+    unavailable_policy = str(ownership.get("owner_unavailable_policy", ""))
+    if "standing authorization" not in unavailable_policy or "fails closed" not in unavailable_policy:
+        errors.append("owner unavailability policy must use standing authorization and fail closed")
     domains = ownership.get("domains", [])
     domain_ids = [str(item.get("id", "")) for item in domains]
     if set(domain_ids) != set(OWNERSHIP_REPOSITORIES) or duplicates(domain_ids):
@@ -407,10 +408,18 @@ def validate_plan(
         errors.append("#166 final refresh field set is incomplete")
     if final_gate.get("stale_or_missing_field_decision") != "NO-GO":
         errors.append("stale or missing final evidence must be NO-GO")
-    if final_gate.get("named_approver_required") is not True:
-        errors.append("#166 must require a named approver")
-    if final_gate.get("automation_is_approval") is not False:
-        errors.append("automation cannot supply #166 approval")
+    if final_gate.get("standing_authorization_contract") != "docs/worker-uplift-final-cutover-authorization.json":
+        errors.append("#166 must bind the standing authorization contract")
+    if final_gate.get("standing_authorization_comment") != "https://github.com/ramideltoro/nutsnews-worker/issues/166#issuecomment-5151195619":
+        errors.append("#166 standing authorization comment mismatch")
+    if final_gate.get("recurring_named_approver_required") is not False:
+        errors.append("exact #166 operations must not require a recurring owner prompt")
+    if final_gate.get("advisory_metadata_is_authorization") is not False:
+        errors.append("advisory metadata cannot replace the standing authorization contract")
+    if final_gate.get("machine_validator_may_issue_go_under_standing_authorization") is not True:
+        errors.append("the exact machine validator must be able to issue GO under standing authorization")
+    if final_gate.get("scope_or_invariant_drift_decision") != "NO-GO":
+        errors.append("scope or invariant drift must be NO-GO")
     if final_gate.get("go_authority") != "authorize protected #127 execution only":
         errors.append("#166 GO authority must be limited to protected #127 execution")
 

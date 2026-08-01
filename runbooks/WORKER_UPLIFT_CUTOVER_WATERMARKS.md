@@ -143,6 +143,7 @@ enable writes or change ingestion ownership.
 
 #174 evidence is one input to the non-mutating #166 decision. #166 must still
 freeze the exact production candidate, complete watermark digest, rollback
-deadline, 48-hour observation window, thresholds, owners, and named GO. Even a
+deadline, 48-hour observation window, thresholds, owners, and machine-validated
+GO under the bounded #166 standing authorization. Even a
 passing #174 apply does not authorize cutover. Only a later exact #166 GO may
 authorize beginning the separately protected #127 execution.

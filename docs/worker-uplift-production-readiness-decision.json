@@ -371,7 +371,7 @@
     },
     {
       "path": "docs/worker-uplift-cutover-control-plan.json",
-      "sha256": "02eeee861498c81803da4452c9e49c5c4b28a9999c03195e74d3af1606970bdc"
+      "sha256": "f5cb4f507190e60ab19d82f891d14a544e9fcc91273bb4fc50752e98a71c854b"
     },
     {
       "path": "docs/worker-uplift-shadow-soak-capacity-report.json",
@@ -707,7 +707,7 @@
       "observation_window_duration_hours": 48,
       "ownership_plan_complete": true,
       "plan_path": "docs/worker-uplift-cutover-control-plan.json",
-      "plan_sha256": "02eeee861498c81803da4452c9e49c5c4b28a9999c03195e74d3af1606970bdc",
+      "plan_sha256": "f5cb4f507190e60ab19d82f891d14a544e9fcc91273bb4fc50752e98a71c854b",
       "planning_blocker_issue": "ramideltoro/nutsnews-worker#165",
       "downstream_control_implementation_required_before": "ramideltoro/nutsnews-worker#166",
       "downstream_control_implementation_blocks_issue_125": false,

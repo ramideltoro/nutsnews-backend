@@ -61,6 +61,11 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/validate_worker_uplift_cutover_controls.py
+          if [[ "$ACTION" == apply || "$ACTION" == rollback ]]; then
+            python3 scripts/validate_worker_uplift_final_cutover_readiness.py --require-go
+          else
+            python3 scripts/validate_worker_uplift_final_cutover_readiness.py
+          fi
           jq -e '.decision == "NO-GO" or .decision == "GO"' docs/worker-uplift-final-cutover-decision.json >/dev/null
           [[ "$CANDIDATE" =~ ^[0-9a-f]{64}$ ]]
           [[ "$WATERMARK" =~ ^[0-9a-f]{64}$ ]]

@@ -341,7 +341,7 @@
     ],
     "single_human_operator": true,
     "independent_human_backup_available": false,
-    "owner_unavailable_policy": "NO-GO or immediate abort; retain legacy_shards as owner and keep uplift production writes false.",
+    "owner_unavailable_policy": "No recurring owner response is required for an exact machine-validated operation under the #166 standing authorization; any scope or evidence drift fails closed, retaining legacy_shards as owner and uplift production writes false.",
     "backup_model": "Each domain names a fail-closed safe-state control rather than fabricating an unavailable second person.",
     "domains": [
       {
@@ -415,11 +415,11 @@
         "backup_control_id": "deadline-or-evidence-failure-forward-recovery"
       },
       {
-        "id": "final_approval",
+        "id": "final_readiness",
         "primary_owner_login": "ramideltoro",
         "backup_owner_login": null,
         "implementation_repository": "ramideltoro/nutsnews-worker",
-        "backup_control_id": "no-named-approver-no-go"
+        "backup_control_id": "machine-no-go-on-scope-or-evidence-drift"
       }
     ]
   },
@@ -513,8 +513,12 @@
       "DNS failover controller and analytics disposition evidence"
     ],
     "stale_or_missing_field_decision": "NO-GO",
-    "named_approver_required": true,
-    "automation_is_approval": false,
+    "standing_authorization_contract": "docs/worker-uplift-final-cutover-authorization.json",
+    "standing_authorization_comment": "https://github.com/ramideltoro/nutsnews-worker/issues/166#issuecomment-5151195619",
+    "recurring_named_approver_required": false,
+    "advisory_metadata_is_authorization": false,
+    "machine_validator_may_issue_go_under_standing_authorization": true,
+    "scope_or_invariant_drift_decision": "NO-GO",
     "go_authority": "authorize protected #127 execution only"
   },
   "validation": {

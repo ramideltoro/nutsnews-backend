@@ -581,6 +581,10 @@ def build_dry_run(contract: dict[str, Any], candidate: str, watermark: str, dead
         "rollback_deadline_utc": deadline,
         "transitions": transitions,
         "unchanged_failover_resources": True,
+        "dns_failover_unchanged": True,
+        "single_writer_invariants_pass": all(
+            item["single_writer_invariants_pass"] for item in transitions
+        ),
         "forbidden_operations_present": False,
         "contract_sha256": canonical_sha256(contract),
     }

@@ -93,6 +93,24 @@ class BackendBackupTests(unittest.TestCase):
         self.assertTrue(runner.snapshot_ids_match("1a999564", full_id))
         self.assertFalse(runner.snapshot_ids_match(full_id, "abcdef12"))
 
+    def test_latest_snapshot_uses_supported_bounded_restic_flag(self):
+        runner = load_runner()
+        completed = type(
+            "Completed",
+            (),
+            {
+                "returncode": 0,
+                "stdout": json.dumps([{"short_id": "1a999564"}]),
+                "stderr": "",
+            },
+        )()
+
+        with mock.patch.object(runner, "run_restic", return_value=completed) as run_restic:
+            snapshot_id = runner.latest_snapshot_id()
+
+        run_restic.assert_called_once_with(["snapshots", "--json", "--latest", "1"], timeout=600)
+        self.assertEqual(snapshot_id, "1a999564")
+
     def test_mark_backup_verified_removes_unverified_latest_snapshot_alert(self):
         runner = load_runner()
         full_id = "1a999564872b8b31d3ef4a7159316f3541708e6b99f9ba5fa78d53bce7af0c51"
@@ -162,6 +180,44 @@ class BackendBackupTests(unittest.TestCase):
         self.assertEqual(status["status"], "critical")
         self.assertIsNone(status["snapshot_id"])
         self.assertEqual(status["snapshot_source"], "unavailable")
+
+    def test_restore_drill_falls_back_to_fresh_state_and_restores_the_exact_snapshot(self):
+        runner = load_runner()
+        full_id = "2fb6c729787cf16c8d2d02662e5e6723a9be6a66d000cb4b1c7596d140f53e2e"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            state_dir.mkdir()
+            selected = Path(tmpdir) / "selected-file"
+            selected.write_text("restore fixture", encoding="utf-8")
+            (state_dir / runner.STATUS_FILES["backup"]).write_text(
+                json.dumps(
+                    {
+                        "status": "healthy",
+                        "freshness_status": "healthy",
+                        "snapshot_id": full_id,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = type("Args", (), {"state_dir": state_dir})()
+
+            def restore(command, timeout=3600):
+                target = Path(command[command.index("--target") + 1])
+                restored = target / str(selected).removeprefix("/")
+                restored.parent.mkdir(parents=True)
+                restored.write_text("restore fixture", encoding="utf-8")
+                return type("Completed", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+            with mock.patch.object(runner, "RESTORE_DRILL_CANDIDATES", (str(selected),)), mock.patch.object(
+                runner, "latest_snapshot_id", return_value=None
+            ), mock.patch.object(runner, "run_restic", side_effect=restore) as run_restic:
+                status = runner.action_restore_drill(args)
+
+        command = run_restic.call_args.args[0]
+        self.assertEqual(command[:2], ["restore", full_id])
+        self.assertEqual(status["status"], "healthy")
+        self.assertEqual(status["snapshot_source"], "backup_status")
 
     def test_backup_workflow_has_only_fixed_actions(self):
         workflow = Path(".github/workflows/backend-backup-maintenance.yml").read_text(encoding="utf-8")

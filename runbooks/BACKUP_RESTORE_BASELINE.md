@@ -178,6 +178,13 @@ The runner writes:
 | `/var/lib/nutsnews/backups/last-verification.json` | latest restic check result |
 | `/var/lib/nutsnews/backups/last-restore-verification.json` | lightweight restore-drill result |
 
+The restore drill resolves one bounded latest Restic snapshot and restores that
+exact immutable snapshot ID. If the snapshot-list query is temporarily
+unavailable, it may use the ID from a fresh healthy `last-backup.json` record;
+it still asks Restic to restore that exact ID and fails closed when neither
+source supplies one. The status records which value-free snapshot source was
+used.
+
 The health report and ops dashboard expose these statuses separately:
 
 - backup failure;

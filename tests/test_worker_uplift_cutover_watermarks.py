@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import subprocess
 import tempfile
 import unittest
 from datetime import timedelta
@@ -135,6 +136,24 @@ class WatermarkFixture:
 
 
 class WorkerUpliftCutoverWatermarkTests(unittest.TestCase):
+    def test_psql_failure_is_classified_without_echoing_diagnostics(self):
+        failure = subprocess.CalledProcessError(
+            1,
+            ["psql"],
+            stderr="ERROR: permission denied for table private_fixture_table",
+        )
+        with mock.patch.object(watermarks.subprocess, "run", side_effect=failure):
+            with self.assertRaisesRegex(
+                watermarks.WatermarkError,
+                r"privilege-proof.*insufficient_privilege",
+            ) as raised:
+                watermarks.psql_json(
+                    "select 1;",
+                    "fixture-password",
+                    context="privilege-proof",
+                )
+        self.assertNotIn("private_fixture_table", str(raised.exception))
+
     def test_committed_contract_workflow_implementation_and_ansible_validate(self):
         self.assertEqual(validator.validate_contract(contract_value()), [])
         self.assertEqual(validator.validate_workflow(WORKFLOW.read_text(encoding="utf-8")), [])

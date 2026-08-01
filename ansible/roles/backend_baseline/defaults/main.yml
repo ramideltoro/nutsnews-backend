@@ -336,15 +336,16 @@ backend_metrics_rabbitmq_service_namespace: worker-uplift
 backend_metrics_rabbitmq_scrape_interval: 60s
 backend_metrics_rabbitmq_scrape_timeout: 10s
 backend_metrics_rabbitmq_sample_limit: 1200
-backend_metrics_rabbitmq_label_limit: 12
+backend_metrics_rabbitmq_label_limit: 13
 backend_metrics_rabbitmq_relabel_cache_ttl: 10m
 backend_metrics_rabbitmq_queue_regex: "^(nutsnews\\.worker\\.(fetch|canonicalization|enrichment|approval|translation|persistence|publication)\\.v1(\\.retry-(30s|5m|30m)|\\.dlq)?)$"
 backend_metrics_rabbitmq_detailed_families:
   - queue_coarse_metrics
   - queue_consumer_count
   - queue_delivery_metrics
+  - queue_exchange_metrics
 backend_metrics_rabbitmq_aggregate_metric_regex: "^(up|scrape_.+|rabbitmq_(up|connections|channels|consumers|queues|exchanges|queue_messages.*|node_.*|process_.*|disk_.*|erlang_.*|alarms.*|auth_attempts.*)|erlang_.+)$"
-backend_metrics_rabbitmq_detailed_metric_regex: "^(up|scrape_.+|rabbitmq_detailed_queue_(messages|messages_ready|messages_unacked|messages_delivered_ack_total|messages_delivered_total|messages_redelivered_total|messages_acked_total|get_ack_total|get_total|get_empty_total|consumers|consumer_capacity|consumer_utilisation))$"
+backend_metrics_rabbitmq_detailed_metric_regex: "^(up|scrape_.+|rabbitmq_detailed_queue_(messages|messages_ready|messages_unacked|messages_delivered_ack_total|messages_delivered_total|messages_redelivered_total|messages_acked_total|get_ack_total|get_total|get_empty_total|consumers|consumer_capacity|consumer_utilisation)|rabbitmq_detailed_queue_exchange_messages_published_total)$"
 backend_logs_enabled: false
 backend_logs_loki_url: ""
 backend_logs_loki_username: ""

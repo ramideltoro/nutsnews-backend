@@ -1,0 +1,152 @@
+BEGIN;
+
+SET LOCAL lock_timeout = '5s';
+SET LOCAL statement_timeout = '30s';
+SELECT pg_advisory_xact_lock(hashtextextended('worker_uplift_fetcher:state-contract:v2', 0));
+
+ALTER TABLE worker_uplift_fetcher.inbox
+  ADD COLUMN IF NOT EXISTS claim_owner_message_id text,
+  ADD COLUMN IF NOT EXISTS claim_token text,
+  ADD COLUMN IF NOT EXISTS claim_acquired_at timestamptz,
+  ADD COLUMN IF NOT EXISTS claim_expires_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
+ALTER TABLE worker_uplift_fetcher.outbox
+  ADD COLUMN IF NOT EXISTS claim_owner_key text,
+  ADD COLUMN IF NOT EXISTS claim_token text,
+  ADD COLUMN IF NOT EXISTS claim_acquired_at timestamptz,
+  ADD COLUMN IF NOT EXISTS claim_expires_at timestamptz,
+  ADD COLUMN IF NOT EXISTS publication_command jsonb,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
+ALTER TABLE worker_uplift_fetcher.fetch_versions
+  ADD COLUMN IF NOT EXISTS feed_id text,
+  ADD COLUMN IF NOT EXISTS content_fingerprint text;
+
+CREATE TABLE IF NOT EXISTS worker_uplift_fetcher.fetch_outcomes (
+  id bigserial PRIMARY KEY,
+  feed_id text NOT NULL,
+  feed_url text NOT NULL,
+  fetch_status text NOT NULL CHECK (fetch_status IN ('success', 'unchanged', 'transient_failure', 'permanent_failure')),
+  fetched_at timestamptz NOT NULL,
+  http_status integer CHECK (http_status IS NULL OR http_status BETWEEN 100 AND 599),
+  body_bytes integer NOT NULL CHECK (body_bytes >= 0),
+  item_count integer NOT NULL CHECK (item_count >= 0),
+  duration_ms integer NOT NULL CHECK (duration_ms >= 0),
+  failure_class text,
+  failure_code text,
+  retryable boolean,
+  diagnostic_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(diagnostic_metadata) = 'object'),
+  redact_after timestamptz NOT NULL DEFAULT (now() + interval '30 days'),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS worker_uplift_fetcher.state_contract (
+  component text PRIMARY KEY,
+  contract_version integer NOT NULL CHECK (contract_version > 0),
+  migrated_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE worker_uplift_fetcher.outbox
+  DROP CONSTRAINT IF EXISTS worker_uplift_fetcher_outbox_publication_command_check;
+ALTER TABLE worker_uplift_fetcher.outbox
+  ADD CONSTRAINT worker_uplift_fetcher_outbox_publication_command_check CHECK (
+    publication_command IS NULL OR jsonb_typeof(publication_command) = 'object'
+  );
+
+-- A pre-v2 lease has no opaque compare-and-set token and cannot be inherited.
+UPDATE worker_uplift_fetcher.inbox
+SET claim_expires_at = NULL,
+    claim_acquired_at = NULL,
+    updated_at = now()
+WHERE claim_token IS NULL
+  AND (claim_expires_at IS NOT NULL OR claim_acquired_at IS NOT NULL);
+
+UPDATE worker_uplift_fetcher.outbox
+SET claim_expires_at = NULL,
+    claim_acquired_at = NULL,
+    updated_at = now()
+WHERE claim_token IS NULL
+  AND (claim_expires_at IS NOT NULL OR claim_acquired_at IS NOT NULL);
+
+DROP INDEX IF EXISTS worker_uplift_fetcher.worker_uplift_fetcher_inbox_claim_token_idx;
+DROP INDEX IF EXISTS worker_uplift_fetcher.worker_uplift_fetcher_outbox_claim_token_idx;
+
+CREATE UNIQUE INDEX worker_uplift_fetcher_inbox_claim_token_idx
+  ON worker_uplift_fetcher.inbox (claim_token)
+  WHERE claim_token IS NOT NULL;
+CREATE UNIQUE INDEX worker_uplift_fetcher_outbox_claim_token_idx
+  ON worker_uplift_fetcher.outbox (claim_token)
+  WHERE claim_token IS NOT NULL;
+
+ALTER TABLE worker_uplift_fetcher.inbox
+  DROP CONSTRAINT IF EXISTS worker_uplift_fetcher_inbox_claim_lease_check;
+ALTER TABLE worker_uplift_fetcher.inbox
+  ADD CONSTRAINT worker_uplift_fetcher_inbox_claim_lease_check CHECK (
+    (claim_token IS NULL AND claim_acquired_at IS NULL AND claim_expires_at IS NULL)
+    OR (
+      claim_token IS NOT NULL
+      AND char_length(claim_token) >= 8
+      AND char_length(claim_token) <= 160
+      AND (claim_token COLLATE "C") ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{7,159}$'
+      AND claim_acquired_at IS NOT NULL
+      AND claim_expires_at IS NOT NULL
+      AND claim_expires_at > claim_acquired_at
+      AND claim_expires_at <= claim_acquired_at + interval '5 minutes'
+    )
+  );
+
+ALTER TABLE worker_uplift_fetcher.outbox
+  DROP CONSTRAINT IF EXISTS worker_uplift_fetcher_outbox_claim_lease_check;
+ALTER TABLE worker_uplift_fetcher.outbox
+  ADD CONSTRAINT worker_uplift_fetcher_outbox_claim_lease_check CHECK (
+    (claim_token IS NULL AND claim_acquired_at IS NULL AND claim_expires_at IS NULL)
+    OR (
+      claim_token IS NOT NULL
+      AND char_length(claim_token) >= 8
+      AND char_length(claim_token) <= 160
+      AND (claim_token COLLATE "C") ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{7,159}$'
+      AND claim_acquired_at IS NOT NULL
+      AND claim_expires_at IS NOT NULL
+      AND claim_expires_at > claim_acquired_at
+      AND claim_expires_at <= claim_acquired_at + interval '5 minutes'
+    )
+  );
+
+CREATE INDEX IF NOT EXISTS worker_uplift_fetcher_outbox_candidate_idx
+  ON worker_uplift_fetcher.outbox (entity_id, created_at DESC)
+  WHERE entity_kind = 'candidate';
+CREATE INDEX IF NOT EXISTS worker_uplift_fetcher_fetch_state_idx
+  ON worker_uplift_fetcher.fetch_versions (feed_id, fetched_at DESC, id DESC)
+  WHERE feed_id IS NOT NULL AND status IN ('fetched', 'not_modified');
+CREATE INDEX IF NOT EXISTS worker_uplift_fetcher_fetch_outcomes_feed_idx
+  ON worker_uplift_fetcher.fetch_outcomes (feed_id, fetched_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS worker_uplift_fetcher_fetch_outcomes_redact_idx
+  ON worker_uplift_fetcher.fetch_outcomes (redact_after, id);
+
+DO $fetcher_contract_privileges$
+BEGIN
+  EXECUTE format(
+    'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE worker_uplift_fetcher.fetch_outcomes, worker_uplift_fetcher.state_contract TO %I',
+    '{{ backend_worker_uplift_postgres_fetcher_user }}'
+  );
+  EXECUTE format(
+    'GRANT USAGE, SELECT ON SEQUENCE worker_uplift_fetcher.fetch_outcomes_id_seq TO %I',
+    '{{ backend_worker_uplift_postgres_fetcher_user }}'
+  );
+  EXECUTE format(
+    'GRANT SELECT ON TABLE worker_uplift_fetcher.fetch_outcomes, worker_uplift_fetcher.state_contract TO %I, %I',
+    '{{ backend_postgres_validation_user }}',
+    '{{ backend_postgres_readonly_user }}'
+  );
+END
+$fetcher_contract_privileges$;
+
+INSERT INTO worker_uplift_fetcher.state_contract (component, contract_version)
+VALUES ('fetcher_state_store', 2)
+ON CONFLICT (component)
+DO UPDATE SET contract_version = EXCLUDED.contract_version,
+              migrated_at = now()
+WHERE worker_uplift_fetcher.state_contract.contract_version < EXCLUDED.contract_version;
+
+COMMIT;

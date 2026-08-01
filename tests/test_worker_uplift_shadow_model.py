@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULTS = ROOT / "ansible/roles/backend_baseline/defaults/main.yml"
 POSTGRES_TASKS = ROOT / "ansible/roles/backend_baseline/tasks/postgres.yml"
 MODEL_TEMPLATE = ROOT / "ansible/roles/backend_baseline/templates/worker-uplift-shadow-data-model.sql.j2"
+FETCHER_CONTRACT_TEMPLATE = ROOT / "ansible/roles/backend_baseline/templates/worker-uplift-fetcher-state-contract.sql.j2"
 CHECK_SCRIPT = ROOT / "scripts/backend_worker_uplift_shadow_model_check.py"
 PROTECTED_APPLY = ROOT / ".github/workflows/protected-backend-ansible-apply.yml"
 PROOF_WORKFLOW = ROOT / ".github/workflows/backend-worker-uplift-shadow-data-model.yml"
@@ -48,6 +49,8 @@ class WorkerUpliftShadowModelTests(unittest.TestCase):
         self.assertIn("Allow worker-uplift stage roles to connect to the future-primary shadow database", tasks)
         self.assertIn("Install worker-uplift shadow PostgreSQL data model", tasks)
         self.assertIn("worker-uplift-shadow-data-model.sql.j2", tasks)
+        self.assertIn("Install worker-uplift fetcher PostgreSQL state contract", tasks)
+        self.assertIn("worker-uplift-fetcher-state-contract.sql.j2", tasks)
         self.assertIn('"direct_public_domain_writes_allowed": false', tasks)
         self.assertIn("backend_worker_uplift_postgres_stage_user_results is changed", tasks)
 
@@ -99,6 +102,30 @@ class WorkerUpliftShadowModelTests(unittest.TestCase):
         self.assertIn("resultSnapshot'->>'summary' AS translated_summary", template)
         for forbidden in ("article_body", "full_prompt", "raw_provider_response", "bearer_token"):
             self.assertNotIn(forbidden, template)
+
+    def test_fetcher_state_contract_matches_the_production_adapter_probe(self):
+        contract = FETCHER_CONTRACT_TEMPLATE.read_text(encoding="utf-8")
+        for token in (
+            "claim_owner_message_id",
+            "claim_owner_key",
+            "claim_token",
+            "claim_acquired_at",
+            "claim_expires_at",
+            "publication_command",
+            "content_fingerprint",
+            "fetch_outcomes",
+            "state_contract",
+            "fetcher_state_store', 2",
+            "worker_uplift_fetcher_inbox_claim_token_idx",
+            "worker_uplift_fetcher_outbox_claim_token_idx",
+            "worker_uplift_fetcher_inbox_claim_lease_check",
+            "worker_uplift_fetcher_outbox_claim_lease_check",
+            "interval '5 minutes'",
+            "backend_worker_uplift_postgres_fetcher_user",
+        ):
+            self.assertIn(token, contract)
+        for forbidden in ("article_body", "full_prompt", "raw_provider_response", "bearer_token"):
+            self.assertNotIn(forbidden, contract)
 
     def test_protected_apply_wires_worker_uplift_credentials_without_second_database(self):
         workflow = PROTECTED_APPLY.read_text(encoding="utf-8")

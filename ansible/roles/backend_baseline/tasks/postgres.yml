@@ -551,6 +551,18 @@
     - backend_postgres_privilege_roles_manageable | default(false) | bool
     - not ansible_check_mode
 
+- name: Install worker-uplift fetcher PostgreSQL state contract
+  community.postgresql.postgresql_query:
+    db: "{{ backend_worker_uplift_postgres_database }}"
+    query: "{{ lookup('ansible.builtin.template', role_path ~ '/templates/worker-uplift-fetcher-state-contract.sql.j2') }}"
+  become_user: postgres
+  when:
+    - backend_postgres_manageable | bool
+    - backend_worker_uplift_postgres_enabled | bool
+    - backend_postgres_database_dependents_manageable | default(false) | bool
+    - backend_postgres_privilege_roles_manageable | default(false) | bool
+    - not ansible_check_mode
+
 - name: Allow database API roles to read future-primary shadow app and worker objects
   community.postgresql.postgresql_query:
     db: "{{ backend_postgres_primary_shadow_database }}"

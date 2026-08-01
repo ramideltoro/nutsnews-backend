@@ -121,6 +121,18 @@
   no_log: true
   when: backend_postgres_manageable | bool
 
+- name: Grant PostgreSQL monitoring statistics to the read-only role
+  community.postgresql.postgresql_membership:
+    groups:
+      - pg_monitor
+    target_roles:
+      - "{{ backend_postgres_readonly_user }}"
+    state: present
+  become_user: postgres
+  when:
+    - backend_postgres_manageable | bool
+    - (not ansible_check_mode) or not (backend_postgres_readonly_user_result is changed)
+
 - name: Ensure migration restore role exists
   community.postgresql.postgresql_user:
     name: "{{ backend_postgres_restore_user }}"
@@ -506,11 +518,55 @@
     - backend_postgres_database_dependents_manageable | default(false) | bool
     - backend_postgres_privilege_roles_manageable | default(false) | bool
 
+- name: Validate required worker-uplift PostgreSQL migrations
+  ansible.builtin.assert:
+    that:
+      - "'001_fetcher_durable_state_contract.sql' in backend_worker_uplift_postgres_migrations"
+      - "backend_worker_uplift_postgres_migrations == (backend_worker_uplift_postgres_migrations | sort)"
+      - "(backend_worker_uplift_postgres_migrations | unique | length) == (backend_worker_uplift_postgres_migrations | length)"
+    fail_msg: "The fetcher durable-state migration must remain in the protected worker-uplift migration set."
+  when:
+    - backend_postgres_manageable | bool
+    - backend_worker_uplift_postgres_enabled | bool
+
+- name: Validate versioned worker-uplift PostgreSQL migration filenames
+  ansible.builtin.assert:
+    that:
+      - item is match('^[0-9]{3}_[a-z0-9_]+[.]sql$')
+    fail_msg: "Worker-uplift PostgreSQL migrations must use a bounded versioned SQL filename."
+  loop: "{{ backend_worker_uplift_postgres_migrations }}"
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - backend_postgres_manageable | bool
+    - backend_worker_uplift_postgres_enabled | bool
+
 - name: Install worker-uplift shadow PostgreSQL data model
   community.postgresql.postgresql_query:
     db: "{{ backend_worker_uplift_postgres_database }}"
     query: "{{ lookup('ansible.builtin.template', role_path ~ '/templates/worker-uplift-shadow-data-model.sql.j2') }}"
   become_user: postgres
+  when:
+    - backend_postgres_manageable | bool
+    - backend_worker_uplift_postgres_enabled | bool
+    - backend_postgres_database_dependents_manageable | default(false) | bool
+    - backend_postgres_privilege_roles_manageable | default(false) | bool
+    - not ansible_check_mode
+
+- name: Apply versioned worker-uplift PostgreSQL migrations
+  community.postgresql.postgresql_query:
+    db: "{{ backend_worker_uplift_postgres_database }}"
+    query: >-
+      {{
+        lookup(
+          'ansible.builtin.file',
+          role_path ~ '/files/worker-uplift-migrations/' ~ item
+        )
+      }}
+  become_user: postgres
+  loop: "{{ backend_worker_uplift_postgres_migrations }}"
+  loop_control:
+    label: "{{ item }}"
   when:
     - backend_postgres_manageable | bool
     - backend_worker_uplift_postgres_enabled | bool

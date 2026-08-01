@@ -80,10 +80,29 @@ class ProjectionFixture:
                     "unavailable_queues": [],
                 }
             services[stage] = {
-                "readiness": {
+                "expected_active": False,
+                "liveness": {
                     "status": "healthy",
                     "http_status": 200,
-                    "body": json.dumps({"status": "ready", "checkedAt": "2026-01-01T00:00:00Z"}),
+                    "probe": "liveness",
+                    "outcome": "ok",
+                },
+                "readiness": {
+                    "status": "critical",
+                    "http_status": 503,
+                    "probe": "readiness",
+                    "outcome": "unhealthy",
+                },
+                "metrics": {
+                    "status": "healthy",
+                    "http_status": 200,
+                    "expected_active_series_present": True,
+                    "reported_expected_active": False,
+                    "expected_active_matches": True,
+                    "readiness_series_present": True,
+                    "readiness_one_hot": True,
+                    "readiness_outcome": "unhealthy",
+                    "readiness_ok": False,
                 },
                 "consumer_readiness": consumer,
             }
@@ -94,9 +113,13 @@ class ProjectionFixture:
             "generated_at_utc": projection.iso_utc(self.observed),
             "mode": "shadow",
             "production_writes_enabled": False,
+            "expected_active": False,
             "services": services,
             "missing_consumers": [],
             "unverifiable_consumers": [],
+            "unhealthy_liveness": [],
+            "unhealthy_metrics": [],
+            "unhealthy_readiness": [],
             "errors": [],
         }
 

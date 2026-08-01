@@ -4,11 +4,15 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
+import math
 import os
 import socket
 import sys
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -28,6 +32,16 @@ REMOTE_SAFETY_COMMANDS: dict[str, str] = {
     "docker_health": (
         "if systemctl is-active docker >/dev/null 2>&1; then "
         "sudo -n docker info --format '{{.ServerVersion}}' 2>/dev/null || docker info --format '{{.ServerVersion}}' 2>/dev/null || true; "
+        "else echo not_configured; fi"
+    ),
+    "worker_runtime_observability": (
+        "if test -x /usr/local/sbin/nutsnews-worker-runtime "
+        "&& test -f /etc/nutsnews-worker-uplift/services.json "
+        "&& test -f /opt/nutsnews-worker-uplift/compose.yml; then "
+        "sudo -n /usr/local/sbin/nutsnews-worker-runtime status "
+        "--manifest /etc/nutsnews-worker-uplift/services.json "
+        "--compose /opt/nutsnews-worker-uplift/compose.yml "
+        "--project nutsnews-worker-uplift --dry-run; "
         "else echo not_configured; fi"
     ),
     "rabbitmq_health": (
@@ -60,6 +74,17 @@ REMOTE_SAFETY_COMMANDS: dict[str, str] = {
     ),
 }
 RABBITMQ_PUBLIC_PORTS = (5672, 15672, 15692)
+WORKER_SERVICES = (
+    "scheduler",
+    "fetcher",
+    "canonicalizer",
+    "enrichment",
+    "approval",
+    "translation",
+    "persistence",
+    "publication",
+)
+WORKER_SERVICE_REGEX = "|".join(WORKER_SERVICES)
 
 PROFILES = {"baseline_apply", "cloudflare_dns_apply", "cloudflare_dns_rollback"}
 CRITICAL_IF_NOT_HEALTHY: dict[str, set[str]] = {
@@ -175,6 +200,195 @@ def rabbitmq_drift(evidence: dict[str, Any]) -> dict[str, Any]:
     return {"name": "rabbitmq_drift", "status": "unknown", "summary": "unknown"}
 
 
+def worker_runtime_observability(evidence: dict[str, Any]) -> dict[str, Any]:
+    output = maintenance.command_stdout(evidence, "worker_runtime_observability").strip()
+    if output == "not_configured":
+        return {
+            "name": "worker_runtime_observability",
+            "status": "not_configured",
+            "summary": "not_configured",
+        }
+    try:
+        data = json.loads(output)
+    except json.JSONDecodeError:
+        return {
+            "name": "worker_runtime_observability",
+            "status": "unknown",
+            "summary": "worker runtime status json invalid",
+        }
+    services = data.get("services")
+    expected_services = {
+        "scheduler",
+        "fetcher",
+        "canonicalizer",
+        "enrichment",
+        "approval",
+        "translation",
+        "persistence",
+        "publication",
+    }
+    complete = isinstance(services, dict) and set(services) == expected_services
+    unhealthy_liveness = data.get("unhealthy_liveness")
+    unhealthy_metrics = data.get("unhealthy_metrics")
+    unhealthy_readiness = data.get("unhealthy_readiness")
+    expected_active = data.get("expected_active")
+    healthy = bool(
+        data.get("status") == "pass"
+        and complete
+        and unhealthy_liveness == []
+        and unhealthy_metrics == []
+        and isinstance(expected_active, bool)
+        and (expected_active is False or unhealthy_readiness == [])
+    )
+    return {
+        "name": "worker_runtime_observability",
+        "status": "healthy" if healthy else "critical",
+        "summary": (
+            f"service_count={len(services) if isinstance(services, dict) else 0} "
+            f"expected_active={str(expected_active).lower() if isinstance(expected_active, bool) else 'unknown'} "
+            f"liveness_failures={len(unhealthy_liveness) if isinstance(unhealthy_liveness, list) else 'unknown'} "
+            f"metrics_failures={len(unhealthy_metrics) if isinstance(unhealthy_metrics, list) else 'unknown'} "
+            f"readiness_failures={len(unhealthy_readiness) if isinstance(unhealthy_readiness, list) else 'unknown'}"
+        ),
+    }
+
+
+def derive_prometheus_query_url(remote_write_url: str) -> str:
+    if not remote_write_url:
+        return ""
+    parsed = urllib.parse.urlparse(remote_write_url)
+    path = parsed.path.rstrip("/")
+    if path.endswith("/api/prom/push"):
+        path = path[: -len("/api/prom/push")] + "/api/prom/api/v1/query"
+    elif path.endswith("/api/v1/push"):
+        path = path[: -len("/api/v1/push")] + "/api/v1/query"
+    elif not path.endswith("/api/v1/query"):
+        path = path + "/api/v1/query"
+    return urllib.parse.urlunparse(
+        parsed._replace(path=path, query="", params="", fragment="")
+    )
+
+
+def worker_runtime_grafana_expression() -> str:
+    worker_selector = (
+        'job="nutsnews-worker-uplift",instance="backend.nutsnews.com",'
+        'environment="production",deployment_environment="production",'
+        f'host="backend.nutsnews.com",service=~"{WORKER_SERVICE_REGEX}"'
+    )
+    host_selector = (
+        'job="nutsnews-backend-host",instance="backend.nutsnews.com",'
+        'service_namespace="nutsnews",service="host",environment="production",'
+        'deployment_environment="production",host="backend.nutsnews.com"'
+    )
+    return (
+        "("
+        f'(count(count by (service) (up{{{worker_selector}}} == 1)) == bool 8) + '
+        f'(count(count by (service) ((time() - timestamp(up{{{worker_selector}}})) < 180)) == bool 8) + '
+        "((max(nutsnews_backend_worker_uplift_deployed_identity_available"
+        f'{{{host_selector}}}) or vector(0)) == bool 1) + '
+        "(count(count by (worker_service) "
+        "(nutsnews_backend_worker_uplift_deployed_service_info"
+        f'{{{host_selector}}} == 1)) == bool 8)'
+        ")"
+    )
+
+
+def prometheus_scalar_query(
+    remote_write_url: str,
+    username: str,
+    password: str,
+    expression: str,
+    timeout: int,
+) -> float | None:
+    query_url = derive_prometheus_query_url(remote_write_url)
+    if not query_url or not username or not password:
+        return None
+    body = urllib.parse.urlencode({"query": expression}).encode("utf-8")
+    req = urllib.request.Request(query_url, data=body, method="POST")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+    auth = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+    req.add_header("Authorization", f"Basic {auth}")
+    try:
+        with urllib.request.urlopen(req, timeout=min(max(timeout, 1), 5)) as response:
+            payload = response.read(65_537)
+            if len(payload) > 65_536:
+                return None
+            data = json.loads(payload.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, urllib.error.URLError):
+        return None
+    data_block = data.get("data") if isinstance(data, dict) else None
+    result = data_block.get("result") if isinstance(data_block, dict) else None
+    if (
+        not isinstance(data, dict)
+        or data.get("status") != "success"
+        or not isinstance(data_block, dict)
+        or data_block.get("resultType") != "vector"
+        or not isinstance(result, list)
+        or len(result) != 1
+        or not isinstance(result[0], dict)
+        or result[0].get("metric") != {}
+    ):
+        return None
+    value = result[0].get("value")
+    if not isinstance(value, list) or len(value) != 2:
+        return None
+    try:
+        parsed = float(value[1])
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def worker_runtime_grafana_observability(
+    args: argparse.Namespace,
+    *,
+    attempts: int = 4,
+    sleeper: Any = time.sleep,
+) -> dict[str, Any]:
+    if (
+        getattr(args, "profile", "") != "baseline_apply"
+        or getattr(args, "phase", "") != "post"
+        or not worker_runtime_enabled_for_gate()
+    ):
+        return {
+            "name": "worker_runtime_grafana_observability",
+            "status": "not_configured",
+            "summary": "post-apply worker runtime Grafana gate disabled",
+        }
+    remote_write_url = os.environ.get("GRAFANA_CLOUD_PROMETHEUS_URL", "").strip()
+    username = os.environ.get("GRAFANA_CLOUD_PROMETHEUS_USERNAME", "").strip()
+    password = os.environ.get("GRAFANA_CLOUD_PROMETHEUS_PASSWORD", "").strip()
+    if not remote_write_url or not username or not password:
+        return {
+            "name": "worker_runtime_grafana_observability",
+            "status": "critical",
+            "summary": "Grafana Cloud Prometheus query credentials missing",
+        }
+    value: float | None = None
+    bounded_attempts = min(max(attempts, 1), 4)
+    for attempt in range(bounded_attempts):
+        value = prometheus_scalar_query(
+            remote_write_url,
+            username,
+            password,
+            worker_runtime_grafana_expression(),
+            getattr(args, "timeout", 15),
+        )
+        if value == 4.0:
+            break
+        if attempt + 1 < bounded_attempts:
+            sleeper(10)
+    passed_checks = int(value) if value is not None and value.is_integer() else 0
+    return {
+        "name": "worker_runtime_grafana_observability",
+        "status": "healthy" if value == 4.0 else "critical",
+        "summary": (
+            f"passed_contract_checks={passed_checks}/4 attempts={bounded_attempts}; "
+            "requires all eight up, fresh, and exact deployed identity series"
+        ),
+    }
+
+
 def rabbitmq_public_exposure(host: str, timeout: int) -> dict[str, Any]:
     if not rabbitmq_enabled_for_gate():
         return {"name": "rabbitmq_public_exposure", "status": "not_configured", "summary": "rabbitmq gate disabled"}
@@ -250,6 +464,8 @@ def safety_checks(args: argparse.Namespace, evidence: dict[str, Any]) -> list[di
     else:
         docker_status = "unknown"
     checks.append({"name": "docker_health", "status": docker_status, "summary": docker_output or "unknown"})
+    checks.append(worker_runtime_observability(evidence))
+    checks.append(worker_runtime_grafana_observability(args))
 
     rabbitmq_output = maintenance.command_stdout(evidence, "rabbitmq_health").strip()
     if rabbitmq_output == "healthy":
@@ -309,6 +525,10 @@ def rabbitmq_enabled_for_gate() -> bool:
     return os.environ.get("NUTSNEWS_BACKEND_RABBITMQ_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
 
 
+def worker_runtime_enabled_for_gate() -> bool:
+    return os.environ.get("NUTSNEWS_BACKEND_WORKER_RUNTIME_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+
+
 def rabbitmq_post_apply_blockers(args: argparse.Namespace, checks: list[dict[str, Any]]) -> list[dict[str, str]]:
     if args.profile != "baseline_apply" or args.phase != "post" or not rabbitmq_enabled_for_gate():
         return []
@@ -321,10 +541,29 @@ def rabbitmq_post_apply_blockers(args: argparse.Namespace, checks: list[dict[str
     return result
 
 
+def worker_runtime_post_apply_blockers(
+    args: argparse.Namespace,
+    checks: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    if args.profile != "baseline_apply" or args.phase != "post" or not worker_runtime_enabled_for_gate():
+        return []
+    by_name = {str(check.get("name")): check for check in checks}
+    result: list[dict[str, str]] = []
+    for name in (
+        "worker_runtime_observability",
+        "worker_runtime_grafana_observability",
+    ):
+        status = str(by_name.get(name, {}).get("status", "missing"))
+        if status != "healthy":
+            result.append({"check": name, "status": status})
+    return result
+
+
 def report(args: argparse.Namespace, evidence: dict[str, Any]) -> dict[str, Any]:
     checks = safety_checks(args, evidence)
     gate_blockers = blockers(args.profile, checks)
     gate_blockers.extend(rabbitmq_post_apply_blockers(args, checks))
+    gate_blockers.extend(worker_runtime_post_apply_blockers(args, checks))
     enforced = args.enforce
     return {
         "version": 1,

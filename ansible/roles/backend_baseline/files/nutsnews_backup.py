@@ -70,6 +70,54 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def normalized_utc_timestamp(value: Any) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def previous_backup_success_at(state_dir: Path) -> str | None:
+    path = state_dir / STATUS_FILES["backup"]
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    recorded = normalized_utc_timestamp(data.get("last_success_at_utc"))
+    if recorded:
+        return recorded
+
+    # Bootstrap state written before last_success_at_utc existed, but only when
+    # the snapshot was both successful and subsequently verified.
+    if data.get("status") != "healthy" or data.get("freshness_status") != "healthy":
+        return None
+    if not normalized_utc_timestamp(data.get("latest_snapshot_verified_at_utc")):
+        return None
+    return normalized_utc_timestamp(data.get("finished_at_utc"))
+
+
+def backup_state_with_history(
+    status: dict[str, Any],
+    *,
+    finished_at: str,
+    previous_success_at: str | None,
+) -> dict[str, Any]:
+    status["finished_at_utc"] = finished_at
+    status["last_run_at_utc"] = finished_at
+    status["last_success_at_utc"] = previous_success_at
+    return status
+
+
 def redact_restic_text(text: str) -> str:
     redacted = re.sub(r"s3:[^\s]+", "s3:[REDACTED]", text)
     redacted = re.sub(r"https?://[^\s]+", "URL_REDACTED", redacted)
@@ -254,53 +302,64 @@ def mark_backup_verified(state_dir: Path, snapshot_id: str | None, verified_at: 
         return
     if not snapshot_ids_match(str(data.get("snapshot_id") or ""), snapshot_id):
         return
+    if data.get("status") != "healthy" or data.get("freshness_status") != "healthy":
+        return
+    backup_finished_at = normalized_utc_timestamp(
+        data.get("finished_at_utc") or data.get("last_run_at_utc")
+    )
+    normalized_verified_at = normalized_utc_timestamp(verified_at)
+    if not backup_finished_at or not normalized_verified_at:
+        return
     alerts = [
         alert
         for alert in data.get("alerts", [])
         if alert.get("kind") != "unverified_latest_snapshot"
     ]
     data["alerts"] = alerts
-    data["latest_snapshot_verified_at_utc"] = verified_at
+    data["latest_snapshot_verified_at_utc"] = normalized_verified_at
+    data["last_success_at_utc"] = backup_finished_at
+    data["last_verified_success_at_utc"] = normalized_verified_at
     write_json(path, data)
 
 
 def action_backup(args: argparse.Namespace) -> dict[str, Any]:
     ensure_state_dir(args.state_dir)
+    previous_success_at = previous_backup_success_at(args.state_dir)
     missing = require_restic_env()
     matrix = load_matrix(args.matrix)
     started_at = utc_now()
     paths = existing_backup_paths(matrix)
     if missing:
-        status = {
+        finished_at = utc_now()
+        status = backup_state_with_history({
             "schema_version": 1,
             "action": "backup",
             "status": "critical",
             "freshness_status": "critical",
             "started_at_utc": started_at,
-            "finished_at_utc": utc_now(),
             "snapshot_id": None,
             "included_paths": paths,
             "missing_secret_names": missing,
             "repository_normalization": repository_normalization_metadata(),
             "alerts": [{"kind": "backup_failure", "status": "critical"}],
-        }
+        }, finished_at=finished_at, previous_success_at=previous_success_at)
         write_json(args.state_dir / STATUS_FILES["backup"], status)
         return status
 
     init = init_repository_if_needed(args.init_if_missing.lower() in {"1", "true", "yes"})
     if init and init["status"] == "error":
-        status = {
+        finished_at = utc_now()
+        status = backup_state_with_history({
             "schema_version": 1,
             "action": "backup",
             "status": "critical",
             "freshness_status": "critical",
             "started_at_utc": started_at,
-            "finished_at_utc": utc_now(),
             "snapshot_id": None,
             "included_paths": paths,
             "repository_initialization": init,
             "alerts": [{"kind": "backup_failure", "status": "critical"}],
-        }
+        }, finished_at=finished_at, previous_success_at=previous_success_at)
         write_json(args.state_dir / STATUS_FILES["backup"], status)
         return status
 
@@ -311,13 +370,13 @@ def action_backup(args: argparse.Namespace) -> dict[str, Any]:
     healthy = result.returncode == 0 and bool(snapshot_id)
     quota = quota_status(snapshot_id, args.quota_warn_bytes)
     verified = latest_backup_is_verified(args.state_dir, snapshot_id)
-    status = {
+    finished_at = utc_now()
+    status = backup_state_with_history({
         "schema_version": 1,
         "action": "backup",
         "status": "healthy" if healthy else "critical",
         "freshness_status": "healthy" if healthy else "critical",
         "started_at_utc": started_at,
-        "finished_at_utc": utc_now(),
         "snapshot_id": snapshot_id,
         "included_paths": paths,
         "service_matrix_version": matrix.get("version"),
@@ -329,7 +388,7 @@ def action_backup(args: argparse.Namespace) -> dict[str, Any]:
         "quota": quota,
         "alerts": alert_list(backup_status="healthy" if healthy else "critical", stale=False, verified=verified, quota=quota),
         "stderr_tail": redact_restic_text(result.stderr[-1000:]) if result.returncode != 0 else "",
-    }
+    }, finished_at=finished_at, previous_success_at=previous_success_at)
     write_json(args.state_dir / STATUS_FILES["backup"], status)
     return status
 
@@ -459,6 +518,28 @@ def action_status(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def unexpected_backup_failure(args: argparse.Namespace) -> dict[str, Any]:
+    ensure_state_dir(args.state_dir)
+    finished_at = utc_now()
+    status = backup_state_with_history(
+        {
+            "schema_version": 1,
+            "action": "backup",
+            "status": "critical",
+            "freshness_status": "critical",
+            "started_at_utc": finished_at,
+            "snapshot_id": None,
+            "included_paths": [],
+            "failure_reason": "unexpected_backup_exception",
+            "alerts": [{"kind": "backup_failure", "status": "critical"}],
+        },
+        finished_at=finished_at,
+        previous_success_at=previous_backup_success_at(args.state_dir),
+    )
+    write_json(args.state_dir / STATUS_FILES["backup"], status)
+    return status
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv if argv is not None else sys.argv[1:])
     actions = {
@@ -467,7 +548,12 @@ def main(argv: list[str] | None = None) -> int:
         "restore-drill": action_restore_drill,
         "status": action_status,
     }
-    result = actions[args.action](args)
+    try:
+        result = actions[args.action](args)
+    except Exception:
+        if args.action != "backup":
+            raise
+        result = unexpected_backup_failure(args)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result.get("status") in {"healthy", "not_configured"} or args.action == "status" else 1
 

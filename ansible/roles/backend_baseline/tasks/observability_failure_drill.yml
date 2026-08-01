@@ -1,0 +1,211 @@
+---
+- name: Validate observability failure-drill installation paths
+  ansible.builtin.assert:
+    that:
+      - backend_observability_failure_drill_runner_path == '/usr/local/sbin/nutsnews-observability-failure-drill'
+      - backend_observability_failure_drill_candidate_path != backend_observability_failure_drill_runner_path
+      - (backend_observability_failure_drill_candidate_path | dirname) == (backend_observability_failure_drill_runner_path | dirname)
+      - backend_observability_failure_drill_candidate_path == backend_observability_failure_drill_runner_path + '.candidate'
+      - backend_observability_failure_drill_state_dir == '/var/lib/nutsnews/observability-drills'
+      - backend_observability_failure_drill_metrics_path == backend_metrics_textfile_dir + '/observability-failure-drills.prom'
+      - backend_metrics_textfile_dir == '/var/lib/nutsnews/metrics'
+      - backend_observability_failure_drill_watchdog_service == 'nutsnews-observability-failure-drill-watchdog.service'
+      - backend_observability_failure_drill_watchdog_timer == 'nutsnews-observability-failure-drill-watchdog.timer'
+      - backend_observability_failure_drill_watchdog_calendar == '*-*-* *:*:00'
+    fail_msg: >-
+      The protected failure-drill workflow requires fixed root-owned executable,
+      candidate, state, and textfile paths.
+
+- name: Inspect existing observability failure-drill candidate
+  ansible.builtin.stat:
+    path: "{{ backend_observability_failure_drill_candidate_path }}"
+    follow: false
+  register: backend_observability_failure_drill_candidate_stat
+
+- name: Reject a linked observability failure-drill candidate
+  ansible.builtin.assert:
+    that:
+      - not (backend_observability_failure_drill_candidate_stat.stat.islnk | default(false))
+    fail_msg: >-
+      Refusing to replace a symbolic-link candidate at
+      {{ backend_observability_failure_drill_candidate_path }}.
+
+- name: Ensure observability failure-drill state directory exists
+  ansible.builtin.file:
+    path: "{{ backend_observability_failure_drill_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Initialize observability failure-drill textfile metrics
+  ansible.builtin.copy:
+    dest: "{{ backend_observability_failure_drill_metrics_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+    content: |
+      # HELP nutsnews_observability_failure_drill_active Whether a bounded production observability failure drill is active.
+      # TYPE nutsnews_observability_failure_drill_active gauge
+      nutsnews_observability_failure_drill_active{drill="worker-unavailable"} 0
+      nutsnews_observability_failure_drill_active{drill="rabbitmq-zero-consumer"} 0
+      nutsnews_observability_failure_drill_active{drill="rabbitmq-growing-dlq"} 0
+      nutsnews_observability_failure_drill_active{drill="postgres-relay-lag"} 0
+      nutsnews_observability_failure_drill_active{drill="backend-readiness-failed"} 0
+
+- name: Stage observability failure-drill executable candidate
+  ansible.builtin.copy:
+    src: nutsnews_observability_failure_drill.py
+    dest: "{{ backend_observability_failure_drill_candidate_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Validate observability failure-drill Python candidate
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - >-
+        import ast, pathlib, sys;
+        ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'), filename=sys.argv[1])
+      - "{{ backend_observability_failure_drill_candidate_path }}"
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Validate observability failure-drill command contract
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_observability_failure_drill_candidate_path }}"
+      - --help
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Refuse observability failure-drill hook upgrade during an active or unsafe drill state
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - |
+        import json
+        import importlib.util
+        import pathlib
+        import stat
+        import sys
+
+        path = pathlib.Path(sys.argv[1])
+        candidate_path = pathlib.Path(sys.argv[2])
+        if path.is_symlink():
+            raise SystemExit("failure-drill state must not be a symbolic link")
+        if not path.exists():
+            raise SystemExit(0)
+        metadata = path.lstat()
+        if not stat.S_ISREG(metadata.st_mode):
+            raise SystemExit("failure-drill state must be a regular file")
+        state = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(state, dict) or not isinstance(state.get("recovery_required"), bool):
+            raise SystemExit("failure-drill state is not safe for a hook upgrade")
+        spec = importlib.util.spec_from_file_location("nutsnews_observability_failure_drill_candidate", candidate_path)
+        if spec is None or spec.loader is None:
+            raise SystemExit("failure-drill candidate cannot validate the current recovery schema")
+        candidate = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = candidate
+        spec.loader.exec_module(candidate)
+        try:
+            candidate.validate_state(state)
+        except Exception:
+            raise SystemExit("failure-drill state is incompatible with the candidate recovery schema")
+        if state["recovery_required"]:
+            raise SystemExit("refusing hook upgrade while failure-drill recovery is required")
+      - "{{ backend_observability_failure_drill_state_dir }}/state.json"
+      - "{{ backend_observability_failure_drill_candidate_path }}"
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Atomically install validated observability failure-drill executable
+  ansible.builtin.copy:
+    src: "{{ backend_observability_failure_drill_candidate_path }}"
+    dest: "{{ backend_observability_failure_drill_runner_path }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  when: not ansible_check_mode
+
+- name: Install persistent observability failure-drill recovery watchdog service
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ backend_observability_failure_drill_watchdog_service }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      [Unit]
+      Description=NutsNews observability failure-drill recovery watchdog
+      After=local-fs.target
+
+      [Service]
+      Type=oneshot
+      User=root
+      Group=root
+      ExecStart={{ backend_observability_failure_drill_runner_path }} --action watchdog
+
+- name: Install persistent observability failure-drill recovery watchdog timer
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ backend_observability_failure_drill_watchdog_timer }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      [Unit]
+      Description=Run NutsNews observability failure-drill recovery watchdog every minute
+
+      [Timer]
+      OnCalendar={{ backend_observability_failure_drill_watchdog_calendar }}
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+
+- name: Enable persistent observability failure-drill recovery watchdog
+  ansible.builtin.systemd:
+    name: "{{ backend_observability_failure_drill_watchdog_timer }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: not ansible_check_mode
+
+- name: Validate observability failure-drill zero-state metrics contract
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - >-
+        import pathlib, sys;
+        text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8');
+        samples = [line for line in text.splitlines() if line.startswith('nutsnews_observability_failure_drill_active{')];
+        assert len(samples) == 5;
+        assert all(line.endswith('} 0') for line in samples);
+        assert 'drill_id=' not in text;
+        assert 'deployment_environment=' not in text;
+        assert 'host=' not in text
+      - "{{ backend_observability_failure_drill_metrics_path }}"
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Report observability failure-drill installation summary
+  ansible.builtin.debug:
+    msg:
+      runner_path: "{{ backend_observability_failure_drill_runner_path }}"
+      state_dir: "{{ backend_observability_failure_drill_state_dir }}"
+      metrics_path: "{{ backend_observability_failure_drill_metrics_path }}"
+      allowed_actions:
+        - plan
+        - inject
+        - status
+        - recover
+        - watchdog
+      watchdog_timer: "{{ backend_observability_failure_drill_watchdog_timer }}"
+      privilege_boundary: existing sudo-n workflow boundary

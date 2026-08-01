@@ -81,7 +81,10 @@ def fixture_report(**overrides):
             "alloy=unavailable\n"
             "sysstat=active\n"
         ),
-        "backend_health": command("ok\n"),
+        "backend_health": command(
+            '{"status":"ready","ready":true,"deploymentEnvironment":"production",'
+            '"dependencies":{"postgresql":"ready"}}\n'
+        ),
         "backup_tools": command("restic=missing\nrclone=missing\npg_dump=missing\ndocker=missing\ncaddy=missing\nalloy=missing\n"),
         "backup_status": command("not_configured\n"),
         "rabbitmq_drift": command("not_configured\n"),
@@ -126,7 +129,7 @@ class BackendHealthReportTests(unittest.TestCase):
         self.assertEqual(by_name["package_updates"]["status"], "warning")
         self.assertEqual(by_name["kernel_alignment"]["status"], "healthy")
         self.assertEqual(by_name["service_docker"]["status"], "not_configured")
-        self.assertEqual(by_name["backend_endpoint_health"]["status"], "healthy")
+        self.assertEqual(by_name["backend_endpoint_readiness"]["status"], "healthy")
         self.assertEqual(by_name["backup_tooling"]["status"], "not_configured")
         self.assertEqual(by_name["backup_freshness"]["status"], "not_configured")
         self.assertEqual(by_name["backup_verification"]["status"], "not_configured")
@@ -328,7 +331,7 @@ class BackendHealthReportTests(unittest.TestCase):
     def test_active_caddy_with_failed_endpoint_is_critical(self):
         checks, summary = backend_health_report.classify(fixture_report(backend_health=command("")))
         by_name = {item["name"]: item for item in checks}
-        self.assertEqual(by_name["backend_endpoint_health"]["status"], "critical")
+        self.assertEqual(by_name["backend_endpoint_readiness"]["status"], "critical")
         self.assertGreaterEqual(summary["critical"], 1)
 
     def test_missing_smtp_degrades_without_failure(self):
@@ -405,6 +408,75 @@ class BackendHealthReportTests(unittest.TestCase):
         self.assertIn("Alerting:", text)
         self.assertIn("active_alert_count: 2", text)
         self.assertIn("last_error: fail2ban=inactive", text)
+
+    def test_failed_audit_preserves_previous_success_and_exports_age(self):
+        alerting = {
+            "summary": {
+                "active_alert_count": 1,
+                "notification_count": 1,
+                "suppressed_count": 0,
+                "recovered_count": 0,
+                "last_sent_at": None,
+                "last_error": None,
+            },
+            "notifications": [],
+            "suppressed": [],
+            "state": {},
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            previous_path = Path(tmpdir) / "previous.json"
+            previous_path.write_text(
+                json.dumps(
+                    {
+                        "last_report_success_at": "2026-07-15T12:00:00Z",
+                        "workflow": {"consecutive_failure_count": 1},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = backend_health_report.parse_args(
+                [
+                    "--output",
+                    str(Path(tmpdir) / "report.json"),
+                    "--previous-state",
+                    str(previous_path),
+                    "--fail-on-critical",
+                ]
+            )
+            with (
+                patch.object(backend_health_report, "utc_now", return_value="2026-07-16T12:00:00Z"),
+                patch.object(backend_health_report, "classify", return_value=([{"name": "database", "status": "critical", "summary": "down"}], {"critical": 1, "warning": 0, "unknown": 0, "not_configured": 0, "healthy": 0})),
+                patch.object(backend_health_report.backend_alert_state, "evaluate_alerts", return_value=alerting),
+            ):
+                report = backend_health_report.build_report(args)
+
+        self.assertEqual("failure", report["workflow"]["conclusion"])
+        self.assertEqual("2026-07-15T12:00:00Z", report["workflow"]["last_success_at"])
+        self.assertEqual(86400, report["workflow"]["last_success_age_seconds"])
+        self.assertEqual(2, report["workflow"]["consecutive_failure_count"])
+
+    def test_fail_on_critical_controls_exit_code_after_artifact_is_written(self):
+        report = fixture_report()
+        report.update(
+            {
+                "checks": [{"name": "database", "status": "critical", "summary": "down"}],
+                "summary": {"critical": 1, "warning": 0, "unknown": 0, "not_configured": 0, "healthy": 0},
+                "workflow": {
+                    "conclusion": "failure",
+                    "critical_check_count": 1,
+                    "last_success_at": None,
+                    "last_success_age_seconds": None,
+                },
+                "alerting": {"summary": {}},
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmpdir, patch.object(
+            backend_health_report, "build_report", return_value=report
+        ), patch("builtins.print"):
+            output = Path(tmpdir) / "report.json"
+            exit_code = backend_health_report.main(["--output", str(output), "--fail-on-critical"])
+            self.assertTrue(output.exists())
+        self.assertEqual(1, exit_code)
 
 
 if __name__ == "__main__":

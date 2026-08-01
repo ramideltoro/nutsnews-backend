@@ -1,4 +1,23 @@
 ---
+- name: Validate Grafana Cloud Prometheus settings
+  ansible.builtin.assert:
+    that:
+      - backend_metrics_prometheus_remote_write_url is match('^https://')
+      - backend_metrics_prometheus_username | length > 0
+      - backend_metrics_prometheus_password | length > 0
+    fail_msg: Grafana Cloud Prometheus URL, username, and password are required when backend_metrics_enabled is true.
+  no_log: true
+
+- name: Validate Grafana Cloud Loki settings
+  ansible.builtin.assert:
+    that:
+      - backend_logs_loki_url is match('^https://')
+      - backend_logs_loki_username | length > 0
+      - backend_logs_loki_password | length > 0
+    fail_msg: Grafana Cloud Loki URL, username, and password are required when backend_logs_enabled is true.
+  no_log: true
+  when: backend_logs_enabled | bool
+
 - name: Ensure Grafana Alloy apt prerequisites are installed
   ansible.builtin.apt:
     name:
@@ -45,15 +64,62 @@
     cache_valid_time: "{{ backend_apt_cache_valid_time }}"
   when: backend_metrics_alloy_manageable | bool
 
-- name: Validate Grafana Cloud Loki settings
+- name: Validate bounded worker-uplift scrape targets
   ansible.builtin.assert:
     that:
-      - backend_logs_loki_url | length > 0
-      - backend_logs_loki_username | length > 0
-      - backend_logs_loki_password | length > 0
-    fail_msg: Grafana Cloud Loki URL, username, and password are required when backend_logs_enabled is true.
+      - backend_metrics_worker_uplift_targets | length == 8
+      - backend_metrics_worker_uplift_targets | map(attribute='address') | list | unique | length == 8
+      - backend_metrics_worker_uplift_targets | selectattr('deployment_mode', 'defined') | list | length == 0
+      - backend_metrics_worker_uplift_targets | selectattr('expected_active', 'defined') | list | length == 0
+      - backend_worker_api_uplift_cutover_state in ['shadow', 'cutover-approved']
+      - >-
+        not (backend_worker_api_uplift_production_writes_enabled | bool)
+        or backend_worker_api_uplift_cutover_state == 'cutover-approved'
+      - backend_metrics_worker_uplift_deployment_mode in ['shadow', 'production']
+      - backend_metrics_worker_uplift_expected_active in ['0', '1']
+      - >-
+        (backend_metrics_worker_uplift_deployment_mode == 'production')
+        == (backend_metrics_worker_uplift_expected_active == '1')
+      - >-
+        backend_metrics_worker_uplift_deployment_mode
+        == ('production' if (
+          backend_worker_api_uplift_cutover_state == 'cutover-approved'
+          and (backend_worker_api_uplift_production_writes_enabled | bool)
+        ) else 'shadow')
+      - >-
+        backend_metrics_worker_uplift_expected_active
+        == ('1' if (
+          backend_worker_api_uplift_cutover_state == 'cutover-approved'
+          and (backend_worker_api_uplift_production_writes_enabled | bool)
+        ) else '0')
+      - >-
+        backend_metrics_worker_uplift_targets
+        | map(attribute='address')
+        | list
+        | difference([
+            '127.0.0.1:18081',
+            '127.0.0.1:18082',
+            '127.0.0.1:18083',
+            '127.0.0.1:18084',
+            '127.0.0.1:18085',
+            '127.0.0.1:18086',
+            '127.0.0.1:18087',
+            '127.0.0.1:18088'
+          ])
+        | length == 0
+    fail_msg: Worker-uplift metrics must contain each loopback endpoint from 18081 through 18088 exactly once.
+  when: backend_metrics_worker_uplift_enabled | bool
+
+- name: Validate private PostgreSQL exporter settings
+  ansible.builtin.assert:
+    that:
+      - backend_postgres_enabled | bool
+      - backend_metrics_postgres_username | length > 0
+      - backend_metrics_postgres_password | length > 0
+      - backend_metrics_postgres_database is match('^[A-Za-z_][A-Za-z0-9_]*$')
+    fail_msg: PostgreSQL metrics require the private PostgreSQL target and protected read-only credentials.
   no_log: true
-  when: backend_logs_enabled | bool
+  when: backend_metrics_postgres_enabled | bool
 
 - name: Allow Alloy to read journal and adm-owned log files
   ansible.builtin.user:
@@ -75,6 +141,13 @@
     group: root
     mode: "0755"
 
+- name: Validate Alloy candidate installation path
+  ansible.builtin.assert:
+    that:
+      - backend_metrics_alloy_candidate_path != backend_metrics_alloy_config_path
+      - (backend_metrics_alloy_candidate_path | dirname) == (backend_metrics_alloy_config_path | dirname)
+    fail_msg: Alloy candidate and live paths must be distinct files in the same directory for atomic installation.
+
 - name: Ensure NutsNews metrics textfile directory exists
   ansible.builtin.file:
     path: "{{ backend_metrics_textfile_dir }}"
@@ -82,6 +155,22 @@
     owner: root
     group: root
     mode: "0755"
+
+- name: Ensure bounded health-audit state directory exists
+  ansible.builtin.file:
+    path: "{{ backend_metrics_health_audit_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Validate durable content metrics database
+  ansible.builtin.assert:
+    that:
+      - backend_postgres_enabled | bool
+      - backend_postgres_primary_shadow_database is match('^[A-Za-z_][A-Za-z0-9_]*$')
+      - backend_metrics_public_feed_status_url is match('^https://')
+    fail_msg: Durable backend content metrics require a safe local primary-shadow PostgreSQL database name.
 
 - name: Install NutsNews textfile metrics exporter
   ansible.builtin.copy:
@@ -104,7 +193,16 @@
 
       [Service]
       Type=oneshot
+      Environment=NUTSNEWS_METRICS_POSTGRES_DATABASE={{ backend_postgres_primary_shadow_database }}
+      Environment=NUTSNEWS_PUBLIC_FEED_STATUS_URL={{ backend_metrics_public_feed_status_url }}
+      Environment=NUTSNEWS_HEALTH_AUDIT_STATE_PATH={{ backend_metrics_health_audit_state_path }}
+      Environment=NUTSNEWS_BACKUP_STALE_AFTER_HOURS={{ backend_backup_stale_after_hours }}
+      Environment=NUTSNEWS_WORKER_UPLIFT_EXPECTED_ACTIVE={{ backend_metrics_worker_uplift_expected_active }}
+      Environment=NUTSNEWS_WORKER_UPLIFT_DEPLOYMENT_MODE={{ backend_metrics_worker_uplift_deployment_mode }}
+      Environment=NUTSNEWS_DEPLOYMENT_ENVIRONMENT={{ backend_metrics_environment_label }}
+      Environment=NUTSNEWS_TELEMETRY_HOST={{ backend_metrics_instance_label }}
       ExecStart={{ backend_metrics_textfile_exporter_path }} --output {{ backend_metrics_textfile_dir }}/nutsnews.prom
+      TimeoutStartSec=120
   notify: Reload systemd
 
 - name: Install NutsNews textfile metrics timer
@@ -137,6 +235,11 @@
       GRAFANA_CLOUD_PROMETHEUS_URL={{ backend_metrics_prometheus_remote_write_url | quote }}
       GRAFANA_CLOUD_PROMETHEUS_USERNAME={{ backend_metrics_prometheus_username | quote }}
       GRAFANA_CLOUD_PROMETHEUS_PASSWORD={{ backend_metrics_prometheus_password | quote }}
+      {% if backend_metrics_postgres_enabled | bool %}
+      NUTSNEWS_POSTGRES_EXPORTER_USERNAME={{ backend_metrics_postgres_username | quote }}
+      NUTSNEWS_POSTGRES_EXPORTER_PASSWORD={{ backend_metrics_postgres_password | quote }}
+      NUTSNEWS_POSTGRES_EXPORTER_DATABASE={{ backend_metrics_postgres_database | quote }}
+      {% endif %}
       {% if backend_logs_enabled | bool %}
       GRAFANA_CLOUD_LOKI_URL={{ backend_logs_loki_url | quote }}
       GRAFANA_CLOUD_LOKI_USERNAME={{ backend_logs_loki_username | quote }}
@@ -167,18 +270,43 @@
     - Reload systemd
     - Restart alloy
 
-- name: Install Alloy metrics configuration
+- name: Render Alloy metrics configuration candidate
   ansible.builtin.template:
     src: alloy-config.alloy.j2
+    dest: "{{ backend_metrics_alloy_candidate_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Validate Alloy metrics configuration candidate
+  ansible.builtin.command:
+    argv:
+      - alloy
+      - validate
+      - "{{ backend_metrics_alloy_candidate_path }}"
+  environment:
+    GRAFANA_CLOUD_PROMETHEUS_URL: "{{ backend_metrics_prometheus_remote_write_url }}"
+    GRAFANA_CLOUD_PROMETHEUS_USERNAME: "{{ backend_metrics_prometheus_username }}"
+    GRAFANA_CLOUD_PROMETHEUS_PASSWORD: "{{ backend_metrics_prometheus_password }}"
+    NUTSNEWS_POSTGRES_EXPORTER_USERNAME: "{{ backend_metrics_postgres_username }}"
+    NUTSNEWS_POSTGRES_EXPORTER_PASSWORD: "{{ backend_metrics_postgres_password }}"
+    NUTSNEWS_POSTGRES_EXPORTER_DATABASE: "{{ backend_metrics_postgres_database }}"
+    GRAFANA_CLOUD_LOKI_URL: "{{ backend_logs_loki_url }}"
+    GRAFANA_CLOUD_LOKI_USERNAME: "{{ backend_logs_loki_username }}"
+    GRAFANA_CLOUD_LOKI_PASSWORD: "{{ backend_logs_loki_password }}"
+  changed_when: false
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Atomically install validated Alloy metrics configuration
+  ansible.builtin.copy:
+    src: "{{ backend_metrics_alloy_candidate_path }}"
     dest: "{{ backend_metrics_alloy_config_path }}"
+    remote_src: true
     owner: root
     group: root
     mode: "0644"
   notify: Restart alloy
-
-- name: Validate Alloy metrics configuration
-  ansible.builtin.command: "alloy validate {{ backend_metrics_alloy_config_path }}"
-  changed_when: false
   when: not ansible_check_mode
 
 - name: Flush handlers before running metrics services
@@ -205,6 +333,32 @@
     daemon_reload: true
   when: not ansible_check_mode
 
+- name: Wait for Alloy readiness
+  ansible.builtin.uri:
+    url: http://127.0.0.1:12345/-/ready
+    method: GET
+    status_code: 200
+    return_content: false
+  register: backend_metrics_alloy_readiness
+  retries: 6
+  delay: 5
+  until: backend_metrics_alloy_readiness.status | default(0) == 200
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Require healthy Alloy components after configuration
+  ansible.builtin.uri:
+    url: http://127.0.0.1:12345/-/healthy
+    method: GET
+    status_code: 200
+    return_content: false
+  register: backend_metrics_alloy_health
+  retries: 3
+  delay: 5
+  until: backend_metrics_alloy_health.status | default(0) == 200
+  changed_when: false
+  when: not ansible_check_mode
+
 - name: Report backend metrics summary
   ansible.builtin.debug:
     msg:
@@ -213,6 +367,9 @@
       alloy_config_path: "{{ backend_metrics_alloy_config_path }}"
       textfile_dir: "{{ backend_metrics_textfile_dir }}"
       scrape_interval: "{{ backend_metrics_scrape_interval }}"
+      worker_uplift_targets: "{{ backend_metrics_worker_uplift_targets | map(attribute='service') | list }}"
+      postgres_exporter: "{{ 'enabled' if backend_metrics_postgres_enabled else 'disabled' }}"
+      caddy_metrics: "{{ 'enabled' if backend_metrics_caddy_enabled else 'disabled' }}"
       endpoint: grafana_cloud_prometheus_remote_write
       logs_endpoint: "{{ 'grafana_cloud_loki' if backend_logs_enabled else 'disabled' }}"
       alloy_package_manageable: "{{ backend_metrics_alloy_manageable }}"

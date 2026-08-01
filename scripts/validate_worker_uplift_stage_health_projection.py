@@ -256,6 +256,10 @@ def validate_implementation(text: str) -> list[str]:
         "other_mutation_grants",
         "article_or_domain_mutation_privileges_available",
         "dns_or_failover_credentials_available",
+        "runtime expected_active must remain false for the shadow projection",
+        "runtime liveness for",
+        "runtime readiness series for",
+        "runtime ownership series for",
     ):
         require(fragment in text, f"implementation missing guard: {fragment}", errors)
     mutation_sql = text.split("def apply_sql", 1)[1].split("def normalized_db_rows", 1)[0] if "def apply_sql" in text else text

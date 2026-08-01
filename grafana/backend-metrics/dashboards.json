@@ -44,7 +44,7 @@
       "uid": "nutsnews-backend-caddy-edge",
       "panels": [
         {"title": "Caddy Active", "unit": "short", "expr": "nutsnews_backend_service_active{job=\"nutsnews-backend-host\",unit=\"caddy\"}"},
-        {"title": "Public Endpoint Healthy", "unit": "short", "expr": "nutsnews_backend_public_endpoint_healthy{job=\"nutsnews-backend-host\"}"},
+        {"title": "Public Endpoint Ready", "unit": "short", "expr": "nutsnews_backend_public_endpoint_ready{job=\"nutsnews-backend-host\"}"},
         {"title": "HTTP/HTTPS Listeners", "unit": "short", "expr": "node_netstat_Tcp_CurrEstab{job=\"nutsnews-backend-host\"}"},
         {"title": "Failed Units", "unit": "short", "expr": "nutsnews_backend_failed_systemd_units{job=\"nutsnews-backend-host\"}"}
       ]
@@ -143,13 +143,13 @@
       "title": "NutsNews backend public endpoint unhealthy",
       "severity": "critical",
       "service": "caddy",
-      "expr": "min_over_time(nutsnews_backend_public_endpoint_healthy{job=\"nutsnews-backend-host\"}[5m])",
+      "expr": "min_over_time(nutsnews_backend_public_endpoint_ready{job=\"nutsnews-backend-host\"}[5m])",
       "threshold": 1,
       "evaluator": "lt",
       "for": "5m",
       "range_seconds": 600,
       "no_data_state": "OK",
-      "summary": "The backend /healthz endpoint is failing from the host probe."
+      "summary": "The backend /readyz endpoint failed its PostgreSQL or deployment-identity check from the host probe."
     },
     {
       "uid": "nn-backend-failed-units",

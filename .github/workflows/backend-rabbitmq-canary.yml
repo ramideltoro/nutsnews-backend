@@ -55,7 +55,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           ACTION: ${{ github.event_name == 'schedule' && 'canary' || inputs.action }}
-          DRILL: ${{ inputs.drill }}
+          DRILL: ${{ inputs.drill || 'consumer-loss' }}
           CONFIRM_TARGET: ${{ inputs.confirm_target }}
         run: |
           set -euo pipefail
@@ -114,7 +114,7 @@ jobs:
         shell: bash
         env:
           ACTION: ${{ github.event_name == 'schedule' && 'canary' || inputs.action }}
-          DRILL: ${{ inputs.drill }}
+          DRILL: ${{ inputs.drill || 'consumer-loss' }}
           NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
           NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
         run: |

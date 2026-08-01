@@ -22,6 +22,9 @@ DEFAULT_RUNTIME_STATUS_PATH = (
 DEFAULT_SECURITY_DISPOSITIONS_PATH = (
     ROOT / "docs" / "worker-uplift-security-dispositions.json"
 )
+DEFAULT_CUTOVER_CONTROL_PLAN_PATH = (
+    ROOT / "docs" / "worker-uplift-cutover-control-plan.json"
+)
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -787,11 +790,50 @@ def validate_decision(
     for field in (
         "production_owner_rollback_workflow_exists",
         "cutover_watermark_exists",
-        "rollback_deadline_defined",
-        "observation_window_approved",
     ):
         if rollback.get(field) is not False:
             errors.append(f"rollback_limits.{field} must remain false")
+    if rollback.get("status") != "planned_parameters_complete_controls_not_implemented":
+        errors.append("rollback limits must distinguish complete planning from unimplemented controls")
+    for field in (
+        "cutover_watermark_semantics_defined",
+        "rollback_deadline_defined",
+        "observation_window_approved",
+        "ownership_plan_complete",
+    ):
+        if rollback.get(field) is not True:
+            errors.append(f"rollback_limits.{field} must be true after #165")
+    if rollback.get("observation_window_duration_hours") != 48:
+        errors.append("#165 observation window must remain 48 hours")
+    if rollback.get("plan_path") != "docs/worker-uplift-cutover-control-plan.json":
+        errors.append("rollback limits must link the #165 source-controlled plan")
+    cutover_plan_ready = False
+    if DEFAULT_CUTOVER_CONTROL_PLAN_PATH.is_file():
+        cutover_plan = load_json(DEFAULT_CUTOVER_CONTROL_PLAN_PATH)
+        cutover_plan_hash = file_sha256(DEFAULT_CUTOVER_CONTROL_PLAN_PATH)
+        if rollback.get("plan_sha256") != cutover_plan_hash:
+            errors.append("rollback limits contain a stale #165 plan SHA-256")
+        plan_rollback = cutover_plan.get("rollback", {})
+        plan_observation = cutover_plan.get("observation_window", {})
+        if rollback.get("planned_absolute_rollback_deadline_utc") != plan_rollback.get(
+            "planned_absolute_deadline_utc"
+        ):
+            errors.append("readiness rollback deadline must match the #165 plan")
+        if rollback.get("observation_window_duration_hours") != plan_observation.get(
+            "duration_hours"
+        ):
+            errors.append("readiness observation duration must match the #165 plan")
+        cutover_plan_ready = (
+            cutover_plan.get("status")
+            == "complete_non_mutating_plan_no_cutover_authority"
+            and rollback.get("plan_sha256") == cutover_plan_hash
+            and rollback.get("cutover_watermark_semantics_defined") is True
+            and rollback.get("rollback_deadline_defined") is True
+            and rollback.get("observation_window_approved") is True
+            and rollback.get("ownership_plan_complete") is True
+        )
+    else:
+        errors.append("#165 source-controlled cutover-control plan is missing")
     if rollback.get("planning_blocker_issue") != "ramideltoro/nutsnews-worker#165":
         errors.append("planned cutover parameters must be owned by nutsnews-worker#165")
     if rollback.get("downstream_control_implementation_required_before") != (
@@ -889,6 +931,13 @@ def validate_decision(
             errors.append(f"{item.get('id')} has invalid readiness status")
         if not item.get("evidence"):
             errors.append(f"{item.get('id')} must record evidence")
+        if item.get("id") == "control_implementation_plan":
+            expected_status = "pass" if cutover_plan_ready else "block"
+            if item.get("status") != expected_status:
+                errors.append(
+                    f"control_implementation_plan readiness must be {expected_status} "
+                    "for the current #165 plan"
+                )
     if not any(item.get("status") == "block" for item in readiness):
         errors.append("NO-GO must contain at least one blocked readiness item")
 
@@ -902,12 +951,14 @@ def validate_decision(
             f"extra={sorted(set(blocker_ids) - REQUIRED_BLOCKERS)}"
         )
     for item in blockers:
-        expected_blocker_status = (
-            "resolved"
-            if item.get("id") == "security_residual_owner_disposition"
+        resolved_by_current_evidence = (
+            item.get("id") == "security_residual_owner_disposition"
             and decision.get("security_gate", {}).get("closure_ready") is True
-            else "open"
+        ) or (
+            item.get("id") == "control_implementation_plan"
+            and cutover_plan_ready
         )
+        expected_blocker_status = "resolved" if resolved_by_current_evidence else "open"
         if item.get("status") != expected_blocker_status:
             errors.append(
                 f"{item.get('id')} status must be {expected_blocker_status} for current evidence"

@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "tracking_issue": "ramideltoro/nutsnews-worker#164",
+  "evidence_scope": "immutable_issue_164_security_remediation_build_and_deployment",
   "captured_at_utc": "2026-07-31T18:43:42Z",
   "safety": {
     "legacy_worker_is_production_ingestion_owner": true,

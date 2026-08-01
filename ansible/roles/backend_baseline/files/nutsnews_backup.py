@@ -145,7 +145,7 @@ def parse_restic_json_lines(text: str) -> list[dict[str, Any]]:
 
 
 def latest_snapshot_id() -> str | None:
-    result = run_restic(["snapshots", "--json", "--last", "1"], timeout=600)
+    result = run_restic(["snapshots", "--json", "--latest", "1"], timeout=600)
     if result.returncode != 0:
         return None
     try:
@@ -384,6 +384,10 @@ def action_restore_drill(args: argparse.Namespace) -> dict[str, Any]:
     ensure_state_dir(args.state_dir)
     started_at = utc_now()
     snapshot_id = latest_snapshot_id()
+    snapshot_source = "restic_latest"
+    if not snapshot_id:
+        snapshot_id = latest_backup_snapshot_id_from_state(args.state_dir)
+        snapshot_source = "backup_status" if snapshot_id else "unavailable"
     selected = [path for path in RESTORE_DRILL_CANDIDATES if Path(path).exists()]
     if not selected and Path("/etc/hostname").exists():
         selected = ["/etc/hostname"]
@@ -395,13 +399,14 @@ def action_restore_drill(args: argparse.Namespace) -> dict[str, Any]:
             "started_at_utc": started_at,
             "finished_at_utc": utc_now(),
             "snapshot_id": None,
+            "snapshot_source": snapshot_source,
             "selected_paths": selected,
             "alerts": [{"kind": "unverified_latest_snapshot", "status": "critical"}],
         }
         write_json(args.state_dir / STATUS_FILES["restore_drill"], status)
         return status
     with tempfile.TemporaryDirectory(prefix="nutsnews-restore-drill-") as tmpdir:
-        restore_args = ["restore", "latest", "--target", tmpdir]
+        restore_args = ["restore", snapshot_id, "--target", tmpdir]
         for path in selected:
             restore_args.extend(["--include", path])
         result = run_restic(restore_args, timeout=3600)
@@ -414,6 +419,7 @@ def action_restore_drill(args: argparse.Namespace) -> dict[str, Any]:
         "started_at_utc": started_at,
         "finished_at_utc": utc_now(),
         "snapshot_id": snapshot_id,
+        "snapshot_source": snapshot_source,
         "selected_paths": selected,
         "restored_paths": restored,
         "alerts": [] if healthy else [{"kind": "unverified_latest_snapshot", "status": "critical"}],

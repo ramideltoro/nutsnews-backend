@@ -130,6 +130,8 @@ def validate_repository() -> list[str]:
         "where control_id = 'production'", "and generation = %s", "and state = %s",
         "validate_final_decision", "exact #166 GO is absent", "dns_failover_unchanged",
         "production_targets_reachable", "standing_bounded_authorization",
+        "NUTSNEWS_PERSISTENCE_PRODUCTION_WRITES_ENABLED", "backend-protected-persistence-cutover-approved",
+        "start-persistence-publication-production-fenced", "start-persistence-publication-shadow",
         final_readiness.COMMENT_URL, final_readiness.SCOPE_SHA256,
     ], "fixed manager")
     if "shell=True" in manager or "os.system(" in manager:

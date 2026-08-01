@@ -632,12 +632,34 @@ BEGIN
   $ddl$, views_schema, 'worker_uplift_enrichment');
   EXECUTE format($ddl$
     CREATE OR REPLACE VIEW %I.approval_projection AS
-    SELECT article_identity_hash, approval_version, decision, positivity_score, reviewed_at
+    SELECT article_identity_hash,
+           approval_version,
+           decision,
+           positivity_score,
+           reviewed_at,
+           diagnostic_metadata->'decisionSnapshot'->>'canonicalUrl' AS canonical_url,
+           diagnostic_metadata->'decisionSnapshot'->>'title' AS title,
+           diagnostic_metadata->'decisionSnapshot'->>'description' AS description,
+           diagnostic_metadata->'decisionSnapshot'->>'imageUrl' AS image_url,
+           diagnostic_metadata->'decisionSnapshot'->>'publishedAt' AS published_at,
+           diagnostic_metadata->'decisionSnapshot'->>'category' AS category,
+           diagnostic_metadata->'decisionSnapshot'->>'sourceSummary' AS source_summary,
+           diagnostic_metadata->'decisionSnapshot'->>'sourceLanguage' AS source_language,
+           diagnostic_metadata->'decisionSnapshot'->>'model' AS ai_model
     FROM %I.approval_decisions
   $ddl$, views_schema, 'worker_uplift_approval');
   EXECUTE format($ddl$
     CREATE OR REPLACE VIEW %I.translation_coverage_projection AS
-    SELECT article_identity_hash, language_code, translation_version, quality_status, translated_at, summary_ref
+    SELECT article_identity_hash,
+           language_code,
+           translation_version,
+           quality_status,
+           translated_at,
+           summary_ref,
+           diagnostic_metadata->'resultSnapshot'->>'sourceLanguage' AS source_language_code,
+           diagnostic_metadata->'resultSnapshot'->>'title' AS translated_title,
+           diagnostic_metadata->'resultSnapshot'->>'summary' AS translated_summary,
+           diagnostic_metadata->'resultSnapshot'->>'model' AS ai_model
     FROM %I.translation_records
   $ddl$, views_schema, 'worker_uplift_translation');
   EXECUTE format($ddl$

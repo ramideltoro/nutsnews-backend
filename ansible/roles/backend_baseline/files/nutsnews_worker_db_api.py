@@ -1208,6 +1208,49 @@ def assert_worker_uplift_publication_payload(operation: str, body: dict[str, Any
         raise ApiError(400, "worker-uplift publication languageCodes must match the protected policy")
 
 
+def assert_http_url(value: str, field: str) -> None:
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ApiError(400, f"{field} must be an HTTP(S) URL")
+
+
+def assert_worker_uplift_persistence_payload(operation: str, body: dict[str, Any]) -> None:
+    if operation == "uplift-save-accepted-articles-batch":
+        articles = body.get("articles")
+        if not isinstance(articles, list) or len(articles) != 1 or not isinstance(articles[0], dict):
+            raise ApiError(400, "worker-uplift persistence requires exactly one accepted article")
+        article = articles[0]
+        original_url = required_string(article, "original_url", maximum=4096)
+        assert_http_url(original_url, "accepted article original_url")
+        image_url = required_string(article, "image_url", maximum=4096)
+        assert_http_url(image_url, "accepted article image_url")
+        for field in ("source", "title", "ai_summary", "category", "ai_model", "published_on_site_at"):
+            required_string(article, field, maximum=10_000)
+        if article.get("ai_provider") != "local_ai" or article.get("status") != "translation_pending":
+            raise ApiError(400, "worker-uplift accepted article policy is invalid")
+        return
+    if operation == "uplift-save-article-summaries-batch":
+        summaries = body.get("summaries")
+        if not isinstance(summaries, list) or len(summaries) != len(SUMMARY_TRANSLATION_LANGUAGE_CODES):
+            raise ApiError(400, "worker-uplift persistence requires exactly five article summaries")
+        if not all(isinstance(summary, dict) for summary in summaries):
+            raise ApiError(400, "worker-uplift summaries must be objects")
+        language_codes = [summary.get("language_code") for summary in summaries]
+        if language_codes != list(SUMMARY_TRANSLATION_LANGUAGE_CODES):
+            raise ApiError(400, "worker-uplift summary languages must match the protected policy")
+        original_urls: list[str] = []
+        for summary in summaries:
+            original_url = required_string(summary, "original_url", maximum=4096)
+            assert_http_url(original_url, "article summary original_url")
+            original_urls.append(original_url)
+            for field in ("source_language_code", "title", "summary", "model", "updated_at"):
+                required_string(summary, field, maximum=10_000)
+            if summary.get("generated_by") != "local_ai":
+                raise ApiError(400, "worker-uplift summaries must use the local_ai provider")
+        if len(set(original_urls)) != 1:
+            raise ApiError(400, "worker-uplift summaries must target exactly one original URL")
+
+
 def load_worker_uplift_receipt(store: PostgresStore, idempotency_key: str) -> dict[str, Any] | None:
     row = store.fetch_one(
         """
@@ -1491,6 +1534,7 @@ def handle_worker_uplift_operation(
     provider_mode = assert_provider_mode(body)
     metadata = worker_uplift_metadata(operation, body, auth_scope)
     assert_worker_uplift_publication_payload(operation, body)
+    assert_worker_uplift_persistence_payload(operation, body)
     payload_digest = uplift_payload_digest(operation, body)
     existing_receipt = load_worker_uplift_receipt(store, metadata["idempotency_key"])
     if existing_receipt is not None:
@@ -1535,6 +1579,10 @@ def handle_worker_uplift_operation(
         delegate_operation = WORKER_UPLIFT_DELEGATE_OPERATIONS[operation]
         delegate_result = handle_operation(delegate_operation, body, store, auth_scope=LEGACY_WORKER_API_SCOPE)
         response = delegate_result if isinstance(delegate_result, dict) else {"ok": True, "result": delegate_result}
+        if operation == "uplift-save-accepted-articles-batch":
+            response["articleCount"] = 1
+        if operation == "uplift-save-article-summaries-batch":
+            response["summaryCount"] = len(SUMMARY_TRANSLATION_LANGUAGE_CODES)
         if operation == "uplift-publish-articles-batch" and (
             response.get("ok") is not True
             or response.get("requestedCount") != 1

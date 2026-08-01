@@ -303,6 +303,7 @@ def validate_decision(
             "observation_start_utc",
             "observation_end_utc",
             "control_commit",
+            "execution_window",
         ):
             require(decision.get(field) is None, f"NO-GO must not freeze {field}", errors)
         if require_go:
@@ -320,7 +321,8 @@ def validate_decision(
     require(bool(SHA256_RE.fullmatch(str(decision.get("candidate_sha256", "")))), "GO candidate SHA-256 missing", errors)
     require(bool(SHA256_RE.fullmatch(str(decision.get("watermark_sha256", "")))), "GO watermark SHA-256 missing", errors)
     require(bool(SHA_RE.fullmatch(str(decision.get("control_commit", "")))), "GO control commit missing", errors)
-    execution = decision.get("execution_window", {})
+    execution_value = decision.get("execution_window")
+    execution = execution_value if isinstance(execution_value, dict) else {}
     execution_start = parse_utc(execution.get("start_utc"), "execution_window.start_utc", errors)
     execution_end = parse_utc(execution.get("end_utc"), "execution_window.end_utc", errors)
     observation_start = parse_utc(decision.get("observation_start_utc"), "observation_start_utc", errors)
@@ -409,9 +411,26 @@ def validate_execution_receipt(
         "execution receipt executed_at_utc drifted",
         errors,
     )
-    for field in ("candidate_sha256", "watermark_sha256", "rollback_deadline_utc"):
-        require(receipt.get(field) == decision.get(field), f"execution receipt {field} does not match the decision", errors)
-    require(receipt.get("decision_file_sha256") == sha256_file(DECISION_PATH), "execution receipt decision file digest mismatch", errors)
+    require(
+        receipt.get("candidate_sha256") == "71b0303705093ad398458083547a86e9e61f50458e8799ace38de4f2404859df",
+        "historical execution receipt candidate drifted",
+        errors,
+    )
+    require(
+        receipt.get("watermark_sha256") == "e9b0ff2b129b76ec54589f32ade782b90aadaff54124344c2541e429d4d5d022",
+        "historical execution receipt watermark drifted",
+        errors,
+    )
+    require(
+        receipt.get("rollback_deadline_utc") == "2026-08-03T21:00:00Z",
+        "historical execution receipt deadline drifted",
+        errors,
+    )
+    require(
+        receipt.get("decision_file_sha256") == "2902e6e50d4614ddae4e86032e6072e86491741a3ca3394c7826b2edb811a0b2",
+        "historical execution receipt decision digest drifted",
+        errors,
+    )
     require(receipt.get("apply_evidence") == {
         "workflow_run": 30713923790,
         "workflow_url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30713923790",
@@ -539,7 +558,8 @@ def main(argv: list[str] | None = None) -> int:
     receipt = load_json(EXECUTION_RECEIPT_PATH)
     print(
         "worker-uplift final cutover readiness valid; "
-        f"historical_decision={decision['decision']} "
+        f"current_decision={decision['decision']} "
+        "historical_execution_decision=GO "
         f"execution_status={receipt['status']} "
         f"apply_authorized={str(receipt['apply_authorized']).lower()} "
         f"rollback_authorized={str(receipt['rollback_authorized']).lower()} "

@@ -241,21 +241,15 @@ class WorkerUpliftCutoverControlTests(unittest.TestCase):
                 now=datetime(2026, 8, 2, 1, 59, tzinfo=timezone.utc),
             )
 
-    def test_current_committed_decision_matches_exact_frozen_inputs(self):
+    def test_current_committed_decision_fails_closed_after_consumed_candidate_rollback(self):
         decision = control.load_json(control.DEFAULT_DECISION)
 
-        control.validate_final_decision(
-            decision,
-            candidate=decision["candidate_sha256"],
-            watermark=decision["watermark_sha256"],
-            deadline=decision["rollback_deadline_utc"],
-        )
-        with self.assertRaisesRegex(control.ControlError, "exact candidate"):
+        with self.assertRaisesRegex(control.ControlError, "exact #166 GO is absent"):
             control.validate_final_decision(
                 decision,
                 candidate=CANDIDATE,
-                watermark=decision["watermark_sha256"],
-                deadline=decision["rollback_deadline_utc"],
+                watermark=WATERMARK,
+                deadline=DEADLINE,
             )
 
     def test_production_files_contain_only_fixed_safe_keys(self):
@@ -268,6 +262,11 @@ class WorkerUpliftCutoverControlTests(unittest.TestCase):
 
         self.assertIn("NUTSNEWS_WORKER_DB_API_WRITES_ENABLED=true", dropin)
         self.assertIn("NUTSNEWS_WORKER_UPLIFT_EXPECTED_CANDIDATE_SHA256", dropin)
+        self.assertIn("NUTSNEWS_PERSISTENCE_PRODUCTION_WRITES_ENABLED: \"true\"", override)
+        self.assertIn(
+            "NUTSNEWS_PERSISTENCE_PRODUCTION_WRITE_CONFIRMATION: backend-protected-persistence-cutover-approved",
+            override,
+        )
         self.assertIn("NUTSNEWS_PUBLICATION_WRITE_MODE: production", override)
         self.assertNotIn("password", (dropin + override).lower())
         self.assertNotIn("token", (dropin + override).lower())

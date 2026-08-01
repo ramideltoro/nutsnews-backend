@@ -118,6 +118,52 @@ def uplift_publication_body(overrides: dict | None = None) -> dict:
     return body
 
 
+def uplift_accepted_article_body(overrides: dict | None = None) -> dict:
+    body = uplift_metadata({
+        "providerMode": "backend_postgres_primary",
+        "articles": [{
+            "source": "example.com",
+            "title": "Community library opens",
+            "original_url": "https://example.com/article-1",
+            "image_url": "https://example.com/article-1.jpg",
+            "published_at": "2026-08-01T20:00:00Z",
+            "published_on_site_at": "2026-08-01T20:01:00Z",
+            "original_excerpt": "Neighbors created a shared library.",
+            "ai_summary": "Neighbors opened a free community library.",
+            "category": "Community | Uplifting",
+            "positivity_score": 91,
+            "ai_provider": "local_ai",
+            "ai_model": "qwen2.5:3b",
+            "status": "translation_pending",
+        }],
+    })
+    if overrides:
+        body.update(overrides)
+    return body
+
+
+def uplift_article_summaries_body(overrides: dict | None = None) -> dict:
+    body = uplift_metadata({
+        "providerMode": "backend_postgres_primary",
+        "summaries": [
+            {
+                "original_url": "https://example.com/article-1",
+                "language_code": language,
+                "source_language_code": "en",
+                "title": f"Localized title {language}",
+                "summary": f"Localized summary {language}",
+                "generated_by": "local_ai",
+                "model": "qwen2.5:3b",
+                "updated_at": "2026-08-01T20:01:00Z",
+            }
+            for language in ("fr", "ja", "de-CH", "de", "el")
+        ],
+    })
+    if overrides:
+        body.update(overrides)
+    return body
+
+
 def worker_uplift_stage_health_row(stage: str, overrides: dict | None = None) -> dict:
     row = {
         "stage_name": stage,
@@ -1352,6 +1398,51 @@ class WorkerDbApiTests(unittest.TestCase):
         self.assertIn("worker_uplift_final.api_command_receipts", receipt_query)
         self.assertEqual("worker-uplift-publication", receipt_params[5])
         self.assertEqual("applied_success", receipt_params[15])
+
+    def test_uplift_persistence_accepts_only_one_article_and_exact_five_summary_rows(self) -> None:
+        article_store = ActiveCutoverStore()
+        article_result = worker_db_api.handle_operation(
+            "uplift-save-accepted-articles-batch",
+            uplift_accepted_article_body(),
+            article_store,
+            auth_scope="worker-uplift-persistence",
+        )
+        self.assertEqual({"ok": True, "articleCount": 1}, article_result)
+        self.assertIn("insert into public.articles", article_store.executes[0][0])
+
+        summary_store = ActiveCutoverStore()
+        summary_result = worker_db_api.handle_operation(
+            "uplift-save-article-summaries-batch",
+            uplift_article_summaries_body(),
+            summary_store,
+            auth_scope="worker-uplift-persistence",
+        )
+        self.assertEqual({"ok": True, "summaryCount": 5}, summary_result)
+        self.assertIn("insert into public.article_summaries", summary_store.executes[0][0])
+
+    def test_uplift_persistence_rejects_non_http_and_non_exact_materialization_scope(self) -> None:
+        invalid_cases = [
+            ("uplift-save-accepted-articles-batch", uplift_accepted_article_body({"articles": []})),
+            ("uplift-save-accepted-articles-batch", uplift_accepted_article_body({
+                "articles": [{**uplift_accepted_article_body()["articles"][0], "original_url": "shadow://article/1"}],
+            })),
+            ("uplift-save-article-summaries-batch", uplift_article_summaries_body({"summaries": []})),
+            ("uplift-save-article-summaries-batch", uplift_article_summaries_body({
+                "summaries": list(reversed(uplift_article_summaries_body()["summaries"])),
+            })),
+        ]
+        for operation, body in invalid_cases:
+            with self.subTest(operation=operation):
+                store = ActiveCutoverStore()
+                with self.assertRaises(worker_db_api.ApiError) as error:
+                    worker_db_api.handle_operation(
+                        operation,
+                        body,
+                        store,
+                        auth_scope="worker-uplift-persistence",
+                    )
+                self.assertEqual(400, error.exception.status)
+                self.assertEqual([], store.executes)
 
     def test_uplift_publication_retry_ignores_delivery_metadata_in_business_digest(self) -> None:
         first_body = uplift_publication_body()

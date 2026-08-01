@@ -17,6 +17,7 @@ RUNTIME_WORKFLOW = ROOT / ".github" / "workflows" / "backend-worker-runtime-oper
 RUNBOOK = ROOT / "runbooks" / "WORKER_UPLIFT_SERVICE_RUNTIME.md"
 RABBITMQ_TOPOLOGY = ROOT / "ansible" / "roles" / "backend_rabbitmq" / "templates" / "worker-uplift-topology.json.j2"
 SHADOW_MODEL = ROOT / "ansible" / "roles" / "backend_baseline" / "templates" / "worker-uplift-shadow-data-model.sql.j2"
+WORKER_DB_API = ROOT / "ansible" / "roles" / "backend_baseline" / "files" / "nutsnews_worker_db_api.py"
 
 
 SERVICES = [
@@ -124,6 +125,7 @@ def validate() -> list[str]:
     runbook = read(RUNBOOK)
     rabbitmq_topology = read(RABBITMQ_TOPOLOGY)
     shadow_model = read(SHADOW_MODEL)
+    worker_db_api = read(WORKER_DB_API)
 
     require(
         "protected apply",
@@ -201,6 +203,28 @@ def validate() -> list[str]:
         errors,
     )
     require(
+        "publication material projections",
+        shadow_model,
+        (
+            "decisionSnapshot'->>'canonicalUrl' AS canonical_url",
+            "decisionSnapshot'->>'sourceSummary' AS source_summary",
+            "resultSnapshot'->>'title' AS translated_title",
+            "resultSnapshot'->>'summary' AS translated_summary",
+        ),
+        errors,
+    )
+    require(
+        "bounded persistence API",
+        worker_db_api,
+        (
+            "worker-uplift persistence requires exactly one accepted article",
+            "worker-uplift persistence requires exactly five article summaries",
+            'response["articleCount"] = 1',
+            'response["summaryCount"] = len(SUMMARY_TRANSLATION_LANGUAGE_CODES)',
+        ),
+        errors,
+    )
+    require(
         "worker runtime final smoke",
         manager,
         (
@@ -230,6 +254,8 @@ def validate() -> list[str]:
     )
     if "NUTSNEWS_PUBLICATION_PRODUCTION_WRITE_CONFIRMATION:" in defaults:
         errors.append("publication service must not receive the protected production-write confirmation in shadow mode")
+    if "NUTSNEWS_PERSISTENCE_PRODUCTION_WRITE_CONFIRMATION:" in defaults:
+        errors.append("persistence service must not receive the protected production-write confirmation in shadow mode")
     for forbidden in (
         "NUTSNEWS_PUBLICATION_WRITE_MODE: production",
         "NUTSNEWS_PERSISTENCE_PRODUCTION_WRITES_ENABLED: \"true\"",

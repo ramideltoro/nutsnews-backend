@@ -1,0 +1,214 @@
+{
+  "schema_version": 1,
+  "receipt_id": "worker-uplift-final-cutover-2026-08-01",
+  "tracking_issue": "ramideltoro/nutsnews-worker#166",
+  "execution_issue": "ramideltoro/nutsnews-worker#127",
+  "status": "rolled_back",
+  "apply_authority_consumed": true,
+  "apply_authorized": false,
+  "rollback_authorized": false,
+  "executed_at_utc": "2026-08-01T19:04:15Z",
+  "candidate_sha256": "71b0303705093ad398458083547a86e9e61f50458e8799ace38de4f2404859df",
+  "watermark_sha256": "e9b0ff2b129b76ec54589f32ade782b90aadaff54124344c2541e429d4d5d022",
+  "rollback_deadline_utc": "2026-08-03T21:00:00Z",
+  "decision_file_sha256": "2902e6e50d4614ddae4e86032e6072e86491741a3ca3394c7826b2edb811a0b2",
+  "apply_evidence": {
+    "workflow_run": 30713923790,
+    "workflow_url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30713923790",
+    "head_commit": "af044a137fec686d302babfb3c9b0bf252f60cba",
+    "artifact_id": 8822743880,
+    "artifact_digest": "sha256:c69dc89738dff24996556b47033d35b5b6af842f18d84962be97ffa3e748c6c6",
+    "conclusion": "success"
+  },
+  "applied_state": {
+    "state": "cutover_active",
+    "active_ingestion_owner": "worker_uplift",
+    "legacy_dispatch_enabled": false,
+    "uplift_scheduler_enabled": true,
+    "uplift_production_writes_enabled": true,
+    "publication_write_mode": "production"
+  },
+  "rollback_progress": {
+    "status": "completed",
+    "finalize_required": false,
+    "rollback_prepare": {
+      "workflow_run": 30715252632,
+      "workflow_url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30715252632",
+      "head_commit": "af044a137fec686d302babfb3c9b0bf252f60cba",
+      "workflow_conclusion": "failure_after_prepare",
+      "protected_job": 91409648963,
+      "prepare_completed_at_utc": "2026-08-01T19:40:48Z",
+      "artifact_id": null,
+      "artifact_disposition": "upload_skipped_after_later_controller_wait_failure"
+    },
+    "pending_state": {
+      "generation": 4,
+      "state": "rollback_pending",
+      "active_ingestion_owner": "legacy_shards",
+      "legacy_dispatch_enabled": false,
+      "uplift_scheduler_enabled": false,
+      "uplift_production_writes_enabled": false,
+      "publication_write_mode": "shadow_comparison",
+      "last_transition_id": "rollback-prepare",
+      "updated_at_utc": "2026-08-01T19:40:46.202Z"
+    },
+    "controller_enable_attempt": {
+      "workflow_run": 30715293972,
+      "head_commit": "da1794f8b8d58dfa8fe926c3dbedf1dbb321ba61",
+      "requested_enabled": true,
+      "deploy_step_conclusion": "success",
+      "deploy_completed_at_utc": "2026-08-01T19:41:23Z",
+      "deployed_version_id": "17b15072-08f0-48b9-b86d-f7ba3148986a",
+      "workflow_conclusion": "failure",
+      "failed_readback_at_utc": "2026-08-01T19:41:24Z",
+      "artifact_id": null,
+      "disposition": "deploy_completed_then_immediate_readback_observed_prior_false_state"
+    },
+    "pre_finalize_controller_status": {
+      "observed_by_workflow_run": 30715566651,
+      "observed_enabled": true,
+      "configuration_valid": true,
+      "legacy_owner_unchanged": true,
+      "retained_failover_surface_count": 8,
+      "evidence_report_sha256": "1e7fd8df881efaaeb73aca2539caa21423a9de74abd9fe8a2a84743a46e72c6b",
+      "inferred_source_deployment_run": 30715293972,
+      "inference_basis": "only_controller_deployment_completed_between_initial_enable_dispatch_and_finalize_readback",
+      "intervening_controller_deployment_run_observed": false,
+      "disposition": "public_true_condition_used_by_rollback_finalize"
+    },
+    "rollback_finalize": {
+      "workflow_run": 30715566651,
+      "workflow_url": "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30715566651",
+      "head_commit": "af044a137fec686d302babfb3c9b0bf252f60cba",
+      "workflow_conclusion": "success",
+      "execution_path": "full_rollback_rerun",
+      "protected_job": 91410455725,
+      "protected_job_started_at_utc": "2026-08-01T19:48:47Z",
+      "idempotent_prepare_rerun": {
+        "started_in_state": "rollback_pending",
+        "started_in_generation": 4,
+        "ended_in_state": "rollback_pending",
+        "ended_in_generation": 4,
+        "stop_uplift_scheduler": "success",
+        "reload_api_unit": "success",
+        "restart_api_shadow": "success",
+        "start_publication_shadow": "success"
+      },
+      "controller_redispatch": {
+        "workflow_run": 30715590990,
+        "dispatched_at_utc": "2026-08-01T19:48:52.221Z",
+        "deployment_completed_before_finalize": false,
+        "disposition": "not_the_public_true_evidence_used_by_finalize"
+      },
+      "completed_at_utc": "2026-08-01T19:48:53Z",
+      "artifact_id": 8823224422,
+      "artifact_name": "worker-uplift-cutover-rollback-30715566651",
+      "artifact_digest": "sha256:99e295d6c5d92c310010590757b4b1c9535798401c19f971c67383464fe81d8c",
+      "report_sha256": "1e7fd8df881efaaeb73aca2539caa21423a9de74abd9fe8a2a84743a46e72c6b"
+    },
+    "post_finalize_reconfirmation": {
+      "controller_apply": {
+        "workflow_run": 30715590990,
+        "head_commit": "da1794f8b8d58dfa8fe926c3dbedf1dbb321ba61",
+        "requested_enabled": true,
+        "deploy_step_conclusion": "success",
+        "deploy_completed_at_utc": "2026-08-01T19:49:18Z",
+        "deployed_version_id": "4c4d7c4e-cd84-465a-a26d-a1d57e4a1c7e",
+        "workflow_conclusion": "success",
+        "artifact_id": 8823228760,
+        "artifact_name": "controller-ingestion-scheduling-apply-30715590990",
+        "artifact_digest": "sha256:139d8ced652948c8cfcb1703f6b2fde2490f3456cea2711f59db8bbe5a37eb9c",
+        "apply_report_sha256": "f85c49306f468ce5b2c07ac166bb72b3b0e4ec45dfd76edcc34cbe2618dcc94d",
+        "render_report_sha256": "6979764650ecab25c5cd55989d7336062ebb956e0c1848a11a6253d9584139d0",
+        "status_contract_sha256": "9e939cc865c251e6118d87bd5c39a970564c1f08b0493317e391b01504670e1b",
+        "disposition": "post_finalize_legacy_enable_reconfirmation"
+      },
+      "controller_status": {
+        "workflow_run": 30715611673,
+        "head_commit": "da1794f8b8d58dfa8fe926c3dbedf1dbb321ba61",
+        "workflow_conclusion": "success",
+        "observed_at_utc": "2026-08-01T19:49:36Z",
+        "artifact_id": 8823231793,
+        "artifact_name": "controller-ingestion-scheduling-status-30715611673",
+        "artifact_digest": "sha256:d4e5624b00b7e1157489d534db9dc6a9ede21cdc2152897adc1ec1efede1cb56",
+        "status_report_sha256": "e3544a8c394febd631f4c620c2a0f6a19c91f9901d965a8558b32f9d35b418d3",
+        "status_contract_sha256": "9e939cc865c251e6118d87bd5c39a970564c1f08b0493317e391b01504670e1b",
+        "observed_enabled": true,
+        "configuration_valid": true,
+        "disposition": "post_finalize_public_state_reconfirmation"
+      }
+    },
+    "final_state": {
+      "generation": 5,
+      "state": "shadow",
+      "active_ingestion_owner": "legacy_shards",
+      "legacy_dispatch_enabled": true,
+      "uplift_scheduler_enabled": true,
+      "uplift_production_writes_enabled": false,
+      "publication_write_mode": "shadow_comparison",
+      "last_transition_id": "rollback-finalize",
+      "updated_at_utc": "2026-08-01T19:48:53.150Z"
+    },
+    "resume_constraints": {
+      "rerun_rollback_prepare": false,
+      "redispatch_controller_enable": false,
+      "rerun_rollback_finalize": false,
+      "require_exact_installed_manager_sha256": "a4d879ae51cd7a2c00247ddddccde5430444e8c479e263aca8064376a5b954c3",
+      "require_exact_installed_decision_sha256": "2902e6e50d4614ddae4e86032e6072e86491741a3ca3394c7826b2edb811a0b2",
+      "require_exact_installed_contract_sha256": "25929ac5094131fc88db2d79ec5b5209d601d6361a8083a88984adbb72e2fd0e",
+      "allowed_pre_finalize_states": []
+    }
+  },
+  "legacy_scheduling_evidence": {
+    "frozen_commit": "a073e351e5716a97e0759cca17096851cbb80261",
+    "executed_workflow_commit": "da1794f8b8d58dfa8fe926c3dbedf1dbb321ba61",
+    "exact_commit_match": false,
+    "relevant_scheduling_files_unchanged": true,
+    "relevant_scheduling_manifest_sha256": "6fc15325fee2b28edea0783eef56408b54e4a4fd9853e884f2f24f2b91e86b37",
+    "disposition": "exactness_drift_not_proven_functional_scheduling_drift",
+    "transition_chain": [
+      {
+        "workflow_run": 30713839084,
+        "head_commit": "da1794f8b8d58dfa8fe926c3dbedf1dbb321ba61",
+        "requested_enabled": false,
+        "conclusion": "failure",
+        "artifact_id": null,
+        "disposition": "deploy_may_have_completed_but_readback_failed"
+      },
+      {
+        "workflow_run": 30713892498,
+        "head_commit": "da1794f8b8d58dfa8fe926c3dbedf1dbb321ba61",
+        "requested_enabled": false,
+        "conclusion": "success",
+        "artifact_id": 8822727856,
+        "artifact_digest": "sha256:1a943d8b6baec628c31e42c0bf999625d5114260dfc483a27524545ee7916171",
+        "disposition": "successful_pre_apply_disabled_status_verification"
+      },
+      {
+        "workflow_run": 30713955433,
+        "head_commit": "da1794f8b8d58dfa8fe926c3dbedf1dbb321ba61",
+        "requested_enabled": false,
+        "conclusion": "success",
+        "artifact_id": 8822748643,
+        "artifact_digest": "sha256:0d0b2f9327cb98e00234e09ee0de290db8f7adf17754704eb410d5a27fa64798",
+        "disposition": "completed_after_backend_database_activation"
+      }
+    ]
+  },
+  "boundary_evidence": {
+    "legacy_in_flight_drain_proven": false,
+    "legacy_to_uplift_barrier_proven": false,
+    "post_transition_boundary_verification_proven": false,
+    "single_writer_report_scope": "database_control_row_only",
+    "disposition": "unresolved_do_not_claim_boundary_integrity_or_repeat_apply"
+  },
+  "authority": {
+    "repeat_apply": false,
+    "repeat_rollback": false,
+    "rollback_resume": false,
+    "different_candidate": false,
+    "different_watermark": false,
+    "different_deadline": false,
+    "runtime_1_deployment_or_qualification": false
+  }
+}

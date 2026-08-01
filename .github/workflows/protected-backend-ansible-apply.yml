@@ -125,6 +125,26 @@ jobs:
           ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
           ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
 
+      - name: Block generic Ansible mutation outside exact shadow state
+        if: inputs.run_mode == 'apply'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            sudo -n /usr/bin/python3 - --require-maintenance-safe \
+            < scripts/backend_worker_uplift_control_state_guard.py \
+            | tee "$RUNNER_TEMP/backend-worker-uplift-control-state-guard.json"
+
       - name: Check RabbitMQ credential readiness
         shell: bash
         env:

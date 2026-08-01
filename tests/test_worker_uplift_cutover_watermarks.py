@@ -56,6 +56,7 @@ def privilege_proof():
         "row_level_security_bypass": False,
         "role_memberships": [],
         "schema_create_grants": [],
+        "owned_relations": [],
         "other_mutation_grants": [],
         "targets": [
             {
@@ -232,6 +233,12 @@ class WorkerUpliftCutoverWatermarkTests(unittest.TestCase):
         proof = privilege_proof()
         watermarks.validate_privilege_proof(proof)
         proof["other_mutation_grants"] = [{"schema": "public", "table": "articles", "privilege": "UPDATE"}]
+        with self.assertRaisesRegex(watermarks.WatermarkError, "outside the exact authorized tables"):
+            watermarks.validate_privilege_proof(proof)
+
+    def test_privilege_proof_rejects_owned_relation(self):
+        proof = privilege_proof()
+        proof["owned_relations"] = [{"schema": "public", "relation": "fixture"}]
         with self.assertRaisesRegex(watermarks.WatermarkError, "outside the exact authorized tables"):
             watermarks.validate_privilege_proof(proof)
 

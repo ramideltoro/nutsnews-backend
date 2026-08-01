@@ -143,6 +143,14 @@ jobs:
         shell: bash
         run: python3 -m unittest tests.test_worker_uplift_stage_health_projection
 
+      - name: Validate worker uplift cutover watermark authorization
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_cutover_watermarks.py
+
+      - name: Run worker uplift cutover watermark tests
+        shell: bash
+        run: python3 -m unittest tests.test_worker_uplift_cutover_watermarks
+
       - name: Validate service baseline inventory
         shell: bash
         run: python3 scripts/validate_service_baseline.py

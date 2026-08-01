@@ -1,0 +1,336 @@
+name: Backend Worker-Uplift Cutover Watermarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Build a value-free candidate or apply the exact eight-stage watermark upsert.
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - apply
+      confirmation:
+        description: For apply, type refresh-worker-uplift-cutover-watermarks. Leave blank for dry-run.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-worker-uplift-cutover-watermarks
+  cancel-in-progress: false
+
+jobs:
+  watermarks:
+    name: Build, optionally apply, and prove exact cutover watermarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production-backend
+
+    steps:
+      - name: Checkout immutable workflow source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch and standing authorization
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            dry-run)
+              if [[ -n "$CONFIRMATION" ]]; then
+                echo "Dry-run rejects apply confirmation." >&2
+                exit 1
+              fi
+              ;;
+            apply)
+              if [[ "$CONFIRMATION" != "refresh-worker-uplift-cutover-watermarks" ]]; then
+                echo "Apply requires the exact typed confirmation." >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Unsupported watermark mode." >&2
+              exit 1
+              ;;
+          esac
+          python3 scripts/validate_worker_uplift_cutover_watermarks.py
+
+      - name: Prepare protected SSH tunnel
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F "$NUTSNEWS_BACKEND_HOST" -f "$HOME/.ssh/known_hosts" > /dev/null
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh -fN -L 15432:127.0.0.1:5432 \
+            -i "$HOME/.ssh/nutsnews_backend" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o ExitOnForwardFailure=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=20 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST"
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Collect bounded runtime and queue stability evidence
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh_args=(
+            -i "$HOME/.ssh/nutsnews_backend"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o ServerAliveInterval=30
+            -o ServerAliveCountMax=20
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+          )
+
+          collect_runtime_candidate() {
+            local label="$1"
+            local root="$RUNNER_TEMP/$label"
+            install -m 0700 -d "$root/queues"
+            runtime_args=(
+              sudo -n /usr/local/sbin/nutsnews-worker-runtime status
+              --manifest /etc/nutsnews-worker-uplift/services.json
+              --compose /opt/nutsnews-worker-uplift/compose.yml
+              --project nutsnews-worker-uplift
+              --queue-kind main
+              --tail 0
+              --dry-run
+            )
+            printf '%q ' "${runtime_args[@]}" > "$root/runtime-command"
+            # The command contains only fixed arguments.
+            # shellcheck disable=SC2029
+            ssh "${ssh_args[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "$(cat "$root/runtime-command")" > "$root/runtime-status.json"
+            ssh "${ssh_args[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+              "sudo -n cat /etc/nutsnews-worker-uplift/services.json" > "$root/runtime-manifest.json"
+            ssh "${ssh_args[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+              "sudo -n cat /opt/nutsnews-worker-uplift/compose.yml" > "$root/runtime-compose.yml"
+            for stage in scheduler fetcher canonicalizer enrichment approval translation persistence publication; do
+              for kind in main retry dlq; do
+                queue_args=(
+                  sudo -n /usr/local/sbin/nutsnews-worker-runtime queue-inspect
+                  --manifest /etc/nutsnews-worker-uplift/services.json
+                  --compose /opt/nutsnews-worker-uplift/compose.yml
+                  --project nutsnews-worker-uplift
+                  --service-name "$stage"
+                  --queue-kind "$kind"
+                  --tail 0
+                  --dry-run
+                )
+                printf '%q ' "${queue_args[@]}" > "$root/queue-command"
+                # Stage and kind are fixed allowlists.
+                # shellcheck disable=SC2029
+                ssh "${ssh_args[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "$(cat "$root/queue-command")" \
+                  > "$root/queues/$stage-$kind.json"
+              done
+            done
+            python3 scripts/backend_worker_uplift_stage_health_projection.py \
+              --mode dry-run \
+              --runtime-status "$root/runtime-status.json" \
+              --runtime-manifest "$root/runtime-manifest.json" \
+              --runtime-compose "$root/runtime-compose.yml" \
+              --queue-evidence-dir "$root/queues" \
+              --output "$RUNNER_TEMP/$label-runtime-safety.json"
+          }
+
+          collect_runtime_candidate first
+          sleep 10
+          collect_runtime_candidate followup
+
+      - name: Build and validate exact value-free candidate
+        shell: bash
+        env:
+          NUTSNEWS_CUTOVER_WATERMARK_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_WATERMARK_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 scripts/backend_worker_uplift_cutover_watermarks.py \
+            --mode dry-run \
+            --runtime-first "$RUNNER_TEMP/first-runtime-safety.json" \
+            --runtime-followup "$RUNNER_TEMP/followup-runtime-safety.json" \
+            --db-password-env NUTSNEWS_CUTOVER_WATERMARK_PASSWORD \
+            --output "$RUNNER_TEMP/watermark-candidate.json"
+          python3 scripts/validate_worker_uplift_cutover_watermarks.py \
+            --artifact "$RUNNER_TEMP/watermark-candidate.json"
+          sha256sum "$RUNNER_TEMP/watermark-candidate.json" \
+            | sed "s|$RUNNER_TEMP/||" > "$RUNNER_TEMP/watermark-candidate.sha256"
+
+      - name: Apply exact bounded watermark upsert
+        if: inputs.mode == 'apply'
+        shell: bash
+        env:
+          NUTSNEWS_CUTOVER_WATERMARK_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_WATERMARK_PASSWORD }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          (cd "$RUNNER_TEMP" && sha256sum --check watermark-candidate.sha256)
+          python3 scripts/validate_worker_uplift_cutover_watermarks.py \
+            --artifact "$RUNNER_TEMP/watermark-candidate.json"
+          python3 scripts/backend_worker_uplift_cutover_watermarks.py \
+            --mode apply \
+            --artifact "$RUNNER_TEMP/watermark-candidate.json" \
+            --db-password-env NUTSNEWS_CUTOVER_WATERMARK_PASSWORD \
+            --confirmation "$CONFIRMATION" \
+            --output "$RUNNER_TEMP/watermark-apply-report.json"
+
+      - name: Collect post-apply runtime evidence
+        if: inputs.mode == 'apply'
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh_args=(
+            -i "$HOME/.ssh/nutsnews_backend"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o ServerAliveInterval=30
+            -o ServerAliveCountMax=20
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+          )
+          root="$RUNNER_TEMP/post"
+          install -m 0700 -d "$root/queues"
+          runtime_args=(
+            sudo -n /usr/local/sbin/nutsnews-worker-runtime status
+            --manifest /etc/nutsnews-worker-uplift/services.json
+            --compose /opt/nutsnews-worker-uplift/compose.yml
+            --project nutsnews-worker-uplift
+            --queue-kind main
+            --tail 0
+            --dry-run
+          )
+          printf '%q ' "${runtime_args[@]}" > "$root/runtime-command"
+          # shellcheck disable=SC2029
+          ssh "${ssh_args[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "$(cat "$root/runtime-command")" > "$root/runtime-status.json"
+          ssh "${ssh_args[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "sudo -n cat /etc/nutsnews-worker-uplift/services.json" > "$root/runtime-manifest.json"
+          ssh "${ssh_args[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "sudo -n cat /opt/nutsnews-worker-uplift/compose.yml" > "$root/runtime-compose.yml"
+          for stage in scheduler fetcher canonicalizer enrichment approval translation persistence publication; do
+            for kind in main retry dlq; do
+              queue_args=(
+                sudo -n /usr/local/sbin/nutsnews-worker-runtime queue-inspect
+                --manifest /etc/nutsnews-worker-uplift/services.json
+                --compose /opt/nutsnews-worker-uplift/compose.yml
+                --project nutsnews-worker-uplift
+                --service-name "$stage"
+                --queue-kind "$kind"
+                --tail 0
+                --dry-run
+              )
+              printf '%q ' "${queue_args[@]}" > "$root/queue-command"
+              # shellcheck disable=SC2029
+              ssh "${ssh_args[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" "$(cat "$root/queue-command")" \
+                > "$root/queues/$stage-$kind.json"
+            done
+          done
+          python3 scripts/backend_worker_uplift_stage_health_projection.py \
+            --mode dry-run \
+            --runtime-status "$root/runtime-status.json" \
+            --runtime-manifest "$root/runtime-manifest.json" \
+            --runtime-compose "$root/runtime-compose.yml" \
+            --queue-evidence-dir "$root/queues" \
+            --output "$RUNNER_TEMP/post-runtime-safety.json"
+
+      - name: Prove post-apply invariants
+        if: inputs.mode == 'apply'
+        shell: bash
+        env:
+          NUTSNEWS_CUTOVER_WATERMARK_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_WATERMARK_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 scripts/backend_worker_uplift_cutover_watermarks.py \
+            --mode verify \
+            --artifact "$RUNNER_TEMP/watermark-candidate.json" \
+            --apply-report "$RUNNER_TEMP/watermark-apply-report.json" \
+            --post-runtime "$RUNNER_TEMP/post-runtime-safety.json" \
+            --db-password-env NUTSNEWS_CUTOVER_WATERMARK_PASSWORD \
+            --output "$RUNNER_TEMP/watermark-post-apply-proof.json"
+
+      - name: Assemble immutable evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -m 0700 -d "$RUNNER_TEMP/watermark-evidence"
+          for path in \
+            "$RUNNER_TEMP/watermark-candidate.json" \
+            "$RUNNER_TEMP/watermark-candidate.sha256" \
+            "$RUNNER_TEMP/watermark-apply-report.json" \
+            "$RUNNER_TEMP/watermark-post-apply-proof.json"
+          do
+            if [[ -f "$path" ]]; then
+              install -m 0600 "$path" "$RUNNER_TEMP/watermark-evidence/"
+            fi
+          done
+          if [[ -f "$RUNNER_TEMP/watermark-evidence/watermark-candidate.json" ]]; then
+            (
+              cd "$RUNNER_TEMP/watermark-evidence"
+              sha256sum ./*.json > watermark-evidence.sha256
+            )
+          fi
+
+      - name: Summarize bounded operation
+        if: always()
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Worker-uplift cutover watermarks"
+            echo
+            echo "- Mode: \`$MODE\`"
+            echo "- Mutation scope: one \`cutover-boundary-v1\` row in each of eight stage reconciliation watermark tables."
+            echo "- Evidence is value-free and bound to an exact candidate digest."
+            echo "- No cutover, production write, replay, queue mutation, ownership change, legacy-worker change, or DNS/failover change is authorized."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload immutable watermark evidence
+        if: always()
+        uses: actions/upload-artifact@1eb3cb2b3e0f29609092a73eb033bb759a334595  # v5.0.0
+        with:
+          name: backend-worker-uplift-cutover-watermarks-${{ inputs.mode }}
+          path: |
+            ${{ runner.temp }}/watermark-evidence/watermark-candidate.json
+            ${{ runner.temp }}/watermark-evidence/watermark-candidate.sha256
+            ${{ runner.temp }}/watermark-evidence/watermark-apply-report.json
+            ${{ runner.temp }}/watermark-evidence/watermark-post-apply-proof.json
+            ${{ runner.temp }}/watermark-evidence/watermark-evidence.sha256
+          if-no-files-found: warn
+          retention-days: 90

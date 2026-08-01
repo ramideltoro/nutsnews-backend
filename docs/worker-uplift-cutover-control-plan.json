@@ -1,0 +1,525 @@
+{
+  "schema_version": 1,
+  "plan_id": "worker-uplift-cutover-control-plan",
+  "tracking_issue": "ramideltoro/nutsnews-worker#165",
+  "implementation_repository": "ramideltoro/nutsnews-backend",
+  "captured_at_utc": "2026-08-01T01:57:19Z",
+  "status": "complete_non_mutating_plan_no_cutover_authority",
+  "source_heads": [
+    {
+      "repository": "ramideltoro/nutsnews-backend",
+      "commit": "3626bba18496e808f4e9d6d2a0659ce6fee56cf0"
+    },
+    {
+      "repository": "ramideltoro/nutsnews-worker",
+      "commit": "22a2c4f33d8dacdf9fd2367de852ae29d3abaa85"
+    },
+    {
+      "repository": "ramideltoro/nutsnews-docs",
+      "commit": "63b5daa8fbb99b96dc7ebb08e26b4c48cb743bcb"
+    },
+    {
+      "repository": "ramideltoro/nutsnews-infra",
+      "commit": "e3da4c0686453643987ed18cf4c32428e5578b62"
+    }
+  ],
+  "source_contracts": [
+    "docs/worker-uplift-architecture-adr.json",
+    "docs/worker-uplift-production-readiness-decision.json",
+    "docs/worker-uplift-shadow-soak-capacity-report.json",
+    "docs/worker-uplift-legacy-to-shadow-parity-report.json",
+    "docs/worker-uplift-rabbitmq-capacity-security-decision.json",
+    "ansible/roles/backend_baseline/templates/worker-uplift-shadow-data-model.sql.j2",
+    "runbooks/WORKER_UPLIFT_PRODUCTION_READINESS_DECISION.md",
+    "ramideltoro/nutsnews-docs@77eeb52078878c2f95989db3107b814e54c52222:NUTSNEWS_WORKER_UPLIFT_OPERATIONS_CUTOVER_GUIDE.md"
+  ],
+  "authority_boundary": {
+    "issue_125": "A GO may authorize beginning guarded scheduling-control implementation in ramideltoro/nutsnews-worker#150 only.",
+    "issue_150": "Implements a reversible legacy ingestion-dispatch flag while preserving the DNS failover controller and deploys with dispatch enabled.",
+    "issue_126": "Implements protected dry-run, apply, verify, and rollback controls but leaves legacy dispatch enabled and uplift production writes disabled.",
+    "issue_166": "Freezes the exact candidate, watermark, absolute deadline, observation timestamps, thresholds, owners, and successful rollback rehearsal, then may issue a separate GO for #127.",
+    "issue_127": "Is the only issue allowed to execute an explicitly approved ingestion-owner switch.",
+    "issue_128": "May decommission legacy ingestion only after the full observation window succeeds.",
+    "this_plan_authorizes_cutover": false,
+    "this_plan_authorizes_production_writes": false,
+    "this_plan_authorizes_ingestion_owner_change": false,
+    "this_plan_authorizes_dns_or_failover_change": false,
+    "this_plan_implements_controls": false
+  },
+  "current_safety_state": {
+    "active_production_ingestion_owner": "legacy_shards",
+    "active_production_ingestion_repository": "ramideltoro/nutsnews-worker",
+    "active_production_ingestion_commit": "22a2c4f33d8dacdf9fd2367de852ae29d3abaa85",
+    "legacy_ingestion_dispatch_enabled": true,
+    "uplift_mode": "shadow",
+    "uplift_production_writes_enabled": false,
+    "uplift_production_visibility_enabled": false,
+    "cloudflare_dns_failover_controller_unchanged": true,
+    "legacy_worker_modified_by_plan": false,
+    "production_infrastructure_modified_by_plan": false,
+    "production_data_modified_by_plan": false,
+    "secret_values_recorded": false
+  },
+  "planned_execution_window": {
+    "start_utc": "2026-08-02T02:00:00Z",
+    "end_utc": "2026-08-02T04:00:00Z",
+    "status": "planning_reference_not_execution_authority",
+    "must_be_refreshed_by_issue_166_if_execution_is_outside_window": true
+  },
+  "cutover_watermark": {
+    "semantics_version": "worker-uplift-handoff-v1",
+    "status": "semantics_defined_value_not_captured",
+    "capture_issue": "ramideltoro/nutsnews-worker#166",
+    "execution_issue": "ramideltoro/nutsnews-worker#127",
+    "capture_owner_login": "ramideltoro",
+    "canonical_encoding": "UTF-8 JSON with sorted keys and compact separators",
+    "watermark_id_rule": "sha256 of the canonical value-source snapshot plus exact candidate manifest",
+    "value_sources": [
+      {
+        "id": "legacy_dispatch_fence",
+        "source": "protected #150 ingestion-scheduler status and apply receipt",
+        "required_fields": [
+          "controller_version",
+          "legacy_dispatch_enabled_before",
+          "legacy_dispatch_enabled_after",
+          "fence_applied_at_utc",
+          "last_legacy_dispatch_completed_at_utc",
+          "in_flight_legacy_dispatch_count"
+        ],
+        "required_boundary": "legacy dispatch disabled and in_flight_legacy_dispatch_count=0 while DNS failover remains active"
+      },
+      {
+        "id": "rabbitmq_drain",
+        "source": "protected backend worker-runtime status plus queue inspection",
+        "required_fields": [
+          "seven_main_queue_names",
+          "messages_ready",
+          "messages_unacknowledged",
+          "consumer_count",
+          "retry_queue_count",
+          "dlq_count",
+          "captured_at_utc"
+        ],
+        "required_boundary": "all main and retry queues drained, every DLQ explained at zero growth, and each main queue has exactly one consumer"
+      },
+      {
+        "id": "stage_reconciliation",
+        "source": "worker_uplift_<stage>.reconciliation_watermarks for all eight stages",
+        "required_fields": [
+          "stage",
+          "watermark_name",
+          "cursor_value",
+          "confirmed_message_id",
+          "confirmed_at",
+          "lag_count"
+        ],
+        "required_boundary": "every declared stage watermark has lag_count=0 and no stage is behind its confirmed publish boundary"
+      },
+      {
+        "id": "stage_outbox",
+        "source": "worker_uplift_<stage>.outbox for all eight stages",
+        "required_fields": [
+          "stage",
+          "max_confirmed_outbox_id",
+          "max_confirmed_at",
+          "max_confirmed_message_id",
+          "unconfirmed_count",
+          "retrying_count",
+          "dead_lettered_count"
+        ],
+        "required_boundary": "unconfirmed_count=0, retrying_count=0, and dead_lettered_count=0 for every stage"
+      },
+      {
+        "id": "final_effect_boundary",
+        "source": "worker_uplift_final aggregate and API-command receipt counts plus final-domain natural-key inventory",
+        "required_fields": [
+          "final_shadow_aggregate_count",
+          "production_api_command_receipt_count",
+          "failed_api_command_receipt_count",
+          "highest_committed_domain_effect_at_utc",
+          "domain_effect_keyset_sha256"
+        ],
+        "required_boundary": "failed_api_command_receipt_count=0 and the natural-key digest is frozen before production output is enabled"
+      },
+      {
+        "id": "exact_candidate",
+        "source": "#166 candidate manifest",
+        "required_fields": [
+          "eight_image_digests",
+          "source_commits",
+          "package_versions",
+          "contract_versions",
+          "runtime_configuration_sha256",
+          "rabbitmq_topology_sha256",
+          "identity_inventory_sha256",
+          "write_policy_sha256"
+        ],
+        "required_boundary": "every identity is immutable and matches deployed value-free evidence"
+      }
+    ],
+    "invalidation_triggers": [
+      "any candidate image, package, contract, topology, identity, or write-policy hash changes",
+      "legacy dispatch resumes after the fence snapshot",
+      "any queue, retry, DLQ, outbox, or reconciliation count changes before the owner switch",
+      "any source timestamp is stale, missing, unordered, or outside the approved window",
+      "any watermark lag, unconfirmed outbox row, failed API receipt, or unexplained domain effect exists",
+      "DNS failover state or controller resources differ from the #166 preflight"
+    ]
+  },
+  "rollback": {
+    "planned_absolute_deadline_utc": "2026-08-04T04:00:00Z",
+    "deadline_calculation": {
+      "reference_timestamp_utc": "2026-08-02T04:00:00Z",
+      "rollback_eligibility_hours": 48,
+      "calculation": "2026-08-02T04:00:00Z + PT48H = 2026-08-04T04:00:00Z"
+    },
+    "target_recovery_time_seconds": 900,
+    "final_gate_must_refresh_absolute_deadline": true,
+    "eligibility_requirements": [
+      "current time is not later than the frozen absolute deadline",
+      "the #166-approved watermark and exact candidate still match",
+      "uplift scheduler can be fenced before changing owner state",
+      "every uplift-only committed domain effect after the watermark is present in the durable audit and visible to the legacy natural-key dedupe boundary",
+      "no unexplained lost or duplicate boundary effect exists",
+      "the protected rollback preflight returns eligible",
+      "DNS failover remains independent and unchanged"
+    ],
+    "early_invalidation_triggers": [
+      "an uplift-only domain effect cannot be proven safe for legacy dedupe",
+      "the watermark or audit evidence is incomplete or stale",
+      "the rollback rehearsal no longer matches deployed controls",
+      "any second writer is observed",
+      "the absolute deadline passes"
+    ],
+    "action_order": [
+      "pause the uplift scheduler",
+      "wait for uplift consumers to settle or safely preserve unacknowledged work",
+      "atomically disable uplift production writes and set the recorded owner to legacy_shards",
+      "verify zero uplift production output after the owner transaction",
+      "restore legacy ingestion dispatch through the #150 reversible flag",
+      "prove exactly one production owner, compare the frozen watermark, and preserve all uplift queues, outboxes, and audit rows",
+      "rerun API, feed, admin, queue, DLQ, Grafana, and DNS-failover verification"
+    ],
+    "after_invalidation_policy": "forward recovery only unless a separately reviewed sync-back proof establishes zero loss and zero duplication",
+    "legacy_assets_retained_until": "issue #128 closes after the full observation window"
+  },
+  "observation_window": {
+    "duration_hours": 48,
+    "checkpoint_interval_seconds": 300,
+    "starts_at": "successful #127 owner/write/scheduler switch verification timestamp",
+    "ends_at": "starts_at plus 48 hours, frozen as an absolute UTC timestamp by #166",
+    "final_gate_must_freeze_absolute_start_and_end": true,
+    "legacy_dispatch_state": "disabled_but_reversible",
+    "legacy_assets_state": "deployed_or_immediately_redeployable_standby",
+    "decommission_before_window_success": false,
+    "decommission_issue": "ramideltoro/nutsnews-worker#128"
+  },
+  "thresholds": [
+    {
+      "id": "single_writer",
+      "measure": "active production ingestion owners",
+      "success": "exactly one owner and it is worker_uplift after the switch",
+      "abort": "any overlap, unknown owner, or owner/write-policy mismatch",
+      "sustain_seconds": 0
+    },
+    {
+      "id": "service_health",
+      "measure": "healthy uplift services",
+      "success": "8 of 8 healthy",
+      "abort": "any service unhealthy for two consecutive checkpoints",
+      "sustain_seconds": 600
+    },
+    {
+      "id": "consumer_count",
+      "measure": "consumer count on each of seven required main queues",
+      "success": "at least 1 on every queue",
+      "abort": "any required queue has zero consumers for two consecutive checkpoints",
+      "sustain_seconds": 600
+    },
+    {
+      "id": "queue_depth",
+      "measure": "messages_ready and messages_unacknowledged per main queue",
+      "success": "messages_ready <= 100 and messages_unacknowledged <= 10",
+      "abort": "either limit is exceeded for two consecutive checkpoints or grows across both checkpoints",
+      "sustain_seconds": 600
+    },
+    {
+      "id": "queue_age",
+      "measure": "oldest main-queue or unconfirmed-outbox age",
+      "success": "age <= 900 seconds",
+      "abort": "age > 900 seconds for two checkpoints or > 1800 seconds once",
+      "sustain_seconds": 600
+    },
+    {
+      "id": "dlq_growth",
+      "measure": "new messages across seven route DLQs",
+      "success": "growth = 0",
+      "abort": "any unexplained new DLQ message",
+      "sustain_seconds": 0
+    },
+    {
+      "id": "reconciliation",
+      "measure": "watermark lag, unconfirmed outbox, retrying outbox, and dead-lettered outbox",
+      "success": "all counts = 0 for every stage",
+      "abort": "any count remains nonzero for two checkpoints or boundary evidence diverges once",
+      "sustain_seconds": 600
+    },
+    {
+      "id": "boundary_integrity",
+      "measure": "lost or duplicate production effects across the frozen watermark",
+      "success": "lost = 0 and duplicate = 0",
+      "abort": "any lost, duplicate, or unverifiable boundary effect",
+      "sustain_seconds": 0
+    },
+    {
+      "id": "api_commands",
+      "measure": "failed or rejected production Worker DB API command receipts",
+      "success": "count = 0",
+      "abort": "any failed or rejected production receipt",
+      "sustain_seconds": 0
+    },
+    {
+      "id": "availability",
+      "measure": "backend request availability and error-free requests",
+      "success": ">= 99.5 percent over the rolling observation window",
+      "abort": "either SLI < 99.5 percent for two consecutive checkpoints",
+      "sustain_seconds": 600
+    },
+    {
+      "id": "latency",
+      "measure": "backend requests completing within 0.75 seconds",
+      "success": ">= 95 percent over the rolling observation window",
+      "abort": "SLI < 95 percent for two consecutive checkpoints",
+      "sustain_seconds": 600
+    },
+    {
+      "id": "feed_freshness",
+      "measure": "feed refresh samples with age <= 900 seconds",
+      "success": ">= 99 percent over the rolling observation window",
+      "abort": "SLI < 99 percent for two consecutive checkpoints or no fresh sample for 900 seconds",
+      "sustain_seconds": 600
+    },
+    {
+      "id": "publisher_confirms",
+      "measure": "RabbitMQ publisher confirm timeout or nack rate",
+      "success": "<= 1 percent over 10 minutes",
+      "abort": "> 1 percent over 10 minutes",
+      "sustain_seconds": 600
+    },
+    {
+      "id": "host_headroom",
+      "measure": "root disk, memory, normalized load, and failed systemd units",
+      "success": "disk <= 80 percent, memory <= 80 percent, load/vCPU <= 1.5, failed units = 0",
+      "abort": "any limit is exceeded for two checkpoints or a failed required unit appears",
+      "sustain_seconds": 600
+    },
+    {
+      "id": "qwen_and_cost",
+      "measure": "approval/translation consecutive failures, unresolved retries, OpenAI calls, and OpenAI spend",
+      "success": "failures = 0, unresolved retries = 0, OpenAI calls = 0, OpenAI spend USD = 0",
+      "abort": "any unresolved AI-stage failure, retry amplification, OpenAI call, or OpenAI spend",
+      "sustain_seconds": 0
+    },
+    {
+      "id": "observability",
+      "measure": "Grafana data freshness and critical worker-uplift alerts",
+      "success": "Prometheus and Loki current; critical alerts = 0",
+      "abort": "telemetry stale for two checkpoints or any unexplained critical alert",
+      "sustain_seconds": 600
+    },
+    {
+      "id": "dns_failover",
+      "measure": "controller health, alarm/cron, Durable Object state, DNS readback, status/actions, and analytics disposition",
+      "success": "all #166-frozen checks pass and controller state is unchanged",
+      "abort": "any controller surface is unhealthy, missing, modified, or unverifiable",
+      "sustain_seconds": 0
+    }
+  ],
+  "ownership": {
+    "authorized_owner_logins": [
+      "ramideltoro"
+    ],
+    "single_human_operator": true,
+    "independent_human_backup_available": false,
+    "owner_unavailable_policy": "NO-GO or immediate abort; retain legacy_shards as owner and keep uplift production writes false.",
+    "backup_model": "Each domain names a fail-closed safe-state control rather than fabricating an unavailable second person.",
+    "domains": [
+      {
+        "id": "ingestion",
+        "primary_owner_login": "ramideltoro",
+        "backup_owner_login": null,
+        "implementation_repository": "ramideltoro/nutsnews-worker",
+        "backup_control_id": "abort-keep-legacy-ingestion-owner"
+      },
+      {
+        "id": "scheduling",
+        "primary_owner_login": "ramideltoro",
+        "backup_owner_login": null,
+        "implementation_repository": "ramideltoro/nutsnews-worker",
+        "backup_control_id": "abort-keep-legacy-dispatch-enabled"
+      },
+      {
+        "id": "write_enablement",
+        "primary_owner_login": "ramideltoro",
+        "backup_owner_login": null,
+        "implementation_repository": "ramideltoro/nutsnews-backend",
+        "backup_control_id": "abort-keep-uplift-writes-false"
+      },
+      {
+        "id": "rabbitmq",
+        "primary_owner_login": "ramideltoro",
+        "backup_owner_login": null,
+        "implementation_repository": "ramideltoro/nutsnews-backend",
+        "backup_control_id": "pause-scheduler-preserve-queues-outboxes"
+      },
+      {
+        "id": "database_api",
+        "primary_owner_login": "ramideltoro",
+        "backup_owner_login": null,
+        "implementation_repository": "ramideltoro/nutsnews-backend",
+        "backup_control_id": "disable-uplift-output-preserve-audit"
+      },
+      {
+        "id": "qwen",
+        "primary_owner_login": "ramideltoro",
+        "backup_owner_login": null,
+        "implementation_repository": "ramideltoro/nutsnews-backend",
+        "backup_control_id": "pause-ai-stages-preserve-retry-state"
+      },
+      {
+        "id": "observability",
+        "primary_owner_login": "ramideltoro",
+        "backup_owner_login": null,
+        "implementation_repository": "ramideltoro/nutsnews-infra",
+        "backup_control_id": "hold-cutover-use-independent-runtime-status"
+      },
+      {
+        "id": "cloudflare_failover",
+        "primary_owner_login": "ramideltoro",
+        "backup_owner_login": null,
+        "implementation_repository": "ramideltoro/nutsnews-infra",
+        "backup_control_id": "abort-never-change-dns-failover"
+      },
+      {
+        "id": "incident_command",
+        "primary_owner_login": "ramideltoro",
+        "backup_owner_login": null,
+        "implementation_repository": "ramideltoro/nutsnews-worker",
+        "backup_control_id": "no-commander-no-go"
+      },
+      {
+        "id": "rollback",
+        "primary_owner_login": "ramideltoro",
+        "backup_owner_login": null,
+        "implementation_repository": "ramideltoro/nutsnews-backend",
+        "backup_control_id": "deadline-or-evidence-failure-forward-recovery"
+      },
+      {
+        "id": "final_approval",
+        "primary_owner_login": "ramideltoro",
+        "backup_owner_login": null,
+        "implementation_repository": "ramideltoro/nutsnews-worker",
+        "backup_control_id": "no-named-approver-no-go"
+      }
+    ]
+  },
+  "single_writer_handoff": [
+    {
+      "sequence": 1,
+      "phase": "preflight",
+      "legacy_dispatch": "enabled",
+      "active_owner": "legacy_shards",
+      "uplift_production_writes": false,
+      "required_evidence": "#166 GO for the exact candidate and successful non-mutating rollback rehearsal"
+    },
+    {
+      "sequence": 2,
+      "phase": "fence_and_drain",
+      "legacy_dispatch": "disabled through #150 only after #127 authorization",
+      "active_owner": "legacy_shards",
+      "uplift_production_writes": false,
+      "required_evidence": "legacy in-flight count zero; uplift scheduler paused; queues/outboxes/reconciliation settled; DNS failover unchanged"
+    },
+    {
+      "sequence": 3,
+      "phase": "freeze_watermark",
+      "legacy_dispatch": "disabled",
+      "active_owner": "legacy_shards",
+      "uplift_production_writes": false,
+      "required_evidence": "canonical watermark artifact and digest match the #166 frozen candidate"
+    },
+    {
+      "sequence": 4,
+      "phase": "atomic_owner_and_write_switch",
+      "legacy_dispatch": "disabled",
+      "active_owner": "worker_uplift",
+      "uplift_production_writes": true,
+      "required_evidence": "#126 compare-and-swap transaction proves prior owner legacy_shards and cannot create two writers"
+    },
+    {
+      "sequence": 5,
+      "phase": "start_uplift_scheduler_and_verify",
+      "legacy_dispatch": "disabled",
+      "active_owner": "worker_uplift",
+      "uplift_production_writes": true,
+      "required_evidence": "uplift scheduler active; boundary smoke/parity passes; every threshold green; DNS failover unchanged"
+    }
+  ],
+  "evidence_custody": {
+    "source_control_owner": "ramideltoro/nutsnews-backend",
+    "tracking_owner": "ramideltoro/nutsnews-worker",
+    "artifact_owner": "GitHub Actions protected backend and infra workflows",
+    "minimum_retention_days_after_issue_128_closure": 90,
+    "required_identifiers": [
+      "repository",
+      "workflow run ID",
+      "head commit",
+      "environment",
+      "artifact ID",
+      "artifact digest",
+      "downloaded report SHA-256",
+      "generated-at UTC timestamp",
+      "watermark ID",
+      "candidate manifest SHA-256"
+    ],
+    "download_before_platform_expiry": true,
+    "issue_comments_record_digests_not_secret_values": true,
+    "forbidden_content": [
+      "credentials",
+      "connection strings",
+      "authorization headers",
+      "private keys",
+      "message payloads",
+      "article bodies",
+      "prompt text",
+      "model responses"
+    ]
+  },
+  "final_gate_refresh": {
+    "issue": "ramideltoro/nutsnews-worker#166",
+    "required_exact_fields": [
+      "planned_execution_window.start_utc",
+      "planned_execution_window.end_utc",
+      "cutover_watermark complete value-source snapshot and SHA-256",
+      "rollback.planned_absolute_deadline_utc",
+      "observation_window absolute start and end",
+      "threshold evaluation artifact IDs and digests",
+      "ownership roster availability",
+      "eight image digests and source commits",
+      "package and contract versions",
+      "runtime configuration, topology, identity, and write-policy hashes",
+      "deployed owner and write-policy state",
+      "rollback rehearsal run and artifact",
+      "DNS failover controller and analytics disposition evidence"
+    ],
+    "stale_or_missing_field_decision": "NO-GO",
+    "named_approver_required": true,
+    "automation_is_approval": false,
+    "go_authority": "authorize protected #127 execution only"
+  },
+  "validation": {
+    "validator": "python3 scripts/validate_worker_uplift_cutover_control_plan.py",
+    "focused_tests": "python3 -m unittest tests.test_worker_uplift_cutover_control_plan",
+    "backend_checks_enforced": true
+  }
+}

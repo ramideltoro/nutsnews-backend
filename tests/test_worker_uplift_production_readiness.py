@@ -77,6 +77,45 @@ class WorkerUpliftProductionReadinessTests(unittest.TestCase):
 
         self.assertTrue(any("status must be resolved" in error for error in errors))
 
+    def test_resolved_cutover_plan_blocker_tracks_complete_plan(self):
+        decision = copy.deepcopy(self.decision)
+        blocker = next(
+            item
+            for item in decision["blockers"]
+            if item["id"] == "control_implementation_plan"
+        )
+        blocker["status"] = "open"
+
+        errors = self.validate(decision=decision)
+
+        self.assertTrue(any("status must be resolved" in error for error in errors))
+
+    def test_cutover_plan_hash_drift_is_rejected(self):
+        decision = copy.deepcopy(self.decision)
+        rollback = decision["runtime_and_recovery_evidence"]["rollback_limits"]
+        rollback["plan_sha256"] = "0" * 64
+
+        errors = self.validate(decision=decision)
+
+        self.assertTrue(any("stale #165 plan SHA-256" in error for error in errors))
+
+    def test_cutover_plan_cannot_claim_implemented_controls(self):
+        decision = copy.deepcopy(self.decision)
+        rollback = decision["runtime_and_recovery_evidence"]["rollback_limits"]
+        rollback["production_owner_rollback_workflow_exists"] = True
+        rollback["cutover_watermark_exists"] = True
+
+        errors = self.validate(decision=decision)
+
+        self.assertIn(
+            "rollback_limits.production_owner_rollback_workflow_exists must remain false",
+            errors,
+        )
+        self.assertIn(
+            "rollback_limits.cutover_watermark_exists must remain false",
+            errors,
+        )
+
     def test_security_gate_tracks_only_current_pending_dispositions(self):
         decision = copy.deepcopy(self.decision)
         decision["security_gate"]["residual_findings_requiring_gate_disposition"].append(

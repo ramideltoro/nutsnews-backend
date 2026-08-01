@@ -104,6 +104,14 @@ jobs:
         shell: bash
         run: python3 -m unittest tests.test_worker_uplift_security_remediation_builds
 
+      - name: Validate worker uplift cutover control plan
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_cutover_control_plan.py
+
+      - name: Run worker uplift cutover control plan tests
+        shell: bash
+        run: python3 -m unittest tests.test_worker_uplift_cutover_control_plan
+
       - name: Validate worker uplift production readiness decision
         shell: bash
         run: python3 scripts/validate_worker_uplift_production_readiness.py

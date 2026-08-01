@@ -86,7 +86,7 @@ apply mode, `#127`, production writes, or an ingestion-owner change.
 | Admin deployed proof | Block | Source and access control are present; `#163` owns current authenticated production projection proof |
 | Security residuals | Pass | `SEC-124-002` through `SEC-124-006` are remediated; `SEC-124-007` through `SEC-124-009` have bounded, dated owner acceptance under the exact-scope standing authorization owned by `#164` |
 | Cloudflare failover | Block | Deployed and source config omit `FAILOVER_ANALYTICS`; worker tracker `#157` owns the infra fix/decision |
-| Control implementation plan | Block | Exact planned watermark, rollback deadline, observation window, thresholds, and named owners are missing; `#165` owns the non-mutating plan |
+| Control implementation plan | Pass | `docs/worker-uplift-cutover-control-plan.json` defines the watermark sources, planning-only absolute rollback deadline, 48-hour observation window, thresholds, named owner, and fail-closed unavailable-owner controls; `#166` must refresh the exact candidate values |
 | Named readiness approval | Block | No named GO approver exists |
 
 ## Action classes
@@ -190,8 +190,9 @@ workflow. In particular:
 - current parity, empty-broker, identity, and outage evidence belongs to
   `#158` through `#161`;
 - backup/restore and admin proof belongs to `#162` and `#163`;
-- the completed named security dispositions belong to `#164`; the control
-  implementation plan belongs to `#165`;
+- the completed named security dispositions belong to `#164`; the completed
+  non-mutating control plan belongs to `#165`, and `#166` must refresh its exact
+  production-candidate values;
 - scheduler production-adapter remediation and current proof belongs to `#168`;
 - implementation of scheduling and reversible owner/write controls belongs
   to downstream issues `#150` and `#126`, not #125.
@@ -245,9 +246,10 @@ Before any later GO:
    Cloudflare artifacts.
 5. Reconcile the identity inventory with the authoritative topology.
 6. Record remediation or a named bounded acceptance for every #124 residual.
-7. Define the exact planned watermark, synchronization boundary, rollback
-   deadline, observation window, thresholds, and named ownership roster in
-   `#165`; do not require the downstream controls to exist yet.
+7. Retain the validated `#165` plan and have `#166` refresh and freeze its
+   execution window, watermark values, absolute rollback deadline, observation
+   timestamps, threshold evidence, exact candidate, and owner availability; do
+   not require the downstream controls to exist at the `#125` gate.
 8. Complete `#168` and prove scheduler readiness uses current time and
    production shadow adapters against the exact candidate.
 9. Retain the immutable artifacts for approved run `30513933114` and

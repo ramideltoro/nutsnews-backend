@@ -3,7 +3,7 @@
   "decision_id": "worker-uplift-production-readiness",
   "tracking_issue": "ramideltoro/nutsnews-worker#125",
   "implementation_repository": "ramideltoro/nutsnews-backend",
-  "evaluated_at_utc": "2026-07-30T19:02:13Z",
+  "evaluated_at_utc": "2026-08-01T01:57:19Z",
   "tracking_model_corrected_at_utc": "2026-07-30T17:59:51Z",
   "review_mode": "non_mutating_production_readiness_decision",
   "decision_scope": "guarded_cutover_control_implementation_readiness",
@@ -76,10 +76,10 @@
   },
   "review_base": {
     "repository": "ramideltoro/nutsnews-backend",
-    "commit": "ba26e7bb9fa7a4f30773216da1e69bfe7ec3bf0d"
+    "commit": "3626bba18496e808f4e9d6d2a0659ce6fee56cf0"
   },
   "decision": "no_go",
-  "decision_summary": "Readiness to begin guarded cutover-control implementation is not approved. FAILOVER_ANALYTICS is absent from both the deployed Cloudflare Worker and current infra source; current parity and empty-broker recovery proof do not match the deployed image/topology set; the deployed scheduler uses local test dependencies and a fixed readiness clock; current dependency-outage, backup/restore, identity, and authenticated-admin evidence is missing or stale; exact planned watermark, rollback deadline, observation window, and operational ownership are not recorded; and no named approver has issued GO. The #164 security disposition gate now passes under bounded, dated owner acceptance and an exact-scope standing authorization. Missing implementation of downstream issues #150 and #126 is not a #125 blocker.",
+  "decision_summary": "Readiness to begin guarded cutover-control implementation is not approved. The deployed scheduler still uses local test dependencies and a fixed readiness clock, several previously collected evidence surfaces require a final exact-candidate reevaluation, and no named #125 approver has issued GO. The #164 security disposition gate and #165 non-mutating cutover-control plan now pass. #165 defines the planned watermark semantics, absolute rollback deadline, 48-hour observation window, thresholds, named owner, and fail-closed unavailable-owner controls; #166 must refresh and freeze the exact execution values. Missing implementation of downstream issues #150 and #126 is not a #125 blocker.",
   "issue_closure_authorized": false,
   "tracking_issue_state_required": "open",
   "named_approver": null,
@@ -105,7 +105,7 @@
   "source_heads": [
     {
       "repository": "ramideltoro/nutsnews-backend",
-      "commit": "ba26e7bb9fa7a4f30773216da1e69bfe7ec3bf0d",
+      "commit": "3626bba18496e808f4e9d6d2a0659ce6fee56cf0",
       "role": "deployment_and_host_operations"
     },
     {
@@ -353,6 +353,10 @@
       "sha256": "a457bd1acabeb48e2a85f30a8bd8e5e0e1b5b4509961354f84795e2b74a39d48"
     },
     {
+      "path": "docs/worker-uplift-cutover-control-plan.json",
+      "sha256": "02eeee861498c81803da4452c9e49c5c4b28a9999c03195e74d3af1606970bdc"
+    },
+    {
       "path": "docs/worker-uplift-shadow-soak-capacity-report.json",
       "sha256": "e327379b89c66022ca17e85100c7da8355b7efe12bb0485103de08911df84f46"
     },
@@ -579,12 +583,18 @@
       ]
     },
     "rollback_limits": {
-      "status": "planned_parameters_missing",
+      "status": "planned_parameters_complete_controls_not_implemented",
       "current_runtime_rollback_scope": "single shadow service image only",
       "production_owner_rollback_workflow_exists": false,
       "cutover_watermark_exists": false,
-      "rollback_deadline_defined": false,
-      "observation_window_approved": false,
+      "cutover_watermark_semantics_defined": true,
+      "rollback_deadline_defined": true,
+      "planned_absolute_rollback_deadline_utc": "2026-08-04T04:00:00Z",
+      "observation_window_approved": true,
+      "observation_window_duration_hours": 48,
+      "ownership_plan_complete": true,
+      "plan_path": "docs/worker-uplift-cutover-control-plan.json",
+      "plan_sha256": "02eeee861498c81803da4452c9e49c5c4b28a9999c03195e74d3af1606970bdc",
       "planning_blocker_issue": "ramideltoro/nutsnews-worker#165",
       "downstream_control_implementation_required_before": "ramideltoro/nutsnews-worker#166",
       "downstream_control_implementation_blocks_issue_125": false,
@@ -755,8 +765,8 @@
     },
     {
       "id": "control_implementation_plan",
-      "status": "block",
-      "evidence": "The exact planned watermark semantics, rollback deadline, observation window, thresholds, and named ownership roster are missing; #165 owns the non-mutating plan. Implementation of #150/#126 is downstream and is not a #125 blocker."
+      "status": "pass",
+      "evidence": "The source-controlled #165 plan defines six exact watermark value sources and canonical hashing, a planning-only absolute execution window and 2026-08-04T04:00:00Z rollback deadline, a 48-hour observation window, 17 fail-closed thresholds, the named owner for every operational domain, and explicit safe-state controls when no independent human backup is available. #166 must refresh and freeze the exact candidate values. Implementation of #150/#126 is downstream and is not a #125 blocker."
     },
     {
       "id": "named_readiness_approval",
@@ -823,10 +833,10 @@
     },
     {
       "id": "control_implementation_plan",
-      "status": "open",
+      "status": "resolved",
       "owner_repository": "ramideltoro/nutsnews-backend",
       "issue": "ramideltoro/nutsnews-worker#165",
-      "required_resolution": "Record the exact planned watermark semantics, rollback deadline, observation window, thresholds, and named owners needed to implement #150/#126. Do not require those downstream controls to exist at #125."
+      "required_resolution": "Resolved by the source-controlled #165 machine plan, validator, focused tests, and runbook. #166 must refresh and freeze the exact candidate values; #150/#126 remain downstream and do not block #125."
     },
     {
       "id": "scheduler_local_test_dependencies",
@@ -849,7 +859,7 @@
     "Complete #160 by reconciling the runtime identity inventory with the authoritative topology.",
     "Complete #161, #162, and #163 with current dependency-outage, backup/isolated-restore, and authenticated-admin evidence.",
     "Retain #164 closure evidence and revalidate its exact-scope standing authorization before its dated review and expiry gates; no per-release or first-run owner comment is required while the pinned scope is unchanged.",
-    "Complete #165 with exact planned watermark, rollback deadline, observation window, thresholds, and named owners; #150/#126 implementation is deliberately downstream of #125.",
+    "Retain the #165 machine plan and have #166 refresh its planning window, absolute rollback deadline, watermark values, observation timestamps, candidate evidence, threshold evaluations, and owner availability; #150/#126 implementation remains deliberately downstream of #125.",
     "Complete #168 by replacing the deployed scheduler's local test dependencies and fixed clock, then attach current immutable readiness and scheduler-smoke proof.",
     "Retain the closed #167 approval-free runtime evidence path and rerun status if the candidate images or runtime configuration change.",
     "Obtain a named current approver only after every #125 blocker is closed; GO authorizes beginning #150 only.",

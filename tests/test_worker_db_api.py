@@ -1211,6 +1211,49 @@ class WorkerDbApiTests(unittest.TestCase):
         self.assertEqual(403, error.exception.status)
         self.assertEqual([], store.executes)
 
+    def test_uplift_primary_command_requires_matching_database_single_writer_control(self) -> None:
+        digest = "a" * 64
+        watermark = "b" * 64
+        store = FakeStore()
+        store.writes_enabled = True
+        store.worker_uplift_cutover_state = "cutover-approved"
+        store.worker_uplift_production_writes_enabled = True
+        store.worker_uplift_expected_candidate_sha256 = digest
+        store.worker_uplift_expected_watermark_sha256 = watermark
+        store.fetch_one = lambda _query, _params=(): {
+            "state": "cutover_active",
+            "active_ingestion_owner": "worker_uplift",
+            "legacy_dispatch_enabled": False,
+            "uplift_scheduler_enabled": True,
+            "uplift_production_writes_enabled": True,
+            "publication_write_mode": "production",
+            "candidate_sha256": digest,
+            "watermark_sha256": watermark,
+        }
+
+        worker_db_api.assert_worker_uplift_production_allowed(store)
+
+        store.worker_uplift_expected_watermark_sha256 = "c" * 64
+        with self.assertRaises(worker_db_api.ApiError) as error:
+            worker_db_api.assert_worker_uplift_production_allowed(store)
+        self.assertEqual(403, error.exception.status)
+
+    def test_uplift_primary_command_fails_closed_when_control_read_fails(self) -> None:
+        store = FakeStore()
+        store.writes_enabled = True
+        store.worker_uplift_cutover_state = "cutover-approved"
+        store.worker_uplift_production_writes_enabled = True
+        store.worker_uplift_expected_candidate_sha256 = "a" * 64
+        store.worker_uplift_expected_watermark_sha256 = "b" * 64
+
+        def failed_read(_query, _params=()):
+            raise RuntimeError("redacted")
+
+        store.fetch_one = failed_read
+        with self.assertRaises(worker_db_api.ApiError) as error:
+            worker_db_api.assert_worker_uplift_production_allowed(store)
+        self.assertEqual(403, error.exception.status)
+
     def test_scoped_tokens_are_distinct_and_resolve_to_scope(self) -> None:
         with patch.dict(
             worker_db_api.os.environ,

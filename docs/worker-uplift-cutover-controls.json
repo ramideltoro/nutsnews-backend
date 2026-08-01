@@ -1,0 +1,275 @@
+{
+  "schema_version": 1,
+  "control_id": "worker-uplift-cutover-controls-v1",
+  "tracking_issue": "ramideltoro/nutsnews-worker#126",
+  "implementation_repository": "ramideltoro/nutsnews-backend",
+  "legacy_scheduling_repository": "ramideltoro/nutsnews-worker",
+  "status": "implemented_fail_closed_not_cutover_authority",
+  "standing_authorization": {
+    "kind": "standing_bounded_authorization",
+    "authorized_owner_login": "ramideltoro",
+    "authorized_at_utc": "2026-08-01T07:56:42Z",
+    "owner_evidence": {
+      "kind": "issue_comment",
+      "url": "https://github.com/ramideltoro/nutsnews-worker/issues/126#issuecomment-5150510712",
+      "author_login": "ramideltoro",
+      "authored_at_utc": "2026-08-01T07:56:42Z",
+      "body_sha256": "654dd45f2a425ca59a5115cb1ce0fd9d1e87488682b103d52673c9c2cff19544"
+    },
+    "per_release_owner_approval_required": false,
+    "first_run_owner_approval_required": false,
+    "routine_environment_wait_owner_approval_required": false,
+    "survives_candidate_revisions": true,
+    "fails_closed_on_scope_change": true,
+    "authorized_operations": [
+      "preflight",
+      "dry-run",
+      "rehearse",
+      "verify",
+      "deploy-safe-controls"
+    ],
+    "authorized_environment": "production-backend",
+    "authorized_typed_confirmations": [
+      "inspect-worker-uplift-cutover-controls",
+      "plan-worker-uplift-cutover",
+      "rehearse-worker-uplift-rollback",
+      "verify-worker-uplift-cutover-controls",
+      "deploy-worker-uplift-cutover-controls-safe"
+    ],
+    "scope_fingerprint_fields": [
+      "standing_authorization.authorized_operations",
+      "standing_authorization.authorized_environment",
+      "standing_authorization.authorized_typed_confirmations",
+      "standing_authorization.excluded_authorities",
+      "current_required_state",
+      "database_control.target",
+      "database_control.role",
+      "database_control.allowed_statements",
+      "workflow.path",
+      "workflow.concurrency_group",
+      "workflow.mutation_modes",
+      "workflow.routine_modes"
+    ],
+    "scope_sha256": "17dffe06f80ec9266761a84a2c738517c57da31e57ad8936dce16d003c021804",
+    "excluded_authorities": [
+      "issue-166-go",
+      "issue-127-execution",
+      "cutover",
+      "production-writes",
+      "ingestion-ownership-change",
+      "legacy-ingestion-disable",
+      "legacy-worker-code-change",
+      "dns-change",
+      "failover-change",
+      "cloudflare-change",
+      "arbitrary-sql",
+      "secret-value-retrieval",
+      "risk-acceptance"
+    ]
+  },
+  "current_required_state": {
+    "active_ingestion_owner": "legacy_shards",
+    "legacy_dispatch_enabled": true,
+    "uplift_mode": "shadow",
+    "uplift_production_writes_enabled": false,
+    "uplift_scheduler_enabled": true,
+    "dns_failover_unchanged": true
+  },
+  "state_machine": {
+    "initial_state": "shadow",
+    "states": {
+      "shadow": {
+        "active_ingestion_owner": "legacy_shards",
+        "legacy_dispatch_enabled": true,
+        "uplift_scheduler_enabled": true,
+        "uplift_production_writes_enabled": false,
+        "publication_write_mode": "shadow_comparison"
+      },
+      "fenced": {
+        "active_ingestion_owner": "legacy_shards",
+        "legacy_dispatch_enabled": false,
+        "uplift_scheduler_enabled": false,
+        "uplift_production_writes_enabled": false,
+        "publication_write_mode": "shadow_comparison"
+      },
+      "cutover_active": {
+        "active_ingestion_owner": "worker_uplift",
+        "legacy_dispatch_enabled": false,
+        "uplift_scheduler_enabled": true,
+        "uplift_production_writes_enabled": true,
+        "publication_write_mode": "production"
+      },
+      "rollback_pending": {
+        "active_ingestion_owner": "legacy_shards",
+        "legacy_dispatch_enabled": false,
+        "uplift_scheduler_enabled": false,
+        "uplift_production_writes_enabled": false,
+        "publication_write_mode": "shadow_comparison"
+      }
+    },
+    "transitions": [
+      {
+        "id": "fence",
+        "from": "shadow",
+        "to": "fenced",
+        "execution_issue": "ramideltoro/nutsnews-worker#127",
+        "requires_legacy_scheduler_status": false
+      },
+      {
+        "id": "activate",
+        "from": "fenced",
+        "to": "cutover_active",
+        "execution_issue": "ramideltoro/nutsnews-worker#127",
+        "requires_exact_final_go": true
+      },
+      {
+        "id": "rollback-prepare",
+        "from": "cutover_active",
+        "to": "rollback_pending",
+        "execution_issue": "ramideltoro/nutsnews-worker#127",
+        "requires_deadline_eligibility": true
+      },
+      {
+        "id": "rollback-finalize",
+        "from": "rollback_pending",
+        "to": "shadow",
+        "execution_issue": "ramideltoro/nutsnews-worker#127",
+        "requires_legacy_scheduler_status": true
+      }
+    ]
+  },
+  "single_writer_invariants": [
+    "uplift production writes imply active_ingestion_owner=worker_uplift",
+    "uplift production writes imply legacy_dispatch_enabled=false",
+    "legacy dispatch enabled implies uplift production writes disabled",
+    "publication production mode is ineffective unless the API environment guard and database compare-and-swap row both authorize the same candidate and watermark",
+    "every partial failure leaves either zero writers or exactly one writer"
+  ],
+  "database_control": {
+    "target": "worker_uplift_final.cutover_control",
+    "audit_target": "worker_uplift_final.cutover_control_audit",
+    "row_id": "production",
+    "role": "nutsnews_worker_uplift_cutover",
+    "role_secret": "NUTSNEWS_WORKER_UPLIFT_CUTOVER_PASSWORD",
+    "allowed_statements": [
+      "SELECT worker_uplift_final.cutover_control production row",
+      "UPDATE worker_uplift_final.cutover_control production row with generation and prior-state compare-and-swap"
+    ],
+    "forbidden_statements": [
+      "INSERT",
+      "DELETE",
+      "TRUNCATE",
+      "ALTER",
+      "CREATE",
+      "DROP",
+      "arbitrary SQL",
+      "article or domain table writes"
+    ],
+    "audit_mechanism": "security-definer trigger records every accepted state transition; the cutover role cannot modify audit rows",
+    "statement_timeout_seconds": 30
+  },
+  "write_gate": {
+    "all_required": [
+      "NUTSNEWS_WORKER_DB_API_WRITES_ENABLED=true",
+      "NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE=cutover-approved",
+      "NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED=true",
+      "database cutover_control state=cutover_active",
+      "database active_ingestion_owner=worker_uplift",
+      "database legacy_dispatch_enabled=false",
+      "database candidate_sha256 and watermark_sha256 match the API environment",
+      "publication write mode=production with the fixed protected confirmation"
+    ],
+    "publication_confirmation": "backend-protected-publication-cutover-approved",
+    "fail_closed_on_database_read_error": true
+  },
+  "legacy_scheduling_control": {
+    "workflow": "ramideltoro/nutsnews-worker/.github/workflows/controller-ingestion-scheduling-operations.yml",
+    "disabled_confirmation": "set-ingestion-scheduling-false",
+    "enabled_confirmation": "set-ingestion-scheduling-true",
+    "status_endpoint": "https://nutsnews-controller.nutsnews.workers.dev/ingestion-scheduling/status",
+    "health_endpoint": "https://nutsnews-controller.nutsnews.workers.dev/healthz",
+    "cross_repository_token": "NUTSNEWS_MAINTENANCE_GITHUB_TOKEN",
+    "fixed_repository": "ramideltoro/nutsnews-worker",
+    "fixed_workflow": "controller-ingestion-scheduling-operations.yml"
+  },
+  "workflow": {
+    "path": ".github/workflows/backend-worker-uplift-cutover-controls.yml",
+    "source_branch": "main",
+    "environment": "production-backend",
+    "concurrency_group": "backend-worker-uplift-cutover-controls",
+    "timeout_minutes": 30,
+    "routine_modes": [
+      "preflight",
+      "dry-run",
+      "rehearse",
+      "verify"
+    ],
+    "mutation_modes": [
+      "apply",
+      "rollback"
+    ],
+    "apply_confirmation_prefix": "execute-worker-uplift-cutover:",
+    "rollback_confirmation_prefix": "rollback-worker-uplift-cutover:",
+    "final_decision_path": "docs/worker-uplift-final-cutover-decision.json",
+    "artifact_retention_days": 90
+  },
+  "apply_order": [
+    "validate exact #166 GO, candidate, watermark, deadline, source commit, and #127 authority",
+    "collect current backend, queue, API, admin, telemetry, and failover evidence",
+    "disable only legacy ingestion scheduling through the #150 protected workflow",
+    "stop the uplift scheduler and prove main/retry queues, outboxes, and in-flight work are drained",
+    "prepare the fail-closed API and publication production configuration while database control still denies writes",
+    "compare-and-swap the database production row from fenced to cutover_active",
+    "start the uplift scheduler",
+    "verify single writer, smoke/parity, queues, DLQs, API, snapshot, admin, Grafana, canary, alerts, and failover controller"
+  ],
+  "rollback_order": [
+    "verify rollback deadline and exact candidate/watermark eligibility",
+    "stop the uplift scheduler",
+    "compare-and-swap the database row to legacy owner with uplift writes disabled",
+    "restore shadow API and publication configuration",
+    "verify zero uplift production output after the rollback fence",
+    "re-enable legacy ingestion scheduling through the #150 protected workflow",
+    "finalize the database row only after live legacy status is enabled",
+    "verify one legacy owner, preserved uplift queues/audit/state, and unchanged failover controller"
+  ],
+  "partial_failure_policy": {
+    "before_database_activation": "zero uplift writer; legacy remains fenced or active; rerun or roll back",
+    "after_database_activation": "uplift is the only allowed writer and legacy remains fenced; rerun verification or initiate eligible rollback",
+    "during_rollback_before_legacy_enable": "zero production writers; keep legacy fenced until shadow restoration is proven",
+    "after_deadline": "forward recovery only unless a separately reviewed sync-back proof exists",
+    "reruns_idempotent": true
+  },
+  "evidence": {
+    "safe_metadata_only": true,
+    "required_artifacts": [
+      "cutover-control-report.json for each dispatched mode",
+      "protected controller scheduling artifact for any future apply or rollback",
+      "SHA256SUMS"
+    ],
+    "required_post_checks": [
+      "single writer",
+      "exact candidate and watermark",
+      "uplift runtime health and seven consumers",
+      "main/retry queue drain and no unexplained DLQ growth",
+      "database API and public snapshot",
+      "authenticated admin",
+      "Grafana metrics/logs/alerts and RabbitMQ canary",
+      "legacy scheduling state",
+      "DNS failover health/status/actions/alarms/analytics unchanged"
+    ],
+    "forbidden_content": [
+      "secret values",
+      "connection strings",
+      "authorization headers",
+      "message payloads",
+      "article or domain content",
+      "private endpoints"
+    ]
+  },
+  "validation": {
+    "validator": "python3 scripts/validate_worker_uplift_cutover_controls.py",
+    "focused_tests": "python3 -m unittest tests.test_worker_uplift_cutover_controls",
+    "backend_checks_enforced": true
+  }
+}

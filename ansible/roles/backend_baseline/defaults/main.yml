@@ -100,6 +100,8 @@ backend_worker_uplift_postgres_persistence_user: nutsnews_worker_uplift_persiste
 backend_worker_uplift_postgres_publication_user: nutsnews_worker_uplift_publication
 backend_worker_uplift_projection_user: nutsnews_worker_uplift_projection
 backend_worker_uplift_projection_password: ""
+backend_worker_uplift_cutover_user: nutsnews_worker_uplift_cutover
+backend_worker_uplift_cutover_password: ""
 backend_worker_uplift_postgres_scheduler_password: ""
 backend_worker_uplift_postgres_fetcher_password: ""
 backend_worker_uplift_postgres_canonicalizer_password: ""
@@ -161,6 +163,8 @@ backend_worker_api_uplift_persistence_token: ""
 backend_worker_api_uplift_publication_token: ""
 backend_worker_api_uplift_cutover_state: shadow
 backend_worker_api_uplift_production_writes_enabled: false
+backend_worker_api_uplift_expected_candidate_sha256: ""
+backend_worker_api_uplift_expected_watermark_sha256: ""
 backend_worker_api_db_host: 127.0.0.1
 backend_worker_api_db_port: "5432"
 backend_worker_api_db_name: "{{ backend_postgres_primary_shadow_database }}"

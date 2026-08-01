@@ -996,6 +996,14 @@ class PostgresStore:
             "NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED",
             False,
         )
+        self.worker_uplift_expected_candidate_sha256 = os.environ.get(
+            "NUTSNEWS_WORKER_UPLIFT_EXPECTED_CANDIDATE_SHA256",
+            "",
+        )
+        self.worker_uplift_expected_watermark_sha256 = os.environ.get(
+            "NUTSNEWS_WORKER_UPLIFT_EXPECTED_WATERMARK_SHA256",
+            "",
+        )
 
     def connect(self):
         import psycopg2
@@ -1106,6 +1114,24 @@ def assert_worker_uplift_scope(operation: str, auth_scope: str, actor_service: s
         raise ApiError(403, "actorService must match the authenticated worker-uplift scope")
 
 
+def worker_uplift_database_control(store: PostgresStore) -> dict[str, Any] | None:
+    """Read the sole production control row, failing closed on any DB error."""
+    try:
+        row = store.fetch_one(
+            """
+            select state, active_ingestion_owner, legacy_dispatch_enabled,
+                   uplift_scheduler_enabled, uplift_production_writes_enabled,
+                   publication_write_mode, candidate_sha256, watermark_sha256
+            from worker_uplift_final.cutover_control
+            where control_id = %s
+            """,
+            ("production",),
+        )
+    except Exception:
+        return None
+    return row if isinstance(row, dict) else None
+
+
 def assert_worker_uplift_production_allowed(store: PostgresStore) -> None:
     cutover_state = getattr(store, "worker_uplift_cutover_state", "shadow")
     production_writes_enabled = bool(getattr(store, "worker_uplift_production_writes_enabled", False))
@@ -1113,6 +1139,23 @@ def assert_worker_uplift_production_allowed(store: PostgresStore) -> None:
         raise ApiError(403, "worker-uplift production writes require protected cutover approval")
     if not getattr(store, "writes_enabled", False):
         raise ApiError(403, "backend PostgreSQL writes are disabled by deployment guardrail")
+    control = worker_uplift_database_control(store)
+    expected_candidate = str(getattr(store, "worker_uplift_expected_candidate_sha256", "") or "")
+    expected_watermark = str(getattr(store, "worker_uplift_expected_watermark_sha256", "") or "")
+    if (
+        control is None
+        or control.get("state") != "cutover_active"
+        or control.get("active_ingestion_owner") != "worker_uplift"
+        or control.get("legacy_dispatch_enabled") is not False
+        or control.get("uplift_scheduler_enabled") is not True
+        or control.get("uplift_production_writes_enabled") is not True
+        or control.get("publication_write_mode") != "production"
+        or not re.fullmatch(r"[0-9a-f]{64}", expected_candidate)
+        or not re.fullmatch(r"[0-9a-f]{64}", expected_watermark)
+        or control.get("candidate_sha256") != expected_candidate
+        or control.get("watermark_sha256") != expected_watermark
+    ):
+        raise ApiError(403, "worker-uplift database single-writer control is not active for this candidate")
 
 
 def worker_uplift_metadata(operation: str, body: dict[str, Any], auth_scope: str) -> dict[str, Any]:

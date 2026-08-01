@@ -36,6 +36,54 @@
     group: root
     mode: "0755"
 
+- name: Validate fail-closed worker-uplift cutover control settings
+  ansible.builtin.assert:
+    that:
+      - backend_worker_runtime_default_mode == 'shadow'
+      - not (backend_worker_runtime_production_writes_enabled | bool)
+      - backend_worker_runtime_cutover_db_password | length > 0
+      - backend_worker_runtime_cutover_db_user == 'nutsnews_worker_uplift_cutover'
+    fail_msg: "Cutover controls require the dedicated protected role and must deploy in safe shadow state."
+  no_log: true
+
+- name: Install fixed worker-uplift cutover control manager
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../scripts/worker_uplift_cutover_control.py"
+    dest: "{{ backend_worker_runtime_cutover_manager_path }}"
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install worker-uplift cutover control contract
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../docs/worker-uplift-cutover-controls.json"
+    dest: "{{ backend_worker_runtime_cutover_contract_path }}"
+    owner: root
+    group: root
+    mode: "0640"
+
+- name: Install fail-closed final cutover decision
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../docs/worker-uplift-final-cutover-decision.json"
+    dest: "{{ backend_worker_runtime_cutover_decision_path }}"
+    owner: root
+    group: root
+    mode: "0640"
+
+- name: Install dedicated cutover database environment
+  ansible.builtin.copy:
+    dest: "{{ backend_worker_runtime_cutover_env_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      NUTSNEWS_WORKER_UPLIFT_CUTOVER_DB_HOST={{ backend_worker_runtime_cutover_db_host }}
+      NUTSNEWS_WORKER_UPLIFT_CUTOVER_DB_PORT={{ backend_worker_runtime_cutover_db_port }}
+      NUTSNEWS_WORKER_UPLIFT_CUTOVER_DB_NAME={{ backend_worker_runtime_cutover_db_name }}
+      NUTSNEWS_WORKER_UPLIFT_CUTOVER_DB_USER={{ backend_worker_runtime_cutover_db_user }}
+      NUTSNEWS_WORKER_UPLIFT_CUTOVER_DB_PASSWORD={{ backend_worker_runtime_cutover_db_password }}
+  no_log: true
+
 - name: Render worker runtime manifest
   ansible.builtin.template:
     src: worker-uplift-services.json.j2

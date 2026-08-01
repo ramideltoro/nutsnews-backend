@@ -1,0 +1,197 @@
+name: Backend Worker-Uplift Cutover Controls
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Fixed control operation. Apply and rollback require an exact #166 GO and #127 authority.
+        required: true
+        default: dry-run
+        type: choice
+        options: [preflight, dry-run, rehearse, verify, apply, rollback]
+      candidate_sha256:
+        description: SHA-256 of the exact production candidate artifact.
+        required: true
+        type: string
+      watermark_sha256:
+        description: SHA-256 of the exact cutover watermark artifact.
+        required: true
+        type: string
+      rollback_deadline_utc:
+        description: Absolute UTC rollback deadline (YYYY-MM-DDTHH:MM:SSZ).
+        required: true
+        type: string
+      confirmation:
+        description: Exact operation confirmation defined by the source-controlled contract.
+        required: true
+        type: string
+      inject_failure:
+        description: Isolated rehearsal-only failure point.
+        required: false
+        default: none
+        type: choice
+        options: [none, fence, activate, rollback-prepare, rollback-finalize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-worker-uplift-cutover-controls
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate fixed operation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Validate contract and exact inputs
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          CANDIDATE: ${{ inputs.candidate_sha256 }}
+          WATERMARK: ${{ inputs.watermark_sha256 }}
+          DEADLINE: ${{ inputs.rollback_deadline_utc }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          INJECT_FAILURE: ${{ inputs.inject_failure }}
+        run: |
+          set -euo pipefail
+          python3 scripts/validate_worker_uplift_cutover_controls.py
+          jq -e '.decision == "NO-GO" or .decision == "GO"' docs/worker-uplift-final-cutover-decision.json >/dev/null
+          [[ "$CANDIDATE" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$WATERMARK" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$DEADLINE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+          case "$ACTION" in
+            preflight) expected=inspect-worker-uplift-cutover-controls ;;
+            dry-run) expected=plan-worker-uplift-cutover ;;
+            rehearse) expected=rehearse-worker-uplift-rollback ;;
+            verify) expected=verify-worker-uplift-cutover-controls ;;
+            apply) expected="execute-worker-uplift-cutover:$CANDIDATE" ;;
+            rollback) expected="rollback-worker-uplift-cutover:$WATERMARK" ;;
+            *) exit 1 ;;
+          esac
+          test "$CONFIRMATION" = "$expected"
+          if [[ "$ACTION" != rehearse && "$INJECT_FAILURE" != none ]]; then
+            echo "Failure injection is isolated-rehearsal only." >&2
+            exit 1
+          fi
+          if [[ "$ACTION" == apply || "$ACTION" == rollback ]]; then
+            test "$GITHUB_REF" = refs/heads/main
+          fi
+
+  offline:
+    name: Value-free plan or isolated rehearsal
+    if: ${{ inputs.action == 'dry-run' || inputs.action == 'rehearse' }}
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Build exact value-free evidence
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          CANDIDATE: ${{ inputs.candidate_sha256 }}
+          WATERMARK: ${{ inputs.watermark_sha256 }}
+          DEADLINE: ${{ inputs.rollback_deadline_utc }}
+          INJECT_FAILURE: ${{ inputs.inject_failure }}
+        run: |
+          set -euo pipefail
+          args=("$ACTION" --candidate-sha256 "$CANDIDATE" --watermark-sha256 "$WATERMARK" --rollback-deadline-utc "$DEADLINE" --report "$RUNNER_TEMP/cutover-control-report.json")
+          if [[ "$INJECT_FAILURE" != none ]]; then args+=(--inject-failure "$INJECT_FAILURE"); fi
+          python3 scripts/worker_uplift_cutover_control.py "${args[@]}"
+          python3 -m json.tool "$RUNNER_TEMP/cutover-control-report.json" >/dev/null
+          sha256sum "$RUNNER_TEMP/cutover-control-report.json" > "$RUNNER_TEMP/SHA256SUMS"
+      - name: Upload immutable evidence
+        uses: actions/upload-artifact@1eb3cb2b3e0f29609092a73eb033bb759a334595  # v5.0.0
+        with:
+          name: worker-uplift-cutover-${{ inputs.action }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/cutover-control-report.json
+            ${{ runner.temp }}/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 90
+
+  protected:
+    name: Protected live control
+    if: ${{ inputs.action == 'preflight' || inputs.action == 'verify' || inputs.action == 'apply' || inputs.action == 'rollback' }}
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production-backend
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Prepare protected SSH
+        shell: bash
+        env:
+          SSH_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_KEY" && test -n "$KNOWN_HOSTS"
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend" "$HOME/.ssh/known_hosts"
+      - name: Execute fixed protected operation
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          CANDIDATE: ${{ inputs.candidate_sha256 }}
+          WATERMARK: ${{ inputs.watermark_sha256 }}
+          DEADLINE: ${{ inputs.rollback_deadline_utc }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          BACKEND_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          MAINTENANCE_TOKEN: ${{ secrets.NUTSNEWS_MAINTENANCE_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          user="${BACKEND_USER:-rami}"
+          ssh_args=(-i "$HOME/.ssh/nutsnews_backend" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts")
+          run_remote() {
+            ssh "${ssh_args[@]}" "$user@$BACKEND_HOST" sudo -n /usr/local/sbin/nutsnews-worker-uplift-cutover-control "$@"
+          }
+          dispatch_legacy() {
+            local enabled="$1"
+            test -n "$MAINTENANCE_TOKEN"
+            GH_TOKEN="$MAINTENANCE_TOKEN" gh workflow run controller-ingestion-scheduling-operations.yml --repo ramideltoro/nutsnews-worker --ref main -f action=apply -f ingestion_scheduling_enabled="$enabled" -f confirmation="set-ingestion-scheduling-$enabled"
+            echo "Protected legacy scheduling workflow dispatched; the fixed status readback remains the mutation proof."
+          }
+          common=(--candidate-sha256 "$CANDIDATE" --watermark-sha256 "$WATERMARK" --rollback-deadline-utc "$DEADLINE" --report /var/lib/nutsnews/worker-uplift-cutover/last-report.json)
+          case "$ACTION" in
+            preflight|verify)
+              run_remote "$ACTION" "${common[@]}" --expected-legacy-enabled true ;;
+            apply)
+              dispatch_legacy false
+              for _ in $(seq 1 60); do curl -fsS https://nutsnews-controller.nutsnews.workers.dev/ingestion-scheduling/status | jq -e '.enabled == false and .configurationValid == true' >/dev/null && break; sleep 5; done
+              curl -fsS https://nutsnews-controller.nutsnews.workers.dev/ingestion-scheduling/status | jq -e '.enabled == false and .configurationValid == true' >/dev/null
+              run_remote apply "${common[@]}" --confirmation "$CONFIRMATION" --expected-legacy-enabled false ;;
+            rollback)
+              run_remote rollback-prepare "${common[@]}" --confirmation "$CONFIRMATION" --expected-legacy-enabled false
+              dispatch_legacy true
+              for _ in $(seq 1 60); do curl -fsS https://nutsnews-controller.nutsnews.workers.dev/ingestion-scheduling/status | jq -e '.enabled == true and .configurationValid == true' >/dev/null && break; sleep 5; done
+              curl -fsS https://nutsnews-controller.nutsnews.workers.dev/ingestion-scheduling/status | jq -e '.enabled == true and .configurationValid == true' >/dev/null
+              run_remote rollback-finalize "${common[@]}" --confirmation "$CONFIRMATION" --expected-legacy-enabled true ;;
+          esac
+          ssh "${ssh_args[@]}" "$user@$BACKEND_HOST" sudo -n cat /var/lib/nutsnews/worker-uplift-cutover/last-report.json > "$RUNNER_TEMP/cutover-control-report.json"
+          jq -e '.status == "pass" and .single_writer_invariants_pass == true and .dns_failover_unchanged == true' "$RUNNER_TEMP/cutover-control-report.json" >/dev/null
+          sha256sum "$RUNNER_TEMP/cutover-control-report.json" > "$RUNNER_TEMP/SHA256SUMS"
+      - name: Upload immutable protected evidence
+        uses: actions/upload-artifact@1eb3cb2b3e0f29609092a73eb033bb759a334595  # v5.0.0
+        with:
+          name: worker-uplift-cutover-${{ inputs.action }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/cutover-control-report.json
+            ${{ runner.temp }}/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 90

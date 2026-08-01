@@ -251,6 +251,61 @@ class WorkerUpliftCutoverWatermarkTests(unittest.TestCase):
         self.assertTrue(report["non_target_database_state"]["unchanged"])
         self.assertEqual(report["database_evidence"]["rows"], expected)
 
+    def test_apply_rerun_is_idempotent_for_same_candidate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = WatermarkFixture(root)
+            artifact = fixture.build()
+            artifact_path = root / "candidate.json"
+            artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+            expected = watermarks.expected_db_rows(artifact)
+            current = {stage: row for stage, row in zip(STAGES, expected)}
+            unchanged = database_snapshot(fixture.observed, current_rows=current)
+            mutation = {
+                "upserted_rows": 8,
+                "expected_rows": 8,
+                "per_stage": {stage: 1 for stage in STAGES},
+                "exact_row_guard": 1,
+            }
+            with mock.patch.object(watermarks, "utc_now", return_value=fixture.observed + timedelta(seconds=5)):
+                with mock.patch.object(
+                    watermarks,
+                    "psql_json",
+                    side_effect=[privilege_proof(), unchanged, mutation, unchanged],
+                ):
+                    report = watermarks.apply_candidate(
+                        contract_value(),
+                        artifact_path,
+                        "fixture-password",
+                        watermarks.APPLY_CONFIRMATION,
+                    )
+        self.assertEqual(report["status"], "applied")
+        self.assertEqual(report["mutation"]["upserted_rows"], 8)
+        self.assertEqual(report["non_target_database_state"]["before_sha256"], report["non_target_database_state"]["after_sha256"])
+
+    def test_stale_candidate_is_rejected_before_mutation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = WatermarkFixture(root)
+            artifact = fixture.build()
+            artifact_path = root / "candidate.json"
+            artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+            newer = copy.deepcopy(watermarks.expected_db_rows(artifact)[0])
+            newer_at = fixture.observed + timedelta(minutes=1)
+            newer["confirmed_at"] = watermarks.iso_utc(newer_at)
+            newer["diagnostic_metadata"]["capturedAtUtc"] = watermarks.iso_utc(newer_at)
+            before = database_snapshot(fixture.observed, current_rows={"scheduler": newer})
+            with mock.patch.object(watermarks, "utc_now", return_value=fixture.observed + timedelta(seconds=5)):
+                with mock.patch.object(watermarks, "psql_json", side_effect=[privilege_proof(), before]) as psql:
+                    with self.assertRaisesRegex(watermarks.WatermarkError, "stale evidence"):
+                        watermarks.apply_candidate(
+                            contract_value(),
+                            artifact_path,
+                            "fixture-password",
+                            watermarks.APPLY_CONFIRMATION,
+                        )
+            self.assertEqual(psql.call_count, 2)
+
     def test_wrong_confirmation_blocks_before_database_access(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

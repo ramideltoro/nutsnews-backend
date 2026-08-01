@@ -4,16 +4,18 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DISPOSITIONS_PATH = ROOT / "docs" / "worker-uplift-security-dispositions.json"
+BACKEND_CHECKS_PATH = ROOT / ".github" / "workflows" / "backend-checks.yml"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 LOGIN_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
@@ -40,6 +42,35 @@ FINDINGS = {
     "SEC-124-007": "low",
     "SEC-124-008": "medium",
     "SEC-124-009": "low",
+}
+STANDING_AUTHORIZATION_ID = "SEC-124-007-009-STANDING-2026-08-01"
+STANDING_OWNER_COMMENT_SHA256 = (
+    "c16828dab3ecefe4c01c5468288a575b5c16a39349af17d5806f459d6fb0d507"
+)
+STANDING_SCOPE_SHA256 = "917a1b18d80619c15bfac4cf8eac401a7be2eff989a1b3f7d5068fc68a44027f"
+STANDING_FINDINGS = ["SEC-124-007", "SEC-124-008", "SEC-124-009"]
+STANDING_FINGERPRINT_FIELDS = [
+    "finding.id",
+    "finding.affected_scope",
+    "finding.risk_acceptance.scope",
+    "finding.risk_acceptance.rationale",
+    "finding.risk_acceptance.compensating_controls",
+    "finding.risk_acceptance.reopen_trigger",
+    "safety_invariants",
+    "standing_authorization.excluded_authorities",
+]
+STANDING_EXCLUDED_AUTHORITIES = {
+    "cutover",
+    "production writes",
+    "DNS changes",
+    "failover changes",
+    "legacy-worker changes",
+    "ingestion-ownership changes",
+    "production infrastructure mutation",
+    "secret-value retrieval",
+    "#125 production-readiness approval",
+    "#166 final cutover-execution approval",
+    "#127 cutover execution",
 }
 ALLOWED_STATUSES = {"pending", "remediated", "accepted_residual_risk"}
 ALLOWED_EVIDENCE_KINDS = {
@@ -79,6 +110,42 @@ def duplicate_values(values: list[str]) -> set[str]:
             duplicates.add(value)
         seen.add(value)
     return duplicates
+
+
+def standing_scope_payload(document: dict[str, Any]) -> dict[str, Any]:
+    authorization = document.get("standing_authorization", {})
+    finding_map = {
+        str(finding.get("id", "")): finding for finding in document.get("findings", [])
+    }
+    scoped_findings: list[dict[str, Any]] = []
+    for finding_id in authorization.get("applies_to_findings", []):
+        finding = finding_map.get(str(finding_id), {})
+        acceptance = finding.get("risk_acceptance") or {}
+        scoped_findings.append(
+            {
+                "id": finding.get("id"),
+                "affected_scope": finding.get("affected_scope"),
+                "risk_scope": acceptance.get("scope"),
+                "rationale": acceptance.get("rationale"),
+                "compensating_controls": acceptance.get("compensating_controls"),
+                "reopen_trigger": acceptance.get("reopen_trigger"),
+            }
+        )
+    return {
+        "finding_ids": authorization.get("applies_to_findings"),
+        "findings": scoped_findings,
+        "safety_invariants": document.get("safety_invariants"),
+        "excluded_authorities": authorization.get("excluded_authorities"),
+    }
+
+
+def standing_scope_sha256(document: dict[str, Any]) -> str:
+    payload = json.dumps(
+        standing_scope_payload(document),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def parse_date(value: object, label: str, errors: list[str]) -> date | None:
@@ -216,6 +283,7 @@ def validate_risk_acceptance(
     *,
     authorized_logins: set[str],
     today: date,
+    standing_authorization: dict[str, Any],
     errors: list[str],
 ) -> None:
     acceptance = finding.get("risk_acceptance")
@@ -257,6 +325,8 @@ def validate_risk_acceptance(
         errors.append(f"{finding_id} risk acceptance review date is expired")
     if expires_on is not None and review_on is not None and review_on > expires_on:
         errors.append(f"{finding_id} risk acceptance review must not follow expiry")
+    if review_on is not None and finding.get("review_by") != review_on.isoformat():
+        errors.append(f"{finding_id} review_by must match the accepted-risk review date")
 
     evidence = acceptance.get("acceptance_evidence")
     if not isinstance(evidence, dict):
@@ -280,6 +350,45 @@ def validate_risk_acceptance(
                 errors,
             ) is None:
                 pass
+        elif kind == "standing_authorization":
+            if review_on is not None and review_on > today + timedelta(days=31):
+                errors.append(
+                    f"{finding_id} risk acceptance review exceeds the 31-day standing limit"
+                )
+            if expires_on is not None and expires_on > today + timedelta(days=61):
+                errors.append(
+                    f"{finding_id} risk acceptance expiry exceeds the 61-day standing limit"
+                )
+            if finding_id not in STANDING_FINDINGS:
+                errors.append(f"{finding_id} is outside the standing authorization finding set")
+            if evidence.get("authorization_id") != standing_authorization.get("id"):
+                errors.append(f"{finding_id} must reference the active standing authorization")
+            if evidence.get("initial_owner_evidence_url") != standing_authorization.get(
+                "owner_evidence", {}
+            ).get("url"):
+                errors.append(f"{finding_id} standing evidence must match the owner comment")
+            author = validate_named_login(
+                evidence.get("author_login"),
+                f"{finding_id}.risk_acceptance.acceptance_evidence.author_login",
+                authorized_logins,
+                errors,
+            )
+            if author != owner or author != standing_authorization.get(
+                "authorized_owner_login"
+            ):
+                errors.append(
+                    f"{finding_id} standing evidence author must match the authorized owner"
+                )
+            if parse_datetime(
+                evidence.get("authored_at_utc"),
+                f"{finding_id}.risk_acceptance.acceptance_evidence.authored_at_utc",
+                errors,
+            ) != parse_datetime(
+                standing_authorization.get("owner_evidence", {}).get("authored_at_utc"),
+                "standing_authorization.owner_evidence.authored_at_utc",
+                errors,
+            ):
+                errors.append(f"{finding_id} standing evidence timestamp must match owner evidence")
         elif kind == "signed_artifact":
             if not str(evidence.get("path", "")).startswith("docs/"):
                 errors.append(f"{finding_id} signed acceptance artifact must be source controlled")
@@ -295,7 +404,8 @@ def validate_risk_acceptance(
                 errors.append(f"{finding_id} acceptance signer must match authorized owner")
         else:
             errors.append(
-                f"{finding_id} acceptance evidence must be an owner issue comment or signed artifact"
+                f"{finding_id} acceptance evidence must be an owner issue comment, standing "
+                "authorization, or signed artifact"
             )
     if finding.get("remediation") is not None:
         errors.append(f"{finding_id} accepted residual risk must not claim remediation")
@@ -326,17 +436,30 @@ def validate_dispositions(
     *,
     today: date | None = None,
     enforce_closure: bool = False,
+    backend_checks_text: str | None = None,
 ) -> list[str]:
     errors: list[str] = []
     effective_today = today or datetime.now(timezone.utc).date()
 
-    if document.get("schema_version") != 1:
-        errors.append("schema_version must be 1")
+    if document.get("schema_version") != 2:
+        errors.append("schema_version must be 2")
     if document.get("tracking_issue") != "ramideltoro/nutsnews-worker#164":
         errors.append("tracking_issue must identify nutsnews-worker#164")
     if document.get("implementation_repository") != "ramideltoro/nutsnews-backend":
         errors.append("implementation_repository must be nutsnews-backend")
     parse_datetime(document.get("captured_at_utc"), "captured_at_utc", errors)
+
+    if backend_checks_text is None:
+        try:
+            backend_checks_text = BACKEND_CHECKS_PATH.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            backend_checks_text = ""
+    closure_workflow_command = (
+        "run: python3 scripts/validate_worker_uplift_security_dispositions.py "
+        "--enforce-closure"
+    )
+    if closure_workflow_command not in backend_checks_text:
+        errors.append("Backend Checks must enforce security disposition closure")
 
     source_review = document.get("source_review", {})
     if source_review.get("tracking_issue") != "ramideltoro/nutsnews-worker#124":
@@ -402,6 +525,109 @@ def validate_dispositions(
     ):
         if policy.get(field) is not False:
             errors.append(f"disposition_policy.{field} must be false")
+
+    for field in (
+        "standing_authorization_may_replace_per_release_owner_comment",
+        "standing_authorization_requires_exact_scope_fingerprint",
+        "standing_authorization_survives_release_revisions_only",
+        "standing_authorization_requires_protected_source_change_and_current_evidence",
+        "standing_authorization_invalid_on_scope_or_invariant_change",
+    ):
+        if policy.get(field) is not True:
+            errors.append(f"disposition_policy.{field} must be true")
+    if policy.get("final_readiness_or_cutover_approval_is_covered") is not False:
+        errors.append(
+            "disposition_policy.final_readiness_or_cutover_approval_is_covered must be false"
+        )
+
+    standing_authorization = document.get("standing_authorization", {})
+    if standing_authorization.get("id") != STANDING_AUTHORIZATION_ID:
+        errors.append("standing authorization id is invalid")
+    if standing_authorization.get("status") != "active":
+        errors.append("standing authorization must be active")
+    standing_owner = validate_named_login(
+        standing_authorization.get("authorized_owner_login"),
+        "standing_authorization.authorized_owner_login",
+        authorized_logins,
+        errors,
+    )
+    authorized_at = parse_datetime(
+        standing_authorization.get("authorized_at_utc"),
+        "standing_authorization.authorized_at_utc",
+        errors,
+    )
+    if authorized_at is not None and authorized_at > datetime.now(timezone.utc):
+        errors.append("standing authorization cannot be future-dated")
+    owner_evidence = standing_authorization.get("owner_evidence", {})
+    if owner_evidence.get("kind") != "issue_comment":
+        errors.append("standing authorization requires an explicit owner issue comment")
+    if not ISSUE_COMMENT_RE.fullmatch(str(owner_evidence.get("url", ""))):
+        errors.append("standing authorization must link an explicit #164 issue comment")
+    if owner_evidence.get("body_sha256") != STANDING_OWNER_COMMENT_SHA256:
+        errors.append("standing authorization owner comment digest is not authorized")
+    evidence_owner = validate_named_login(
+        owner_evidence.get("author_login"),
+        "standing_authorization.owner_evidence.author_login",
+        authorized_logins,
+        errors,
+    )
+    evidence_at = parse_datetime(
+        owner_evidence.get("authored_at_utc"),
+        "standing_authorization.owner_evidence.authored_at_utc",
+        errors,
+    )
+    if evidence_owner != standing_owner:
+        errors.append("standing authorization evidence author must match its owner")
+    if authorized_at is not None and evidence_at != authorized_at:
+        errors.append("standing authorization timestamp must match its owner evidence")
+    if standing_authorization.get("applies_to_findings") != STANDING_FINDINGS:
+        errors.append("standing authorization must cover exactly SEC-124-007 through SEC-124-009")
+    for field in (
+        "applies_to_current_and_future_release_revisions",
+    ):
+        if standing_authorization.get(field) is not True:
+            errors.append(f"standing_authorization.{field} must be true")
+    for field in (
+        "per_release_owner_approval_required",
+        "first_run_owner_approval_required",
+        "review_refresh_requires_new_owner_approval",
+    ):
+        if standing_authorization.get(field) is not False:
+            errors.append(f"standing_authorization.{field} must be false")
+    if standing_authorization.get("scope_fingerprint_fields") != STANDING_FINGERPRINT_FIELDS:
+        errors.append("standing authorization fingerprint field set is invalid")
+    if set(standing_authorization.get("excluded_authorities", [])) != (
+        STANDING_EXCLUDED_AUTHORITIES
+    ):
+        errors.append("standing authorization excluded authority set is invalid")
+    if duplicate_values(standing_authorization.get("excluded_authorities", [])):
+        errors.append("standing authorization excluded authorities must not contain duplicates")
+    if not standing_authorization.get("invalidated_by"):
+        errors.append("standing authorization must record invalidation triggers")
+    revalidation = standing_authorization.get("revalidation", {})
+    for field in (
+        "value_free",
+        "current_evidence_required",
+        "protected_pull_request_required",
+        "review_and_expiry_dates_remain_fail_closed",
+    ):
+        if revalidation.get(field) is not True:
+            errors.append(f"standing_authorization.revalidation.{field} must be true")
+    if revalidation.get("validator") != (
+        "python3 scripts/validate_worker_uplift_security_dispositions.py --enforce-closure"
+    ):
+        errors.append("standing authorization must name the fail-closed validator")
+    if revalidation.get("focused_tests") != (
+        "python3 -m unittest tests.test_worker_uplift_security_dispositions"
+    ):
+        errors.append("standing authorization must name the focused tests")
+    scope_digest = standing_authorization.get("scope_sha256")
+    if not SHA256_RE.fullmatch(str(scope_digest)):
+        errors.append("standing authorization scope_sha256 must be a SHA-256 digest")
+    elif scope_digest != STANDING_SCOPE_SHA256:
+        errors.append("standing authorization scope fingerprint is not owner-authorized")
+    elif scope_digest != standing_scope_sha256(document):
+        errors.append("standing authorization scope fingerprint does not match current scope")
 
     findings = document.get("findings", [])
     finding_ids = [str(item.get("id", "")) for item in findings]
@@ -469,6 +695,7 @@ def validate_dispositions(
                 finding,
                 authorized_logins=authorized_logins,
                 today=effective_today,
+                standing_authorization=standing_authorization,
                 errors=errors,
             )
             acceptance = finding.get("risk_acceptance", {})
@@ -531,8 +758,9 @@ def main_args(argv: list[str]) -> int:
     parser.add_argument("--enforce-closure", action="store_true")
     args = parser.parse_args(argv)
 
+    document = load_json(args.dispositions)
     errors = validate_dispositions(
-        load_json(args.dispositions),
+        document,
         enforce_closure=args.enforce_closure,
     )
     if errors:
@@ -541,10 +769,13 @@ def main_args(argv: list[str]) -> int:
             print(f"- {error}", file=sys.stderr)
         return 1
 
-    print(
-        "Worker-uplift security dispositions are structurally valid"
-        + (" and complete." if args.enforce_closure else "; unresolved findings remain fail-closed."),
-    )
+    if document.get("closure_gate", {}).get("ready") is True:
+        print("Worker-uplift security dispositions are structurally valid and complete.")
+    else:
+        print(
+            "Worker-uplift security dispositions are structurally valid; "
+            "unresolved findings remain fail-closed."
+        )
     return 0
 
 

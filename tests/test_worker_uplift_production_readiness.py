@@ -21,18 +21,59 @@ class WorkerUpliftProductionReadinessTests(unittest.TestCase):
             runtime_status_proof or self.runtime_status_proof,
         )
 
-    def test_committed_no_go_passes(self):
+    def test_committed_go_passes(self):
         self.assertEqual(self.validate(), [])
 
-    def test_go_or_closure_is_rejected_with_open_blockers(self):
+    def test_no_go_or_open_issue_is_rejected(self):
         decision = copy.deepcopy(self.decision)
-        decision["decision"] = "go"
-        decision["issue_closure_authorized"] = True
+        decision["decision"] = "no_go"
+        decision["tracking_issue_state_required"] = "open"
 
         errors = self.validate(decision=decision)
 
-        self.assertTrue(any("must remain NO-GO" in error for error in errors))
-        self.assertTrue(any("must not authorize issue closure" in error for error in errors))
+        self.assertIn("committed #125 decision must be GO", errors)
+        self.assertIn("passing #125 GO must require the tracking issue closed", errors)
+
+    def test_missing_or_wrong_approver_is_rejected(self):
+        decision = copy.deepcopy(self.decision)
+        decision["named_approver"] = {}
+
+        errors = self.validate(decision=decision)
+
+        self.assertTrue(any("named #125 approver" in error for error in errors))
+        self.assertTrue(any("standing authorization" in error for error in errors))
+
+    def test_approval_scope_expansion_is_rejected(self):
+        decision = copy.deepcopy(self.decision)
+        decision["named_approver"]["scope"] = "cutover"
+        decision["named_approver"]["does_not_authorize"].remove(
+            "final_cutover_execution_gate_approval"
+        )
+
+        errors = self.validate(decision=decision)
+
+        self.assertTrue(any("#150 implementation only" in error for error in errors))
+        self.assertTrue(any("exclude #166" in error for error in errors))
+
+    def test_cutover_authority_expansion_is_rejected(self):
+        decision = copy.deepcopy(self.decision)
+        decision["decision_authority"]["go_authorizes_issue"] = (
+            "ramideltoro/nutsnews-worker#127"
+        )
+
+        errors = self.validate(decision=decision)
+
+        self.assertIn("#125 GO may authorize only the start of #150", errors)
+
+    def test_downstream_dependency_order_drift_is_rejected(self):
+        decision = copy.deepcopy(self.decision)
+        decision["dependency_graph"]["ordered_control_and_execution_gates"][1][
+            "depends_on"
+        ] = ["ramideltoro/nutsnews-worker#125"]
+
+        errors = self.validate(decision=decision)
+
+        self.assertTrue(any("#125 -> #150 -> #126 -> #166 -> #127" in error for error in errors))
 
     def test_production_write_or_owner_change_is_rejected(self):
         decision = copy.deepcopy(self.decision)
@@ -44,75 +85,88 @@ class WorkerUpliftProductionReadinessTests(unittest.TestCase):
         self.assertIn("safety_invariants.production_writes_enabled must be false", errors)
         self.assertIn("safety_invariants.ingestion_ownership_changed must be false", errors)
 
-    def test_fabricated_approver_or_waiver_is_rejected(self):
+    def test_risk_waiver_is_rejected(self):
         decision = copy.deepcopy(self.decision)
-        decision["named_approver"] = "invented-owner"
-        decision["risk_waivers"] = [{"finding": "SEC-124-002"}]
+        decision["risk_waivers"] = [{"finding": "invented"}]
 
         errors = self.validate(decision=decision)
 
-        self.assertTrue(any("must not fabricate a named approver" in error for error in errors))
-        self.assertTrue(any("must not fabricate risk waivers" in error for error in errors))
+        self.assertIn("#125 GO must not introduce risk waivers", errors)
 
-    def test_security_gate_cannot_ignore_complete_dispositions(self):
+    def test_candidate_image_mismatch_is_rejected(self):
         decision = copy.deepcopy(self.decision)
-        decision["security_gate"]["closure_ready"] = False
-        decision["security_gate"]["named_owner_decisions"] = []
+        decision["comparison_and_soak_evidence"]["parity"][
+            "candidate_image_mismatches"
+        ] = ["scheduler"]
 
         errors = self.validate(decision=decision)
 
-        self.assertTrue(any("closure_ready must match" in error for error in errors))
-        self.assertTrue(any("owner decisions must match" in error for error in errors))
+        self.assertTrue(any("no mismatch" in error for error in errors))
 
-    def test_resolved_security_blocker_tracks_complete_dispositions(self):
+    def test_stale_parity_or_soak_is_rejected(self):
         decision = copy.deepcopy(self.decision)
-        blocker = next(
-            item
-            for item in decision["blockers"]
-            if item["id"] == "security_residual_owner_disposition"
-        )
-        blocker["status"] = "open"
+        decision["comparison_and_soak_evidence"]["parity"]["status"] = "stale"
+        decision["comparison_and_soak_evidence"]["soak"]["status"] = "stale"
 
         errors = self.validate(decision=decision)
 
-        self.assertTrue(any("status must be resolved" in error for error in errors))
+        self.assertTrue(any("parity run 30684493608" in error for error in errors))
+        self.assertTrue(any("soak run 30684679655" in error for error in errors))
+        self.assertTrue(any("stale or blocked evidence" in error for error in errors))
 
-    def test_resolved_cutover_plan_blocker_tracks_complete_plan(self):
+    def test_incomplete_soak_window_is_rejected(self):
         decision = copy.deepcopy(self.decision)
-        blocker = next(
-            item
-            for item in decision["blockers"]
-            if item["id"] == "control_implementation_plan"
-        )
-        blocker["status"] = "open"
+        decision["comparison_and_soak_evidence"]["soak"]["observed_hours"] = 47.99
 
         errors = self.validate(decision=decision)
 
-        self.assertTrue(any("status must be resolved" in error for error in errors))
+        self.assertTrue(any("at least 48 hours" in error for error in errors))
 
-    def test_resolved_scheduler_blocker_tracks_current_runtime_proof(self):
+    def test_current_runtime_artifact_digest_is_required(self):
         decision = copy.deepcopy(self.decision)
-        blocker = next(
-            item
-            for item in decision["blockers"]
-            if item["id"] == "scheduler_local_test_dependencies"
-        )
-        blocker["status"] = "open"
+        decision["runtime_and_recovery_evidence"]["current_candidate_status"][
+            "artifact_digest"
+        ] = "not-a-digest"
 
         errors = self.validate(decision=decision)
 
-        self.assertTrue(any("status must be resolved" in error for error in errors))
+        self.assertTrue(any("artifact digest" in error for error in errors))
 
-    def test_cutover_plan_hash_drift_is_rejected(self):
+    def test_scheduler_test_adapters_are_rejected(self):
         decision = copy.deepcopy(self.decision)
-        rollback = decision["runtime_and_recovery_evidence"]["rollback_limits"]
-        rollback["plan_sha256"] = "0" * 64
+        decision["runtime_and_recovery_evidence"]["scheduler_readiness"][
+            "source_uses_local_test_dependencies"
+        ] = True
 
         errors = self.validate(decision=decision)
 
-        self.assertTrue(any("stale #165 plan SHA-256" in error for error in errors))
+        self.assertTrue(any("reject local test adapters" in error for error in errors))
 
-    def test_cutover_plan_cannot_claim_implemented_controls(self):
+    def test_unresolved_recovery_is_rejected(self):
+        decision = copy.deepcopy(self.decision)
+        recovery = decision["runtime_and_recovery_evidence"]["empty_broker_recovery"]
+        recovery["status"] = "stale"
+        recovery["all_required_consumers_restored"] = False
+
+        errors = self.validate(decision=decision)
+
+        self.assertTrue(any("#159" in error for error in errors))
+        self.assertTrue(any("all_required_consumers_restored" in error for error in errors))
+
+    def test_missing_dependency_drill_is_rejected(self):
+        decision = copy.deepcopy(self.decision)
+        evidence = decision["runtime_and_recovery_evidence"][
+            "dependency_outage_and_backup_proof"
+        ]
+        evidence["missing"] = ["qwen"]
+        evidence["qwen_detected_and_recovered"] = False
+
+        errors = self.validate(decision=decision)
+
+        self.assertTrue(any("complete and current-equivalent" in error for error in errors))
+        self.assertTrue(any("qwen_detected_and_recovered" in error for error in errors))
+
+    def test_downstream_controls_cannot_be_claimed_implemented(self):
         decision = copy.deepcopy(self.decision)
         rollback = decision["runtime_and_recovery_evidence"]["rollback_limits"]
         rollback["production_owner_rollback_workflow_exists"] = True
@@ -120,115 +174,36 @@ class WorkerUpliftProductionReadinessTests(unittest.TestCase):
 
         errors = self.validate(decision=decision)
 
-        self.assertIn(
-            "rollback_limits.production_owner_rollback_workflow_exists must remain false",
-            errors,
-        )
-        self.assertIn(
-            "rollback_limits.cutover_watermark_exists must remain false",
-            errors,
-        )
+        self.assertTrue(any("must remain false before #126" in error for error in errors))
 
-    def test_security_gate_tracks_only_current_pending_dispositions(self):
+    def test_cloudflare_binding_absence_is_rejected(self):
         decision = copy.deepcopy(self.decision)
-        decision["security_gate"]["residual_findings_requiring_gate_disposition"].append(
-            "SEC-124-002"
-        )
+        decision["cloudflare_failover"]["failover_analytics_binding_present"] = False
 
         errors = self.validate(decision=decision)
 
-        self.assertTrue(
-            any("must match the disposition artifact" in error for error in errors)
-        )
+        self.assertTrue(any("FAILOVER_ANALYTICS" in error for error in errors))
 
-    def test_failover_analytics_cannot_be_inferred_from_documentation(self):
-        proof = copy.deepcopy(self.binding_proof)
-        proof["required_binding"]["present"] = True
-
-        errors = self.validate(binding_proof=proof)
-
-        self.assertTrue(any("must be recorded absent" in error for error in errors))
-
-    def test_cloudflare_value_bearing_field_is_rejected(self):
-        proof = copy.deepcopy(self.binding_proof)
-        proof["bindings"][0]["value"] = "not-a-real-value"
-
-        errors = self.validate(binding_proof=proof)
-
-        self.assertTrue(any("forbidden value-bearing keys" in error for error in errors))
-
-    def test_missing_blocker_is_rejected(self):
+    def test_admin_mutating_or_missing_evidence_is_rejected(self):
         decision = copy.deepcopy(self.decision)
-        decision["blockers"] = [
-            item
-            for item in decision["blockers"]
-            if item["id"] != "failover_analytics_binding"
-        ]
+        admin = decision["observability_and_admin_evidence"]["admin_portal"]
+        admin["authorized_access_read_only"] = False
+        admin["authenticated_live_projection_artifact_present"] = False
 
         errors = self.validate(decision=decision)
 
-        self.assertTrue(any("blocker scope mismatch" in error for error in errors))
+        self.assertTrue(any("authorized_access_read_only" in error for error in errors))
+        self.assertTrue(any("authenticated_live_projection" in error for error in errors))
 
-    def test_blocker_must_link_canonical_worker_tracking_issue(self):
+    def test_open_readiness_item_or_blocker_is_rejected(self):
         decision = copy.deepcopy(self.decision)
-        decision["blockers"][0]["issue"] = "ramideltoro/nutsnews-infra#440"
+        decision["readiness_items"][0]["status"] = "block"
+        decision["blockers"][0]["status"] = "open"
 
         errors = self.validate(decision=decision)
 
-        self.assertTrue(
-            any("must link canonical tracking issue" in error for error in errors)
-        )
-
-    def test_downstream_control_implementation_cannot_block_issue_125(self):
-        decision = copy.deepcopy(self.decision)
-        decision["decision_authority"][
-            "missing_downstream_control_implementation_blocks_this_gate"
-        ] = True
-        decision["runtime_and_recovery_evidence"]["rollback_limits"][
-            "downstream_control_implementation_blocks_issue_125"
-        ] = True
-
-        errors = self.validate(decision=decision)
-
-        self.assertIn("missing #150/#126 implementation must not block #125", errors)
-        self.assertIn("downstream control implementation must not block #125", errors)
-
-    def test_corrected_dependency_order_is_required(self):
-        decision = copy.deepcopy(self.decision)
-        decision["dependency_graph"]["ordered_control_and_execution_gates"][1][
-            "depends_on"
-        ] = ["ramideltoro/nutsnews-worker#125"]
-
-        errors = self.validate(decision=decision)
-
-        self.assertTrue(
-            any("#125 -> #150 -> #126 -> #166 -> #127" in error for error in errors)
-        )
-
-    def test_protected_approval_bypass_is_rejected(self):
-        decision = copy.deepcopy(self.decision)
-        decision["runtime_and_recovery_evidence"]["fresh_status_dispatch"][
-            "approval_bypassed"
-        ] = True
-
-        errors = self.validate(decision=decision)
-
-        self.assertTrue(any("must not be bypassed" in error for error in errors))
-
-    def test_completed_protected_status_requires_immutable_artifact(self):
-        decision = copy.deepcopy(self.decision)
-        fresh_status = decision["runtime_and_recovery_evidence"][
-            "fresh_status_dispatch"
-        ]
-        fresh_status.pop("artifact_id")
-        fresh_status.pop("artifact_digest")
-
-        errors = self.validate(decision=decision)
-
-        self.assertTrue(any("must record artifact 8770464087" in error for error in errors))
-        self.assertTrue(
-            any("immutable artifact digest" in error for error in errors)
-        )
+        self.assertTrue(any("readiness must pass" in error for error in errors))
+        self.assertTrue(any("must be resolved" in error for error in errors))
 
     def test_source_hash_drift_is_rejected(self):
         decision = copy.deepcopy(self.decision)
@@ -238,68 +213,11 @@ class WorkerUpliftProductionReadinessTests(unittest.TestCase):
 
         self.assertTrue(any("source-control hash is stale" in error for error in errors))
 
-    def test_approval_free_status_cannot_enter_protected_path(self):
+    def test_value_bearing_field_is_rejected(self):
         decision = copy.deepcopy(self.decision)
-        approval_free = decision["runtime_and_recovery_evidence"][
-            "approval_free_status_dispatch"
-        ]
-        approval_free["pending_deployment_count_observed"] = 1
-        approval_free["protected_job_status"] = "success"
+        decision["named_approver"]["token"] = "not-a-real-secret"
 
         errors = self.validate(decision=decision)
-
-        self.assertTrue(any("zero pending deployments" in error for error in errors))
-        self.assertTrue(any("must skip the protected job" in error for error in errors))
-
-    def test_scheduler_timestamp_defect_cannot_be_normalized(self):
-        proof = copy.deepcopy(self.runtime_status_proof)
-        proof["scheduler_readiness_discrepancy"]["readiness_checked_at_utc"] = (
-            proof["protected_status"]["generated_at_utc"]
-        )
-        proof["scheduler_readiness_discrepancy"]["silently_normalized"] = True
-
-        errors = self.validate(runtime_status_proof=proof)
-
-        self.assertTrue(any("preserve the observed checkedAt" in error for error in errors))
-        self.assertTrue(any("must not be silently normalized" in error for error in errors))
-
-    def test_scheduler_completion_must_reject_test_adapters_and_link_issue(self):
-        decision = copy.deepcopy(self.decision)
-        scheduler = decision["runtime_and_recovery_evidence"]["scheduler_readiness"]
-        scheduler["source_uses_local_test_dependencies"] = True
-        scheduler["tracking_issue"] = "ramideltoro/nutsnews-worker#125"
-
-        errors = self.validate(decision=decision)
-
-        self.assertTrue(any("must reject local test adapters" in error for error in errors))
-        self.assertTrue(any("must link completed #168" in error for error in errors))
-
-    def test_stale_soak_cannot_claim_current_candidate(self):
-        decision = copy.deepcopy(self.decision)
-        decision["comparison_and_soak_evidence"]["soak"][
-            "image_set_matches_current"
-        ] = True
-
-        errors = self.validate(decision=decision)
-
-        self.assertTrue(any("must not claim to match" in error for error in errors))
-
-    def test_runtime_tracking_issue_85_must_remain_historical_provenance(self):
-        proof = copy.deepcopy(self.runtime_status_proof)
-        tracker = proof["report_tracking_issue_discrepancy"]
-        tracker["reported_number"] = 125
-        tracker["new_blocker_required"] = True
-
-        errors = self.validate(runtime_status_proof=proof)
-
-        self.assertTrue(any("must preserve 85" in error for error in errors))
-        self.assertTrue(any("must not fabricate a blocker" in error for error in errors))
-
-    def test_runtime_evidence_value_bearing_field_is_rejected(self):
-        proof = copy.deepcopy(self.runtime_status_proof)
-        proof["protected_status"]["value"] = "not-a-real-secret"
-
-        errors = self.validate(runtime_status_proof=proof)
 
         self.assertTrue(any("forbidden value-bearing keys" in error for error in errors))
 

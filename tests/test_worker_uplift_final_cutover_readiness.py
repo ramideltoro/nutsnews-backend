@@ -10,18 +10,27 @@ class WorkerUpliftFinalCutoverReadinessTests(unittest.TestCase):
     def setUp(self):
         self.authorization = readiness.load_json(readiness.AUTHORIZATION_PATH)
         self.decision = readiness.load_json(readiness.DECISION_PATH)
+        self.candidate = readiness.load_json(readiness.CANDIDATE_PATH)
 
-    def test_committed_no_go_is_valid_and_fails_closed(self):
+    def test_committed_go_is_valid_and_bound_to_exact_candidate(self):
         self.assertEqual(
-            readiness.validate_decision(self.decision, self.authorization),
+            readiness.validate_decision(
+                self.decision,
+                self.authorization,
+                candidate=self.candidate,
+                require_go=True,
+            ),
             [],
         )
-        errors = readiness.validate_decision(
-            self.decision,
-            self.authorization,
-            require_go=True,
+        self.assertEqual(
+            self.decision["candidate_sha256"],
+            self.candidate["manifest_sha256"],
         )
-        self.assertIn("exact #166 GO is absent", errors)
+        self.assertEqual(
+            self.decision["decision_scope"]["authorizes_issue"],
+            "ramideltoro/nutsnews-worker#127",
+        )
+        self.assertFalse(self.decision["decision_scope"]["performs_cutover"])
 
     def test_standing_authorization_removes_recurring_owner_prompt(self):
         errors = readiness.validate_authorization(self.authorization)
@@ -62,6 +71,7 @@ class WorkerUpliftFinalCutoverReadinessTests(unittest.TestCase):
         errors = readiness.validate_decision(
             decision,
             self.authorization,
+            candidate=self.candidate,
             require_go=True,
         )
 
@@ -72,11 +82,38 @@ class WorkerUpliftFinalCutoverReadinessTests(unittest.TestCase):
 
     def test_no_go_cannot_freeze_partial_execution_inputs(self):
         decision = copy.deepcopy(self.decision)
+        decision["decision"] = "NO-GO"
+        decision["authorized_for_execution"] = False
+        decision["blockers"] = ["test blocker"]
         decision["candidate_sha256"] = "a" * 64
+        for field in (
+            "watermark_sha256",
+            "rollback_deadline_utc",
+            "observation_start_utc",
+            "observation_end_utc",
+            "control_commit",
+        ):
+            decision[field] = None
 
         errors = readiness.validate_decision(decision, self.authorization)
 
         self.assertIn("NO-GO must not freeze candidate_sha256", errors)
+
+    def test_threshold_digest_drift_fails_closed(self):
+        decision = copy.deepcopy(self.decision)
+        decision["thresholds"]["sha256"] = "a" * 64
+
+        errors = readiness.validate_decision(
+            decision,
+            self.authorization,
+            candidate=self.candidate,
+            require_go=True,
+        )
+
+        self.assertIn(
+            "threshold digest does not match the source-controlled plan",
+            errors,
+        )
 
     def test_value_bearing_keys_are_rejected_without_echoing_values(self):
         contract = copy.deepcopy(self.authorization)

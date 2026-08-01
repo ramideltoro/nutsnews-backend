@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "manifest_sha256": "71b0303705093ad398458083547a86e9e61f50458e8799ace38de4f2404859df",
+  "manifest": {
+    "stages": [
+      {
+        "stage": "scheduler",
+        "source_repository": "ramideltoro/nutsnews-worker-feed-scheduler",
+        "source_commit": "f627a6014a43cadba89cffc31a40565c2d00f001",
+        "image": "ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler@sha256:f489c7bdf60433b44c21a69224b10e62a1b39203119da53378b2018c17ce1452",
+        "contract_version": "0.3.1",
+        "runtime_package_version": "0.4.0",
+        "mode": "shadow",
+        "production_writes_enabled": false
+      },
+      {
+        "stage": "fetcher",
+        "source_repository": "ramideltoro/nutsnews-worker-feed-fetcher",
+        "source_commit": "501ededcad48924b632b0547679f4dcb54ed4a90",
+        "image": "ghcr.io/ramideltoro/nutsnews-worker-feed-fetcher@sha256:7ee6f7a8155b959f01ff265c9b3b8861be5ef5f9bcef5616d5eba88a48e0fbaa",
+        "contract_version": "0.3.1",
+        "runtime_package_version": "0.5.0",
+        "mode": "shadow",
+        "production_writes_enabled": false
+      },
+      {
+        "stage": "canonicalizer",
+        "source_repository": "ramideltoro/nutsnews-worker-article-canonicalizer",
+        "source_commit": "64dea55ad8f0e9b67e746b5d4363d43762fea792",
+        "image": "ghcr.io/ramideltoro/nutsnews-worker-article-canonicalizer@sha256:6d9fa787412697767a4b8af0eecef43b7c333fdcbae4ad41bda34ce94a2da4c9",
+        "contract_version": "0.4.0",
+        "runtime_package_version": "0.5.0",
+        "mode": "shadow",
+        "production_writes_enabled": false
+      },
+      {
+        "stage": "enrichment",
+        "source_repository": "ramideltoro/nutsnews-worker-article-enrichment",
+        "source_commit": "c7a464e54eda1ed9e5f82d8dc545b1f7f7a36ec0",
+        "image": "ghcr.io/ramideltoro/nutsnews-worker-article-enrichment@sha256:c00bec63cc7a410d8ba228e72b0616d561e64d05ae9316f871183fe5b2a840dc",
+        "contract_version": "0.4.0",
+        "runtime_package_version": "0.5.0",
+        "mode": "shadow",
+        "production_writes_enabled": false
+      },
+      {
+        "stage": "approval",
+        "source_repository": "ramideltoro/nutsnews-worker-article-approval",
+        "source_commit": "70c51a65123a4990c6a756d41bbb7566eb3f326b",
+        "image": "ghcr.io/ramideltoro/nutsnews-worker-article-approval@sha256:0d45c0a8d023cfa499e1197e5804734b3cf501552740d3ae7c638f4f1212bfb9",
+        "contract_version": "0.4.0",
+        "runtime_package_version": "0.5.0",
+        "mode": "shadow",
+        "production_writes_enabled": false
+      },
+      {
+        "stage": "translation",
+        "source_repository": "ramideltoro/nutsnews-worker-article-translation",
+        "source_commit": "22e918518945b3db633c81c09f816b9983f49dfd",
+        "image": "ghcr.io/ramideltoro/nutsnews-worker-article-translation@sha256:eed2ca084b30d1db6b1fc9b51ac4e4444ec8841b548a825c97b48f9467b0ead9",
+        "contract_version": "0.4.0",
+        "runtime_package_version": "0.5.0",
+        "mode": "shadow",
+        "production_writes_enabled": false
+      },
+      {
+        "stage": "persistence",
+        "source_repository": "ramideltoro/nutsnews-worker-article-persistence",
+        "source_commit": "e646a51bfea5142d769e0980608dc86f6c7623f7",
+        "image": "ghcr.io/ramideltoro/nutsnews-worker-article-persistence@sha256:3d158826415f1ad602436aebd21280dd35b1fa34a8f44303b6f39a814ba2b9b9",
+        "contract_version": "0.4.0",
+        "runtime_package_version": "0.5.0",
+        "mode": "shadow",
+        "production_writes_enabled": false
+      },
+      {
+        "stage": "publication",
+        "source_repository": "ramideltoro/nutsnews-worker-article-publication",
+        "source_commit": "47f05a5e177d63c43f18ac203ec773d606a2fbf4",
+        "image": "ghcr.io/ramideltoro/nutsnews-worker-article-publication@sha256:3e9fbebb7e345b7928f94de37e646e4829e81732f5153b6da06246f7618adf4a",
+        "contract_version": "0.4.0",
+        "runtime_package_version": "0.5.0",
+        "mode": "shadow",
+        "production_writes_enabled": false
+      }
+    ],
+    "immutable_packages": [
+      {
+        "repository": "ramideltoro/nutsnews-worker-contracts",
+        "version": "0.3.1",
+        "commit": "396d94dba76e3773ede50783463419501853b107",
+        "publish_run": 29980948115,
+        "attestation_id": 36694796,
+        "tarball_sha256": "5e2c006e8aba3c20e0b52a42f53e07c3d3ab5fbb00dd118a346ee9bf6e32fb2d"
+      },
+      {
+        "repository": "ramideltoro/nutsnews-worker-contracts",
+        "version": "0.4.0",
+        "commit": "bf10f4257a1ac7f3e5aef0c5a14f62ec51ae4bb2",
+        "publish_run": 30156164725,
+        "attestation_id": 37079895,
+        "tarball_sha256": "3189d372db74c64f6527e4fd2ff30b5ee807c06fe6c574a8b901886bf66bc7d5"
+      },
+      {
+        "repository": "ramideltoro/nutsnews-worker-runtime",
+        "version": "0.4.0",
+        "commit": "077a83ee717e385afffccec489aaa1fff31c50f1",
+        "publish_run": 30139733351,
+        "attestation_id": 37051512,
+        "tarball_sha256": "34bd7278b0a321449d3bcbda109e9cd2d1931dd78fffc587818e822ea4d2c6ba"
+      },
+      {
+        "repository": "ramideltoro/nutsnews-worker-runtime",
+        "version": "0.5.0",
+        "commit": "43e7883554e250b2297d40266374cb4ff87d141c",
+        "publish_run": 30398759792,
+        "attestation_id": 37608731,
+        "tarball_sha256": "371761f3420d4219354d450b1d1cec62b373817cc78f91128274490b9a8981c0"
+      }
+    ],
+    "source_control_hashes": [
+      {
+        "path": "docs/worker-uplift-final-cutover-authorization.json",
+        "sha256": "45b57560264c4810cd942656ca83c06d7ea08a7de0f5412461add917dbd5cf04"
+      },
+      {
+        "path": "docs/worker-uplift-cutover-controls.json",
+        "sha256": "25929ac5094131fc88db2d79ec5b5209d601d6361a8083a88984adbb72e2fd0e"
+      },
+      {
+        "path": "docs/worker-uplift-cutover-control-plan.json",
+        "sha256": "f5cb4f507190e60ab19d82f891d14a544e9fcc91273bb4fc50752e98a71c854b"
+      },
+      {
+        "path": ".github/workflows/backend-worker-uplift-cutover-controls.yml",
+        "sha256": "475bfb3563736993b2d1584da07a0c13774a799507132ac6d077823e9240bc13"
+      },
+      {
+        "path": "scripts/worker_uplift_cutover_control.py",
+        "sha256": "a4d879ae51cd7a2c00247ddddccde5430444e8c479e263aca8064376a5b954c3"
+      },
+      {
+        "path": "scripts/validate_worker_uplift_cutover_controls.py",
+        "sha256": "8e5e4d6759bb38a164b16fdbee615a2d7f4b9eee0a0a874976e062bdde7dd8b0"
+      }
+    ],
+    "write_policy": {
+      "active_ingestion_owner": "legacy_shards",
+      "legacy_dispatch_enabled": true,
+      "uplift_mode": "shadow",
+      "production_writes_enabled": false,
+      "production_visibility_enabled": false,
+      "single_writer_enforced": true,
+      "dns_failover_unchanged": true
+    },
+    "control_commit": "f7852230882100a48fc714a02102f4cf5a7b7260",
+    "legacy_scheduling_commit": "a073e351e5716a97e0759cca17096851cbb80261",
+    "deployed_state": {
+      "mode": "shadow",
+      "production_writes_enabled": false,
+      "active_ingestion_owner": "legacy_shards",
+      "runtime_status_run": 30708098613,
+      "artifact_id": 8820964511,
+      "artifact_digest_sha256": "sha256:347802b28d8e2821135cb2dd52eea842331f2cfa08a2ecfa9c4af902022ba103",
+      "downloaded_report_sha256": "19e2d0fcc770c280fe389a9ebe85dc1df124e52fa85895deab1ca7512fcb6b55"
+    }
+  }
+}

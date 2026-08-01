@@ -3,9 +3,9 @@
   "decision_id": "worker-uplift-final-cutover-decision",
   "tracking_issue": "ramideltoro/nutsnews-worker#166",
   "execution_issue": "ramideltoro/nutsnews-worker#127",
-  "decision": "NO-GO",
-  "authorized_for_execution": false,
-  "evaluated_at_utc": "2026-08-01T11:20:09Z",
+  "decision": "GO",
+  "authorized_for_execution": true,
+  "evaluated_at_utc": "2026-08-01T16:58:00Z",
   "authorization": {
     "kind": "standing_bounded_authorization",
     "contract": "docs/worker-uplift-final-cutover-authorization.json",
@@ -15,22 +15,156 @@
     "scope_sha256": "0a6a390ddec8fd10ebad039dccb6a768726d494839b0bcfdfabff63b9e3b78eb",
     "recurring_owner_approval_required": false
   },
-  "candidate_sha256": null,
-  "watermark_sha256": null,
-  "rollback_deadline_utc": null,
-  "observation_start_utc": null,
-  "observation_end_utc": null,
-  "control_commit": null,
+  "candidate_sha256": "71b0303705093ad398458083547a86e9e61f50458e8799ace38de4f2404859df",
+  "watermark_sha256": "e9b0ff2b129b76ec54589f32ade782b90aadaff54124344c2541e429d4d5d022",
+  "rollback_deadline_utc": "2026-08-03T21:00:00Z",
+  "observation_start_utc": "2026-08-01T21:00:00Z",
+  "observation_end_utc": "2026-08-03T21:00:00Z",
+  "execution_window": {
+    "start_utc": "2026-08-01T19:00:00Z",
+    "end_utc": "2026-08-01T21:00:00Z"
+  },
+  "control_commit": "f7852230882100a48fc714a02102f4cf5a7b7260",
   "legacy_scheduling_commit": "a073e351e5716a97e0759cca17096851cbb80261",
-  "blockers": [
-    "#166 exact candidate and current evidence have not been frozen",
-    "#166 current rollback rehearsal has not been incorporated"
-  ],
+  "blockers": [],
   "safety": {
     "active_ingestion_owner": "legacy_shards",
     "legacy_dispatch_enabled": true,
     "uplift_mode": "shadow",
     "production_writes_enabled": false,
     "dns_failover_unchanged": true
+  },
+  "thresholds": {
+    "count": 17,
+    "source": "docs/worker-uplift-cutover-control-plan.json",
+    "sha256": "6823d92447f75a452c5ea7f65e50cf83ee4b303d0c0b6ab43cd2697a78931cb9"
+  },
+  "ownership": {
+    "primary_owner_login": "ramideltoro",
+    "independent_human_backup_available": false,
+    "backup_model": "fail_closed_safe_state_controls",
+    "evidence_custodian_login": "ramideltoro",
+    "owner_unavailable_action": "abort_before_fence_or_restore_the_last_valid_single_writer_safe_state"
+  },
+  "evidence": {
+    "controls": {
+      "status": "pass",
+      "value_free": true,
+      "immutable_refs": [
+        "https://github.com/ramideltoro/nutsnews-backend/commit/9c58c44c267cc1a82c450ee3468932d82c1c25fc",
+        "https://github.com/ramideltoro/nutsnews-backend/commit/4a86fcb85a94f3821ee4ebe804c62cf2dab1bee7",
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30691931764#artifact-8816059890-sha256-dc715af5dd12f639b0e31ebc9a065ee441fa01173022472cc66d11b26a638391",
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30709038795#artifact-8821255864-sha256-b500509af577e985436f725e85b078842a57d97e3875b2184fe1476d51eff595",
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30709164722#artifact-8821299354-sha256-888c07a4bbfcb6f5dec31600a9932bdf81030cdc08e06e97b1a07e882c7d63cb",
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30709204722#artifact-8821311487-sha256-9b79c055f21ed72e68b885be319971ed93d2eb8660c8e930e6fe1d710feecab4"
+      ]
+    },
+    "rollback_rehearsal": {
+      "status": "pass",
+      "value_free": true,
+      "immutable_refs": [
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30709065035#artifact-8821264352-sha256-a2168d242722f85d732c1cd166e3f589df565d0f1d381e0338d70ab1f9ac73ff",
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30709095571#artifact-8821273793-sha256-91510d9e97dca097dd41b2b29aa3dbe1333ad5f3130cedaf92c354fd120f8e10",
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30709108042#artifact-8821279036-sha256-c4025960bf9128983c8a413197e699f025478a0e64b81c2620a1a912019e9fae",
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30709127075#artifact-8821285026-sha256-f0b4ace1547112ca35c17261aec7e70fd4e1a73021085ff31914e82d099e6206",
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30709141781#artifact-8821290189-sha256-46f39d27c6fbdc5dc64e159026fad9278a1e7b71887c1ff3676240f0fc6cbe15"
+      ]
+    },
+    "runtime_status": {
+      "status": "pass",
+      "value_free": true,
+      "immutable_refs": [
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30708098613#artifact-8820964511-sha256-347802b28d8e2821135cb2dd52eea842331f2cfa08a2ecfa9c4af902022ba103-report-19e2d0fcc770c280fe389a9ebe85dc1df124e52fa85895deab1ca7512fcb6b55",
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30707158268#artifact-8820775326-sha256-697c43e1edc1315cf3f4ab9a3b7d4e19e19de0a0109fa56d47bcf8803740e910"
+      ]
+    },
+    "watermarks": {
+      "status": "pass",
+      "value_free": true,
+      "immutable_refs": [
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30708562687#artifact-8821121189-sha256-747050f1c06dbfda17f8a3b030a25785e3db052ba4cf3b4bdcd59d8f4e1b3daa",
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30708669391#artifact-8821158151-sha256-5215f4de51cff77d2d74f0fe1a0d09070697a913a183f63acb580ba9484efe0e-candidate-e9b0ff2b129b76ec54589f32ade782b90aadaff54124344c2541e429d4d5d022-proof-1f6470a1c314dda9daab657d0f2c680cdb9034586807675bf728f3845d369065"
+      ]
+    },
+    "parity": {
+      "status": "pass",
+      "value_free": true,
+      "immutable_refs": [
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30697921903#artifact-8817867435-sha256-d3766363972071bfbdc8bf8b3a8f9e14c4cac0459263d295ce3a40080e8153d6",
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30698118606#artifact-8817918879-sha256-365f1159b40f976df2ede5a1aaef43b8e1aad4551d4f0c866b88110327463a74"
+      ]
+    },
+    "soak": {
+      "status": "pass",
+      "value_free": true,
+      "immutable_refs": [
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30697539081#artifact-8817741707-sha256-63af92f8f18e79105af9363cbe072dbc709e31fe628abb3c6510c889dbe52a93"
+      ]
+    },
+    "security": {
+      "status": "pass",
+      "value_free": true,
+      "immutable_refs": [
+        "https://github.com/ramideltoro/nutsnews-backend/commit/b619cf91504eafca21f70c5d68888563f5fca7a9",
+        "https://github.com/ramideltoro/nutsnews-backend/commit/3626bba18496e808f4e9d6d2a0659ce6fee56cf0",
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30678581033",
+        "https://github.com/ramideltoro/nutsnews-worker/issues/164#issuecomment-5148872751"
+      ]
+    },
+    "dependency_outage": {
+      "status": "pass",
+      "value_free": true,
+      "immutable_refs": [
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30698252692#artifact-8817967994-sha256-2755dec579adf301037d28926f83129c3300014de2f840ada9afa66e9b7f563c-report-43d22a792d18b89b482023eb73e9d0b81e4910301aa6b195644674bb6e29beee"
+      ]
+    },
+    "empty_broker_recovery": {
+      "status": "pass",
+      "value_free": true,
+      "immutable_refs": [
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30708373209#artifact-8821061941-sha256-762c155c3a70bc4326e4eda977352fa61708f7837e79df90b3cef2cbc5c11865-report-d205da12b1f2d6b5728b9775d8a796c5ec564a3f2d1ccf8716358239e3f1036d"
+      ]
+    },
+    "backup_restore": {
+      "status": "pass",
+      "value_free": true,
+      "immutable_refs": [
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30596331065#artifact-8780245456-sha256-f02d1f761d910bb870e4f32d6b8a2507d8788937beb7710473fc45d9a34e02eb",
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30596391281#artifact-8780264195-sha256-32a509effb8f98123b3e24e688f124f6792b79a4055f121e33a502039cb13203",
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30596869305#artifact-8780440760-sha256-053527311406a268c947b50f54d95c11eb39ce3ba15383d4f7e45332f052a30e",
+        "https://github.com/ramideltoro/nutsnews-backend/actions/runs/30683327104#artifact-8813032734-sha256-f55bbf169e45c4d891704bd301a59de8a5e5bec8ef96ddee53c7f97339bfd9a3"
+      ]
+    },
+    "authenticated_admin": {
+      "status": "pass",
+      "value_free": true,
+      "immutable_refs": [
+        "https://github.com/ramideltoro/nutsnews/actions/runs/30632243204#artifact-8793826506-sha256-e4666853abfacf85d0b5df238e0deb929dbcf59c31d5f1d2af40153b72e22509"
+      ]
+    },
+    "observability": {
+      "status": "pass",
+      "value_free": true,
+      "immutable_refs": [
+        "https://github.com/ramideltoro/nutsnews-infra/commit/c23403e41d42595fdef3e26cd9965bd480c5b9ea",
+        "https://github.com/ramideltoro/nutsnews-infra/actions/runs/30708192621#artifacts-8821001367-8821001180",
+        "https://github.com/ramideltoro/nutsnews-infra/actions/runs/30708243067#artifact-8821016365-sha256-8154885f02e9e2a9dba2bad7db0f8e038ba6f74ca2b1caf8bc6ab7132dffecf5"
+      ]
+    },
+    "failover_analytics": {
+      "status": "pass",
+      "value_free": true,
+      "immutable_refs": [
+        "https://github.com/ramideltoro/nutsnews-infra/commit/b10a76cf523c9f5b47bd69b8301dc3d9d9a4d8a6",
+        "https://github.com/ramideltoro/nutsnews-infra/actions/runs/30588814493#artifact-8777561586-sha256-5939295e1de8e9d0b41dad3a893d01a44deed53556b56d4e7a1068baad300db7-report-d125b916b8ff01019b537fe5d2746efe21454677732bd33600a9e1bc02369854"
+      ]
+    }
+  },
+  "decision_scope": {
+    "authorizes_issue": "ramideltoro/nutsnews-worker#127",
+    "performs_cutover": false,
+    "enables_production_writes_now": false,
+    "changes_ingestion_owner_now": false,
+    "changes_dns_or_failover": false
   }
 }

@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "tracking_issue": "ramideltoro/nutsnews-worker#166",
+  "execution_issue": "ramideltoro/nutsnews-worker#127",
+  "implementation_repository": "ramideltoro/nutsnews-backend",
+  "authorization": {
+    "kind": "standing_bounded_authorization",
+    "owner_login": "ramideltoro",
+    "owner_comment_url": "https://github.com/ramideltoro/nutsnews-worker/issues/166#issuecomment-5151195619",
+    "owner_comment_body_sha256": "738fb59be36e11889c75fe06f18797cf02a3466d7a4477d1cbc638856c24190c",
+    "applies_to_current_and_future_exact_candidates": true,
+    "per_release_owner_approval_required": false,
+    "first_run_owner_approval_required": false,
+    "routine_environment_wait_owner_response_required": false,
+    "exact_environment_wait_api_approval_allowed": true,
+    "machine_validated_go_allowed": true,
+    "risk_waiver": false,
+    "survives_candidate_revisions": true,
+    "fails_closed_on_scope_or_invariant_change": true,
+    "scope_sha256": "0a6a390ddec8fd10ebad039dccb6a768726d494839b0bcfdfabff63b9e3b78eb"
+  },
+  "scope_fingerprint": {
+    "environment": "production-backend",
+    "workflow": ".github/workflows/backend-worker-uplift-cutover-controls.yml",
+    "decision_artifact": "docs/worker-uplift-final-cutover-decision.json",
+    "candidate_artifact": "docs/worker-uplift-final-cutover-candidate.json",
+    "allowed_execution_issue": "ramideltoro/nutsnews-worker#127",
+    "allowed_operations": [
+      "apply",
+      "rollback"
+    ],
+    "apply_confirmation_prefix": "execute-worker-uplift-cutover:",
+    "rollback_confirmation_prefix": "rollback-worker-uplift-cutover:",
+    "candidate_stage_count": 8,
+    "required_current_owner": "legacy_shards",
+    "required_current_legacy_dispatch_enabled": true,
+    "required_current_uplift_mode": "shadow",
+    "required_current_production_writes_enabled": false,
+    "dns_failover_unchanged": true
+  },
+  "required_machine_gates": [
+    "exact_candidate_manifest_sha256",
+    "exact_eight_image_and_source_pairs",
+    "immutable_package_and_contract_evidence",
+    "current_deployed_runtime_and_write_policy",
+    "current_complete_parity_and_soak_evidence",
+    "current_watermark_and_zero_lag_evidence",
+    "current_rollback_rehearsal",
+    "absolute_execution_rollback_and_observation_windows",
+    "complete_threshold_and_owner_rosters",
+    "no_open_blockers",
+    "fixed_workflow_and_typed_confirmation",
+    "post_action_single_writer_and_guardrail_verification"
+  ],
+  "forbidden_authorities": [
+    "arbitrary_sql",
+    "article_or_domain_writes_outside_fixed_cutover_transition",
+    "queue_publish_consume_purge_or_topology_change",
+    "schema_change",
+    "infrastructure_mutation",
+    "dns_change",
+    "failover_change",
+    "cloudflare_change",
+    "legacy_worker_code_change",
+    "unvalidated_ingestion_owner_change",
+    "unvalidated_production_write_enablement",
+    "safety_gate_removal",
+    "environment_protection_change",
+    "secret_value_retrieval_or_recording",
+    "risk_acceptance",
+    "execution_outside_issue_127"
+  ],
+  "drift_policy": {
+    "decision": "NO-GO",
+    "requires_reviewed_source_change": true,
+    "inherits_authorization_silently": false,
+    "requires_new_owner_comment_when_scope_is_unchanged": false,
+    "requires_new_owner_comment_when_scope_changes": true
+  }
+}

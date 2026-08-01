@@ -1,0 +1,66 @@
+# Worker-uplift final cutover readiness
+
+Issue `nutsnews-worker#166` is the non-mutating gate for the exact protected
+execution in `nutsnews-worker#127`. It does not cut over, enable uplift
+production writes, disable legacy ingestion, or change DNS/failover.
+
+## Standing bounded authorization
+
+The owner authorization is recorded at
+https://github.com/ramideltoro/nutsnews-worker/issues/166#issuecomment-5151195619
+and pinned by body SHA-256 and scope SHA-256 in
+`docs/worker-uplift-final-cutover-authorization.json`. No recurring owner prompt
+is required for a release, first execution, or routine protected-environment
+wait when the exact source-controlled scope and every invariant validate.
+
+This is not a risk waiver. The validator must fail closed if the candidate,
+scope, safety state, workflow, typed confirmation, evidence set, watermark,
+rollback limits, observation window, or exclusions change. A scope change needs
+a reviewed source update and a new owner authorization; an unchanged exact
+candidate revision does not.
+
+## Evidence classes
+
+- Read-only: current runtime status, queues/DLQs, parity, complete-window soak,
+  security dispositions, dependency recovery, backup/restore, authenticated
+  admin, observability, and Cloudflare failover analytics proof. Inspect the
+  downloaded JSON and checksum, not only the workflow conclusion.
+- Value-free dry run: build the exact candidate and watermark inputs and run
+  the fixed `dry-run` control operation. It cannot reach production targets.
+- Isolated rehearsal: run `rehearse` for the exact inputs, including all fixed
+  injected failure points. It cannot reach production targets or mutate state.
+- Protected read-only: run `preflight` and `verify` through the
+  `production-backend` environment. Exact waits within the standing scope may
+  be approved through the GitHub API.
+- Protected mutation: only #127 may run `apply` or `rollback`, from `main`,
+  with the exact candidate, watermark, absolute deadline, and typed
+  confirmation frozen by #166.
+
+## Validation and decision
+
+Run:
+
+```bash
+python3 scripts/validate_worker_uplift_final_cutover_readiness.py
+python3 -m unittest tests.test_worker_uplift_final_cutover_readiness
+```
+
+The committed decision may remain `NO-GO` while evidence is incomplete. Before
+#127, `--require-go` must pass. GO is valid only when the exact eight-service
+candidate is immutable, every evidence category passes, blockers are empty,
+the legacy worker is still the sole production ingestion owner, uplift remains
+shadow-only with `production_writes_enabled=false`, and the fixed execution,
+rollback, observation, threshold, and ownership records are complete.
+
+## Drift and recovery
+
+Any missing or stale evidence, source hash mismatch, candidate mismatch,
+unexpected owner/write state, time-window mismatch, or expanded authority is
+an automatic `NO-GO`. Keep legacy dispatch enabled and uplift production writes
+false. Do not change DNS, Cloudflare, failover behavior, queues, schemas, or
+legacy-worker code to clear the gate.
+
+After #127, preserve the immutable apply artifact and execute the 48-hour
+observation plan. Rollback is allowed only through the fixed protected workflow
+before the frozen absolute deadline. If the deadline passes, use the documented
+forward-recovery path; do not improvise a rollback.

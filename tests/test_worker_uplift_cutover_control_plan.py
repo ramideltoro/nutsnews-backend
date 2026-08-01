@@ -52,7 +52,7 @@ class WorkerUpliftCutoverControlPlanTests(unittest.TestCase):
 
         self.assertTrue(any("ownership domain set" in error for error in errors))
 
-    def test_missing_named_backup_control_is_rejected(self):
+    def test_missing_fail_closed_backup_control_is_rejected(self):
         plan = copy.deepcopy(self.plan)
         plan["ownership"]["domains"][0]["backup_control_id"] = ""
 

@@ -1,12 +1,20 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "decision_id": "worker-uplift-final-cutover-decision",
   "tracking_issue": "ramideltoro/nutsnews-worker#166",
   "execution_issue": "ramideltoro/nutsnews-worker#127",
   "decision": "NO-GO",
   "authorized_for_execution": false,
-  "approver_login": null,
-  "approved_at_utc": null,
+  "evaluated_at_utc": "2026-08-01T11:20:09Z",
+  "authorization": {
+    "kind": "standing_bounded_authorization",
+    "contract": "docs/worker-uplift-final-cutover-authorization.json",
+    "owner_login": "ramideltoro",
+    "owner_comment_url": "https://github.com/ramideltoro/nutsnews-worker/issues/166#issuecomment-5151195619",
+    "owner_comment_body_sha256": "738fb59be36e11889c75fe06f18797cf02a3466d7a4477d1cbc638856c24190c",
+    "scope_sha256": "0a6a390ddec8fd10ebad039dccb6a768726d494839b0bcfdfabff63b9e3b78eb",
+    "recurring_owner_approval_required": false
+  },
   "candidate_sha256": null,
   "watermark_sha256": null,
   "rollback_deadline_utc": null,
@@ -15,8 +23,8 @@
   "control_commit": null,
   "legacy_scheduling_commit": "a073e351e5716a97e0759cca17096851cbb80261",
   "blockers": [
-    "#126 controls are not yet merged, deployed, and rehearsed",
-    "#166 has not frozen and approved the exact production candidate"
+    "#166 exact candidate and current evidence have not been frozen",
+    "#166 current rollback rehearsal has not been incorporated"
   ],
   "safety": {
     "active_ingestion_owner": "legacy_shards",

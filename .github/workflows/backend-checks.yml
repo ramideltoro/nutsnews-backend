@@ -123,6 +123,14 @@ jobs:
           tests.test_worker_uplift_cutover_controls
           tests.test_validate_worker_uplift_cutover_controls
 
+      - name: Validate worker uplift final cutover readiness
+        shell: bash
+        run: python3 scripts/validate_worker_uplift_final_cutover_readiness.py
+
+      - name: Run worker uplift final cutover readiness tests
+        shell: bash
+        run: python3 -m unittest tests.test_worker_uplift_final_cutover_readiness
+
       - name: Validate worker uplift production readiness decision
         shell: bash
         run: python3 scripts/validate_worker_uplift_production_readiness.py

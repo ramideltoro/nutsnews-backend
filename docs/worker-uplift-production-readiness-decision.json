@@ -162,12 +162,12 @@
     },
     {
       "repository": "ramideltoro/nutsnews-worker-article-approval",
-      "commit": "6597030ffcc07c51fb1259b3152d2645f5927d75",
+      "commit": "70c51a65123a4990c6a756d41bbb7566eb3f326b",
       "role": "approval_service"
     },
     {
       "repository": "ramideltoro/nutsnews-worker-article-translation",
-      "commit": "d1206b73157305128b3bf5dc6bf5a7bcbb4c818d",
+      "commit": "22e918518945b3db633c81c09f816b9983f49dfd",
       "role": "translation_service"
     },
     {
@@ -298,8 +298,8 @@
     {
       "stage": "approval",
       "source_repository": "ramideltoro/nutsnews-worker-article-approval",
-      "source_commit": "6597030ffcc07c51fb1259b3152d2645f5927d75",
-      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-approval@sha256:b977adb932647808b73f62dc84bee69a52dca88e4198566d9e0c30180fdb2407",
+      "source_commit": "70c51a65123a4990c6a756d41bbb7566eb3f326b",
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-approval@sha256:0d45c0a8d023cfa499e1197e5804734b3cf501552740d3ae7c638f4f1212bfb9",
       "contract_version": "0.4.0",
       "runtime_package_version": "0.5.0",
       "mode": "shadow",
@@ -308,8 +308,8 @@
     {
       "stage": "translation",
       "source_repository": "ramideltoro/nutsnews-worker-article-translation",
-      "source_commit": "d1206b73157305128b3bf5dc6bf5a7bcbb4c818d",
-      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-translation@sha256:926dc46ac29f9e6661ee8baa83171aca7a4e9941edbe93af6dbd19708a614da9",
+      "source_commit": "22e918518945b3db633c81c09f816b9983f49dfd",
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-translation@sha256:eed2ca084b30d1db6b1fc9b51ac4e4444ec8841b548a825c97b48f9467b0ead9",
       "contract_version": "0.4.0",
       "runtime_package_version": "0.5.0",
       "mode": "shadow",
@@ -371,7 +371,7 @@
     },
     {
       "path": "docs/worker-uplift-cutover-control-plan.json",
-      "sha256": "02eeee861498c81803da4452c9e49c5c4b28a9999c03195e74d3af1606970bdc"
+      "sha256": "f5cb4f507190e60ab19d82f891d14a544e9fcc91273bb4fc50752e98a71c854b"
     },
     {
       "path": "docs/worker-uplift-shadow-soak-capacity-report.json",
@@ -707,7 +707,7 @@
       "observation_window_duration_hours": 48,
       "ownership_plan_complete": true,
       "plan_path": "docs/worker-uplift-cutover-control-plan.json",
-      "plan_sha256": "02eeee861498c81803da4452c9e49c5c4b28a9999c03195e74d3af1606970bdc",
+      "plan_sha256": "f5cb4f507190e60ab19d82f891d14a544e9fcc91273bb4fc50752e98a71c854b",
       "planning_blocker_issue": "ramideltoro/nutsnews-worker#165",
       "downstream_control_implementation_required_before": "ramideltoro/nutsnews-worker#166",
       "downstream_control_implementation_blocks_issue_125": false,

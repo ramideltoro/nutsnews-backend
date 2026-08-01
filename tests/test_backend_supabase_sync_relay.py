@@ -52,11 +52,19 @@ def contract() -> dict:
     }
 
 
-def run_with_contract(contract_data: dict, argv: list[str], env: dict[str, str]):
+def run_with_contract(
+    contract_data: dict,
+    argv: list[str],
+    env: dict[str, str],
+    *,
+    previous_report: dict | None = None,
+):
     with tempfile.TemporaryDirectory() as tmpdir:
         contract_path = Path(tmpdir) / "relay.json"
         output_path = Path(tmpdir) / "report.json"
         contract_path.write_text(json.dumps(contract_data), encoding="utf-8")
+        if previous_report is not None:
+            output_path.write_text(json.dumps(previous_report), encoding="utf-8")
         with mock.patch.dict("os.environ", env, clear=True):
             with redirect_stdout(StringIO()):
                 exit_code = relay.main_args(
@@ -173,7 +181,17 @@ class BackendSupabaseSyncRelayTests(unittest.TestCase):
                     with mock.patch.object(
                         relay.reconcile,
                         "validate_standby",
-                        return_value={"status": "pass", "failed_required_checks": [], "checks": []},
+                        return_value={
+                            "status": "pass",
+                            "failed_required_checks": [],
+                            "checks": [
+                                {
+                                    "id": "table.public.worker_runs",
+                                    "status": "pass",
+                                    "target_lag_rows": 0,
+                                }
+                            ],
+                        },
                     ):
                         exit_code, report = run_with_contract(
                             contract(),
@@ -186,12 +204,94 @@ class BackendSupabaseSyncRelayTests(unittest.TestCase):
 
         self.assertEqual(0, exit_code)
         self.assertEqual("pass", report["status"])
+        self.assertEqual(2, report["schema_version"])
         self.assertEqual("applied", report["sync"]["status"])
         self.assertIn("completed_at_utc", report)
         self.assertIn("last_applied_at_utc", report)
+        self.assertEqual(report["completed_at_utc"], report["last_success_at_utc"])
+        self.assertEqual(
+            {
+                "complete": True,
+                "expected_table_count": 1,
+                "failed_table_count": 0,
+                "max_table_lag_rows": 0,
+                "safe_metadata_only": True,
+                "validated_table_count": 1,
+            },
+            report["validation_summary"],
+        )
         self.assertEqual(["insert", "update", "delete", "sequence-readiness"], report["sync"]["supported_change_types"])
         apply_table_backfill.assert_called_once()
         apply_sequence_safety.assert_called_once()
+
+    def test_failed_run_preserves_last_success_and_last_applied_history(self) -> None:
+        previous = {
+            "schema_version": 2,
+            "status": "pass",
+            "mode": "sync-once",
+            "safe_metadata_only": True,
+            "checked_at_utc": "2026-08-01T10:00:00Z",
+            "completed_at_utc": "2026-08-01T10:00:01Z",
+            "finished_at_utc": "2026-08-01T10:00:01Z",
+            "last_success_at_utc": "2026-08-01T10:00:01Z",
+            "last_applied_at_utc": "2026-08-01T10:00:01Z",
+            "sync": {"status": "applied"},
+            "post_sync": {"status": "pass"},
+        }
+        with mock.patch.object(
+            relay,
+            "relay_preflight",
+            return_value={"status": "fail", "failed_required_checks": ["schema-fingerprint"], "checks": []},
+        ):
+            exit_code, report = run_with_contract(
+                contract(),
+                ["--mode", "sync-once", "--enforce"],
+                {"SRC": "postgresql://source", "TGT": "postgresql://target"},
+                previous_report=previous,
+            )
+
+        self.assertEqual(1, exit_code)
+        self.assertEqual("fail", report["status"])
+        self.assertEqual(previous["last_success_at_utc"], report["last_success_at_utc"])
+        self.assertEqual(previous["last_applied_at_utc"], report["last_applied_at_utc"])
+        self.assertIn("finished_at_utc", report)
+
+    def test_passing_dry_run_does_not_invent_relay_success_history(self) -> None:
+        with mock.patch.object(
+            relay,
+            "relay_preflight",
+            return_value={"status": "pass", "failed_required_checks": [], "checks": []},
+        ):
+            exit_code, report = run_with_contract(
+                contract(),
+                ["--mode", "dry-run", "--enforce"],
+                {"SRC": "postgresql://source", "TGT": "postgresql://target"},
+            )
+
+        self.assertEqual(0, exit_code)
+        self.assertEqual("pass", report["status"])
+        self.assertEqual("not_run", report["sync"]["status"])
+        self.assertNotIn("last_success_at_utc", report)
+        self.assertNotIn("last_applied_at_utc", report)
+        self.assertFalse(report["validation_summary"]["complete"])
+
+    def test_skipped_post_sync_checks_do_not_count_as_failed_tables(self) -> None:
+        summary = relay.relay_validation_summary(
+            {
+                "status": "skipped_with_reason",
+                "checks": [
+                    {
+                        "id": "table.public.worker_runs",
+                        "status": "skipped_with_reason",
+                    }
+                ],
+            },
+            1,
+        )
+
+        self.assertFalse(summary["complete"])
+        self.assertIsNone(summary["failed_table_count"])
+        self.assertIsNone(summary["max_table_lag_rows"])
 
     def test_manifest_without_primary_key_or_primary_replica_identity_fails_closed(self) -> None:
         relay_contract = contract()

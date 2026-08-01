@@ -14,12 +14,23 @@ The workflow:
   smoke, canary status, timer, listener, update, and recent-error signals;
 - writes a sanitized JSON report artifact and GitHub step summary;
 - loads the previous completed report artifact to maintain alert fingerprints, cooldown state, suppression counts, and recovery notices;
+- reduces the report to a closed, safe-metadata-only health-audit event;
+- optionally sends that bounded event to one fixed root-owned state writer so
+  Alloy can expose workflow conclusion, last-success age, and consecutive
+  failures;
 - sends email through SMTP when reporting credentials are configured and there are unsuppressed alert notifications.
 
-It does not run arbitrary remote commands, restart services, change packages,
-edit files, run RabbitMQ smoke, or call the protected Ansible apply workflow.
-RabbitMQ smoke remains a separate protected workflow because it creates isolated
-probe resources and restarts the broker.
+Report collection does not run arbitrary remote commands, restart services,
+change packages, run RabbitMQ smoke, or call the protected Ansible apply
+workflow. When bounded state publication is explicitly enabled, the only
+additional remote command is the literal
+`sudo -n /usr/local/sbin/nutsnews-health-audit-state write`. That root-owned
+program accepts strict JSON on standard input and can replace only
+`/var/lib/nutsnews/health-audit/last-run.json`. A validated sudoers drop-in
+authorizes the `rami` account for that exact executable and `write` argument;
+the event-production mode also refuses elevated execution. RabbitMQ smoke
+remains a separate protected workflow because it creates isolated probe
+resources and restarts the broker.
 
 ## Required Repository Secrets
 
@@ -48,8 +59,14 @@ Optional repository or environment variables:
 | `NUTSNEWS_REPORT_SMTP_PORT` | `587` |
 | `NUTSNEWS_REPORT_SMTP_STARTTLS` | `true` |
 | `NUTSNEWS_REPORT_SUBJECT_PREFIX` | `[NutsNews backend]` |
+| `NUTSNEWS_HEALTH_AUDIT_REMOTE_PUBLISH_ENABLED` | unset/`false`; remote publication is skipped |
 
-The workflow prints only credential names and delivery status. It must not print secret values.
+The workflow must not print secret values. The bounded publication path logs
+only whether state changed and its closed-set conclusion.
+
+`NUTSNEWS_BACKEND_HOST` is fail-closed to the canonical `65.75.201.18` target,
+and the SSH user is fail-closed to the `rami` audit account. Neither value can
+select an arbitrary publication target.
 
 ## Report States
 
@@ -58,6 +75,7 @@ The JSON report includes:
 - `last_report_run_at`
 - `next_report_run_at`
 - `last_report_success_at`
+- `conclusion` (`success` or `failure`)
 - `last_error`
 - delivery status
 - `alerting.summary.active_alert_count`
@@ -108,6 +126,64 @@ Statuses are:
 
 Missing SMTP credentials degrade to `not_configured`. Missing SSH credentials are a workflow configuration error because the report cannot inspect the host.
 
+Any `critical` check makes the report conclusion `failure`. A failed report
+does not advance `last_report_success_at`, and the generator exits nonzero only
+after writing the JSON artifact and step summary. The artifact upload uses
+`always()`, so critical runs retain evidence. Warnings and known
+`not_configured` states do not by themselves fail the workflow.
+
+## Bounded Metrics State
+
+The local event producer selects only these fields from the full artifact:
+
+- fixed schema version, source, availability, and safe-metadata marker;
+- `success` or `failure` conclusion;
+- canonical UTC run timestamp;
+- bounded critical-check count;
+- fixed `86400` second expected interval.
+
+It never publishes host output, check summaries, errors, identifiers, paths,
+credentials, or email fields. Input size, exact keys, value types, timestamp
+freshness, integer ranges, duplicate keys, and non-finite JSON values are
+validated both before SSH and by the installed writer.
+
+The writer holds a fixed-directory lock and performs a file-and-directory
+`fsync` around an atomic replace. A failure preserves the prior
+`last_success_at_utc` and increments `consecutive_failures`; a success updates
+last success and resets the counter. Older events, conflicting same-timestamp
+events, malformed prior state, symbolic-link targets, and values outside the
+closed schema are rejected without replacing durable truth. An exact replay is
+idempotent.
+
+## Rollout Order and Current Freeze
+
+The generation-5 production incident freeze supersedes normal mutation
+instructions: do not run backend Ansible/runtime apply, queue
+replay/purge/drain, worker or Cloudflare deploy, Runtime1/fetcher migration,
+Grafana apply/drills, or web production deploy. The authoritative worker mode
+remains `shadow_comparison`. Source review and read-only verification remain
+allowed.
+
+Source review is non-mutating, and a later authorized merge cannot publish
+remotely while the publication variable remains absent or `false`. That safety
+property is not authorization to merge or apply during the current freeze.
+Keep `NUTSNEWS_HEALTH_AUDIT_REMOTE_PUBLISH_ENABLED` absent or `false` until the
+freeze is explicitly lifted and all of these steps complete in order:
+
+1. Run the protected backend Ansible workflow in check mode and review the
+   fixed writer path, root ownership, and exact-argument sudoers validation.
+2. After approval, apply the baseline so
+   `/usr/local/sbin/nutsnews-health-audit-state` exists on the backend.
+3. Verify the installed writer checksum and the metrics state directory with
+   read-only commands. Do not hand-create the state file.
+4. Set `NUTSNEWS_HEALTH_AUDIT_REMOTE_PUBLISH_ENABLED=true` as an explicit
+   repository variable.
+5. Dispatch one report and confirm both a successful publication summary and
+   scrapeable `nutsnews_backend_health_audit_*` metrics.
+6. Exercise a bounded critical-check test only after the incident freeze and
+   failure-drill approval are lifted; confirm the workflow fails while its
+   artifact remains available and last success does not advance.
+
 ## Alert Deduplication
 
 The report turns every warning, critical, or unknown check into an alert candidate. Healthy and `not_configured` checks are not alert candidates.
@@ -149,6 +225,7 @@ Run unit tests:
 
 ```bash
 python3 -m unittest tests.test_backend_health_report
+python3 -m unittest tests.test_backend_health_audit_state
 ```
 
 Run full backend validation:
@@ -160,6 +237,10 @@ python3 -m unittest discover -s tests
 
 ## Rollback
 
-Disable or revert the workflow through a pull request if reports become noisy or delivery fails.
+Set `NUTSNEWS_HEALTH_AUDIT_REMOTE_PUBLISH_ENABLED=false` before reverting the
+workflow or removing the installed writer. Disabling the variable immediately
+stops remote state mutation while leaving report generation and artifacts
+intact. Revert source through a pull request and remove the writer only through
+the protected Ansible apply path after the current freeze is lifted.
 
 Rotate SMTP or SSH credentials in GitHub secrets if a secret is suspected to be exposed. Do not commit report artifacts that contain live host evidence.

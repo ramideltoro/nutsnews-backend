@@ -9,10 +9,15 @@ import json
 import math
 import os
 import re
+import socket
+import threading
+import time
+import uuid
+from collections import defaultdict
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import urlsplit
 
 
@@ -164,6 +169,43 @@ WORKER_UPLIFT_ACTIVE_INGESTION_OWNER_SET = {
     "unknown",
 }
 WORKER_UPLIFT_ADMIN_PROJECTION_VERSION = 1
+
+SERVICE_NAME = "nutsnews-worker-db-api"
+REQUEST_DURATION_BUCKETS_SECONDS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0)
+HEALTH_OPERATIONS = {"healthz", "livez", "readyz", "metrics"}
+WORKER_API_OPERATIONS = READ_OPERATIONS | WRITE_OPERATIONS
+APP_API_OPERATIONS = APP_READ_OPERATIONS | APP_WRITE_OPERATIONS
+API_POST_OPERATIONS = WORKER_API_OPERATIONS | APP_API_OPERATIONS
+INVALID_METHOD_OPERATION = "invalid_method"
+INVALID_ROUTE_OPERATION = "invalid_route"
+AUTHENTICATION_FAILED_OPERATION = "authentication_failed"
+METRIC_KEY_OVERFLOW_OPERATION = "metric_key_overflow"
+OBSERVED_HTTP_METHODS = {"GET", "POST"}
+OBSERVED_STATUS_CLASSES = {"2xx", "4xx", "5xx"}
+METRIC_KEY_OVERFLOW = (METRIC_KEY_OVERFLOW_OPERATION, "OTHER", "other")
+READINESS_CONNECT_TIMEOUT_SECONDS = 3
+READINESS_STATEMENT_TIMEOUT_MS = 2_000
+READINESS_CACHE_TTL_SECONDS = 2.0
+READINESS_MAX_IN_FLIGHT_PROBES = 1
+# Reachable keys are 61 authenticated POST operations x {2xx,4xx,5xx},
+# four GET health operations x {2xx,5xx}, four fixed rejection keys, and
+# the reserved overflow key: 196 today. Keep reviewed spare keys while a
+# hard cap prevents future code paths from growing the in-memory registry.
+PROVEN_REQUEST_METRIC_KEYS = (
+    len(API_POST_OPERATIONS) * 3
+    + len(HEALTH_OPERATIONS) * 2
+    + 4
+    + 1
+)
+MAX_REQUEST_METRIC_KEYS = 200
+MAX_PROMETHEUS_SAMPLES_PER_REQUEST_KEY = len(REQUEST_DURATION_BUCKETS_SECONDS) + 5
+FIXED_PROMETHEUS_SAMPLE_COUNT = 6
+MAX_RENDERED_PROMETHEUS_SAMPLES = (
+    FIXED_PROMETHEUS_SAMPLE_COUNT
+    + MAX_REQUEST_METRIC_KEYS * MAX_PROMETHEUS_SAMPLES_PER_REQUEST_KEY
+)
+VALID_REQUEST_ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+VALID_TRACEPARENT = re.compile(r"^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$")
 
 RUNTIME_FEATURE_FLAG_DEFAULTS = {
     "reader_archive_search": True,
@@ -1006,19 +1048,37 @@ class PostgresStore:
             "",
         )
 
-    def connect(self):
+    def connect(
+        self,
+        *,
+        connect_timeout_seconds: int = 5,
+        statement_timeout_ms: int | None = None,
+    ):
         import psycopg2
         import psycopg2.extras
 
-        return psycopg2.connect(
-            host=self.host,
-            port=self.port,
-            dbname=self.database,
-            user=self.user,
-            password=self.password,
-            connect_timeout=5,
-            cursor_factory=psycopg2.extras.RealDictCursor,
-        )
+        connection_options: dict[str, Any] = {
+            "host": self.host,
+            "port": self.port,
+            "dbname": self.database,
+            "user": self.user,
+            "password": self.password,
+            "connect_timeout": connect_timeout_seconds,
+            "cursor_factory": psycopg2.extras.RealDictCursor,
+        }
+        if statement_timeout_ms is not None:
+            connection_options["options"] = f"-c statement_timeout={statement_timeout_ms}"
+        return psycopg2.connect(**connection_options)
+
+    def check_readiness(self) -> bool:
+        with self.connect(
+            connect_timeout_seconds=READINESS_CONNECT_TIMEOUT_SECONDS,
+            statement_timeout_ms=READINESS_STATEMENT_TIMEOUT_MS,
+        ) as conn:
+            with conn.cursor() as cur:
+                cur.execute("select 1 as ready")
+                row = cur.fetchone()
+                return bool(row and row.get("ready") == 1)
 
     def fetch_all(self, query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         with self.connect() as conn:
@@ -1034,6 +1094,65 @@ class PostgresStore:
         with self.connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(query, params)
+
+
+class ReadinessResult(NamedTuple):
+    ready: bool
+    error_class: str | None
+    checked_at: float
+    cached: bool
+
+
+class PostgresReadinessGate:
+    """Bound public readiness fan-out to one short, cached PostgreSQL probe."""
+
+    def __init__(
+        self,
+        store: Any,
+        *,
+        monotonic_clock: Any = time.monotonic,
+        wall_clock: Any = time.time,
+    ) -> None:
+        self.store = store
+        self._monotonic_clock = monotonic_clock
+        self._wall_clock = wall_clock
+        self._lock = threading.Lock()
+        self._in_flight = 0
+        self._last_completed_monotonic = 0.0
+        self._last_result: ReadinessResult | None = None
+
+    def check(self) -> ReadinessResult:
+        now = self._monotonic_clock()
+        with self._lock:
+            if (
+                self._last_result is not None
+                and now - self._last_completed_monotonic < READINESS_CACHE_TTL_SECONDS
+            ):
+                return ReadinessResult(
+                    self._last_result.ready,
+                    self._last_result.error_class,
+                    self._last_result.checked_at,
+                    True,
+                )
+            if self._in_flight >= READINESS_MAX_IN_FLIGHT_PROBES:
+                checked_at = self._last_result.checked_at if self._last_result is not None else 0.0
+                return ReadinessResult(False, "PostgresqlReadinessProbeBusy", checked_at, False)
+            self._in_flight += 1
+
+        try:
+            ready = bool(self.store.check_readiness())
+            error_class = None if ready else "PostgresqlReadinessCheckFailed"
+        except Exception as error:
+            ready = False
+            error_class = type(error).__name__
+
+        completed_monotonic = self._monotonic_clock()
+        result = ReadinessResult(ready, error_class, self._wall_clock(), False)
+        with self._lock:
+            self._last_completed_monotonic = completed_monotonic
+            self._last_result = result
+            self._in_flight -= 1
+        return result
 
 
 def assert_provider_mode(body: dict[str, Any]) -> str:
@@ -1101,6 +1220,205 @@ def internal_error_payload(error: Exception) -> dict[str, Any]:
     if isinstance(sqlstate, str) and sqlstate:
         payload["sqlstate"] = sqlstate
     return payload
+
+
+def service_identity() -> dict[str, str]:
+    """Return deployment identity from controlled service configuration."""
+    return {
+        "service": SERVICE_NAME,
+        "service_version": os.environ.get("NUTSNEWS_SERVICE_VERSION", "1.2.0")[:128],
+        "revision": os.environ.get("NUTSNEWS_BUILD_REVISION", "unknown")[:128],
+        "deployment_environment": os.environ.get("NUTSNEWS_DEPLOYMENT_ENVIRONMENT", "production")[:64],
+        "host": os.environ.get("NUTSNEWS_TELEMETRY_HOST", socket.gethostname())[:128],
+    }
+
+
+def prometheus_escape(value: Any) -> str:
+    return str(value).replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
+
+
+def prometheus_labels(labels: dict[str, Any]) -> str:
+    return "{" + ",".join(f'{key}="{prometheus_escape(value)}"' for key, value in sorted(labels.items())) + "}"
+
+
+def bounded_request_operation(method: str, path: str) -> str:
+    normalized_method = method.upper()
+    raw_path, separator, _query = path.partition("?")
+    normalized_path = raw_path.rstrip("/") or "/"
+
+    if normalized_method == "GET":
+        if normalized_path in {f"/{operation}" for operation in HEALTH_OPERATIONS}:
+            return normalized_path.removeprefix("/")
+        if normalized_path.startswith(("/api/worker/db/", "/api/app/db/")):
+            return INVALID_METHOD_OPERATION
+        return INVALID_ROUTE_OPERATION
+
+    if normalized_method != "POST":
+        return INVALID_METHOD_OPERATION
+    if separator or raw_path.endswith("/"):
+        return INVALID_ROUTE_OPERATION
+    if normalized_path.startswith("/api/worker/db/"):
+        candidate = normalized_path.removeprefix("/api/worker/db/")
+        return candidate if candidate in WORKER_API_OPERATIONS else INVALID_ROUTE_OPERATION
+    if normalized_path.startswith("/api/app/db/"):
+        candidate = normalized_path.removeprefix("/api/app/db/")
+        return candidate if candidate in APP_API_OPERATIONS else INVALID_ROUTE_OPERATION
+    if normalized_path in {f"/{operation}" for operation in HEALTH_OPERATIONS}:
+        return INVALID_METHOD_OPERATION
+    return INVALID_ROUTE_OPERATION
+
+
+def status_class(status: int) -> str:
+    return f"{max(0, min(9, status // 100))}xx"
+
+
+def bounded_metric_key(operation: str, method: str, status: int) -> tuple[str, str, str]:
+    normalized_method = method.upper()
+    if normalized_method not in OBSERVED_HTTP_METHODS:
+        normalized_method = "OTHER"
+    normalized_status_class = status_class(status)
+    if normalized_status_class not in OBSERVED_STATUS_CLASSES:
+        normalized_status_class = "other"
+
+    if operation == INVALID_METHOD_OPERATION:
+        return INVALID_METHOD_OPERATION, "OTHER", "4xx"
+    if operation == INVALID_ROUTE_OPERATION:
+        return INVALID_ROUTE_OPERATION, "OTHER", "4xx"
+    if operation == AUTHENTICATION_FAILED_OPERATION:
+        authentication_status = "5xx" if normalized_status_class == "5xx" else "4xx"
+        return AUTHENTICATION_FAILED_OPERATION, "POST", authentication_status
+
+    if operation in API_POST_OPERATIONS:
+        if normalized_method != "POST":
+            return INVALID_METHOD_OPERATION, "OTHER", "4xx"
+    elif operation in HEALTH_OPERATIONS:
+        if normalized_method != "GET":
+            return INVALID_METHOD_OPERATION, "OTHER", "4xx"
+    else:
+        return METRIC_KEY_OVERFLOW
+
+    return operation, normalized_method, normalized_status_class
+
+
+class ApiMetrics:
+    """Small, dependency-free Prometheus registry with bounded label values."""
+
+    def __init__(self, identity: dict[str, str] | None = None) -> None:
+        self.identity = identity or service_identity()
+        self.started_at = time.time()
+        self._lock = threading.Lock()
+        self._requests: dict[tuple[str, str, str], int] = defaultdict(int)
+        self._errors: dict[tuple[str, str, str], int] = defaultdict(int)
+        self._duration_count: dict[tuple[str, str, str], int] = defaultdict(int)
+        self._duration_sum: dict[tuple[str, str, str], float] = defaultdict(float)
+        self._duration_buckets: dict[tuple[str, str, str], list[int]] = {}
+        self._postgresql_ready = 0
+        self._readiness_last_check = 0.0
+
+    def observe_request(self, operation: str, method: str, status: int, duration_seconds: float) -> None:
+        key = bounded_metric_key(operation, method, status)
+        with self._lock:
+            if key not in self._requests and key != METRIC_KEY_OVERFLOW:
+                reserved_overflow_slots = 0 if METRIC_KEY_OVERFLOW in self._requests else 1
+                if len(self._requests) >= MAX_REQUEST_METRIC_KEYS - reserved_overflow_slots:
+                    key = METRIC_KEY_OVERFLOW
+            self._requests[key] += 1
+            if status >= 400:
+                self._errors[key] += 1
+            self._duration_count[key] += 1
+            self._duration_sum[key] += max(0.0, duration_seconds)
+            counts = self._duration_buckets.setdefault(key, [0] * len(REQUEST_DURATION_BUCKETS_SECONDS))
+            for index, bucket in enumerate(REQUEST_DURATION_BUCKETS_SECONDS):
+                if duration_seconds <= bucket:
+                    counts[index] += 1
+
+    def set_postgresql_ready(self, ready: bool, *, checked_at: float) -> None:
+        with self._lock:
+            self._postgresql_ready = 1 if ready else 0
+            if checked_at > 0:
+                self._readiness_last_check = checked_at
+
+    def render(self, *, writes_enabled: bool) -> str:
+        with self._lock:
+            requests = dict(self._requests)
+            errors = dict(self._errors)
+            duration_count = dict(self._duration_count)
+            duration_sum = dict(self._duration_sum)
+            duration_buckets = {key: list(value) for key, value in self._duration_buckets.items()}
+            postgresql_ready = self._postgresql_ready
+            readiness_last_check = self._readiness_last_check
+
+        build_labels = {
+            "deployment_environment": self.identity["deployment_environment"],
+            "revision": self.identity["revision"],
+            "service": self.identity["service"],
+            "service_version": self.identity["service_version"],
+        }
+        lines = [
+            "# HELP nutsnews_backend_api_build_info Backend API deployment identity.",
+            "# TYPE nutsnews_backend_api_build_info gauge",
+            f"nutsnews_backend_api_build_info{prometheus_labels(build_labels)} 1",
+            "# HELP nutsnews_backend_api_up Backend API process is serving metrics.",
+            "# TYPE nutsnews_backend_api_up gauge",
+            "nutsnews_backend_api_up 1",
+            "# HELP nutsnews_backend_api_process_start_time_seconds Backend API process start time.",
+            "# TYPE nutsnews_backend_api_process_start_time_seconds gauge",
+            f"nutsnews_backend_api_process_start_time_seconds {self.started_at:.3f}",
+            "# HELP nutsnews_backend_api_dependency_ready Dependency readiness state.",
+            "# TYPE nutsnews_backend_api_dependency_ready gauge",
+            f'nutsnews_backend_api_dependency_ready{{dependency="postgresql"}} {postgresql_ready}',
+            "# HELP nutsnews_backend_api_readiness_last_check_timestamp_seconds Last PostgreSQL readiness check.",
+            "# TYPE nutsnews_backend_api_readiness_last_check_timestamp_seconds gauge",
+            f"nutsnews_backend_api_readiness_last_check_timestamp_seconds {readiness_last_check:.3f}",
+            "# HELP nutsnews_backend_api_write_mode Backend API protected write mode.",
+            "# TYPE nutsnews_backend_api_write_mode gauge",
+            f'nutsnews_backend_api_write_mode{{mode="{"enabled" if writes_enabled else "shadow"}"}} 1',
+            "# HELP nutsnews_backend_api_requests_total HTTP requests handled by bounded operation.",
+            "# TYPE nutsnews_backend_api_requests_total counter",
+        ]
+
+        def request_labels(key: tuple[str, str, str]) -> dict[str, str]:
+            operation, method, response_status_class = key
+            return {"method": method, "operation": operation, "status_class": response_status_class}
+
+        for key in sorted(requests):
+            lines.append(f"nutsnews_backend_api_requests_total{prometheus_labels(request_labels(key))} {requests[key]}")
+        lines.extend(
+            [
+                "# HELP nutsnews_backend_api_request_errors_total HTTP error responses by bounded operation.",
+                "# TYPE nutsnews_backend_api_request_errors_total counter",
+            ]
+        )
+        for key in sorted(errors):
+            lines.append(
+                f"nutsnews_backend_api_request_errors_total{prometheus_labels(request_labels(key))} {errors[key]}"
+            )
+        lines.extend(
+            [
+                "# HELP nutsnews_backend_api_request_duration_seconds HTTP request duration histogram.",
+                "# TYPE nutsnews_backend_api_request_duration_seconds histogram",
+            ]
+        )
+        for key in sorted(duration_count):
+            base_labels = request_labels(key)
+            for bucket, count in zip(REQUEST_DURATION_BUCKETS_SECONDS, duration_buckets[key], strict=True):
+                lines.append(
+                    "nutsnews_backend_api_request_duration_seconds_bucket"
+                    f"{prometheus_labels({**base_labels, 'le': str(bucket)})} {count}"
+                )
+            lines.append(
+                "nutsnews_backend_api_request_duration_seconds_bucket"
+                f"{prometheus_labels({**base_labels, 'le': '+Inf'})} {duration_count[key]}"
+            )
+            lines.append(
+                f"nutsnews_backend_api_request_duration_seconds_sum{prometheus_labels(base_labels)} "
+                f"{duration_sum[key]:.9f}"
+            )
+            lines.append(
+                f"nutsnews_backend_api_request_duration_seconds_count{prometheus_labels(base_labels)} "
+                f"{duration_count[key]}"
+            )
+        return "\n".join(lines) + "\n"
 
 
 WORKER_UPLIFT_DELIVERY_METADATA_FIELDS = {
@@ -3379,33 +3697,117 @@ def handle_app_operation(operation: str, body: dict[str, Any], store: PostgresSt
 
 
 class WorkerDbApiHandler(BaseHTTPRequestHandler):
-    server_version = "NutsNewsDbCompatApi/1.0"
+    server_version = "NutsNewsDbCompatApi/1.2"
 
     def do_GET(self) -> None:
-        if self.path == "/healthz":
-            self.write_json(200, {"status": "ok"})
-            return
-        self.write_json(404, {"error": "not found"})
+        started = time.perf_counter()
+        operation = bounded_request_operation("GET", self.path)
+        status = 500
+        error_class: str | None = None
+        self.prepare_request_context()
+        try:
+            normalized_path = self.path.partition("?")[0].rstrip("/") or "/"
+            if normalized_path == "/healthz":
+                status = 200
+                self.write_json(status, {"status": "ok"})
+            elif normalized_path == "/livez":
+                status = 200
+                identity = self.server.identity  # type: ignore[attr-defined]
+                self.write_json(
+                    status,
+                    {
+                        "status": "live",
+                        "live": True,
+                        "service": identity["service"],
+                        "serviceVersion": identity["service_version"],
+                        "buildRevision": identity["revision"],
+                        "deploymentEnvironment": identity["deployment_environment"],
+                    },
+                )
+            elif normalized_path == "/readyz":
+                readiness = self.server.readiness.check()  # type: ignore[attr-defined]
+                ready = readiness.ready
+                error_class = readiness.error_class
+                self.server.metrics.set_postgresql_ready(  # type: ignore[attr-defined]
+                    ready,
+                    checked_at=readiness.checked_at,
+                )
+                identity = self.server.identity  # type: ignore[attr-defined]
+                status = 200 if ready else 503
+                self.write_json(
+                    status,
+                    {
+                        "status": "ready" if ready else "not_ready",
+                        "ready": ready,
+                        "service": identity["service"],
+                        "serviceVersion": identity["service_version"],
+                        "buildRevision": identity["revision"],
+                        "deploymentEnvironment": identity["deployment_environment"],
+                        "dependencies": {"postgresql": "ready" if ready else "unavailable"},
+                    },
+                )
+            elif normalized_path == "/metrics":
+                status = 200
+                body = self.server.metrics.render(  # type: ignore[attr-defined]
+                    writes_enabled=bool(getattr(self.server.store, "writes_enabled", False))  # type: ignore[attr-defined]
+                )
+                self.write_text(status, body, "text/plain; version=0.0.4; charset=utf-8")
+            else:
+                status = 404
+                self.write_json(status, {"error": "not found"})
+        except Exception as error:
+            status = 500
+            error_class = type(error).__name__
+            self.write_json(status, internal_error_payload(error))
+        finally:
+            self.finish_observation(operation, "GET", status, started, error_class)
 
     def do_POST(self) -> None:
+        started = time.perf_counter()
+        operation = bounded_request_operation("POST", self.path)
+        self.observation_operation = operation
+        status = 500
+        error_class: str | None = None
+        self.prepare_request_context()
         try:
             self.handle_post()
+            status = 200
         except ApiError as error:
-            self.write_json(error.status, {"error": error.message})
+            status = error.status
+            error_class = type(error).__name__
+            self.write_json(status, {"error": error.message})
         except Exception as error:
-            self.write_json(500, internal_error_payload(error))
+            status = 500
+            error_class = type(error).__name__
+            self.write_json(status, internal_error_payload(error))
+        finally:
+            self.finish_observation(self.observation_operation, "POST", status, started, error_class)
 
     def handle_post(self) -> None:
+        if "?" in self.path:
+            raise ApiError(400, "query parameters are not supported")
+        normalized_path = self.path
+        if normalized_path.endswith("/"):
+            raise ApiError(404, "not found")
         route = None
-        if self.path.startswith("/api/worker/db/"):
+        if normalized_path.startswith("/api/worker/db/"):
             route = "worker"
-        elif self.path.startswith("/api/app/db/"):
+        elif normalized_path.startswith("/api/app/db/"):
             route = "app"
         else:
             raise ApiError(404, "not found")
-        operation = self.path.rsplit("/", 1)[-1]
-        auth_scope = authenticate_database_api_token(self.headers.get("authorization", ""))
-        content_length = int(self.headers.get("content-length", "0") or "0")
+        operation = normalized_path.rsplit("/", 1)[-1]
+        try:
+            auth_scope = authenticate_database_api_token(self.headers.get("authorization", ""))
+        except Exception:
+            self.observation_operation = AUTHENTICATION_FAILED_OPERATION
+            raise
+        try:
+            content_length = int(self.headers.get("content-length", "0") or "0")
+        except ValueError as exc:
+            raise ApiError(400, "content-length must be an integer") from exc
+        if content_length < 0:
+            raise ApiError(400, "content-length must be non-negative")
         if content_length > 2_000_000:
             raise ApiError(413, "request body too large")
         try:
@@ -3422,11 +3824,58 @@ class WorkerDbApiHandler(BaseHTTPRequestHandler):
             result = handle_app_operation(operation, body, self.server.store)  # type: ignore[attr-defined]
         self.write_json(200, result)
 
+    def prepare_request_context(self) -> None:
+        supplied_request_id = self.headers.get("x-request-id", "")
+        self.request_id = supplied_request_id if VALID_REQUEST_ID.fullmatch(supplied_request_id) else str(uuid.uuid4())
+        supplied_traceparent = self.headers.get("traceparent", "").lower()
+        self.traceparent = supplied_traceparent if VALID_TRACEPARENT.fullmatch(supplied_traceparent) else None
+
+    def finish_observation(
+        self,
+        operation: str,
+        method: str,
+        status: int,
+        started: float,
+        error_class: str | None,
+    ) -> None:
+        duration_seconds = max(0.0, time.perf_counter() - started)
+        self.server.metrics.observe_request(operation, method, status, duration_seconds)  # type: ignore[attr-defined]
+        identity = self.server.identity  # type: ignore[attr-defined]
+        record: dict[str, Any] = {
+            "at": datetime.now(UTC).isoformat(),
+            "event": "backend_api.request.completed",
+            "deployment_environment": identity["deployment_environment"],
+            "service": identity["service"],
+            "service_version": identity["service_version"],
+            "host": identity["host"],
+            "source": "backend_api",
+            "severity": "error" if status >= 500 else "warning" if status >= 400 else "info",
+            "method": method,
+            "operation": operation,
+            "status_class": status_class(status),
+            "status": status,
+            "duration_ms": round(duration_seconds * 1000, 3),
+            "request_id": self.request_id,
+        }
+        if self.traceparent:
+            record["traceparent"] = self.traceparent
+        if error_class:
+            record["error_class"] = error_class[:128]
+        print(json.dumps(record, separators=(",", ":"), sort_keys=True), flush=True)
+
     def write_json(self, status: int, payload: Any) -> None:
         encoded = json.dumps(payload, default=json_default, separators=(",", ":")).encode("utf-8")
+        self.write_bytes(status, encoded, "application/json")
+
+    def write_text(self, status: int, payload: str, content_type: str) -> None:
+        self.write_bytes(status, payload.encode("utf-8"), content_type)
+
+    def write_bytes(self, status: int, encoded: bytes, content_type: str) -> None:
         self.send_response(status)
-        self.send_header("content-type", "application/json")
+        self.send_header("content-type", content_type)
         self.send_header("cache-control", "no-store")
+        self.send_header("pragma", "no-cache")
+        self.send_header("x-request-id", self.request_id)
         self.send_header("content-length", str(len(encoded)))
         self.end_headers()
         self.wfile.write(encoded)
@@ -3436,9 +3885,19 @@ class WorkerDbApiHandler(BaseHTTPRequestHandler):
 
 
 class WorkerDbApiServer(ThreadingHTTPServer):
-    def __init__(self, server_address: tuple[str, int], handler_class: type[BaseHTTPRequestHandler]) -> None:
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        handler_class: type[BaseHTTPRequestHandler],
+        *,
+        store: Any | None = None,
+        metrics: ApiMetrics | None = None,
+    ) -> None:
         super().__init__(server_address, handler_class)
-        self.store = PostgresStore()
+        self.store = store or PostgresStore()
+        self.identity = service_identity()
+        self.metrics = metrics or ApiMetrics(self.identity)
+        self.readiness = PostgresReadinessGate(self.store)
 
 
 def main() -> int:

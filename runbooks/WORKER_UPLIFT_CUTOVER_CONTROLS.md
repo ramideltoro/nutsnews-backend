@@ -20,6 +20,19 @@ The #126 standing policy never authorizes #166 GO, #127 execution, a writer or o
 - Publication production materialization: the same generated override activates the existing fixed publication confirmation. Persistence and publication are recreated together while the database control row is still fenced, so neither API command is authorized before the compare-and-swap activates the exact candidate.
 - Legacy scheduling: the fixed protected workflow in `ramideltoro/nutsnews-worker`; it toggles only the `INGESTION_SCHEDULING_ENABLED` controller variable and retains cron, Durable Object, Analytics Engine, health/status/actions, DNS readback, live-origin readiness, alerts, and manual failover surfaces.
 
+## Observability authority
+
+Grafana ownership and alert-gating metrics are derived only from exactly one
+`worker_uplift_final.cutover_control(control_id='production')` row. The
+collector validates the generation, state, ingestion owner, legacy-dispatch
+flag, uplift scheduler flag, production-write flag, and publication write mode
+as one allowed tuple; it never infers ownership from Compose, a manifest, or an
+environment variable. Missing, duplicate, malformed, or inconsistent control
+state fails closed as `ownership_available=0` and `expected_active=0`.
+A valid `shadow` row projects legacy ownership, shadow comparison, and writes
+disabled; a valid `cutover_active` row projects uplift ownership and the
+production write gate.
+
 ## Read-only and rehearsal operations
 
 Dispatch from backend `main` with 64-character lowercase candidate and watermark SHA-256 values, an absolute UTC rollback deadline, and the exact confirmation:

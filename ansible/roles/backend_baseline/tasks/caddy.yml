@@ -10,16 +10,71 @@
   ansible.builtin.set_fact:
     backend_caddy_manageable: "{{ (not ansible_check_mode) or not (backend_caddy_package is changed) }}"
 
-- name: Install backend Caddy health configuration
+- name: Validate Caddy candidate installation path
+  ansible.builtin.assert:
+    that:
+      - backend_caddy_candidate_path != backend_caddy_config_path
+      - (backend_caddy_candidate_path | dirname) == (backend_caddy_config_path | dirname)
+    fail_msg: Caddy candidate and live paths must be distinct files in the same directory for atomic installation.
+  when: backend_caddy_manageable | bool
+
+- name: Ensure Caddy telemetry log directory is Alloy-readable
+  ansible.builtin.file:
+    path: /var/log/caddy
+    state: directory
+    owner: caddy
+    group: adm
+    mode: "2750"
+  when: backend_caddy_manageable | bool
+
+- name: Render backend Caddy configuration candidate
   ansible.builtin.copy:
-    dest: "{{ backend_caddy_config_path }}"
+    dest: "{{ backend_caddy_candidate_path }}"
     owner: root
     group: root
     mode: "0644"
     content: |
       # Managed by ramideltoro/nutsnews-backend.
+      {
+          metrics {
+              per_host
+          }
+
+          log default {
+              output file /var/log/caddy/error.log {
+                  mode 0640
+                  roll_size 10MiB
+                  roll_keep 5
+                  roll_keep_for 336h
+              }
+              format json
+              level INFO
+              exclude http.log.access
+          }
+      }
+
       {{ backend_domain }} {
           encode zstd gzip
+
+          log backend_access {
+              output file /var/log/caddy/access.log {
+                  mode 0640
+                  roll_size 10MiB
+                  roll_keep 5
+                  roll_keep_for 336h
+              }
+              format filter {
+                  wrap json
+                  fields {
+                      request>remote_ip delete
+                      request>client_ip delete
+                      request>remote_port delete
+                      request>headers delete
+                      request>uri delete
+                      resp_headers delete
+                  }
+              }
+          }
 
           handle {{ backend_monitoring_health_path }} {
               header Content-Type text/plain
@@ -27,8 +82,23 @@
           }
           {% if backend_worker_api_enabled | bool %}
 
-          handle /api/worker/db/* {
+          handle /livez {
               reverse_proxy http://{{ backend_worker_api_bind }}:{{ backend_worker_api_port }}
+          }
+
+          handle /readyz {
+              reverse_proxy http://{{ backend_worker_api_bind }}:{{ backend_worker_api_port }}
+          }
+
+          handle /api/worker/db/* {
+              reverse_proxy http://{{ backend_worker_api_bind }}:{{ backend_worker_api_port }} {
+                  # Safe liveness-only active check; never invoke a write or
+                  # ingestion route to establish upstream health.
+                  health_uri /livez
+                  health_interval 30s
+                  health_timeout 5s
+                  health_status 200
+              }
           }
 
           handle /api/app/db/* {
@@ -60,12 +130,31 @@
           php_fastcgi {{ backend_db_dashboard_php_fpm_listen }}
       }
       {% endif %}
-  notify: Reload caddy
   when: backend_caddy_manageable | bool
 
-- name: Validate backend Caddy configuration
-  ansible.builtin.command: "caddy validate --config {{ backend_caddy_config_path }}"
+- name: Validate backend Caddy configuration candidate
+  ansible.builtin.command:
+    argv:
+      - caddy
+      - validate
+      - --config
+      - "{{ backend_caddy_candidate_path }}"
+      - --adapter
+      - caddyfile
   changed_when: false
+  when:
+    - backend_caddy_manageable | bool
+    - not ansible_check_mode
+
+- name: Atomically install validated backend Caddy configuration
+  ansible.builtin.copy:
+    src: "{{ backend_caddy_candidate_path }}"
+    dest: "{{ backend_caddy_config_path }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload caddy
   when:
     - backend_caddy_manageable | bool
     - not ansible_check_mode
@@ -77,11 +166,34 @@
     state: started
   when: backend_caddy_manageable | bool
 
+- name: Reload the validated Caddy configuration before probing it
+  ansible.builtin.meta: flush_handlers
+  when:
+    - backend_caddy_manageable | bool
+    - not ansible_check_mode
+
 - name: Capture local backend health endpoint
-  ansible.builtin.command: "curl -fsS -H 'Host: {{ backend_domain }}' http://127.0.0.1{{ backend_monitoring_health_path }}"
+  ansible.builtin.command:
+    argv:
+      - curl
+      - --fail
+      - --silent
+      - --show-error
+      - --insecure
+      - --noproxy
+      - "*"
+      - --max-time
+      - "10"
+      - --resolve
+      - "{{ backend_domain }}:443:127.0.0.1"
+      - "https://{{ backend_domain }}{{ backend_monitoring_health_path }}"
   register: backend_caddy_local_health
   changed_when: false
-  failed_when: false
+  retries: 6
+  delay: 5
+  until:
+    - backend_caddy_local_health.rc | default(1) == 0
+    - backend_caddy_local_health.stdout | default('') == backend_caddy_health_response
   when:
     - backend_caddy_manageable | bool
     - not ansible_check_mode
@@ -95,3 +207,31 @@
       health_path: "{{ backend_monitoring_health_path }}"
       service_manageable: "{{ backend_caddy_manageable }}"
       local_health_output: "{{ backend_caddy_local_health.stdout_lines | default([]) }}"
+
+- name: Capture Caddy-routed Worker database API readiness
+  ansible.builtin.command:
+    argv:
+      - curl
+      - --fail
+      - --silent
+      - --show-error
+      - --insecure
+      - --noproxy
+      - "*"
+      - --max-time
+      - "10"
+      - --resolve
+      - "{{ backend_domain }}:443:127.0.0.1"
+      - "https://{{ backend_domain }}/readyz"
+  register: backend_caddy_worker_api_readiness
+  changed_when: false
+  retries: 6
+  delay: 5
+  until:
+    - backend_caddy_worker_api_readiness.rc | default(1) == 0
+    - backend_caddy_worker_api_readiness.stdout | default('') is search('"ready"[ ]*:[ ]*true')
+    - backend_caddy_worker_api_readiness.stdout | default('') is search('"buildRevision"[ ]*:[ ]*"' ~ backend_worker_api_build_revision ~ '"')
+  when:
+    - backend_caddy_manageable | bool
+    - backend_worker_api_enabled | bool
+    - not ansible_check_mode

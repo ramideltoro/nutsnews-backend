@@ -17,8 +17,34 @@ from typing import Any
 
 
 TRACKING_ISSUE = 88
-RABBITMQ_LOG_QUERY = '{host="backend.nutsnews.com",source="container",service="rabbitmq"}'
-WORKER_LOG_QUERY = '{host="backend.nutsnews.com",source="container",service=~"scheduler|fetcher|canonicalizer|enrichment|approval|translation|persistence|publication"}'
+DEPLOYMENT_ENVIRONMENT = "production"
+WORKER_SERVICES = (
+    "scheduler",
+    "fetcher",
+    "canonicalizer",
+    "enrichment",
+    "approval",
+    "translation",
+    "persistence",
+    "publication",
+)
+RABBITMQ_LOG_QUERY = (
+    '{deployment_environment="production",host="backend.nutsnews.com",'
+    'source="container",service="rabbitmq"}'
+)
+WORKER_LOG_QUERY = (
+    '{deployment_environment="production",host="backend.nutsnews.com",source="container",'
+    'service=~"scheduler|fetcher|canonicalizer|enrichment|approval|translation|persistence|publication"}'
+)
+
+
+def worker_log_query(service: str) -> str:
+    if service not in WORKER_SERVICES:
+        raise ValueError("worker service must come from the fixed allow-list")
+    return (
+        f'{{deployment_environment="{DEPLOYMENT_ENVIRONMENT}",host="backend.nutsnews.com",'
+        f'source="container",service="{service}"}}'
+    )
 
 
 def utc_now() -> str:
@@ -234,27 +260,52 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         }
     checks.append(check("loki_rabbitmq_query", rabbitmq_loki["status"], rabbitmq_loki["summary"], rabbitmq_loki))
 
-    worker_loki = loki_query_range(
-        args.loki_url,
-        args.loki_username,
-        args.loki_password,
-        WORKER_LOG_QUERY,
-        hours=args.query_hours,
-        timeout=args.timeout,
+    worker_results: dict[str, dict[str, Any]] = {}
+    for service in WORKER_SERVICES:
+        worker_results[service] = loki_query_range(
+            args.loki_url,
+            args.loki_username,
+            args.loki_password,
+            worker_log_query(service),
+            hours=args.query_hours,
+            timeout=args.timeout,
+        )
+    missing_worker_logs = [
+        service
+        for service, result in worker_results.items()
+        if result.get("status") != "healthy"
+    ]
+    worker_status = "healthy" if not missing_worker_logs else (
+        "critical" if args.require_loki_data else "not_configured"
     )
     checks.append(
         check(
             "loki_worker_service_query",
-            "healthy" if worker_loki["status"] == "healthy" else "not_configured",
-            worker_loki["summary"] if worker_loki["status"] == "healthy" else "worker services are not deployed yet; source routing is predeclared",
-            worker_loki,
+            worker_status,
+            (
+                "all eight current worker services have recent logs"
+                if not missing_worker_logs
+                else f"missing_worker_services={','.join(missing_worker_logs)}"
+            ),
+            {
+                "expected_service_count": len(WORKER_SERVICES),
+                "healthy_service_count": len(WORKER_SERVICES) - len(missing_worker_logs),
+                "missing_worker_services": missing_worker_logs,
+                "credential_error": any(
+                    result.get("credential_error") is True
+                    for result in worker_results.values()
+                ),
+                "services": worker_results,
+            },
         )
     )
 
     credential_error = any(item.get("details", {}).get("credential_error") for item in checks)
-    status = "pass" if all(item["status"] in {"healthy", "not_configured"} for item in checks) and not (
-        args.require_loki_data and rabbitmq_loki["status"] != "healthy"
-    ) else "fail"
+    required_loki_failed = bool(
+        args.require_loki_data
+        and (rabbitmq_loki["status"] != "healthy" or worker_status != "healthy")
+    )
+    status = "pass" if all(item["status"] in {"healthy", "not_configured"} for item in checks) and not required_loki_failed else "fail"
     return {
         "status": status,
         "generated_at_utc": utc_now(),
@@ -264,7 +315,11 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         "traces_enabled": False,
         "queries": {
             "rabbitmq": RABBITMQ_LOG_QUERY,
-            "worker_services": WORKER_LOG_QUERY,
+            "worker_service_group": WORKER_LOG_QUERY,
+            "worker_services": {
+                service: worker_log_query(service)
+                for service in WORKER_SERVICES
+            },
         },
         "checks": checks,
         "summary": {

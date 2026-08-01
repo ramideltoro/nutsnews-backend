@@ -57,7 +57,7 @@ prometheus.exporter.unix "host" {
 prometheus.scrape "host" {
   targets         = prometheus.exporter.unix.host.targets
   scrape_interval = "{{ backend_metrics_scrape_interval }}"
-  forward_to      = [prometheus.relabel.backend.receiver]
+  forward_to      = [prometheus.relabel.backend_host.receiver]
 }
 
 {% if backend_metrics_alloy_self_enabled | bool %}
@@ -66,11 +66,11 @@ prometheus.exporter.self "alloy" {}
 prometheus.scrape "alloy_self" {
   targets         = prometheus.exporter.self.alloy.targets
   scrape_interval = "{{ backend_metrics_alloy_self_scrape_interval }}"
-  forward_to      = [prometheus.relabel.backend.receiver]
+  forward_to      = [prometheus.relabel.alloy_self.receiver]
 }
 
 {% endif %}
-prometheus.relabel "backend" {
+prometheus.relabel "backend_host" {
   forward_to = [prometheus.remote_write.grafana_cloud.receiver]
 
   rule {
@@ -87,8 +87,405 @@ prometheus.relabel "backend" {
     target_label = "environment"
     replacement  = "{{ backend_metrics_environment_label }}"
   }
+
+  rule {
+    target_label = "deployment_environment"
+    replacement  = "{{ backend_metrics_environment_label }}"
+  }
+
+  rule {
+    target_label = "host"
+    replacement  = "{{ backend_metrics_instance_label }}"
+  }
+
+  rule {
+    target_label = "service"
+    replacement  = "host"
+  }
+
+  rule {
+    target_label = "service_namespace"
+    replacement  = "nutsnews"
+  }
 }
 
+{% if backend_metrics_alloy_self_enabled | bool %}
+prometheus.relabel "alloy_self" {
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+  rule {
+    target_label = "job"
+    replacement  = "nutsnews-backend-alloy"
+  }
+
+  rule {
+    target_label = "instance"
+    replacement  = "{{ backend_metrics_instance_label }}"
+  }
+
+  rule {
+    target_label = "environment"
+    replacement  = "{{ backend_metrics_environment_label }}"
+  }
+
+  rule {
+    target_label = "deployment_environment"
+    replacement  = "{{ backend_metrics_environment_label }}"
+  }
+
+  rule {
+    target_label = "host"
+    replacement  = "{{ backend_metrics_instance_label }}"
+  }
+
+  rule {
+    target_label = "service"
+    replacement  = "alloy"
+  }
+
+  rule {
+    target_label = "service_namespace"
+    replacement  = "nutsnews"
+  }
+}
+
+{% endif %}
+{% if backend_metrics_backend_api_enabled | bool %}
+prometheus.scrape "backend_api" {
+  targets = [
+    {
+      "__address__" = "{{ backend_worker_api_bind }}:{{ backend_worker_api_port }}",
+      service         = "backend-api",
+    },
+  ]
+  metrics_path    = "/metrics"
+  scrape_interval = "{{ backend_metrics_backend_api_scrape_interval }}"
+  scrape_timeout  = "{{ backend_metrics_backend_api_scrape_timeout }}"
+  sample_limit    = {{ backend_metrics_backend_api_sample_limit }}
+  label_limit     = {{ backend_metrics_backend_api_label_limit }}
+  forward_to      = [prometheus.relabel.backend_api.receiver]
+}
+
+prometheus.relabel "backend_api" {
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "^(up|scrape_.+|nutsnews_backend_api_.+)$"
+    action        = "keep"
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "nutsnews-backend-api"
+  }
+
+  rule {
+    target_label = "instance"
+    replacement  = "{{ backend_metrics_instance_label }}"
+  }
+
+  rule {
+    target_label = "host"
+    replacement  = "{{ backend_metrics_instance_label }}"
+  }
+
+  rule {
+    target_label = "environment"
+    replacement  = "{{ backend_metrics_environment_label }}"
+  }
+
+  rule {
+    target_label = "deployment_environment"
+    replacement  = "{{ backend_metrics_environment_label }}"
+  }
+
+  rule {
+    regex  = "^(__name__|job|instance|environment|deployment_environment|host|service|service_version|revision|operation|method|status_class|dependency|check|mode|le)$"
+    action = "labelkeep"
+  }
+}
+
+{% endif %}
+{% if backend_metrics_worker_uplift_enabled | bool %}
+prometheus.scrape "worker_uplift" {
+  targets = [
+{% for target in backend_metrics_worker_uplift_targets %}
+    {
+      "__address__"   = "{{ target.address }}",
+      service          = "{{ target.service }}",
+      stage            = "{{ target.stage }}",
+      observability_contract = "{{ backend_metrics_worker_uplift_contract_status }}",
+    },
+{% endfor %}
+  ]
+  metrics_path    = "/metrics"
+  scrape_interval = "{{ backend_metrics_worker_uplift_scrape_interval }}"
+  scrape_timeout  = "{{ backend_metrics_worker_uplift_scrape_timeout }}"
+  sample_limit    = {{ backend_metrics_worker_uplift_sample_limit }}
+  label_limit     = {{ backend_metrics_worker_uplift_label_limit }}
+  forward_to      = [prometheus.relabel.worker_uplift.receiver]
+}
+
+prometheus.relabel "worker_uplift" {
+  forward_to     = [prometheus.remote_write.grafana_cloud.receiver]
+  max_cache_size = {{ backend_metrics_worker_uplift_relabel_cache_size }}
+  cache_ttl      = "{{ backend_metrics_worker_uplift_relabel_cache_ttl }}"
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "^(up|scrape_.+|nutsnews_.+)$"
+    action        = "keep"
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "nutsnews-worker-uplift"
+  }
+
+  rule {
+    target_label = "instance"
+    replacement  = "{{ backend_metrics_instance_label }}"
+  }
+
+  rule {
+    target_label = "host"
+    replacement  = "{{ backend_metrics_instance_label }}"
+  }
+
+  rule {
+    target_label = "environment"
+    replacement  = "{{ backend_metrics_environment_label }}"
+  }
+
+  rule {
+    target_label = "deployment_environment"
+    replacement  = "{{ backend_metrics_environment_label }}"
+  }
+
+  rule {
+    target_label = "service_namespace"
+    replacement  = "nutsnews"
+  }
+
+  rule {
+    regex  = "^(article|article_id|feed|feed_id|message|message_id|idempotency|idempotency_key|trace_id|span_id|correlation_id|causation_id|payload|url|path|user|ip|token|secret|prompt|model_output)$"
+    action = "labeldrop"
+  }
+
+  // result/retry/token_kind remain temporarily for metrics already emitted by
+  // the shadow images; all are finite enums and are removed at image rollout.
+  rule {
+    regex  = "^(__name__|job|instance|environment|deployment_environment|host|service|service_namespace|version|revision|stage|queue|outcome|dependency|language|provider|probe|check|le|observability_contract|deployment|adapter|result|retry|retry_class|token_kind)$"
+    action = "labelkeep"
+  }
+}
+
+{% endif %}
+{% if backend_metrics_caddy_enabled | bool %}
+prometheus.scrape "caddy" {
+  targets = [
+    {
+      "__address__" = "{{ backend_metrics_caddy_target }}",
+      service         = "caddy",
+    },
+  ]
+  metrics_path    = "/metrics"
+  scrape_interval = "{{ backend_metrics_caddy_scrape_interval }}"
+  scrape_timeout  = "{{ backend_metrics_caddy_scrape_timeout }}"
+  sample_limit    = {{ backend_metrics_caddy_sample_limit }}
+  label_limit     = {{ backend_metrics_caddy_label_limit }}
+  forward_to      = [prometheus.relabel.caddy.receiver]
+}
+
+prometheus.relabel "caddy" {
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "^(up|scrape_.+|caddy_http_.+|caddy_reverse_proxy_.+|caddy_tls_.+|process_start_time_seconds)$"
+    action        = "keep"
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "nutsnews-backend-caddy"
+  }
+
+  rule {
+    target_label = "instance"
+    replacement  = "{{ backend_metrics_instance_label }}"
+  }
+
+  rule {
+    target_label = "host"
+    replacement  = "{{ backend_metrics_instance_label }}"
+  }
+
+  rule {
+    target_label = "environment"
+    replacement  = "{{ backend_metrics_environment_label }}"
+  }
+
+  rule {
+    target_label = "deployment_environment"
+    replacement  = "{{ backend_metrics_environment_label }}"
+  }
+
+  rule {
+    regex  = "^(__name__|job|instance|environment|deployment_environment|host|service|server|handler|method|code|upstream|le)$"
+    action = "labelkeep"
+  }
+}
+
+{% if backend_metrics_caddy_tls_probe_enabled | bool %}
+prometheus.exporter.blackbox "caddy_tls" {
+  config = "{ modules: { http_tls: { prober: http, timeout: 8s, http: { method: GET, valid_status_codes: [200], preferred_ip_protocol: ip4 } } } }"
+
+  target {
+    name    = "backend-caddy-tls"
+    address = "https://{{ backend_domain }}{{ backend_metrics_caddy_tls_probe_path }}"
+    module  = "http_tls"
+    labels = {
+      service = "caddy",
+      probe   = "tls",
+      check   = "certificate",
+    }
+  }
+}
+
+prometheus.scrape "caddy_tls" {
+  targets         = prometheus.exporter.blackbox.caddy_tls.targets
+  scrape_interval = "{{ backend_metrics_caddy_tls_scrape_interval }}"
+  scrape_timeout  = "{{ backend_metrics_caddy_tls_scrape_timeout }}"
+  sample_limit    = {{ backend_metrics_caddy_tls_sample_limit }}
+  label_limit     = {{ backend_metrics_caddy_label_limit }}
+  forward_to      = [prometheus.relabel.caddy_tls.receiver]
+}
+
+prometheus.relabel "caddy_tls" {
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "^(up|scrape_.+|probe_(success|duration_seconds|http_status_code|ssl_earliest_cert_expiry|tls_version_info|http_duration_seconds))$"
+    action        = "keep"
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "nutsnews-backend-caddy-tls"
+  }
+
+  rule {
+    target_label = "instance"
+    replacement  = "{{ backend_metrics_instance_label }}"
+  }
+
+  rule {
+    target_label = "host"
+    replacement  = "{{ backend_metrics_instance_label }}"
+  }
+
+  rule {
+    target_label = "environment"
+    replacement  = "{{ backend_metrics_environment_label }}"
+  }
+
+  rule {
+    target_label = "deployment_environment"
+    replacement  = "{{ backend_metrics_environment_label }}"
+  }
+
+  rule {
+    regex  = "^(__name__|job|instance|environment|deployment_environment|host|service|probe|check|phase|version|le)$"
+    action = "labelkeep"
+  }
+}
+
+{% endif %}
+{% endif %}
+{% if backend_metrics_postgres_enabled | bool %}
+prometheus.exporter.postgres "backend" {
+  data_source_names = [
+    "postgresql://" + sys.env("NUTSNEWS_POSTGRES_EXPORTER_USERNAME") + ":" + encoding.url_encode(sys.env("NUTSNEWS_POSTGRES_EXPORTER_PASSWORD")) + "@127.0.0.1:5432/" + sys.env("NUTSNEWS_POSTGRES_EXPORTER_DATABASE") + "?sslmode=disable",
+  ]
+  disable_settings_metrics = true
+  enabled_collectors = [
+    "database_wraparound",
+    "database",
+    "locks",
+    "long_running_transactions",
+    "postmaster",
+    "replication_slot",
+    "replication",
+    "stat_activity_autovacuum",
+    "stat_bgwriter",
+    "stat_checkpointer",
+    "stat_database",
+    "stat_progress_vacuum",
+    "stat_user_tables",
+    "stat_wal_receiver",
+    "wal",
+    "xlog_location",
+  ]
+}
+
+prometheus.scrape "postgres" {
+  targets         = prometheus.exporter.postgres.backend.targets
+  scrape_interval = "{{ backend_metrics_postgres_scrape_interval }}"
+  scrape_timeout  = "{{ backend_metrics_postgres_scrape_timeout }}"
+  sample_limit    = {{ backend_metrics_postgres_sample_limit }}
+  label_limit     = {{ backend_metrics_postgres_label_limit }}
+  forward_to      = [prometheus.relabel.postgres.receiver]
+}
+
+prometheus.relabel "postgres" {
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "^(up|scrape_.+|pg_(up|database.*|locks.*|long_running.*|postmaster.*|replication.*|stat_activity.*|stat_bgwriter.*|stat_checkpointer.*|stat_database.*|stat_progress_vacuum.*|stat_user_tables.*|stat_wal_receiver.*|wal.*|xlog.*|exporter_last_scrape.*))$"
+    action        = "keep"
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "nutsnews-backend-postgres"
+  }
+
+  rule {
+    target_label = "instance"
+    replacement  = "{{ backend_metrics_instance_label }}"
+  }
+
+  rule {
+    target_label = "host"
+    replacement  = "{{ backend_metrics_instance_label }}"
+  }
+
+  rule {
+    target_label = "service"
+    replacement  = "postgresql"
+  }
+
+  rule {
+    target_label = "environment"
+    replacement  = "{{ backend_metrics_environment_label }}"
+  }
+
+  rule {
+    target_label = "deployment_environment"
+    replacement  = "{{ backend_metrics_environment_label }}"
+  }
+
+  rule {
+    regex  = "^(__name__|job|instance|environment|deployment_environment|host|service|datname|schemaname|relname|indexrelname|mode|state|slot_name|slot_type|application_name|sync_state|le)$"
+    action = "labelkeep"
+  }
+}
+
+{% endif %}
 {% if backend_metrics_rabbitmq_enabled | bool %}
 prometheus.scrape "rabbitmq_aggregate" {
   targets = [
@@ -138,6 +535,16 @@ prometheus.relabel "rabbitmq_aggregate" {
   }
 
   rule {
+    target_label = "deployment_environment"
+    replacement  = "{{ backend_metrics_environment_label }}"
+  }
+
+  rule {
+    target_label = "service"
+    replacement  = "rabbitmq"
+  }
+
+  rule {
     target_label = "service_namespace"
     replacement  = "{{ backend_metrics_rabbitmq_service_namespace }}"
   }
@@ -148,7 +555,7 @@ prometheus.relabel "rabbitmq_aggregate" {
   }
 
   rule {
-    regex  = "^(__name__|job|instance|environment|host|service_namespace|rabbitmq_endpoint|node|cluster)$"
+    regex  = "^(__name__|job|instance|environment|deployment_environment|host|service|service_namespace|rabbitmq_endpoint|node|cluster)$"
     action = "labelkeep"
   }
 }
@@ -212,6 +619,16 @@ prometheus.relabel "rabbitmq_detailed" {
   }
 
   rule {
+    target_label = "deployment_environment"
+    replacement  = "{{ backend_metrics_environment_label }}"
+  }
+
+  rule {
+    target_label = "service"
+    replacement  = "rabbitmq"
+  }
+
+  rule {
     target_label = "service_namespace"
     replacement  = "{{ backend_metrics_rabbitmq_service_namespace }}"
   }
@@ -222,7 +639,7 @@ prometheus.relabel "rabbitmq_detailed" {
   }
 
   rule {
-    regex  = "^(__name__|job|instance|environment|host|service_namespace|rabbitmq_endpoint|node|cluster|vhost|queue)$"
+    regex  = "^(__name__|job|instance|environment|deployment_environment|host|service|service_namespace|rabbitmq_endpoint|node|cluster|vhost|queue|exchange)$"
     action = "labelkeep"
   }
 }
@@ -250,19 +667,51 @@ loki.relabel "journal_context" {
   rule {
     source_labels = ["__journal_priority_keyword"]
     target_label  = "severity"
+    regex         = "(?i)^(trace|debug)$"
+    replacement   = "debug"
   }
+
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "severity"
+    regex         = "(?i)^(info|notice)$"
+    replacement   = "info"
+  }
+
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "severity"
+    regex         = "(?i)^(warn|warning)$"
+    replacement   = "warning"
+  }
+
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "severity"
+    regex         = "(?i)^(err|error)$"
+    replacement   = "error"
+  }
+
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "severity"
+    regex         = "(?i)^(fatal|panic|critical|crit|alert|emerg|emergency)$"
+    replacement   = "critical"
+  }
+
 }
 
 local.file_match "backend_logs" {
   path_targets = [
 {% for target in backend_logs_file_targets %}
     {
-      "__path__" = "{{ target.path }}",
-      environment = "{{ backend_metrics_environment_label }}",
-      host = "{{ backend_metrics_instance_label }}",
-      source = "file",
-      service = "{{ target.service }}",
-      unit = "{{ target.unit }}",
+      "__path__"             = "{{ target.path }}",
+      deployment_environment = "{{ backend_metrics_environment_label }}",
+      host                   = "{{ backend_metrics_instance_label }}",
+      source                 = "{{ target.source | default('file') }}",
+      service                = "{{ target.service }}",
+      service_version        = "{{ target.service_version | default('unknown') }}",
+      severity               = "info",
     },
 {% endfor %}
   ]
@@ -280,11 +729,12 @@ loki.source.journal "{{ source.unit | regex_replace('[^A-Za-z0-9_]', '_') }}" {
   matches       = "_SYSTEMD_UNIT={{ source.unit }}"
   relabel_rules = loki.relabel.journal_context.rules
   labels        = {
-    environment = "{{ backend_metrics_environment_label }}",
-    host        = "{{ backend_metrics_instance_label }}",
-    source      = "journal",
-    service     = "{{ source.service }}",
-    unit        = "{{ source.unit }}",
+    deployment_environment = "{{ backend_metrics_environment_label }}",
+    host                   = "{{ backend_metrics_instance_label }}",
+    source                 = "journal",
+    service                = "{{ source.service }}",
+    service_version        = "{{ source.service_version | default('unknown') }}",
+    severity               = "info",
   }
   forward_to = [loki.process.backend_logs.receiver]
 }
@@ -296,6 +746,59 @@ loki.relabel "worker_uplift_container_context" {
   rule {
     source_labels = ["__journal_priority_keyword"]
     target_label  = "severity"
+    regex         = "(?i)^(trace|debug)$"
+    replacement   = "debug"
+  }
+
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "severity"
+    regex         = "(?i)^(info|notice)$"
+    replacement   = "info"
+  }
+
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "severity"
+    regex         = "(?i)^(warn|warning)$"
+    replacement   = "warning"
+  }
+
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "severity"
+    regex         = "(?i)^(err|error)$"
+    replacement   = "error"
+  }
+
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "severity"
+    regex         = "(?i)^(fatal|panic|critical|crit|alert|emerg|emergency)$"
+    replacement   = "critical"
+  }
+
+  // Docker's journald driver sanitizes immutable container labels into
+  // upper-case fields; Alloy exposes them as lower-case __journal_ labels.
+  rule {
+    source_labels = ["__journal_com_nutsnews_service_version"]
+    target_label  = "service_version"
+    regex         = "^([0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?)$"
+    replacement   = "$1"
+  }
+
+  rule {
+    source_labels = ["__journal_com_nutsnews_revision"]
+    target_label  = "deployed_revision"
+    regex         = "^([0-9a-f]{40})$"
+    replacement   = "$1"
+  }
+
+  rule {
+    source_labels = ["__journal_com_nutsnews_image_digest"]
+    target_label  = "deployed_image_digest"
+    regex         = "^(sha256:[0-9a-f]{64})$"
+    replacement   = "$1"
   }
 }
 
@@ -305,14 +808,12 @@ loki.source.journal "container_{{ source.tag | regex_replace('[^A-Za-z0-9_]', '_
   matches       = "CONTAINER_TAG={{ source.tag }}"
   relabel_rules = loki.relabel.worker_uplift_container_context.rules
   labels        = {
-    environment = "{{ backend_metrics_environment_label }}",
-    host        = "{{ backend_metrics_instance_label }}",
-    source      = "container",
-    service     = "{{ source.service }}",
-    version     = "{{ source.version }}",
-{% if source.queue is defined %}
-    queue       = "{{ source.queue }}",
-{% endif %}
+    deployment_environment = "{{ backend_metrics_environment_label }}",
+    host                   = "{{ backend_metrics_instance_label }}",
+    source                 = "container",
+    service                = "{{ source.service }}",
+    service_version        = "{{ source.service_version | default('unknown') }}",
+    severity               = "info",
   }
   forward_to = [loki.process.backend_logs.receiver]
 }
@@ -321,24 +822,8 @@ loki.source.journal "container_{{ source.tag | regex_replace('[^A-Za-z0-9_]', '_
 loki.process "backend_logs" {
   forward_to = [loki.write.grafana_cloud_loki.receiver]
 
-  stage.json {
-    expressions = {
-      level           = "level",
-      correlation_id  = "correlationId",
-      causation_id    = "causationId",
-      message_id      = "messageId",
-      idempotency_key = "idempotencyKey",
-      traceparent     = "traceparent",
-      tracestate      = "tracestate",
-    }
-    drop_malformed = false
-  }
-
-  stage.drop {
-    expression          = "(?i)\"(?:level|severity)\"[[:space:]]*:[[:space:]]*\"(?:debug|trace)\""
-    drop_counter_reason = "debug_trace_log_level"
-  }
-
+  // Reject whole private-key and oversized records before parsing can place
+  // any of their fields in Alloy's extracted map.
   stage.drop {
     expression          = "(?i)(BEGIN (RSA|DSA|EC|OPENSSH|PRIVATE) KEY|PRIVATE KEY-----)"
     drop_counter_reason = "private_key_marker"
@@ -349,18 +834,88 @@ loki.process "backend_logs" {
     drop_counter_reason = "oversized_log_line"
   }
 
+  stage.json {
+    expressions = {
+      raw_severity        = "level || severity",
+      raw_request_id      = "requestId || request_id || attributes.requestId || attributes.request_id",
+      raw_correlation_id  = "correlationId || correlation_id",
+      raw_causation_id    = "causationId || causation_id",
+      raw_message_id      = "messageId || message_id",
+      raw_idempotency_key = "idempotencyKey || idempotency_key",
+      raw_article_id      = "articleId || article_id || attributes.articleId || attributes.article_id || attributes.canonicalArticleId || attributes.articleIdentityHash",
+      raw_feed_id         = "feedId || feed_id || attributes.feedId || attributes.feed_id",
+      raw_pipeline_run_id = "pipelineRunId || pipeline_run_id",
+      raw_traceparent     = "traceparent",
+      raw_queue           = "queue",
+      raw_outcome         = "outcome",
+    }
+    drop_malformed = false
+  }
+
+  stage.labels {
+    values = {
+      raw_severity = "raw_severity",
+    }
+  }
+
+  stage.match {
+    selector = "{raw_severity=~\"(?i)^(trace|debug)$\"}"
+
+    stage.static_labels {
+      values = { severity = "debug" }
+    }
+  }
+
+  stage.match {
+    selector = "{raw_severity=~\"(?i)^(info|notice)$\"}"
+
+    stage.static_labels {
+      values = { severity = "info" }
+    }
+  }
+
+  stage.match {
+    selector = "{raw_severity=~\"(?i)^(warn|warning)$\"}"
+
+    stage.static_labels {
+      values = { severity = "warning" }
+    }
+  }
+
+  stage.match {
+    selector = "{raw_severity=~\"(?i)^(err|error)$\"}"
+
+    stage.static_labels {
+      values = { severity = "error" }
+    }
+  }
+
+  stage.match {
+    selector = "{raw_severity=~\"(?i)^(fatal|panic|critical|crit|alert|emerg|emergency)$\"}"
+
+    stage.static_labels {
+      values = { severity = "critical" }
+    }
+  }
+
+  stage.match {
+    selector            = "{severity=\"debug\"}"
+    action              = "drop"
+    drop_counter_reason = "debug_trace_log_level"
+  }
+
   stage.replace {
-    expression = "(?i)authorization[:=][[:space:]]*(?:bearer|basic)[[:space:]]+([^[:space:]\\\"']+)"
+    expression = "(?i)[\\\"']?authorization[\\\"']?[[:space:]]*[:=][[:space:]]*[\\\"']?(bearer|basic)[[:space:]]+([^[:space:]\\\"']+)[\\\"']?"
     replace    = "[REDACTED]"
   }
 
   stage.replace {
-    expression = "(?i)(?:cookie|set-cookie)[:=][[:space:]]*([^\\n\\r]+)"
+    expression = "(?i)[\\\"']?(cookie|set-cookie)[\\\"']?[[:space:]]*[:=][[:space:]]*([\\\"'][^\\n\\r\\\"']*[\\\"']|[^\\n\\r]+)"
     replace    = "[REDACTED]"
   }
 
   stage.replace {
-    expression = "(?i)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|oauth[_-]?(?:code|token)|password|passwd|pwd|secret|session|token)[[:space:]]*[:=][[:space:]]*([^[:space:],&\\\"']+)"
+    expression = "(?i)[\\\"']?(api[_-]?key|access[_-]?token|refresh[_-]?token|oauth[_-]?(code|token)|password|passwd|pwd|secret|session|token|tracestate)[\\\"']?[[:space:]]*[:=][[:space:]]*([\\\"'][^\\n\\r\\\"']*[\\\"']|[^[:space:],&\\\"']+)"
     replace    = "[REDACTED]"
   }
 
@@ -381,19 +936,132 @@ loki.process "backend_logs" {
     }
   }
 
+  // Raw JSON fields stay only in Alloy's extracted map. Full-match RE2
+  // captures create distinct safe keys, so malformed, opaque, or oversized
+  // candidates have no structured-metadata fallback. Opaque W3C tracestate is
+  // redacted from the line and intentionally omitted from metadata.
+  stage.regex {
+    source     = "raw_request_id"
+    expression = "^(?P<safe_request_id>[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|feed-[0-9a-f]{32}|enrichment_[0-9a-f]{32}|enrichment-req-[0-9]{3})$"
+  }
+
+  stage.regex {
+    source     = "raw_correlation_id"
+    expression = "^(?P<safe_correlation_id>[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$"
+  }
+
+  stage.regex {
+    source     = "raw_causation_id"
+    expression = "^(?P<safe_causation_id>[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$"
+  }
+
+  stage.regex {
+    source     = "raw_message_id"
+    expression = "^(?P<safe_message_id>[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$"
+  }
+
+  // The first idempotency gate enforces the producer's 256-byte ASCII
+  // contract. The second gate restricts export to namespaces emitted by the
+  // reviewed backend and worker producers; arbitrary token-shaped strings are
+  // not promoted merely because they satisfy the broad envelope grammar.
+  stage.regex {
+    source     = "raw_idempotency_key"
+    expression = "^(?P<candidate_idempotency_key>[a-z0-9][a-z0-9._:/-]{0,255})$"
+  }
+
+  stage.regex {
+    source     = "candidate_idempotency_key"
+    expression = "^(?P<safe_idempotency_key>(?P<safe_idempotency_namespace>scheduler:feed|fetcher:canonicalization|canonicalizer:enrichment|enrichment:approval|approval:translation|approval:decision|translation:backlog|translation:result|translation:persistence|persistence:final-shadow|persistence:publication|feed-health|feed|probe:worker-api-final-shadow|smoke:pipeline:feed|smoke:approval:accepted|smoke:approval:rejected|smoke:translation):[a-z0-9][a-z0-9._:/-]*)$"
+  }
+
+  stage.regex {
+    source     = "raw_article_id"
+    expression = "^(?P<safe_article_id>article_[0-9a-f]{32}|article-[a-z0-9][a-z0-9.-]{0,63})$"
+  }
+
+  stage.regex {
+    source     = "raw_feed_id"
+    expression = "^(?P<safe_feed_id>feed-[a-z0-9][a-z0-9.-]{0,63}|worker-shadow-smoke-[a-z0-9][a-z0-9.-]{0,63})$"
+  }
+
+  stage.regex {
+    source     = "raw_pipeline_run_id"
+    expression = "^(?P<safe_pipeline_run_id>[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$"
+  }
+
+  // Validate trace context as one unit and derive trace_id only from the
+  // validated traceparent. The second gate intersects the exact-length first
+  // gate with non-zero trace/span requirements without RE2 lookarounds.
+  stage.regex {
+    source     = "raw_traceparent"
+    expression = "^(?P<candidate_traceparent>00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2})$"
+  }
+
+  stage.regex {
+    source     = "candidate_traceparent"
+    expression = "^(?P<safe_traceparent>00-(?P<safe_trace_id>[0-9a-f]*[1-9a-f][0-9a-f]*)-(?P<safe_span_id>[0-9a-f]*[1-9a-f][0-9a-f]*)-[0-9a-f]{2})$"
+  }
+
+  stage.regex {
+    source     = "raw_queue"
+    expression = "^(?P<safe_queue>nutsnews[.]worker[.](?P<safe_queue_stage>fetch|canonicalization|enrichment|approval|translation|persistence|publication)[.]v1(?P<safe_queue_suffix>[.](?P<safe_queue_delivery>retry-(?P<safe_queue_retry>30s|5m|30m)|dlq))?)$"
+  }
+
+  stage.regex {
+    source     = "raw_outcome"
+    expression = "^(?P<safe_outcome>started|success|duplicate|invalid|retry|dlq|failure|ok|degraded|unhealthy|inactive|active|cancelled|channel-dropped|recovering|closed|draining|drained)$"
+  }
+
+  // Defense in depth: the validators above already impose tighter shape and
+  // length constraints. These extracted-field bounds keep future contract
+  // extensions from silently increasing per-entry structured metadata.
+  stage.truncate {
+    rule {
+      source_type = "extracted"
+      sources     = ["safe_request_id", "safe_correlation_id", "safe_causation_id", "safe_message_id", "safe_trace_id", "safe_pipeline_run_id", "safe_traceparent", "safe_queue"]
+      limit       = "64B"
+    }
+
+    rule {
+      source_type = "extracted"
+      sources     = ["safe_article_id", "safe_feed_id"]
+      limit       = "96B"
+    }
+
+    rule {
+      source_type = "extracted"
+      sources     = ["safe_idempotency_key"]
+      limit       = "256B"
+    }
+
+    rule {
+      source_type = "extracted"
+      sources     = ["safe_outcome"]
+      limit       = "24B"
+    }
+  }
+
   stage.structured_metadata {
     values = {
-      correlation_id  = "",
-      causation_id    = "",
-      message_id      = "",
-      idempotency_key = "",
-      traceparent     = "",
-      tracestate      = "",
+      request_id      = "safe_request_id",
+      correlation_id  = "safe_correlation_id",
+      causation_id    = "safe_causation_id",
+      message_id      = "safe_message_id",
+      idempotency_key = "safe_idempotency_key",
+      trace_id        = "safe_trace_id",
+      article_id      = "safe_article_id",
+      feed_id         = "safe_feed_id",
+      pipeline_run_id = "safe_pipeline_run_id",
+      traceparent     = "safe_traceparent",
+      queue           = "safe_queue",
+      outcome         = "safe_outcome",
+      revision        = "deployed_revision",
+      image_digest    = "deployed_image_digest",
     }
   }
 
   stage.label_keep {
-    values = ["environment", "host", "source", "service", "unit", "severity", "filename", "job", "version", "queue", "outcome"]
+    values = ["deployment_environment", "service", "service_version", "host", "source", "severity"]
   }
 }
 {% endif %}

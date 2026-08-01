@@ -35,6 +35,12 @@ Add these to the `production-backend` Environment:
 | --- | --- |
 | `NUTSNEWS_BACKEND_SSH_PRIVATE_KEY` | Private key allowed to SSH to `65.75.201.18` for backend Ansible runs |
 | `NUTSNEWS_BACKEND_KNOWN_HOSTS` | Verified `known_hosts` entry for `65.75.201.18` |
+| `GRAFANA_CLOUD_PROMETHEUS_URL` | Grafana Cloud Prometheus remote-write endpoint |
+| `GRAFANA_CLOUD_PROMETHEUS_USERNAME` | Metrics-publisher identity |
+| `GRAFANA_CLOUD_PROMETHEUS_PASSWORD` | Metrics-publisher credential |
+| `GRAFANA_CLOUD_LOKI_URL` | Grafana Cloud Loki write endpoint |
+| `GRAFANA_CLOUD_LOKI_USERNAME` | Logs-publisher identity |
+| `GRAFANA_CLOUD_LOKI_PASSWORD` | Logs-publisher credential |
 
 Optional secrets:
 
@@ -80,6 +86,18 @@ the swapfile would only be created by a real apply.
 6. Review the final Ansible recap.
 
 Apply mode must never be run from a pull request branch.
+
+Production Alloy is a code-controlled enabled desired state. Missing Grafana
+write credentials fail the workflow closed. Disabling Alloy requires a
+reviewed desired-state change and the exact
+`backend_metrics_alloy_disable_confirmation=DISABLE_PRODUCTION_ALLOY`; do not
+use credential removal as a disable mechanism.
+
+Generic apply also accepts only
+`NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE=shadow` and
+`NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED=false`. It cannot perform
+or preserve a production owner/write transition; use only the dedicated,
+reviewed cutover-control path for that state.
 
 Routine baseline applies must not be used as a broad OS-upgrade or reboot
 shortcut. The backend baseline defaults keep `dist` upgrades, package autoremove,

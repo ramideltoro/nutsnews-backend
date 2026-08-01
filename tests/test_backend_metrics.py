@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
@@ -52,6 +54,95 @@ def load_worker_logs_check_module():
 
 
 class BackendMetricsTests(unittest.TestCase):
+    def test_worker_uplift_ownership_uses_authoritative_generation_five_shadow_row(self):
+        metrics = load_metrics_module()
+        row = {
+            "control_id": "production",
+            "generation": 5,
+            "state": "shadow",
+            "active_ingestion_owner": "legacy_shards",
+            "legacy_dispatch_enabled": True,
+            "uplift_scheduler_enabled": True,
+            "uplift_production_writes_enabled": False,
+            "publication_write_mode": "shadow_comparison",
+        }
+
+        with mock.patch.object(metrics, "postgres_json_query", return_value=row) as query:
+            output = "\n".join(metrics.worker_uplift_ownership_metric_lines())
+
+        query.assert_called_once_with(metrics.WORKER_UPLIFT_CONTROL_STATE_QUERY)
+        self.assertIn("nutsnews_backend_worker_uplift_ownership_available 1", output)
+        self.assertIn("nutsnews_backend_worker_uplift_control_generation 5", output)
+        self.assertIn("nutsnews_backend_worker_uplift_expected_active 0", output)
+        self.assertIn("nutsnews_backend_worker_uplift_legacy_dispatch_enabled 1", output)
+        self.assertIn("nutsnews_backend_worker_uplift_scheduler_enabled 1", output)
+        self.assertIn("nutsnews_backend_worker_uplift_production_writes_enabled 0", output)
+        self.assertIn('state="shadow"', output)
+        self.assertIn('ingestion_owner="legacy_shards"', output)
+        self.assertIn('publication_write_mode="shadow_comparison"', output)
+        self.assertIn('write_gate="disabled"', output)
+
+    def test_worker_uplift_ownership_supports_valid_cutover_but_fails_closed_on_bad_rows(self):
+        metrics = load_metrics_module()
+        cutover = {
+            "control_id": "production",
+            "generation": 9,
+            "state": "cutover_active",
+            "active_ingestion_owner": "worker_uplift",
+            "legacy_dispatch_enabled": False,
+            "uplift_scheduler_enabled": True,
+            "uplift_production_writes_enabled": True,
+            "publication_write_mode": "production",
+        }
+        active = "\n".join(metrics.worker_uplift_ownership_metric_lines(cutover))
+        self.assertIn("nutsnews_backend_worker_uplift_ownership_available 1", active)
+        self.assertIn("nutsnews_backend_worker_uplift_expected_active 1", active)
+        self.assertIn('ingestion_owner="worker_uplift"', active)
+        self.assertIn('mode="production"', active)
+        self.assertIn('write_gate="enabled"', active)
+
+        contradictory = {**cutover, "active_ingestion_owner": "legacy_shards"}
+        malformed_generation = {**cutover, "generation": True}
+        for bad_row in (None, {}, contradictory, malformed_generation, {**cutover, "state": "future"}):
+            with self.subTest(row=bad_row):
+                unavailable = "\n".join(metrics.worker_uplift_ownership_metric_lines(bad_row))
+                self.assertIn("nutsnews_backend_worker_uplift_ownership_available 0", unavailable)
+                self.assertIn("nutsnews_backend_worker_uplift_control_generation 0", unavailable)
+                self.assertIn("nutsnews_backend_worker_uplift_expected_active 0", unavailable)
+                self.assertIn('state="unknown"', unavailable)
+                self.assertIn('ingestion_owner="unknown"', unavailable)
+                self.assertIn('publication_write_mode="unknown"', unavailable)
+
+    def test_current_worker_observability_contract_is_explicitly_disabled(self):
+        metrics = load_metrics_module()
+        with mock.patch.dict("os.environ", {}, clear=True):
+            output = "\n".join(metrics.worker_uplift_observability_contract_metric_lines())
+        self.assertIn(
+            "nutsnews_backend_worker_uplift_observability_contract_available 1",
+            output,
+        )
+        self.assertIn(
+            "nutsnews_backend_worker_uplift_observability_contract_enabled 0",
+            output,
+        )
+        self.assertIn('status="awaiting-qualified-v1"', output)
+
+        with mock.patch.dict(
+            "os.environ",
+            {
+                "NUTSNEWS_WORKER_UPLIFT_OBSERVABILITY_CONTRACT_STATUS": "qualified-v1",
+                "NUTSNEWS_WORKER_UPLIFT_OBSERVABILITY_CONTRACT_ENABLED": "true",
+            },
+            clear=True,
+        ):
+            invalid = "\n".join(metrics.worker_uplift_observability_contract_metric_lines())
+        self.assertIn(
+            "nutsnews_backend_worker_uplift_observability_contract_available 0",
+            invalid,
+        )
+        self.assertIn('status="invalid"', invalid)
+
+
     def test_grafana_dashboard_spec_passes_guardrails(self):
         spec = provision_grafana_metrics.load_spec(GRAFANA_SPEC)
         self.assertEqual(provision_grafana_metrics.validate_spec(spec), [])
@@ -149,6 +240,165 @@ class BackendMetricsTests(unittest.TestCase):
         rendered = metrics.metric("nutsnews_test", 1, {"unit": 'a"b\\c'})
         self.assertEqual(rendered, 'nutsnews_test{unit="a\\"b\\\\c"} 1')
 
+    def test_docker_stats_are_timeout_bounded_allowlisted_and_aggregated(self):
+        metrics = load_metrics_module()
+        rows = [
+            {
+                "Name": "nutsnews-rabbitmq",
+                "ID": "raw-rabbitmq-id-must-not-be-exported",
+                "CPUPerc": "2.50%",
+                "MemUsage": "512MiB / 1GiB",
+                "MemPerc": "50.00%",
+                "NetIO": "1MB / 2MB",
+                "BlockIO": "3MiB / 4MiB",
+                "PIDs": "50",
+            },
+            {
+                "Name": "nutsnews-worker-uplift-scheduler-1",
+                "CPUPerc": "1.25%",
+                "MemUsage": "64MiB / 256MiB",
+                "MemPerc": "25.00%",
+                "NetIO": "2kB / 3kB",
+                "BlockIO": "0B / 1MB",
+                "PIDs": "7",
+            },
+            {
+                "Name": "nutsnews-worker-uplift-scheduler-2",
+                "CPUPerc": "0.50%",
+                "MemUsage": "32MiB / 128MiB",
+                "MemPerc": "25.00%",
+                "NetIO": "4kB / 5kB",
+                "BlockIO": "1MiB / 2MiB",
+                "PIDs": "3",
+            },
+            {
+                "Name": "nutsnews-worker-uplift-scheduler-3",
+                "CPUPerc": "0.25%",
+                "MemUsage": "16MiB / 64MiB",
+                "MemPerc": "25.00%",
+                "NetIO": "6kB / 7kB",
+                "BlockIO": "2MiB / 3MiB",
+                "PIDs": "2",
+            },
+            {
+                "Name": "nutsnews-worker-uplift-scheduler-4",
+                "CPUPerc": "98.00%",
+            },
+            {
+                "Name": "unapproved-customer-container",
+                "Image": "private.example/raw-image-must-not-be-exported",
+                "CPUPerc": "99.00%",
+            },
+        ]
+        completed = metrics.subprocess.CompletedProcess(
+            ["docker", "stats"],
+            0,
+            "\n".join(json.dumps(row) for row in rows),
+            "",
+        )
+
+        with mock.patch.object(metrics.subprocess, "run", return_value=completed) as run:
+            output = "\n".join(metrics.docker_stats_metric_lines())
+
+        run.assert_called_once_with(
+            ["docker", "stats", "--no-stream", "--format", "{{json .}}"],
+            check=False,
+            stdout=metrics.subprocess.PIPE,
+            stderr=metrics.subprocess.DEVNULL,
+            text=True,
+            timeout=5,
+        )
+        self.assertIn("nutsnews_docker_stats_collection_available 1", output)
+        self.assertIn("nutsnews_docker_approved_services 9", output)
+        self.assertIn("nutsnews_docker_available_services 2", output)
+        self.assertIn('nutsnews_docker_stats_available{service="rabbitmq"} 1', output)
+        self.assertIn('nutsnews_docker_container_count{service="scheduler"} 3', output)
+        self.assertIn('nutsnews_docker_container_cpu_percent{service="scheduler"} 2.0', output)
+        self.assertIn(
+            'nutsnews_docker_container_memory_used_bytes{service="scheduler"} 117440512',
+            output,
+        )
+        self.assertIn(
+            'nutsnews_docker_container_network_transmit_bytes{service="scheduler"} 15000',
+            output,
+        )
+        self.assertIn(
+            'nutsnews_docker_container_block_write_bytes{service="rabbitmq"} 4194304',
+            output,
+        )
+        self.assertIn('nutsnews_docker_container_pids{service="rabbitmq"} 50', output)
+        self.assertIn('nutsnews_docker_stats_available{service="publication"} 0', output)
+        self.assertIn('nutsnews_docker_container_cpu_percent{service="publication"} -1', output)
+        self.assertIn("nutsnews_docker_aggregate_container_count 4", output)
+        self.assertIn("nutsnews_docker_aggregate_cpu_percent 4.5", output)
+        self.assertIn("nutsnews_docker_aggregate_memory_used_bytes 654311424", output)
+        self.assertIn("nutsnews_docker_aggregate_memory_limit_bytes 1543503872", output)
+        self.assertIn("nutsnews_docker_aggregate_memory_used_percent 42.391304", output)
+        self.assertIn("nutsnews_docker_aggregate_network_receive_bytes 1012000", output)
+        self.assertIn("nutsnews_docker_aggregate_block_write_bytes 10437184", output)
+        self.assertIn("nutsnews_docker_aggregate_pids 62", output)
+        self.assertEqual(
+            set(re.findall(r'service="([^"]+)"', output)),
+            set(metrics.DOCKER_STATS_SERVICES),
+        )
+        for forbidden in (
+            "raw-rabbitmq-id-must-not-be-exported",
+            "nutsnews-worker-uplift-scheduler-4",
+            "unapproved-customer-container",
+            "raw-image-must-not-be-exported",
+            "container=",
+            "image=",
+        ):
+            self.assertNotIn(forbidden, output)
+
+    def test_docker_stats_failures_emit_complete_unavailable_sentinels(self):
+        metrics = load_metrics_module()
+        failures = (
+            metrics.subprocess.CompletedProcess(["docker", "stats"], 1, "", "unavailable"),
+            metrics.subprocess.CompletedProcess(
+                ["docker", "stats"],
+                0,
+                json.dumps(
+                    {
+                        "Name": "nutsnews-rabbitmq",
+                        "CPUPerc": "not-a-percentage",
+                        "MemUsage": "1MiB / 1GiB",
+                        "MemPerc": "1%",
+                        "NetIO": "0B / 0B",
+                        "BlockIO": "0B / 0B",
+                        "PIDs": "1",
+                    }
+                ),
+                "",
+            ),
+        )
+
+        for completed in failures:
+            with self.subTest(returncode=completed.returncode, stdout=completed.stdout):
+                with mock.patch.object(metrics.subprocess, "run", return_value=completed):
+                    output = "\n".join(metrics.docker_stats_metric_lines())
+                self.assertIn("nutsnews_docker_stats_collection_available 0", output)
+                self.assertIn("nutsnews_docker_available_services -1", output)
+                self.assertIn("nutsnews_docker_aggregate_cpu_percent -1", output)
+                for service in metrics.DOCKER_STATS_SERVICES:
+                    self.assertIn(
+                        f'nutsnews_docker_stats_available{{service="{service}"}} 0',
+                        output,
+                    )
+                    self.assertIn(
+                        f'nutsnews_docker_container_memory_used_bytes{{service="{service}"}} -1',
+                        output,
+                    )
+
+        with mock.patch.object(
+            metrics.subprocess,
+            "run",
+            side_effect=metrics.subprocess.TimeoutExpired("docker stats", 5),
+        ):
+            timed_out = "\n".join(metrics.docker_stats_metric_lines())
+        self.assertIn("nutsnews_docker_stats_collection_available 0", timed_out)
+        self.assertIn('nutsnews_docker_stats_available{service="rabbitmq"} 0', timed_out)
+
     def test_metrics_tasks_skip_alloy_package_when_repo_is_new_in_check_mode(self):
         task = METRICS_TASKS.read_text(encoding="utf-8")
         self.assertIn("backend_metrics_alloy_manageable", task)
@@ -162,7 +412,13 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertIn('stage.replace', template)
         self.assertIn('stage.truncate', template)
         self.assertIn('stage.label_keep', template)
-        self.assertNotIn("request_id", template)
+        self.assertIn("request_id", template)
+        self.assertIn("stage.structured_metadata", template)
+        label_keep = template.split("stage.label_keep", 1)[1].split("}", 1)[0]
+        for label in ("deployment_environment", "service", "service_version", "host", "source", "severity"):
+            self.assertIn(f'"{label}"', label_keep)
+        for label in ("request_id", "message_id", "correlation_id", "trace_id", "article_id", "feed_id", "pipeline_run_id", "idempotency_key"):
+            self.assertNotIn(f'"{label}"', label_keep)
         self.assertNotIn("loki.source.docker", template)
         self.assertNotIn("/var/run/docker.sock", template)
 
@@ -173,9 +429,12 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertIn("backend_metrics_rabbitmq_enabled: false", defaults)
         self.assertIn("backend_metrics_rabbitmq_target: 127.0.0.1:15692", defaults)
         self.assertIn("backend_metrics_rabbitmq_sample_limit: 1200", defaults)
+        self.assertIn("backend_metrics_rabbitmq_label_limit: 13", defaults)
         self.assertIn("queue_coarse_metrics", defaults)
         self.assertIn("queue_consumer_count", defaults)
         self.assertIn("queue_delivery_metrics", defaults)
+        self.assertIn("queue_exchange_metrics", defaults)
+        self.assertIn("rabbitmq_detailed_queue_exchange_messages_published_total", defaults)
         self.assertIn('prometheus.exporter.self "alloy"', template)
         self.assertIn('prometheus.scrape "rabbitmq_aggregate"', template)
         self.assertIn('prometheus.scrape "rabbitmq_detailed"', template)
@@ -189,7 +448,15 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertIn("labeldrop", template)
         self.assertIn("labelkeep", template)
         self.assertIn("service_namespace", template)
-        self.assertNotIn("request_id", template)
+        rabbitmq_metrics = template.split('prometheus.relabel "rabbitmq_aggregate"', 1)[1].split("{% endif %}", 1)[0]
+        self.assertNotIn("request_id", rabbitmq_metrics)
+        detailed_relabel = rabbitmq_metrics.split('prometheus.relabel "rabbitmq_detailed"', 1)[1]
+        detailed_labelkeep = re.search(
+            r'regex\s+= "\^\(([^"]+)\)\$"\n\s+action = "labelkeep"',
+            detailed_relabel,
+        )
+        self.assertIsNotNone(detailed_labelkeep)
+        self.assertIn("exchange", detailed_labelkeep.group(1).split("|"))
 
     def test_alloy_log_access_is_least_privilege(self):
         task = METRICS_TASKS.read_text(encoding="utf-8")
@@ -217,7 +484,7 @@ class BackendMetricsTests(unittest.TestCase):
             self.assertIn(f"service: {service}", defaults)
         self.assertIn("nutsnews-rabbitmq-canary.timer", load_metrics_module().SERVICES)
         self.assertIn("CONTAINER_TAG={{ source.tag }}", template)
-        self.assertIn('source      = "container"', template)
+        self.assertIn('source                 = "container"', template)
         self.assertIn("stage.json", template)
         self.assertIn("stage.structured_metadata", template)
         self.assertIn("correlationId", template)
@@ -225,8 +492,22 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertIn("traceparent", template)
         self.assertIn('drop_counter_reason = "debug_trace_log_level"', template)
         label_keep = template.split("stage.label_keep", 1)[1].split("}", 1)[0]
-        for allowed in ("version", "queue", "outcome"):
+        for allowed in ("deployment_environment", "service", "service_version", "host", "source", "severity"):
             self.assertIn(f'"{allowed}"', label_keep)
+        for metadata in (
+            "queue",
+            "outcome",
+            "revision",
+            "image_digest",
+            "request_id",
+            "message_id",
+            "idempotency_key",
+            "trace_id",
+            "article_id",
+            "feed_id",
+            "pipeline_run_id",
+        ):
+            self.assertIn(f"{metadata}", template.split("stage.structured_metadata", 1)[1])
         for forbidden in ("message_id", "idempotency", "trace_id", "correlation_id", "token", "secret", "prompt", "model_output"):
             self.assertNotIn(f'"{forbidden}"', label_keep)
         self.assertNotIn("loki.source.docker", template)
@@ -236,6 +517,11 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertIn('tag: "nutsnews-worker-uplift-rabbitmq"', rabbitmq_compose)
         self.assertIn("driver: journald", worker_compose)
         self.assertIn('tag: "nutsnews-worker-uplift-{{ service.name }}"', worker_compose)
+        self.assertIn("com.nutsnews.version", worker_compose)
+        self.assertNotIn("expected_service_version", defaults)
+        self.assertNotIn("expected_revision", defaults)
+        self.assertNotIn("expected_image_digest", defaults)
+        self.assertIn("backend_metrics_worker_uplift_contract_status: awaiting-qualified-v1", defaults)
 
     def test_worker_uplift_logs_check_workflow_is_read_only_and_safe(self):
         workflow = WORKER_LOGS_WORKFLOW.read_text(encoding="utf-8")
@@ -259,6 +545,53 @@ class BackendMetricsTests(unittest.TestCase):
             logs_check.derive_loki_query_range_url("https://logs.example.net/loki/api/v1/push"),
             "https://logs.example.net/loki/api/v1/query_range",
         )
+
+    def test_worker_uplift_required_loki_check_requires_all_eight_service_streams(self):
+        logs_check = load_worker_logs_check_module()
+
+        class Args:
+            loki_url = "https://logs.example.net/loki/api/v1/push"
+            loki_username = "123"
+            loki_password = "secret"
+            query_hours = 6
+            timeout = 5
+            require_loki_data = True
+
+        def query_result(_url, _username, _password, query, **_kwargs):
+            if 'service="translation"' in query:
+                return {
+                    "status": "critical",
+                    "summary": "stream_count=0, line_count=0",
+                    "credential_error": False,
+                }
+            return {
+                "status": "healthy",
+                "summary": "stream_count=1, line_count=1",
+                "credential_error": False,
+            }
+
+        with (
+            mock.patch.object(logs_check, "local_checks", return_value=[]),
+            mock.patch.object(logs_check, "loki_query_range", side_effect=query_result),
+        ):
+            report = logs_check.build_report(Args())
+        self.assertEqual(report["status"], "fail")
+        worker_check = next(
+            item for item in report["checks"]
+            if item["name"] == "loki_worker_service_query"
+        )
+        self.assertEqual(worker_check["status"], "critical")
+        self.assertEqual(
+            worker_check["details"]["missing_worker_services"],
+            ["translation"],
+        )
+        self.assertEqual(len(report["queries"]["worker_services"]), 8)
+        for query in report["queries"]["worker_services"].values():
+            self.assertIn('deployment_environment="production"', query)
+            self.assertIn('source="container"', query)
+            self.assertNotIn("service_version", query)
+            self.assertNotIn("revision", query)
+            self.assertNotIn("image_digest", query)
 
     def test_worker_uplift_logs_check_quotes_remote_shell_command(self):
         logs_check = load_worker_logs_check_module()
@@ -341,6 +674,7 @@ class BackendMetricsTests(unittest.TestCase):
 
     def test_textfile_exporter_writes_backup_metrics_without_secret_content(self):
         metrics = load_metrics_module()
+        collected_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         with tempfile.TemporaryDirectory() as tmpdir:
             state_dir = Path(tmpdir) / "backups"
             state_dir.mkdir()
@@ -348,6 +682,8 @@ class BackendMetricsTests(unittest.TestCase):
             postgres_dir.mkdir()
             rabbitmq_dir = Path(tmpdir) / "rabbitmq-recovery"
             rabbitmq_dir.mkdir()
+            relay_dir = Path(tmpdir) / "supabase-sync-relay"
+            relay_dir.mkdir()
             (state_dir / "last-backup.json").write_text(
                 json.dumps(
                     {
@@ -372,7 +708,17 @@ class BackendMetricsTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (postgres_dir / "replication-health.json").write_text(
-                json.dumps({"replication": {"lag_status": "healthy", "max_lag_seconds": 12, "blockers": []}}),
+                json.dumps(
+                    {
+                        "checked_at_utc": collected_at,
+                        "replication": {
+                            "lag_status": "healthy",
+                            "max_lag_seconds": 12,
+                            "validation_stale_threshold_seconds": 900,
+                            "blockers": [],
+                        },
+                    }
+                ),
                 encoding="utf-8",
             )
             (rabbitmq_dir / "last-definition-export.json").write_text(
@@ -381,13 +727,49 @@ class BackendMetricsTests(unittest.TestCase):
             )
             (rabbitmq_dir / "last-clean-rebuild-drill.json").write_text(json.dumps({"status": "healthy"}), encoding="utf-8")
             (rabbitmq_dir / "last-stopped-volume-restore-drill.json").write_text(json.dumps({"status": "healthy"}), encoding="utf-8")
+            relay_path = relay_dir / "last-run.json"
+            relay_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "status": "pass",
+                        "mode": "sync-once",
+                        "safe_metadata_only": True,
+                        "checked_at_utc": collected_at,
+                        "completed_at_utc": collected_at,
+                        "finished_at_utc": collected_at,
+                        "last_success_at_utc": collected_at,
+                        "last_applied_at_utc": "2026-07-17T00:16:22Z",
+                        "sync": {"status": "applied", "table_count": 2},
+                        "post_sync": {
+                            "status": "pass",
+                            "checks": [
+                                {"id": "table.public.articles", "status": "pass", "target_lag_rows": 0},
+                                {"id": "table.public.rss_feeds", "status": "pass", "target_lag_rows": 0},
+                            ]
+                        },
+                        "validation_summary": {
+                            "expected_table_count": 2,
+                            "validated_table_count": 2,
+                            "failed_table_count": 0,
+                            "max_table_lag_rows": 0,
+                            "complete": True,
+                            "safe_metadata_only": True,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
             with (
                 mock.patch.object(metrics, "BACKUP_STATE_DIR", state_dir),
                 mock.patch.object(metrics, "RABBITMQ_RECOVERY_STATE_DIR", rabbitmq_dir),
                 mock.patch.object(metrics, "POSTGRES_STATE_DIR", postgres_dir),
                 mock.patch.object(metrics, "POSTGRES_REPLICATION_HEALTH_PATH", postgres_dir / "replication-health.json"),
+                mock.patch.object(metrics, "SUPABASE_SYNC_RELAY_STATE_PATH", relay_path),
                 mock.patch.object(metrics, "shell", return_value="0"),
                 mock.patch.object(metrics, "service_active", return_value=1),
+                mock.patch.object(metrics, "postgres_json_query", return_value=None),
+                mock.patch.object(metrics, "fetch_json_url", return_value=None),
             ):
                 lines = metrics.collect()
         output = "\n".join(lines)
@@ -397,9 +779,396 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertIn('nutsnews_backend_postgres_replication_lag_configured{status="healthy"} 1', output)
         self.assertIn("nutsnews_backend_postgres_replication_blockers 0", output)
         self.assertIn("nutsnews_backend_postgres_replication_max_lag_seconds 12", output)
+        self.assertIn("nutsnews_backend_metric_exporter_available 1", output)
+        self.assertIn("nutsnews_backend_sync_relay_available 1", output)
+        self.assertIn("nutsnews_backend_sync_relay_healthy 1", output)
+        self.assertIn("nutsnews_backend_sync_relay_failed_table_count 0", output)
+        self.assertIn("nutsnews_backend_sync_relay_last_success_timestamp_seconds", output)
         self.assertIn('nutsnews_backend_rabbitmq_recovery_stage_healthy{stage="definition_export"} 1', output)
         self.assertIn("nutsnews_backend_rabbitmq_definition_export_age_seconds", output)
         self.assertNotIn("password", output.lower())
+
+    def test_textfile_exporter_overwrites_stale_output_with_unavailable_state(self):
+        metrics = load_metrics_module()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = Path(tmpdir) / "nutsnews.prom"
+            output.write_text("nutsnews_stale_success 1\n", encoding="utf-8")
+            with mock.patch.object(metrics, "collect", side_effect=RuntimeError("collector failed")), mock.patch(
+                "sys.argv", ["nutsnews_metrics_textfile.py", "--output", str(output)]
+            ):
+                exit_code = metrics.main()
+            rendered = output.read_text(encoding="utf-8")
+
+        self.assertEqual(1, exit_code)
+        self.assertIn("nutsnews_backend_metric_exporter_available 0", rendered)
+        self.assertIn("nutsnews_backend_metric_exporter_error 1", rendered)
+        self.assertIn("nutsnews_alloy_readiness_probe_success 0", rendered)
+        self.assertIn("nutsnews_alloy_ready 0", rendered)
+        self.assertIn("nutsnews_backend_worker_uplift_expected_active 0", rendered)
+        self.assertIn("nutsnews_docker_stats_collection_available 0", rendered)
+        self.assertIn('nutsnews_docker_stats_available{service="rabbitmq"} 0', rendered)
+        self.assertIn(
+            'nutsnews_docker_container_memory_used_bytes{service="rabbitmq"} -1',
+            rendered,
+        )
+        self.assertNotIn("nutsnews_stale_success", rendered)
+        self.assertNotIn("collector failed", rendered)
+
+    def test_alloy_readiness_metrics_are_bounded_and_explicit(self):
+        metrics = load_metrics_module()
+
+        ready = "\n".join(metrics.alloy_readiness_metric_lines(1))
+        unavailable = "\n".join(metrics.alloy_readiness_metric_lines(0))
+
+        self.assertIn("nutsnews_alloy_readiness_probe_success 1", ready)
+        self.assertIn("nutsnews_alloy_ready 1", ready)
+        self.assertIn("nutsnews_alloy_readiness_probe_success 0", unavailable)
+        self.assertIn("nutsnews_alloy_ready 0", unavailable)
+
+    def test_backup_history_metrics_separate_failed_run_from_verified_success(self):
+        metrics = load_metrics_module()
+        now = metrics.timestamp_seconds("2026-08-01T02:00:00Z")
+        self.assertIsNotNone(now)
+        state = {
+            "schema_version": 1,
+            "action": "backup",
+            "status": "critical",
+            "last_run_at_utc": "2026-08-01T01:59:00Z",
+            "last_success_at_utc": "2026-07-31T02:00:00Z",
+        }
+
+        output = "\n".join(metrics.backup_history_metric_lines(now, state))
+
+        self.assertIn("nutsnews_backend_backup_status_available 1", output)
+        self.assertIn("nutsnews_backend_backup_last_run_age_seconds 60", output)
+        self.assertIn("nutsnews_backend_backup_last_success_age_seconds 86400", output)
+        self.assertIn("nutsnews_backend_backup_last_success_fresh 1", output)
+        self.assertIn("nutsnews_backend_backup_stale_after_seconds 108000", output)
+
+    def test_backup_history_metrics_make_first_run_and_corrupt_state_explicit(self):
+        metrics = load_metrics_module()
+        now = metrics.timestamp_seconds("2026-08-01T02:00:00Z")
+        self.assertIsNotNone(now)
+        first_failure = {
+            "schema_version": 1,
+            "action": "backup",
+            "status": "critical",
+            "last_run_at_utc": "2026-08-01T01:59:00Z",
+            "last_success_at_utc": None,
+        }
+
+        first_output = "\n".join(metrics.backup_history_metric_lines(now, first_failure))
+        corrupt_output = "\n".join(
+            metrics.backup_history_metric_lines(now, {"status": "unknown"})
+        )
+
+        self.assertIn("nutsnews_backend_backup_status_available 1", first_output)
+        self.assertIn("nutsnews_backend_backup_last_success_timestamp_seconds 0", first_output)
+        self.assertIn("nutsnews_backend_backup_last_success_age_seconds -1", first_output)
+        self.assertIn("nutsnews_backend_backup_last_success_fresh -1", first_output)
+        self.assertIn("nutsnews_backend_backup_status_available 0", corrupt_output)
+        self.assertIn("nutsnews_backend_backup_last_run_age_seconds -1", corrupt_output)
+        self.assertIn("nutsnews_backend_backup_last_success_age_seconds -1", corrupt_output)
+
+    def test_stale_replication_and_failed_relay_cannot_look_fresh(self):
+        metrics = load_metrics_module()
+        collected_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            postgres_dir = root / "postgres"
+            postgres_dir.mkdir()
+            (postgres_dir / "status.json").write_text(
+                json.dumps(
+                    {
+                        "status": "healthy",
+                        "last_restore_drill": {"status": "healthy"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (postgres_dir / "replication-health.json").write_text(
+                json.dumps(
+                    {
+                        "checked_at_utc": "2020-01-01T00:00:00Z",
+                        "replication": {
+                            "lag_status": "healthy",
+                            "max_lag_seconds": 1,
+                            "validation_stale_threshold_seconds": 900,
+                            "blockers": [],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            relay_path = root / "last-relay.json"
+            relay_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "status": "fail",
+                        "mode": "sync-once",
+                        "safe_metadata_only": True,
+                        "checked_at_utc": collected_at,
+                        "completed_at_utc": collected_at,
+                        "finished_at_utc": collected_at,
+                        "last_success_at_utc": "2026-07-31T00:00:00Z",
+                        "last_applied_at_utc": "2026-07-31T00:00:00Z",
+                        "sync": {"status": "applied", "table_count": 1},
+                        "post_sync": {
+                            "status": "fail",
+                            "checks": [
+                                {"id": "table.public.articles", "status": "fail", "target_lag_rows": 1}
+                            ],
+                        },
+                        "validation_summary": {
+                            "expected_table_count": 1,
+                            "validated_table_count": 1,
+                            "failed_table_count": 1,
+                            "max_table_lag_rows": 1,
+                            "complete": True,
+                            "safe_metadata_only": True,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(metrics, "BACKUP_STATE_DIR", root / "backups"),
+                mock.patch.object(metrics, "RABBITMQ_RECOVERY_STATE_DIR", root / "rabbitmq"),
+                mock.patch.object(metrics, "POSTGRES_STATE_DIR", postgres_dir),
+                mock.patch.object(
+                    metrics,
+                    "POSTGRES_REPLICATION_HEALTH_PATH",
+                    postgres_dir / "replication-health.json",
+                ),
+                mock.patch.object(metrics, "SUPABASE_SYNC_RELAY_STATE_PATH", relay_path),
+                mock.patch.object(metrics, "shell", return_value="0"),
+                mock.patch.object(metrics, "service_active", return_value=1),
+                mock.patch.object(metrics, "postgres_json_query", return_value=None),
+                mock.patch.object(metrics, "fetch_json_url", return_value=None),
+            ):
+                output = "\n".join(metrics.collect())
+
+        self.assertIn("nutsnews_backend_postgres_failover_ready 0", output)
+        self.assertIn("nutsnews_backend_postgres_replication_telemetry_fresh 0", output)
+        self.assertIn("nutsnews_backend_postgres_replication_max_lag_seconds -1", output)
+        self.assertIn("nutsnews_backend_sync_relay_collector_fresh 1", output)
+        self.assertNotIn("nutsnews_backend_sync_relay_lag_seconds -1", output)
+        self.assertIn("nutsnews_backend_sync_relay_max_table_lag_rows 1", output)
+        self.assertNotIn("nutsnews_backend_sync_relay_last_success_timestamp_seconds 0", output)
+        self.assertNotIn("nutsnews_backend_sync_relay_last_success_age_seconds -1", output)
+        self.assertIn("nutsnews_backend_sync_relay_healthy 0", output)
+
+    def test_durable_content_metrics_are_real_bounded_aggregates(self):
+        metrics = load_metrics_module()
+        now = metrics.timestamp_seconds("2026-08-01T04:00:00Z")
+        self.assertIsNotNone(now)
+        query_results = {
+            metrics.LEGACY_WORKER_METRICS_QUERY: {
+                "last_run_at": "2026-08-01T03:59:00Z",
+                "last_success_at": "2026-08-01T03:59:00Z",
+                "last_run_success": True,
+                "last_scheduled_run_at": "2026-08-01T03:40:00Z",
+                "last_scheduled_success_at": "2026-08-01T03:40:00Z",
+                "last_scheduled_run_success": True,
+                "runs_24h": 10,
+                "successful_runs_24h": 9,
+                "scheduled_runs_24h": 8,
+                "successful_scheduled_runs_24h": 7,
+            },
+            metrics.FEED_HEALTH_METRICS_QUERY: {
+                "active_count": 11,
+                "healthy_count": 7,
+                "warning_count": 1,
+                "failed_count": 1,
+                "stale_count": 1,
+                "untracked_count": 1,
+                "unhealthy_count": 4,
+                "oldest_checked_at": "2026-08-01T02:00:00Z",
+                "latest_checked_at": "2026-08-01T03:59:00Z",
+                "oldest_success_at": "2026-08-01T01:00:00Z",
+                "latest_success_at": "2026-08-01T03:58:00Z",
+            },
+            metrics.CONTENT_COVERAGE_METRICS_QUERY: {
+                "snapshot_rows": 120,
+                "latest_published_at": "2026-08-01T03:50:00Z",
+                "recent_sample_rows": 60,
+                "recent_image_rows": 45,
+                "recent_translated_pairs": 240,
+                "translated_fr": 48,
+                "translated_ja": 48,
+                "translated_de_ch": 48,
+                "translated_de": 48,
+                "translated_el": 48,
+            },
+            metrics.AI_USAGE_METRICS_QUERY: {
+                "runs_24h": 5,
+                "last_run_at": "2026-08-01T03:45:00Z",
+                "local_calls_24h": 20,
+                "openai_calls_24h": 2,
+                "local_tokens_24h": 2000,
+                "openai_tokens_24h": 200,
+                "openai_estimated_cost_usd_24h": 0.25,
+                "cost_protection_events_24h": 0,
+                "spike_warning_events_24h": 1,
+            },
+            metrics.DATABASE_GROWTH_METRICS_QUERY: {
+                "database_size_bytes": 123456,
+                "articles_rows": 1000,
+                "article_summaries_rows": 5000,
+                "worker_runs_rows": 250,
+                "ai_usage_runs_rows": 200,
+            },
+            metrics.WORKER_UPLIFT_OUTBOX_METRICS_QUERY: {
+                stage: {"oldest_age_seconds": index * 10, "pending_count": index}
+                for index, stage in enumerate(metrics.WORKER_UPLIFT_STAGES)
+            },
+        }
+        public_snapshot = {
+            "ready": True,
+            "status": "hit",
+            "refreshedAt": "2026-08-01T03:55:00Z",
+            "ageSeconds": 300,
+            "articleCount": 120,
+            "maxArticles": 120,
+        }
+        with (
+            mock.patch.object(
+                metrics,
+                "postgres_json_query",
+                side_effect=lambda query: query_results[query],
+            ),
+            mock.patch.object(metrics, "fetch_json_url", return_value=public_snapshot),
+        ):
+            output = "\n".join(metrics.durable_content_metric_lines(now))
+
+        self.assertIn("nutsnews_backend_legacy_worker_available 1", output)
+        self.assertIn("nutsnews_backend_legacy_worker_last_scheduled_success_age_seconds 1200", output)
+        self.assertIn("nutsnews_backend_legacy_worker_fresh_within_15_minutes 0", output)
+        self.assertIn("nutsnews_backend_feed_healthy_count 7", output)
+        self.assertIn("nutsnews_backend_feed_warning_count 1", output)
+        self.assertIn("nutsnews_backend_feed_oldest_check_age_seconds 7200", output)
+        self.assertIn("nutsnews_backend_public_feed_snapshot_newest_content_age_seconds 600", output)
+        self.assertIn("nutsnews_backend_recent_published_image_coverage_ratio 0.75", output)
+        self.assertIn("nutsnews_backend_recent_published_translation_coverage_ratio 0.8", output)
+        self.assertIn(
+            'nutsnews_backend_recent_published_language_coverage_ratio{language="de-CH"} 0.8',
+            output,
+        )
+        self.assertIn('nutsnews_backend_ai_calls_24h{provider="local"} 20', output)
+        self.assertIn('nutsnews_backend_ai_calls_24h{provider="openai"} 2', output)
+        self.assertIn("nutsnews_backend_database_size_bytes 123456", output)
+        self.assertIn("nutsnews_backend_public_feed_edge_snapshot_age_seconds 300", output)
+        self.assertIn('nutsnews_backend_public_feed_edge_snapshot_status{status="hit"} 1', output)
+        self.assertIn(
+            'nutsnews_backend_worker_uplift_oldest_unconfirmed_outbox_age_seconds{stage="publication"} 70',
+            output,
+        )
+        self.assertNotIn("original_url", output)
+        self.assertNotIn("feed_url", output)
+
+    def test_durable_content_metrics_emit_unavailable_instead_of_stale_success(self):
+        metrics = load_metrics_module()
+        with (
+            mock.patch.object(metrics, "postgres_json_query", return_value=None),
+            mock.patch.object(metrics, "fetch_json_url", return_value=None),
+        ):
+            output = "\n".join(metrics.durable_content_metric_lines(1_800_000_000))
+
+        for metric_name in (
+            "nutsnews_backend_legacy_worker_available",
+            "nutsnews_backend_feed_health_available",
+            "nutsnews_backend_content_coverage_available",
+            "nutsnews_backend_ai_usage_available",
+            "nutsnews_backend_database_growth_available",
+            "nutsnews_backend_public_feed_edge_snapshot_available",
+        ):
+            self.assertIn(f"{metric_name} 0", output)
+        self.assertIn("nutsnews_backend_legacy_worker_last_success_age_seconds -1", output)
+        self.assertIn("nutsnews_backend_recent_published_image_coverage_ratio -1", output)
+        self.assertIn("nutsnews_backend_public_feed_edge_snapshot_age_seconds -1", output)
+        self.assertIn(
+            'nutsnews_backend_worker_uplift_outbox_available{stage="scheduler"} 0',
+            output,
+        )
+        self.assertIn(
+            'nutsnews_backend_worker_uplift_oldest_unconfirmed_outbox_age_seconds{stage="scheduler"} -1',
+            output,
+        )
+
+    def test_database_and_public_snapshot_collectors_reject_unsafe_targets(self):
+        metrics = load_metrics_module()
+        with mock.patch.object(metrics.subprocess, "run") as run:
+            self.assertIsNone(metrics.postgres_json_query("select '{}'::json", database="bad;drop"))
+            self.assertIsNone(metrics.fetch_json_url("http://127.0.0.1/private"))
+        run.assert_not_called()
+
+    def test_metrics_service_runs_durable_signals_every_five_minutes(self):
+        defaults = Path("ansible/roles/backend_baseline/defaults/main.yml").read_text(encoding="utf-8")
+        tasks = METRICS_TASKS.read_text(encoding="utf-8")
+        self.assertIn('backend_metrics_textfile_calendar: "*:0/5:00"', defaults)
+        self.assertIn("NUTSNEWS_METRICS_POSTGRES_DATABASE={{ backend_postgres_primary_shadow_database }}", tasks)
+        self.assertIn("NUTSNEWS_PUBLIC_FEED_STATUS_URL={{ backend_metrics_public_feed_status_url }}", tasks)
+        self.assertIn("NUTSNEWS_HEALTH_AUDIT_STATE_PATH={{ backend_metrics_health_audit_state_path }}", tasks)
+        self.assertIn("NUTSNEWS_BACKUP_STALE_AFTER_HOURS={{ backend_backup_stale_after_hours }}", tasks)
+        self.assertIn(
+            "NUTSNEWS_WORKER_UPLIFT_OBSERVABILITY_CONTRACT_STATUS={{ backend_metrics_worker_uplift_contract_status }}",
+            tasks,
+        )
+        self.assertIn(
+            "NUTSNEWS_WORKER_UPLIFT_OBSERVABILITY_CONTRACT_ENABLED={{ backend_metrics_worker_uplift_contract_enabled",
+            tasks,
+        )
+        self.assertNotIn("NUTSNEWS_WORKER_UPLIFT_EXPECTED_ACTIVE", tasks)
+        self.assertNotIn("NUTSNEWS_WORKER_UPLIFT_DEPLOYMENT_MODE", tasks)
+
+    def test_health_audit_state_is_recomputed_into_scrapeable_age_metrics(self):
+        metrics = load_metrics_module()
+        now = metrics.timestamp_seconds("2026-08-01T13:00:00Z")
+        self.assertIsNotNone(now)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / "last-run.json"
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "safe_metadata_only": True,
+                        "source": "github_actions",
+                        "available": True,
+                        "conclusion": "failure",
+                        "last_run_at_utc": "2026-08-01T12:00:00Z",
+                        "last_success_at_utc": "2026-07-31T12:00:00Z",
+                        "consecutive_failures": 2,
+                        "critical_checks": 3,
+                        "expected_interval_seconds": 86400,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(metrics, "HEALTH_AUDIT_STATE_PATH", state_path):
+                output = "\n".join(metrics.health_audit_metric_lines(now))
+
+        self.assertIn("nutsnews_backend_health_audit_available 1", output)
+        self.assertIn('nutsnews_backend_health_audit_conclusion{conclusion="failure"} 1', output)
+        self.assertIn("nutsnews_backend_health_audit_last_run_age_seconds 3600", output)
+        self.assertIn("nutsnews_backend_health_audit_last_success_age_seconds 90000", output)
+        self.assertIn("nutsnews_backend_health_audit_consecutive_failures 2", output)
+        self.assertIn("nutsnews_backend_health_audit_critical_checks 3", output)
+        self.assertIn("nutsnews_backend_health_audit_expected_interval_seconds 86400", output)
+
+    def test_invalid_health_audit_state_is_explicitly_unavailable(self):
+        metrics = load_metrics_module()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / "last-run.json"
+            state_path.write_text('{"conclusion":"totally-arbitrary"}', encoding="utf-8")
+            with mock.patch.object(metrics, "HEALTH_AUDIT_STATE_PATH", state_path):
+                output = "\n".join(metrics.health_audit_metric_lines(1_800_000_000))
+
+        self.assertIn("nutsnews_backend_health_audit_available 0", output)
+        self.assertIn('nutsnews_backend_health_audit_conclusion{conclusion="unknown"} 1', output)
+        self.assertIn("nutsnews_backend_health_audit_last_run_timestamp_seconds 0", output)
+        self.assertIn("nutsnews_backend_health_audit_last_run_age_seconds -1", output)
+        self.assertIn("nutsnews_backend_health_audit_consecutive_failures -1", output)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import tempfile
 import unittest
 from datetime import UTC, datetime
@@ -300,9 +301,12 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertIn("backend_metrics_rabbitmq_enabled: false", defaults)
         self.assertIn("backend_metrics_rabbitmq_target: 127.0.0.1:15692", defaults)
         self.assertIn("backend_metrics_rabbitmq_sample_limit: 1200", defaults)
+        self.assertIn("backend_metrics_rabbitmq_label_limit: 13", defaults)
         self.assertIn("queue_coarse_metrics", defaults)
         self.assertIn("queue_consumer_count", defaults)
         self.assertIn("queue_delivery_metrics", defaults)
+        self.assertIn("queue_exchange_metrics", defaults)
+        self.assertIn("rabbitmq_detailed_queue_exchange_messages_published_total", defaults)
         self.assertIn('prometheus.exporter.self "alloy"', template)
         self.assertIn('prometheus.scrape "rabbitmq_aggregate"', template)
         self.assertIn('prometheus.scrape "rabbitmq_detailed"', template)
@@ -318,6 +322,13 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertIn("service_namespace", template)
         rabbitmq_metrics = template.split('prometheus.relabel "rabbitmq_aggregate"', 1)[1].split("{% endif %}", 1)[0]
         self.assertNotIn("request_id", rabbitmq_metrics)
+        detailed_relabel = rabbitmq_metrics.split('prometheus.relabel "rabbitmq_detailed"', 1)[1]
+        detailed_labelkeep = re.search(
+            r'regex\s+= "\^\(([^"]+)\)\$"\n\s+action = "labelkeep"',
+            detailed_relabel,
+        )
+        self.assertIsNotNone(detailed_labelkeep)
+        self.assertIn("exchange", detailed_labelkeep.group(1).split("|"))
 
     def test_alloy_log_access_is_least_privilege(self):
         task = METRICS_TASKS.read_text(encoding="utf-8")

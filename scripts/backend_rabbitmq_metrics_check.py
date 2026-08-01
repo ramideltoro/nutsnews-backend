@@ -26,6 +26,7 @@ REMOTE_COMMANDS: dict[str, str] = {
         "curl -fsS --max-time 10 "
         "'http://127.0.0.1:15692/metrics/detailed?"
         "family=queue_coarse_metrics&family=queue_consumer_count&family=queue_delivery_metrics"
+        "&family=queue_exchange_metrics"
         "&vhost=nutsnews-worker-uplift"
         "&queue=^nutsnews\\.worker\\.' 2>/dev/null || true"
     ),

@@ -643,7 +643,7 @@ prometheus.relabel "rabbitmq_detailed" {
   }
 
   rule {
-    regex  = "^(__name__|job|instance|environment|deployment_environment|host|service|service_namespace|rabbitmq_endpoint|node|cluster|vhost|queue)$"
+    regex  = "^(__name__|job|instance|environment|deployment_environment|host|service|service_namespace|rabbitmq_endpoint|node|cluster|vhost|queue|exchange)$"
     action = "labelkeep"
   }
 }

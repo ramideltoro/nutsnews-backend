@@ -204,6 +204,8 @@ def validate_runtime_status(runtime: dict[str, Any], observed_at: datetime, now:
         raise ProjectionError("runtime mode must remain shadow")
     if runtime.get("production_writes_enabled") is not False:
         raise ProjectionError("runtime production_writes_enabled must remain false")
+    if runtime.get("expected_active") is not False:
+        raise ProjectionError("runtime expected_active must remain false for the shadow projection")
     if runtime.get("missing_consumers") != []:
         raise ProjectionError("runtime status reports missing consumers")
     if runtime.get("unverifiable_consumers") != []:
@@ -218,10 +220,20 @@ def validate_runtime_status(runtime: dict[str, Any], observed_at: datetime, now:
         item = services.get(stage)
         if not isinstance(item, dict):
             raise ProjectionError(f"runtime status for {stage} is missing")
+        liveness = item.get("liveness")
         readiness = item.get("readiness")
+        metrics = item.get("metrics")
         consumer = item.get("consumer_readiness")
-        if not isinstance(readiness, dict) or readiness.get("status") != "healthy":
-            raise ProjectionError(f"runtime readiness for {stage} is not healthy")
+        if not isinstance(liveness, dict) or liveness.get("status") != "healthy":
+            raise ProjectionError(f"runtime liveness for {stage} is not healthy")
+        if not isinstance(readiness, dict) or readiness.get("outcome") not in {"ok", "degraded", "unhealthy"}:
+            raise ProjectionError(f"runtime readiness for {stage} is not observable")
+        if not isinstance(metrics, dict) or metrics.get("status") != "healthy":
+            raise ProjectionError(f"runtime metrics contract for {stage} is not healthy")
+        if metrics.get("readiness_series_present") is not True or metrics.get("readiness_one_hot") is not True:
+            raise ProjectionError(f"runtime readiness series for {stage} is not complete and one-hot")
+        if metrics.get("reported_expected_active") is not False or metrics.get("expected_active_matches") is not True:
+            raise ProjectionError(f"runtime ownership series for {stage} does not match shadow ownership")
         expected_consumer_status = "not_applicable" if stage == "scheduler" else "healthy"
         if not isinstance(consumer, dict) or consumer.get("status") != expected_consumer_status:
             raise ProjectionError(f"runtime consumer readiness for {stage} is not {expected_consumer_status}")

@@ -47,6 +47,7 @@ backend_monitoring_health_path: /healthz
 backend_monitoring_app_status: infrastructure_health_only
 backend_caddy_enabled: true
 backend_caddy_config_path: /etc/caddy/Caddyfile
+backend_caddy_candidate_path: "{{ backend_caddy_config_path }}.candidate"
 backend_caddy_health_response: ok
 backend_ops_dashboard_enabled: true
 backend_ops_dashboard_user: nutsnews-dashboard
@@ -145,6 +146,8 @@ backend_worker_uplift_postgres_stage_roles:
     schema: worker_uplift_publication
     user: "{{ backend_worker_uplift_postgres_publication_user }}"
     password: "{{ backend_worker_uplift_postgres_publication_password }}"
+backend_worker_uplift_postgres_migrations:
+  - 001_fetcher_durable_state_contract.sql
 backend_postgres_listen_addresses: localhost
 backend_postgres_log_min_duration_statement: "500"
 backend_postgres_log_autovacuum_min_duration: "10s"
@@ -160,6 +163,11 @@ backend_worker_api_script_path: "{{ backend_worker_api_root }}/nutsnews_worker_d
 backend_worker_api_env_path: /etc/nutsnews-worker-db-api.env
 backend_worker_api_bind: 127.0.0.1
 backend_worker_api_port: "8093"
+backend_worker_api_monitoring_path: /readyz
+backend_worker_api_service_version: "1.1.0"
+backend_worker_api_build_revision: unknown
+backend_worker_api_deployment_environment: production
+backend_worker_api_telemetry_host: backend-vps
 backend_worker_api_token: ""
 backend_worker_api_uplift_persistence_token: ""
 backend_worker_api_uplift_publication_token: ""
@@ -226,7 +234,10 @@ backend_backup_calendar: "*-*-* 03:17:00"
 backend_backup_verify_calendar: "*-*-* 04:17:00"
 backend_backup_restore_drill_calendar: "Sun *-*-* 05:17:00"
 backend_metrics_enabled: false
+backend_metrics_production_desired_state: false
+backend_metrics_alloy_disable_confirmation: ""
 backend_metrics_alloy_config_path: /etc/alloy/config.alloy
+backend_metrics_alloy_candidate_path: "{{ backend_metrics_alloy_config_path }}.candidate"
 backend_metrics_alloy_env_path: /etc/alloy/nutsnews-prometheus.env
 backend_metrics_prometheus_remote_write_url: ""
 backend_metrics_prometheus_username: ""
@@ -236,12 +247,88 @@ backend_metrics_instance_label: backend.nutsnews.com
 backend_metrics_scrape_interval: 60s
 backend_metrics_textfile_dir: /var/lib/nutsnews/metrics
 backend_metrics_textfile_exporter_path: /usr/local/bin/nutsnews-metrics-textfile
-backend_metrics_textfile_calendar: "*:0/1:00"
+backend_metrics_textfile_calendar: "*:0/5:00"
+backend_metrics_public_feed_status_url: https://nutsnews-worker-0.nutsnews.workers.dev/public-feed-snapshot/status
+backend_metrics_health_audit_state_dir: /var/lib/nutsnews/health-audit
+backend_metrics_health_audit_state_path: "{{ backend_metrics_health_audit_state_dir }}/last-run.json"
+backend_observability_failure_drill_runner_path: /usr/local/sbin/nutsnews-observability-failure-drill
+backend_observability_failure_drill_candidate_path: "{{ backend_observability_failure_drill_runner_path }}.candidate"
+backend_observability_failure_drill_state_dir: /var/lib/nutsnews/observability-drills
+backend_observability_failure_drill_metrics_path: "{{ backend_metrics_textfile_dir }}/observability-failure-drills.prom"
+backend_observability_failure_drill_watchdog_service: nutsnews-observability-failure-drill-watchdog.service
+backend_observability_failure_drill_watchdog_timer: nutsnews-observability-failure-drill-watchdog.timer
+backend_observability_failure_drill_watchdog_calendar: "*-*-* *:*:00"
 backend_metrics_remote_write_capacity: 2500
 backend_metrics_remote_write_max_samples_per_send: 500
 backend_metrics_remote_write_max_shards: 2
 backend_metrics_alloy_self_enabled: true
 backend_metrics_alloy_self_scrape_interval: 60s
+backend_metrics_backend_api_enabled: "{{ backend_worker_api_enabled }}"
+backend_metrics_backend_api_scrape_interval: 60s
+backend_metrics_backend_api_scrape_timeout: 10s
+backend_metrics_backend_api_sample_limit: 300
+backend_metrics_backend_api_label_limit: 12
+backend_metrics_worker_uplift_enabled: true
+backend_metrics_worker_uplift_scrape_interval: 60s
+backend_metrics_worker_uplift_scrape_timeout: 10s
+backend_metrics_worker_uplift_sample_limit: 500
+backend_metrics_worker_uplift_label_limit: 20
+backend_metrics_worker_uplift_relabel_cache_size: 128
+backend_metrics_worker_uplift_relabel_cache_ttl: 10m
+backend_metrics_worker_uplift_deployment_mode: >-
+  {{ 'production' if (
+    backend_worker_api_uplift_cutover_state == 'cutover-approved'
+    and (backend_worker_api_uplift_production_writes_enabled | bool)
+  ) else 'shadow' }}
+backend_metrics_worker_uplift_expected_active: >-
+  {{ '1' if (
+    backend_worker_api_uplift_cutover_state == 'cutover-approved'
+    and (backend_worker_api_uplift_production_writes_enabled | bool)
+  ) else '0' }}
+backend_metrics_worker_uplift_targets:
+  - service: scheduler
+    stage: scheduler
+    address: 127.0.0.1:18081
+  - service: fetcher
+    stage: fetch
+    address: 127.0.0.1:18082
+  - service: canonicalizer
+    stage: canonicalization
+    address: 127.0.0.1:18083
+  - service: enrichment
+    stage: enrichment
+    address: 127.0.0.1:18084
+  - service: approval
+    stage: approval
+    address: 127.0.0.1:18085
+  - service: translation
+    stage: translation
+    address: 127.0.0.1:18086
+  - service: persistence
+    stage: persistence
+    address: 127.0.0.1:18087
+  - service: publication
+    stage: publication
+    address: 127.0.0.1:18088
+backend_metrics_caddy_enabled: "{{ backend_caddy_enabled }}"
+backend_metrics_caddy_target: 127.0.0.1:2019
+backend_metrics_caddy_scrape_interval: 60s
+backend_metrics_caddy_scrape_timeout: 10s
+backend_metrics_caddy_sample_limit: 500
+backend_metrics_caddy_label_limit: 15
+backend_metrics_caddy_tls_probe_enabled: true
+backend_metrics_caddy_tls_probe_path: /readyz
+backend_metrics_caddy_tls_scrape_interval: 5m
+backend_metrics_caddy_tls_scrape_timeout: 10s
+backend_metrics_caddy_tls_sample_limit: 60
+backend_metrics_postgres_enabled: "{{ backend_postgres_enabled }}"
+backend_metrics_postgres_username: "{{ backend_postgres_readonly_user }}"
+backend_metrics_postgres_password: "{{ backend_postgres_readonly_password }}"
+backend_metrics_postgres_database: "{{ backend_postgres_primary_shadow_database }}"
+backend_metrics_postgres_scrape_interval: 60s
+backend_metrics_postgres_scrape_timeout: 15s
+backend_metrics_postgres_sample_limit: 1200
+backend_metrics_postgres_label_limit: 15
 backend_metrics_rabbitmq_enabled: false
 backend_metrics_rabbitmq_target: 127.0.0.1:15692
 backend_metrics_rabbitmq_vhost: nutsnews-worker-uplift
@@ -271,22 +358,52 @@ backend_logs_loki_batch_size: 256KiB
 backend_logs_loki_batch_wait: 5s
 backend_logs_worker_uplift_traces_enabled: false
 backend_logs_worker_uplift_trace_sample_ratio: "0"
-backend_logs_worker_uplift_contract_version: "0.3.1"
 backend_logs_journal_units:
   - service: caddy
     unit: caddy.service
   - service: alloy
     unit: alloy.service
+  - service: postgresql
+    unit: postgresql.service
+  - service: postgresql
+    unit: "postgresql@{{ backend_postgres_major_version }}-main.service"
+  - service: backend-api
+    service_version: "{{ backend_worker_api_service_version }}"
+    unit: nutsnews-worker-db-api.service
+  - service: sync-relay
+    unit: nutsnews-supabase-sync-relay.service
+  - service: sync-relay
+    unit: nutsnews-supabase-sync-relay.timer
+  - service: rabbitmq
+    unit: nutsnews-rabbitmq.service
+  - service: rabbitmq-canary
+    unit: nutsnews-rabbitmq-canary.service
+  - service: rabbitmq-canary
+    unit: nutsnews-rabbitmq-canary.timer
   - service: backup
     unit: nutsnews-backup.service
   - service: backup
     unit: nutsnews-backup-verify.service
   - service: backup
     unit: nutsnews-restore-drill.service
+  - service: backup
+    unit: nutsnews-backup.timer
+  - service: backup
+    unit: nutsnews-backup-verify.timer
+  - service: backup
+    unit: nutsnews-restore-drill.timer
   - service: timer
     unit: nutsnews-metrics-textfile.service
   - service: timer
+    unit: nutsnews-metrics-textfile.timer
+  - service: observability-drill
+    unit: nutsnews-observability-failure-drill-watchdog.service
+  - service: observability-drill
+    unit: nutsnews-observability-failure-drill-watchdog.timer
+  - service: timer
     unit: nutsnews-ops-dashboard-collect.service
+  - service: timer
+    unit: nutsnews-ops-dashboard-collect.timer
   - service: security
     unit: fail2ban.service
   - service: security
@@ -301,57 +418,73 @@ backend_logs_journal_units:
     unit: apt-daily-upgrade.service
 backend_logs_file_targets:
   - service: security
-    unit: auth.log
+    source: auth
     path: /var/log/auth.log
   - service: security
-    unit: fail2ban.log
+    source: fail2ban
     path: /var/log/fail2ban.log
   - service: caddy
-    unit: caddy-access.log
+    source: caddy-access
     path: /var/log/caddy/access.log
   - service: caddy
-    unit: caddy-error.log
+    source: caddy-error
     path: /var/log/caddy/error.log
+  - service: postgresql
+    source: postgresql
+    path: /var/log/postgresql/postgresql*.log
   - service: backend
-    unit: nutsnews-app
+    source: application
     path: /var/log/nutsnews/*.log
-  - service: backend
-    unit: nutsnews-worker-db-api
-    path: /var/log/nutsnews/worker-db-api.log
 backend_logs_worker_uplift_container_sources:
   - service: rabbitmq
     tag: nutsnews-worker-uplift-rabbitmq
-    version: broker
+    service_version: broker
   - service: scheduler
     tag: nutsnews-worker-uplift-scheduler
-    version: "{{ backend_logs_worker_uplift_contract_version }}"
+    expected_service_version: "0.1.0"
+    expected_revision: f627a6014a43cadba89cffc31a40565c2d00f001
+    expected_image_digest: sha256:f489c7bdf60433b44c21a69224b10e62a1b39203119da53378b2018c17ce1452
   - service: fetcher
     tag: nutsnews-worker-uplift-fetcher
-    version: "{{ backend_logs_worker_uplift_contract_version }}"
+    expected_service_version: "0.1.0"
+    expected_revision: 501ededcad48924b632b0547679f4dcb54ed4a90
+    expected_image_digest: sha256:7ee6f7a8155b959f01ff265c9b3b8861be5ef5f9bcef5616d5eba88a48e0fbaa
     queue: nutsnews.worker.fetch.v1
   - service: canonicalizer
     tag: nutsnews-worker-uplift-canonicalizer
-    version: "{{ backend_logs_worker_uplift_contract_version }}"
+    expected_service_version: "0.1.0"
+    expected_revision: 64dea55ad8f0e9b67e746b5d4363d43762fea792
+    expected_image_digest: sha256:6d9fa787412697767a4b8af0eecef43b7c333fdcbae4ad41bda34ce94a2da4c9
     queue: nutsnews.worker.canonicalization.v1
   - service: enrichment
     tag: nutsnews-worker-uplift-enrichment
-    version: "{{ backend_logs_worker_uplift_contract_version }}"
+    expected_service_version: "0.1.0"
+    expected_revision: c7a464e54eda1ed9e5f82d8dc545b1f7f7a36ec0
+    expected_image_digest: sha256:c00bec63cc7a410d8ba228e72b0616d561e64d05ae9316f871183fe5b2a840dc
     queue: nutsnews.worker.enrichment.v1
   - service: approval
     tag: nutsnews-worker-uplift-approval
-    version: "{{ backend_logs_worker_uplift_contract_version }}"
+    expected_service_version: "0.1.0"
+    expected_revision: 70c51a65123a4990c6a756d41bbb7566eb3f326b
+    expected_image_digest: sha256:0d45c0a8d023cfa499e1197e5804734b3cf501552740d3ae7c638f4f1212bfb9
     queue: nutsnews.worker.approval.v1
   - service: translation
     tag: nutsnews-worker-uplift-translation
-    version: "{{ backend_logs_worker_uplift_contract_version }}"
+    expected_service_version: "0.1.0"
+    expected_revision: 22e918518945b3db633c81c09f816b9983f49dfd
+    expected_image_digest: sha256:eed2ca084b30d1db6b1fc9b51ac4e4444ec8841b548a825c97b48f9467b0ead9
     queue: nutsnews.worker.translation.v1
   - service: persistence
     tag: nutsnews-worker-uplift-persistence
-    version: "{{ backend_logs_worker_uplift_contract_version }}"
+    expected_service_version: "0.1.0"
+    expected_revision: e646a51bfea5142d769e0980608dc86f6c7623f7
+    expected_image_digest: sha256:3d158826415f1ad602436aebd21280dd35b1fa34a8f44303b6f39a814ba2b9b9
     queue: nutsnews.worker.persistence.v1
   - service: publication
     tag: nutsnews-worker-uplift-publication
-    version: "{{ backend_logs_worker_uplift_contract_version }}"
+    expected_service_version: "0.1.0"
+    expected_revision: 47f05a5e177d63c43f18ac203ec773d606a2fbf4
+    expected_image_digest: sha256:3e9fbebb7e345b7928f94de37e646e4829e81732f5153b6da06246f7618adf4a
     queue: nutsnews.worker.publication.v1
 backend_newrelic_logs_enabled: false
 backend_newrelic_logs_config_dir: /etc/newrelic-infra/logging.d

@@ -17,8 +17,9 @@ The workflow runs unauthenticated public `GET` checks:
 - `frontend_www_home`: `https://www.nutsnews.com/`, expects `200`.
 - `frontend_apex_redirect`: `https://nutsnews.com/`, expects redirect to
   `https://www.nutsnews.com/`.
-- `backend_healthz`: `https://backend.nutsnews.com/healthz`, expects `200` and
-  body `ok`.
+- `backend_readyz`: `https://backend.nutsnews.com/readyz`, expects `200`,
+  `ready=true`, PostgreSQL readiness, the production deployment identity, and
+  `Cache-Control: no-store` plus `Pragma: no-cache`.
 - `backend_tls_known_404`: `https://backend.nutsnews.com/`, expects the current
   known `404` while the backend application is not deployed.
 - `supabase_platform_status`: Supabase public status API, used as the
@@ -43,10 +44,10 @@ backend operations with bounded limits:
 - `load-admin-runtime-feature-flags`
 
 The tokened checks do not submit forms, use write operations, or include
-response row bodies in artifacts or email. Public `/healthz` success alone is
-not backend admin compatibility success; the scheduled monitor is critical when
-the protected admin operation token is missing or any required operation returns
-non-2xx or an invalid response shape.
+response row bodies in artifacts or email. `/healthz` remains a compatibility
+route only and is not a monitoring source. The scheduled monitor is critical
+when `/readyz` is not truthful, the protected admin operation token is missing,
+or any required operation returns non-2xx or an invalid response shape.
 
 ## New Relic Acceptance
 

@@ -82,6 +82,9 @@ backend_worker_runtime_services:
     tracking_issue: 117
     image: ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler@sha256:f489c7bdf60433b44c21a69224b10e62a1b39203119da53378b2018c17ce1452
     image_tag: f627a6014a43cadba89cffc31a40565c2d00f001
+    service_version: "0.1.0"
+    build_revision: f627a6014a43cadba89cffc31a40565c2d00f001
+    image_digest: sha256:f489c7bdf60433b44c21a69224b10e62a1b39203119da53378b2018c17ce1452
     contract_version: "0.3.1"
     runtime_package_version: "0.4.0"
     runtime_mode: shadow
@@ -96,7 +99,7 @@ backend_worker_runtime_services:
         - CMD
         - node
         - -e
-        - "fetch('http://127.0.0.1:18081/ready').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        - "fetch('http://127.0.0.1:18081/live').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
       interval: 30s
       timeout: 5s
       retries: 3
@@ -149,6 +152,9 @@ backend_worker_runtime_services:
     tracking_issue: 117
     image: ghcr.io/ramideltoro/nutsnews-worker-feed-fetcher@sha256:7ee6f7a8155b959f01ff265c9b3b8861be5ef5f9bcef5616d5eba88a48e0fbaa
     image_tag: 501ededcad48924b632b0547679f4dcb54ed4a90
+    service_version: "0.1.0"
+    build_revision: 501ededcad48924b632b0547679f4dcb54ed4a90
+    image_digest: sha256:7ee6f7a8155b959f01ff265c9b3b8861be5ef5f9bcef5616d5eba88a48e0fbaa
     contract_version: "0.3.1"
     runtime_package_version: "0.5.0"
     runtime_mode: shadow
@@ -163,7 +169,7 @@ backend_worker_runtime_services:
         - CMD
         - node
         - -e
-        - "fetch('http://127.0.0.1:18082/ready').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        - "fetch('http://127.0.0.1:18082/live').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
       interval: 30s
       timeout: 5s
       retries: 3
@@ -186,6 +192,9 @@ backend_worker_runtime_services:
       NUTSNEWS_FETCHER_MAX_REDIRECTS: "3"
       NUTSNEWS_FETCHER_MAX_RESPONSE_BYTES: "1048576"
       NUTSNEWS_FETCHER_RETRY_AFTER_MAX_MS: "1800000"
+      NUTSNEWS_FETCHER_DATABASE_POOL_MAX: "10"
+      NUTSNEWS_FETCHER_DATABASE_TIMEOUT_MS: "5000"
+      NUTSNEWS_FETCHER_IDEMPOTENCY_LEASE_MS: "1800000"
       NUTSNEWS_FETCHER_SHUTDOWN_TIMEOUT_MS: "30000"
       NUTSNEWS_FETCHER_SHADOW_MODE: "true"
       NUTSNEWS_FETCHER_TELEMETRY_LOGS: stdout
@@ -222,6 +231,9 @@ backend_worker_runtime_services:
     tracking_issue: 117
     image: ghcr.io/ramideltoro/nutsnews-worker-article-canonicalizer@sha256:6d9fa787412697767a4b8af0eecef43b7c333fdcbae4ad41bda34ce94a2da4c9
     image_tag: 64dea55ad8f0e9b67e746b5d4363d43762fea792
+    service_version: "0.1.0"
+    build_revision: 64dea55ad8f0e9b67e746b5d4363d43762fea792
+    image_digest: sha256:6d9fa787412697767a4b8af0eecef43b7c333fdcbae4ad41bda34ce94a2da4c9
     contract_version: "0.4.0"
     runtime_package_version: "0.5.0"
     runtime_mode: shadow
@@ -236,7 +248,7 @@ backend_worker_runtime_services:
         - CMD
         - node
         - -e
-        - "fetch('http://127.0.0.1:18083/ready').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        - "fetch('http://127.0.0.1:18083/live').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
       interval: 30s
       timeout: 5s
       retries: 3
@@ -289,6 +301,9 @@ backend_worker_runtime_services:
     tracking_issue: 117
     image: ghcr.io/ramideltoro/nutsnews-worker-article-enrichment@sha256:c00bec63cc7a410d8ba228e72b0616d561e64d05ae9316f871183fe5b2a840dc
     image_tag: c7a464e54eda1ed9e5f82d8dc545b1f7f7a36ec0
+    service_version: "0.1.0"
+    build_revision: c7a464e54eda1ed9e5f82d8dc545b1f7f7a36ec0
+    image_digest: sha256:c00bec63cc7a410d8ba228e72b0616d561e64d05ae9316f871183fe5b2a840dc
     contract_version: "0.4.0"
     runtime_package_version: "0.5.0"
     runtime_mode: shadow
@@ -303,7 +318,7 @@ backend_worker_runtime_services:
         - CMD
         - node
         - -e
-        - "fetch('http://127.0.0.1:18084/ready').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        - "fetch('http://127.0.0.1:18084/live').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
       interval: 30s
       timeout: 5s
       retries: 3
@@ -369,6 +384,9 @@ backend_worker_runtime_services:
     tracking_issue: 118
     image: ghcr.io/ramideltoro/nutsnews-worker-article-approval@sha256:0d45c0a8d023cfa499e1197e5804734b3cf501552740d3ae7c638f4f1212bfb9
     image_tag: 70c51a65123a4990c6a756d41bbb7566eb3f326b
+    service_version: "0.1.0"
+    build_revision: 70c51a65123a4990c6a756d41bbb7566eb3f326b
+    image_digest: sha256:0d45c0a8d023cfa499e1197e5804734b3cf501552740d3ae7c638f4f1212bfb9
     contract_version: "0.4.0"
     runtime_package_version: "0.5.0"
     runtime_mode: shadow
@@ -383,7 +401,7 @@ backend_worker_runtime_services:
         - CMD
         - node
         - -e
-        - "fetch('http://127.0.0.1:18085/ready').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        - "fetch('http://127.0.0.1:18085/live').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
       interval: 30s
       timeout: 5s
       retries: 3
@@ -465,6 +483,9 @@ backend_worker_runtime_services:
     tracking_issue: 118
     image: ghcr.io/ramideltoro/nutsnews-worker-article-translation@sha256:eed2ca084b30d1db6b1fc9b51ac4e4444ec8841b548a825c97b48f9467b0ead9
     image_tag: 22e918518945b3db633c81c09f816b9983f49dfd
+    service_version: "0.1.0"
+    build_revision: 22e918518945b3db633c81c09f816b9983f49dfd
+    image_digest: sha256:eed2ca084b30d1db6b1fc9b51ac4e4444ec8841b548a825c97b48f9467b0ead9
     contract_version: "0.4.0"
     runtime_package_version: "0.5.0"
     runtime_mode: shadow
@@ -479,7 +500,7 @@ backend_worker_runtime_services:
         - CMD
         - node
         - -e
-        - "fetch('http://127.0.0.1:18086/ready').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        - "fetch('http://127.0.0.1:18086/live').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
       interval: 30s
       timeout: 5s
       retries: 3
@@ -558,6 +579,9 @@ backend_worker_runtime_services:
     tracking_issue: 119
     image: ghcr.io/ramideltoro/nutsnews-worker-article-persistence@sha256:3d158826415f1ad602436aebd21280dd35b1fa34a8f44303b6f39a814ba2b9b9
     image_tag: e646a51bfea5142d769e0980608dc86f6c7623f7
+    service_version: "0.1.0"
+    build_revision: e646a51bfea5142d769e0980608dc86f6c7623f7
+    image_digest: sha256:3d158826415f1ad602436aebd21280dd35b1fa34a8f44303b6f39a814ba2b9b9
     contract_version: "0.4.0"
     runtime_package_version: "0.5.0"
     runtime_mode: shadow
@@ -572,7 +596,7 @@ backend_worker_runtime_services:
         - CMD
         - node
         - -e
-        - "fetch('http://127.0.0.1:18087/ready').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        - "fetch('http://127.0.0.1:18087/live').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
       interval: 30s
       timeout: 5s
       retries: 3
@@ -637,6 +661,9 @@ backend_worker_runtime_services:
     tracking_issue: 119
     image: ghcr.io/ramideltoro/nutsnews-worker-article-publication@sha256:3e9fbebb7e345b7928f94de37e646e4829e81732f5153b6da06246f7618adf4a
     image_tag: 47f05a5e177d63c43f18ac203ec773d606a2fbf4
+    service_version: "0.1.0"
+    build_revision: 47f05a5e177d63c43f18ac203ec773d606a2fbf4
+    image_digest: sha256:3e9fbebb7e345b7928f94de37e646e4829e81732f5153b6da06246f7618adf4a
     contract_version: "0.4.0"
     runtime_package_version: "0.5.0"
     runtime_mode: shadow
@@ -651,7 +678,7 @@ backend_worker_runtime_services:
         - CMD
         - node
         - -e
-        - "fetch('http://127.0.0.1:18088/ready').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        - "fetch('http://127.0.0.1:18088/live').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
       interval: 30s
       timeout: 5s
       retries: 3

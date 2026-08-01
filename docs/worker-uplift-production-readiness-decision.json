@@ -339,7 +339,7 @@
   "source_control_hashes": [
     {
       "path": "ansible/roles/backend_worker_runtime/defaults/main.yml",
-      "sha256": "61dd27176a4fdf362cc74ff373bdebd7d709d1d48b56e946d9bfed51bdc87b89"
+      "sha256": "c147928d6596aebd80b064ea1be3c837ff7a83c418c1c49f409afdbdabba4ccd"
     },
     {
       "path": "ansible/roles/backend_worker_runtime/templates/worker-uplift-services.json.j2",

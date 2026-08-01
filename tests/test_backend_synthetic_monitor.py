@@ -17,7 +17,7 @@ class BackendSyntheticMonitorTests(unittest.TestCase):
         self.assertGreaterEqual(len(checks), 5)
         names = {check.name for check in checks}
         self.assertIn("frontend_www_home", names)
-        self.assertIn("backend_healthz", names)
+        self.assertIn("backend_readyz", names)
         self.assertIn("supabase_platform_status", names)
         self.assertTrue(all(check.url.startswith("https://") for check in checks))
 
@@ -210,24 +210,98 @@ class BackendSyntheticMonitorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "previous.json"
             path.write_text(
-                json.dumps({"checks": [{"name": "backend_healthz", "last_success_at": "2026-07-17T00:00:00Z"}]}),
+                json.dumps({"checks": [{"name": "backend_readyz", "last_success_at": "2026-07-17T00:00:00Z"}]}),
                 encoding="utf-8",
             )
-            self.assertEqual(backend_synthetic_monitor.load_previous(path), {"backend_healthz": "2026-07-17T00:00:00Z"})
+            self.assertEqual(backend_synthetic_monitor.load_previous(path), {"backend_readyz": "2026-07-17T00:00:00Z"})
 
     def test_failed_check_uses_previous_last_success(self):
         check = backend_synthetic_monitor.SyntheticCheck(
-            name="backend_healthz",
-            url="https://backend.nutsnews.com/healthz",
+            name="backend_readyz",
+            url="https://backend.nutsnews.com/readyz",
             expected_statuses=(200,),
-            body_contains="ok",
-            failure_class="backend_health",
+            expected_json=(("status", "ready"), ("ready", True)),
+            expected_header_contains=(("cache-control", "no-store"),),
+            failure_class="backend_readiness",
         )
         with mock.patch.object(backend_synthetic_monitor, "opener_for", side_effect=TimeoutError("timeout")):
             result = backend_synthetic_monitor.run_check(check, "2026-07-17T00:00:00Z", "2026-07-17T01:00:00Z")
         self.assertEqual(result["status"], "critical")
         self.assertEqual(result["failure_class"], "timeout")
         self.assertEqual(result["last_success_at"], "2026-07-17T00:00:00Z")
+
+    def test_backend_readiness_check_validates_body_identity_and_no_cache_headers(self):
+        check = next(
+            item for item in backend_synthetic_monitor.public_checks() if item.name == "backend_readyz"
+        )
+
+        class FakeResponse:
+            def __init__(self, payload, headers):
+                self.payload = payload
+                self.headers = headers
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def getcode(self):
+                return 200
+
+            def read(self, _limit=-1):
+                return json.dumps(self.payload).encode()
+
+        class FakeOpener:
+            def __init__(self, response):
+                self.response = response
+
+            def open(self, _request, timeout):
+                self.timeout = timeout
+                return self.response
+
+        ready_payload = {
+            "status": "ready",
+            "ready": True,
+            "service": "nutsnews-worker-db-api",
+            "serviceVersion": "1.1.0",
+            "buildRevision": "abc123",
+            "deploymentEnvironment": "production",
+            "dependencies": {"postgresql": "ready"},
+        }
+        with mock.patch.object(
+            backend_synthetic_monitor,
+            "opener_for",
+            return_value=FakeOpener(
+                FakeResponse(ready_payload, {"cache-control": "no-store", "pragma": "no-cache"})
+            ),
+        ):
+            result = backend_synthetic_monitor.run_check(
+                check,
+                None,
+                "2026-07-17T01:00:00Z",
+            )
+        self.assertEqual("healthy", result["status"])
+
+        with mock.patch.object(
+            backend_synthetic_monitor,
+            "opener_for",
+            return_value=FakeOpener(
+                FakeResponse(
+                    {**ready_payload, "ready": False},
+                    {"cache-control": "public, max-age=300", "pragma": "cache"},
+                )
+            ),
+        ):
+            result = backend_synthetic_monitor.run_check(
+                check,
+                "2026-07-17T00:00:00Z",
+                "2026-07-17T01:00:00Z",
+            )
+        self.assertEqual("critical", result["status"])
+        self.assertIn("json_match=false", result["failure_detail"])
+        self.assertIn("header_match=false", result["failure_detail"])
+        self.assertEqual("2026-07-17T00:00:00Z", result["last_success_at"])
 
     def test_redaction_masks_email_and_url_secret(self):
         redacted = backend_synthetic_monitor.redact("postgres://user:secret@example.com/db person@example.com")
@@ -255,10 +329,10 @@ class BackendSyntheticMonitorTests(unittest.TestCase):
                     },
                     "checks": [
                         {
-                            "name": "backend_healthz",
+                            "name": "backend_readyz",
                             "status": "critical",
                             "http_status": 500,
-                            "failure_class": "backend_health",
+                            "failure_class": "backend_readiness",
                             "last_success_at": "2026-07-17T00:00:00Z",
                         }
                     ],
@@ -284,6 +358,9 @@ class BackendSyntheticMonitorTests(unittest.TestCase):
         self.assertIn("NUTSNEWS_BACKEND_API_URL: ${{ vars.NUTSNEWS_BACKEND_API_URL || 'https://backend.nutsnews.com/api/app/db' }}", workflow)
         self.assertIn("NUTSNEWS_BACKEND_API_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_API_TOKEN }}", workflow)
         self.assertNotIn("--skip-admin-backend", workflow)
+        script = Path("scripts/backend_synthetic_monitor.py").read_text(encoding="utf-8")
+        self.assertIn("https://backend.nutsnews.com/readyz", script)
+        self.assertNotIn("https://backend.nutsnews.com/healthz", script)
 
 
 if __name__ == "__main__":

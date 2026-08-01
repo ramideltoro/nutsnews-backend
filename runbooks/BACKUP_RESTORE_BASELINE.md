@@ -174,7 +174,7 @@ The runner writes:
 
 | File | Meaning |
 | --- | --- |
-| `/var/lib/nutsnews/backups/last-backup.json` | latest backup freshness, snapshot id, included paths, quota status |
+| `/var/lib/nutsnews/backups/last-backup.json` | latest backup attempt, last successfully verified backup, snapshot id, included paths, quota status |
 | `/var/lib/nutsnews/backups/last-verification.json` | latest restic check result |
 | `/var/lib/nutsnews/backups/last-restore-verification.json` | lightweight restore-drill result |
 
@@ -191,6 +191,13 @@ The health report and ops dashboard expose these statuses separately:
 - stale backup;
 - unverified latest snapshot;
 - storage/quota warning.
+
+`last_run_at_utc` advances on every backup attempt, including failures.
+`last_success_at_utc` advances only after the resulting snapshot passes the
+separate verification action and is preserved across later failures. Grafana
+exports both timestamps and ages, plus an explicit availability signal and a
+`108000`-second (30-hour) verified-success freshness threshold. A recent failed
+attempt therefore never resets backup freshness.
 
 RabbitMQ recovery evidence is also surfaced through
 `/usr/local/sbin/nutsnews-backup status` under `rabbitmq_recovery`. Definition

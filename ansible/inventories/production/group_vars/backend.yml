@@ -10,3 +10,6 @@ backend_public_ports:
 backend_future_public_ports:
   - 80
   - 443
+backend_metrics_enabled: true
+backend_metrics_production_desired_state: true
+backend_logs_enabled: true

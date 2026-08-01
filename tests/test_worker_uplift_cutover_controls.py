@@ -241,15 +241,21 @@ class WorkerUpliftCutoverControlTests(unittest.TestCase):
                 now=datetime(2026, 8, 2, 1, 59, tzinfo=timezone.utc),
             )
 
-    def test_current_committed_decision_fails_closed(self):
+    def test_current_committed_decision_matches_exact_frozen_inputs(self):
         decision = control.load_json(control.DEFAULT_DECISION)
 
-        with self.assertRaisesRegex(control.ControlError, "exact #166 GO"):
+        control.validate_final_decision(
+            decision,
+            candidate=decision["candidate_sha256"],
+            watermark=decision["watermark_sha256"],
+            deadline=decision["rollback_deadline_utc"],
+        )
+        with self.assertRaisesRegex(control.ControlError, "exact candidate"):
             control.validate_final_decision(
                 decision,
                 candidate=CANDIDATE,
-                watermark=WATERMARK,
-                deadline=DEADLINE,
+                watermark=decision["watermark_sha256"],
+                deadline=decision["rollback_deadline_utc"],
             )
 
     def test_production_files_contain_only_fixed_safe_keys(self):

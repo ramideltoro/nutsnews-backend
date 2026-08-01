@@ -21,6 +21,7 @@ WORKFLOW_PATH = ROOT / ".github/workflows/backend-worker-uplift-cutover-controls
 MANAGER_PATH = ROOT / "scripts/worker_uplift_cutover_control.py"
 BACKEND_CHECKS_PATH = ROOT / ".github/workflows/backend-checks.yml"
 RUNBOOK_PATH = ROOT / "runbooks/WORKER_UPLIFT_FINAL_CUTOVER_READINESS.md"
+CONTROL_PLAN_PATH = ROOT / "docs/worker-uplift-cutover-control-plan.json"
 
 COMMENT_URL = "https://github.com/ramideltoro/nutsnews-worker/issues/166#issuecomment-5151195619"
 COMMENT_SHA256 = "738fb59be36e11889c75fe06f18797cf02a3466d7a4477d1cbc638856c24190c"
@@ -289,7 +290,7 @@ def validate_decision(
     }
     require(decision_authorization == expected_authorization, "decision is not bound to the exact standing authorization", errors)
     require(decision.get("safety") == EXPECTED_SAFETY, "decision pre-cutover safety state changed", errors)
-    parse_utc(decision.get("evaluated_at_utc"), "evaluated_at_utc", errors)
+    evaluated_at = parse_utc(decision.get("evaluated_at_utc"), "evaluated_at_utc", errors)
     validate_value_free(decision, errors)
     if decision.get("decision") == "NO-GO":
         require(decision.get("authorized_for_execution") is False, "NO-GO cannot authorize execution", errors)
@@ -326,6 +327,8 @@ def validate_decision(
     rollback_deadline = parse_utc(decision.get("rollback_deadline_utc"), "rollback_deadline_utc", errors)
     if execution_start and execution_end:
         require(execution_start < execution_end, "execution window must be positive", errors)
+    if evaluated_at and execution_start:
+        require(evaluated_at <= execution_start, "GO cannot be evaluated after its execution window starts", errors)
     if execution_end and observation_start:
         require(execution_end <= observation_start, "observation window cannot start before execution window ends", errors)
     if observation_start and observation_end:
@@ -335,6 +338,14 @@ def validate_decision(
     thresholds = decision.get("thresholds", {})
     require(isinstance(thresholds.get("count"), int) and thresholds.get("count") == 17, "decision must freeze all 17 thresholds", errors)
     require(bool(SHA256_RE.fullmatch(str(thresholds.get("sha256", "")))), "threshold digest missing", errors)
+    require(thresholds.get("source") == "docs/worker-uplift-cutover-control-plan.json", "threshold source mismatch", errors)
+    try:
+        threshold_values = load_json(CONTROL_PLAN_PATH).get("thresholds", [])
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        errors.append(f"could not load cutover threshold plan: {exc.__class__.__name__}")
+    else:
+        require(isinstance(threshold_values, list) and len(threshold_values) == 17, "cutover plan must contain exactly 17 thresholds", errors)
+        require(thresholds.get("sha256") == sha256_json(threshold_values), "threshold digest does not match the source-controlled plan", errors)
     owners = decision.get("ownership", {})
     require(owners.get("primary_owner_login") == "ramideltoro", "primary operational owner mismatch", errors)
     require(owners.get("independent_human_backup_available") is False, "independent human backup must not be fabricated", errors)

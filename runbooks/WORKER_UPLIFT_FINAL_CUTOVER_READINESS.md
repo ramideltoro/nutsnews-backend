@@ -52,6 +52,38 @@ the legacy worker is still the sole production ingestion owner, uplift remains
 shadow-only with `production_writes_enabled=false`, and the fixed execution,
 rollback, observation, threshold, and ownership records are complete.
 
+## Frozen #166 GO inputs
+
+The current source-controlled GO authorizes only the fixed protected #127
+workflow during `2026-08-01T19:00:00Z` through `2026-08-01T21:00:00Z`:
+
+- candidate manifest SHA-256:
+  `71b0303705093ad398458083547a86e9e61f50458e8799ace38de4f2404859df`;
+- exact eight-stage watermark artifact SHA-256:
+  `e9b0ff2b129b76ec54589f32ade782b90aadaff54124344c2541e429d4d5d022`;
+- absolute rollback deadline: `2026-08-03T21:00:00Z`;
+- observation window: `2026-08-01T21:00:00Z` through
+  `2026-08-03T21:00:00Z`;
+- 17-threshold canonical SHA-256:
+  `6823d92447f75a452c5ea7f65e50cf83ee4b303d0c0b6ab43cd2697a78931cb9`;
+- primary operator and evidence custodian: `ramideltoro`; no independent human
+  backup is claimed, so owner unavailability requires aborting into the last
+  validated single-writer safe state.
+
+The decision was made while `legacy_shards` remained the active owner, legacy
+dispatch remained enabled, all eight uplift services remained in `shadow`, and
+`production_writes_enabled=false`. Current protected preflight
+`30709164722` and verify `30709204722` prove that state without mutation. The
+full isolated rollback rehearsal `30709065035` and injected failure runs
+`30709095571`, `30709108042`, `30709127075`, and `30709141781` prove all fixed
+failure branches are single-writer safe, cannot reach production targets, and
+finish far inside the 900-second recovery target.
+
+Do not substitute another image, source revision, watermark, deadline, window,
+threshold set, workflow, typed confirmation, or owner plan. Any substitution
+invalidates GO. The execution operator must inspect the immutable #127 apply
+artifact before beginning the observation clock.
+
 ## Drift and recovery
 
 Any missing or stale evidence, source hash mismatch, candidate mismatch,

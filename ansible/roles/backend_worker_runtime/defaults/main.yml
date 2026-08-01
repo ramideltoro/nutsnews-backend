@@ -147,8 +147,8 @@ backend_worker_runtime_services:
   - name: fetcher
     stage: fetcher
     tracking_issue: 117
-    image: ghcr.io/ramideltoro/nutsnews-worker-feed-fetcher@sha256:f44c40e635717fd16ad17f03e821bb69c43a96e10b309adccfedb981136e2ac5
-    image_tag: acd8b0769c29a3c94a20b7f83bad365167f1fa1e
+    image: ghcr.io/ramideltoro/nutsnews-worker-feed-fetcher@sha256:13781f7143820b8b827ddd3c441574595e4e357693f86d160e6cd7123b17270d
+    image_tag: 905e6af5989bb4eb1eba772cde728f86026eb229
     contract_version: "0.3.1"
     runtime_package_version: "0.5.0"
     runtime_mode: shadow
@@ -172,7 +172,7 @@ backend_worker_runtime_services:
       required: true
       signed: true
       source_repository: ramideltoro/nutsnews-worker-feed-fetcher
-      subject_digest: sha256:f44c40e635717fd16ad17f03e821bb69c43a96e10b309adccfedb981136e2ac5
+      subject_digest: sha256:13781f7143820b8b827ddd3c441574595e4e357693f86d160e6cd7123b17270d
     env:
       NUTSNEWS_ENVIRONMENT: production
       NUTSNEWS_FETCHER_HTTP_HOST: 127.0.0.1

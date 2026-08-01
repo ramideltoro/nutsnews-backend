@@ -136,6 +136,11 @@ consume the dedicated probe queue.
 The protected apply canary has three bounded attempts with a short delay so a
 single transient AMQP or management queue timeout does not fail an otherwise
 healthy apply; all attempts must still succeed before the workflow can pass.
+The scheduled workflow supplies a source-controlled `consumer-loss` drill
+selector fallback because `workflow_dispatch` input defaults are absent on
+schedule events. The scheduled action remains `canary` and does not execute a
+drill; the fallback only keeps the shared fixed-input validator from rejecting
+the scheduled probe before SSH.
 Protected apply ensures only the dedicated durable canary exchange immediately
 before the canary. The canary then declares a per-run exclusive auto-delete queue
 under the `worker.uplift.canary.queue.v4.<uuid>` prefix at runtime, binds it to

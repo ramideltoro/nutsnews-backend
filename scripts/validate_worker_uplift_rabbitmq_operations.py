@@ -187,6 +187,7 @@ def validate() -> list[str]:
             "backend-rabbitmq-canary-report.json",
             "backend-rabbitmq-canary-report",
             "17,47 * * * *",
+            "inputs.drill || 'consumer-loss'",
         ),
         errors,
     )

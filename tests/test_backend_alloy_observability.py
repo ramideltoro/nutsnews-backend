@@ -81,6 +81,16 @@ class BackendAlloyObservabilityTests(unittest.TestCase):
         self.assertIn("expected_active", alloy)
         self.assertIn("deployment_mode", alloy)
         worker_relabel = alloy.split('prometheus.relabel "worker_uplift"', 1)[1].split("{% endif %}", 1)[0]
+        self.assertIn(
+            'target_label = "service_namespace"\n    replacement  = "nutsnews"',
+            worker_relabel,
+        )
+        labelkeep = re.search(
+            r'regex\s+= "\^\(([^"]+)\)\$"\n\s+action = "labelkeep"',
+            worker_relabel,
+        )
+        self.assertIsNotNone(labelkeep)
+        self.assertIn("service_namespace", labelkeep.group(1).split("|"))
         for identity_label in ("version", "revision", "deployment", "adapter"):
             self.assertIn(identity_label, worker_relabel)
 

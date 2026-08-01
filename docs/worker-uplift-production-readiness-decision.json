@@ -3,7 +3,7 @@
   "decision_id": "worker-uplift-production-readiness",
   "tracking_issue": "ramideltoro/nutsnews-worker#125",
   "implementation_repository": "ramideltoro/nutsnews-backend",
-  "evaluated_at_utc": "2026-08-01T01:57:19Z",
+  "evaluated_at_utc": "2026-08-01T04:15:00Z",
   "tracking_model_corrected_at_utc": "2026-07-30T17:59:51Z",
   "review_mode": "non_mutating_production_readiness_decision",
   "decision_scope": "guarded_cutover_control_implementation_readiness",
@@ -76,10 +76,10 @@
   },
   "review_base": {
     "repository": "ramideltoro/nutsnews-backend",
-    "commit": "3626bba18496e808f4e9d6d2a0659ce6fee56cf0"
+    "commit": "c9f58564f35bacf99646c76ace139f4778c3dfbb"
   },
   "decision": "no_go",
-  "decision_summary": "Readiness to begin guarded cutover-control implementation is not approved. The deployed scheduler still uses local test dependencies and a fixed readiness clock, several previously collected evidence surfaces require a final exact-candidate reevaluation, and no named #125 approver has issued GO. The #164 security disposition gate and #165 non-mutating cutover-control plan now pass. #165 defines the planned watermark semantics, absolute rollback deadline, 48-hour observation window, thresholds, named owner, and fail-closed unavailable-owner controls; #166 must refresh and freeze the exact execution values. Missing implementation of downstream issues #150 and #126 is not a #125 blocker.",
+  "decision_summary": "Readiness to begin guarded cutover-control implementation is not yet approved. #168 now passes with the deployed production-adapter scheduler and current wall-clock readiness, but the scheduler revision makes prior candidate-bound parity and soak evidence stale until the protected reports are rerun. No named #125 approver has issued the final GO. #164 and #165 pass, and missing implementation of downstream issues #150 and #126 is not a #125 blocker.",
   "issue_closure_authorized": false,
   "tracking_issue_state_required": "open",
   "named_approver": null,
@@ -105,7 +105,7 @@
   "source_heads": [
     {
       "repository": "ramideltoro/nutsnews-backend",
-      "commit": "3626bba18496e808f4e9d6d2a0659ce6fee56cf0",
+      "commit": "c9f58564f35bacf99646c76ace139f4778c3dfbb",
       "role": "deployment_and_host_operations"
     },
     {
@@ -115,67 +115,67 @@
     },
     {
       "repository": "ramideltoro/nutsnews-worker-contracts",
-      "commit": "bf10f4257a1ac7f3e5aef0c5a14f62ec51ae4bb2",
+      "commit": "663e5b6053666ebf5fbcf9ed79c02d34193d215c",
       "role": "shared_contract_package"
     },
     {
       "repository": "ramideltoro/nutsnews-worker-runtime",
-      "commit": "43e7883554e250b2297d40266374cb4ff87d141c",
+      "commit": "9d3ad5998eaa2c2d2d157293f77e86a8c22a38b5",
       "role": "shared_runtime_package"
     },
     {
       "repository": "ramideltoro/nutsnews-worker-feed-scheduler",
-      "commit": "ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396",
+      "commit": "f627a6014a43cadba89cffc31a40565c2d00f001",
       "role": "scheduler_service"
     },
     {
       "repository": "ramideltoro/nutsnews-worker-feed-fetcher",
-      "commit": "5b82b3e27ef85e57fc9aec23a0815cde584758eb",
+      "commit": "501ededcad48924b632b0547679f4dcb54ed4a90",
       "role": "fetcher_service"
     },
     {
       "repository": "ramideltoro/nutsnews-worker-article-canonicalizer",
-      "commit": "64d6f59920ec6aa5fb56028de99f7600ecb5be2d",
+      "commit": "64dea55ad8f0e9b67e746b5d4363d43762fea792",
       "role": "canonicalizer_service"
     },
     {
       "repository": "ramideltoro/nutsnews-worker-article-enrichment",
-      "commit": "edd63d8acd4a46a33aea4b043e3dc8dfd95af310",
+      "commit": "c7a464e54eda1ed9e5f82d8dc545b1f7f7a36ec0",
       "role": "enrichment_service"
     },
     {
       "repository": "ramideltoro/nutsnews-worker-article-approval",
-      "commit": "38185c74717221453c662f4ba1b093315eff5b83",
+      "commit": "6597030ffcc07c51fb1259b3152d2645f5927d75",
       "role": "approval_service"
     },
     {
       "repository": "ramideltoro/nutsnews-worker-article-translation",
-      "commit": "d3b68668c7b714500d7efd204ecf33987a34e3ee",
+      "commit": "d1206b73157305128b3bf5dc6bf5a7bcbb4c818d",
       "role": "translation_service"
     },
     {
       "repository": "ramideltoro/nutsnews-worker-article-persistence",
-      "commit": "6dae69d96b4b081b23b5e1d85e10133ee36a6674",
+      "commit": "e646a51bfea5142d769e0980608dc86f6c7623f7",
       "role": "persistence_service"
     },
     {
       "repository": "ramideltoro/nutsnews-worker-article-publication",
-      "commit": "5a9e3c09a8572a7978687bcb7afec548e3934a63",
+      "commit": "47f05a5e177d63c43f18ac203ec773d606a2fbf4",
       "role": "publication_service"
     },
     {
       "repository": "ramideltoro/nutsnews-infra",
-      "commit": "48748cd7fea036d14e281fe84fcde5a52d41166c",
+      "commit": "e3da4c0686453643987ed18cf4c32428e5578b62",
       "role": "grafana_and_cloudflare_ownership"
     },
     {
       "repository": "ramideltoro/nutsnews-docs",
-      "commit": "fa8853515268463b5c3e32d4b6a1efc39b0f1383",
+      "commit": "b6b146130c57aebe09b067475acfa2a61b889d45",
       "role": "architecture_and_runbooks"
     },
     {
       "repository": "ramideltoro/nutsnews",
-      "commit": "ba8fd07b940d0418436b33c6ccb4d59a76caab4a",
+      "commit": "3108ff1def6dca5bf89bbdc8fcfb7db7dcfd291f",
       "role": "admin_portal"
     }
   ],
@@ -241,8 +241,8 @@
     {
       "stage": "scheduler",
       "source_repository": "ramideltoro/nutsnews-worker-feed-scheduler",
-      "source_commit": "ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396",
-      "image": "ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler@sha256:ac1870a4f4fb1cd847ea6de43b9e3551e9d9c2acc6e32586f570edf61bc2d053",
+      "source_commit": "f627a6014a43cadba89cffc31a40565c2d00f001",
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler@sha256:f489c7bdf60433b44c21a69224b10e62a1b39203119da53378b2018c17ce1452",
       "contract_version": "0.3.1",
       "runtime_package_version": "0.4.0",
       "mode": "shadow",
@@ -251,8 +251,8 @@
     {
       "stage": "fetcher",
       "source_repository": "ramideltoro/nutsnews-worker-feed-fetcher",
-      "source_commit": "5b82b3e27ef85e57fc9aec23a0815cde584758eb",
-      "image": "ghcr.io/ramideltoro/nutsnews-worker-feed-fetcher@sha256:38617a1592b98797f951070d997d6b599725aff0ce7cecfaac7f70d99016125c",
+      "source_commit": "501ededcad48924b632b0547679f4dcb54ed4a90",
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-feed-fetcher@sha256:7ee6f7a8155b959f01ff265c9b3b8861be5ef5f9bcef5616d5eba88a48e0fbaa",
       "contract_version": "0.3.1",
       "runtime_package_version": "0.5.0",
       "mode": "shadow",
@@ -261,8 +261,8 @@
     {
       "stage": "canonicalizer",
       "source_repository": "ramideltoro/nutsnews-worker-article-canonicalizer",
-      "source_commit": "64d6f59920ec6aa5fb56028de99f7600ecb5be2d",
-      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-canonicalizer@sha256:63f5c6dc639850f008fb30e6bcb4b4e19d54095bd75511119e690cb1abe7ef98",
+      "source_commit": "64dea55ad8f0e9b67e746b5d4363d43762fea792",
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-canonicalizer@sha256:6d9fa787412697767a4b8af0eecef43b7c333fdcbae4ad41bda34ce94a2da4c9",
       "contract_version": "0.4.0",
       "runtime_package_version": "0.5.0",
       "mode": "shadow",
@@ -271,8 +271,8 @@
     {
       "stage": "enrichment",
       "source_repository": "ramideltoro/nutsnews-worker-article-enrichment",
-      "source_commit": "edd63d8acd4a46a33aea4b043e3dc8dfd95af310",
-      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-enrichment@sha256:c2decb289e7c8fb42ccb1ec661683642686d3f65a6aea310cda2debc33cf8317",
+      "source_commit": "c7a464e54eda1ed9e5f82d8dc545b1f7f7a36ec0",
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-enrichment@sha256:c00bec63cc7a410d8ba228e72b0616d561e64d05ae9316f871183fe5b2a840dc",
       "contract_version": "0.4.0",
       "runtime_package_version": "0.5.0",
       "mode": "shadow",
@@ -281,8 +281,8 @@
     {
       "stage": "approval",
       "source_repository": "ramideltoro/nutsnews-worker-article-approval",
-      "source_commit": "38185c74717221453c662f4ba1b093315eff5b83",
-      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-approval@sha256:20b59d4f6aebab45a3849f36497d530a0dd1517e64d0c969fdecbbd5e7675750",
+      "source_commit": "6597030ffcc07c51fb1259b3152d2645f5927d75",
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-approval@sha256:b977adb932647808b73f62dc84bee69a52dca88e4198566d9e0c30180fdb2407",
       "contract_version": "0.4.0",
       "runtime_package_version": "0.5.0",
       "mode": "shadow",
@@ -291,8 +291,8 @@
     {
       "stage": "translation",
       "source_repository": "ramideltoro/nutsnews-worker-article-translation",
-      "source_commit": "d3b68668c7b714500d7efd204ecf33987a34e3ee",
-      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-translation@sha256:9116bb007d2592bc84b49ac185d042e01f991f67a875aae5fbe3d364c80f1d32",
+      "source_commit": "d1206b73157305128b3bf5dc6bf5a7bcbb4c818d",
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-translation@sha256:926dc46ac29f9e6661ee8baa83171aca7a4e9941edbe93af6dbd19708a614da9",
       "contract_version": "0.4.0",
       "runtime_package_version": "0.5.0",
       "mode": "shadow",
@@ -301,8 +301,8 @@
     {
       "stage": "persistence",
       "source_repository": "ramideltoro/nutsnews-worker-article-persistence",
-      "source_commit": "6dae69d96b4b081b23b5e1d85e10133ee36a6674",
-      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-persistence@sha256:b7cd29d59d43406e3e8ab61ed4840b2fdea84ba8016fead4eb3eaa8d1c8de77d",
+      "source_commit": "e646a51bfea5142d769e0980608dc86f6c7623f7",
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-persistence@sha256:3d158826415f1ad602436aebd21280dd35b1fa34a8f44303b6f39a814ba2b9b9",
       "contract_version": "0.4.0",
       "runtime_package_version": "0.5.0",
       "mode": "shadow",
@@ -311,8 +311,8 @@
     {
       "stage": "publication",
       "source_repository": "ramideltoro/nutsnews-worker-article-publication",
-      "source_commit": "5a9e3c09a8572a7978687bcb7afec548e3934a63",
-      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-publication@sha256:96ecc4d028a36c7a6e926174c4ce8677c506a5b8dd031bb03973859f86d85328",
+      "source_commit": "47f05a5e177d63c43f18ac203ec773d606a2fbf4",
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-article-publication@sha256:3e9fbebb7e345b7928f94de37e646e4829e81732f5153b6da06246f7618adf4a",
       "contract_version": "0.4.0",
       "runtime_package_version": "0.5.0",
       "mode": "shadow",
@@ -435,7 +435,7 @@
       "stale_reason": "All eight image digests in the parity artifact differ from the currently deployed image set."
     },
     "soak": {
-      "status": "pass",
+      "status": "stale",
       "run_id": 30405550709,
       "head_commit": "2d044026b132eb0e0544c86647a38b07b69e47a8",
       "artifact_id": 8706384719,
@@ -446,7 +446,8 @@
       "observed_hours": 72.43,
       "observed_events": 415,
       "failed_checks": [],
-      "image_set_matches_current": true,
+      "image_set_matches_current": false,
+      "stale_reason": "The protected soak predates the production-adapter scheduler digest deployed for #168 and must be rerun against the exact current candidate.",
       "host_headroom": {
         "cpu_count": 4,
         "load_per_vcpu": 0.203,
@@ -524,14 +525,32 @@
       "evidence_sha256": "b6006ae065ed8dc305ed228f0fb6da431ce220fab806acc4b67a45aa02df9537"
     },
     "scheduler_readiness": {
-      "status": "blocked_confirmed_evidence_defect",
-      "report_generated_at_utc": "2026-07-30T18:24:00Z",
-      "checked_at_utc": "2026-07-23T00:00:00.000Z",
-      "dependency": "local-feed-source",
-      "source_commit": "ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396",
-      "source_uses_local_test_dependencies": true,
+      "status": "pass",
+      "report_generated_at_utc": "2026-08-01T04:12:39Z",
+      "checked_at_utc": "2026-08-01T04:12:40.033Z",
+      "dependencies": [
+        "rabbitmq-payload-publisher",
+        "backend-api-feed-source",
+        "postgres-schedule-lease-store",
+        "system-runtime-clock"
+      ],
+      "freshness_bound_ms": 5000,
+      "source_commit": "f627a6014a43cadba89cffc31a40565c2d00f001",
+      "image": "ghcr.io/ramideltoro/nutsnews-worker-feed-scheduler@sha256:f489c7bdf60433b44c21a69224b10e62a1b39203119da53378b2018c17ce1452",
+      "source_uses_local_test_dependencies": false,
       "silently_normalized": false,
-      "blocker_issue": "ramideltoro/nutsnews-worker#168"
+      "tracking_issue": "ramideltoro/nutsnews-worker#168",
+      "status_run_id": 30683488159,
+      "status_artifact_id": 8813086274,
+      "status_artifact_digest": "sha256:6626c2316ca68ea1476606f27de5d959ef940307e286641dcf5e5e4f8bda0111",
+      "status_report_sha256": "9c6b03a2553a148f39108e3712ab51f76a874fd1e25e332f8fb456853b1e1e42",
+      "logs_run_id": 30683457473,
+      "queue_run_id": 30683458187,
+      "scheduled_count": 1,
+      "confirmed_count": 1,
+      "failed_count": 0,
+      "fetch_queue_consumers": 1,
+      "fetch_queue_messages": 0
     },
     "runtime_report_tracking_issue": {
       "reported_number": 85,
@@ -705,8 +724,8 @@
     },
     {
       "id": "soak_capacity_cost",
-      "status": "pass",
-      "evidence": "Run 30405550709 passed a complete 72.43-hour, 415-event window on the current image set with healthy queues, zero failed checks, zero OpenAI calls, and host headroom."
+      "status": "block",
+      "evidence": "Run 30405550709 passed a complete 72.43-hour, 415-event window, but it predates the production-adapter scheduler digest deployed for #168. The protected complete-window report must be rerun against the exact current candidate."
     },
     {
       "id": "consumer_failure_recovery",
@@ -735,8 +754,8 @@
     },
     {
       "id": "scheduler_runtime_dependencies",
-      "status": "block",
-      "evidence": "Both status artifacts expose scheduler checkedAt=2026-07-23T00:00:00.000Z and local test feed-source readiness. Source commit ab61a4a6c83a5ae8dad374e1edf89ffa0b4e6396 confirms production startup unconditionally creates local test dependencies; #168 owns the independent remediation and current proof."
+      "status": "pass",
+      "evidence": "Closed #168 deployed scheduler source f627a6014a43cadba89cffc31a40565c2d00f001 and image sha256:f489c7bdf60433b44c21a69224b10e62a1b39203119da53378b2018c17ce1452. Status run 30683488159 proves current wall-clock readiness within 5 seconds and only RabbitMQ, backend API, PostgreSQL, and system-clock production adapters; logs/queue runs 30683457473 and 30683458187 prove exactly one publisher-confirmed shadow message and a drained fetch queue."
     },
     {
       "id": "grafana_alerts_logs_metrics",
@@ -840,10 +859,10 @@
     },
     {
       "id": "scheduler_local_test_dependencies",
-      "status": "open",
+      "status": "resolved",
       "owner_repository": "ramideltoro/nutsnews-worker-feed-scheduler",
       "issue": "ramideltoro/nutsnews-worker#168",
-      "required_resolution": "Replace deployed local test scheduler dependencies and fixed clock with production shadow adapters, then attach current readiness and scheduler-smoke evidence with a real observation timestamp."
+      "required_resolution": "Resolved by scheduler PR #20, backend PRs #464/#465, protected baseline/deploy/restore runs 30683022336, 30683414683, and 30683327104, plus value-free status/log/queue runs 30683488159, 30683457473, and 30683458187."
     },
     {
       "id": "named_readiness_approver",

@@ -316,9 +316,10 @@ class BackendAlloyObservabilityTests(unittest.TestCase):
         alloy = ALLOY.read_text(encoding="utf-8")
         caddy = CADDY_TASKS.read_text(encoding="utf-8")
 
-        self.assertIn("metrics {", caddy)
-        self.assertIn("per_host", caddy)
-        self.assertIn("log backend_access", caddy)
+        self.assertIn("servers {\n              metrics", caddy)
+        self.assertNotIn("metrics {\n              per_host", caddy)
+        self.assertIn("log {", caddy)
+        self.assertNotIn("log backend_access", caddy)
         self.assertIn("/var/log/caddy/access.log", caddy)
         self.assertIn("request>remote_ip delete", caddy)
         self.assertIn("request>client_ip delete", caddy)

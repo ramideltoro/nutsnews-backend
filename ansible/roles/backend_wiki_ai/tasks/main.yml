@@ -22,6 +22,8 @@
       - backend_wiki_ai_max_request_bytes | int <= 8388608
       - backend_wiki_ai_queue_wait_seconds | int >= 1
       - backend_wiki_ai_queue_wait_seconds | int <= 900
+      - backend_wiki_ai_heartbeat_interval_seconds | int >= 1
+      - backend_wiki_ai_heartbeat_interval_seconds | int <= 60
       - backend_wiki_ai_api_key | length >= 32
       - "'\n' not in backend_wiki_ai_api_key"
       - "'\r' not in backend_wiki_ai_api_key"
@@ -346,6 +348,7 @@
       NUTSNEWS_WIKI_AI_UPSTREAM_PORT={{ backend_wiki_ai_ollama_port }}
       NUTSNEWS_WIKI_AI_UPSTREAM_TIMEOUT_SECONDS={{ backend_wiki_ai_upstream_timeout_seconds }}
       NUTSNEWS_WIKI_AI_QUEUE_WAIT_SECONDS={{ backend_wiki_ai_queue_wait_seconds }}
+      NUTSNEWS_WIKI_AI_HEARTBEAT_INTERVAL_SECONDS={{ backend_wiki_ai_heartbeat_interval_seconds }}
   no_log: true
   notify: Restart Wiki AI proxy
   when: backend_wiki_ai_manageable | bool

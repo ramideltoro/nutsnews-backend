@@ -45,6 +45,7 @@ database URLs into issues, PRs, logs, screenshots, or summaries.
 | `nutsnews_migration_validation` | `NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD` | Parity and smoke validation; bypasses restored RLS for aggregate-only migration checks | Rotate or disable after cutover |
 | `nutsnews_migration_replication` | `NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD` | Backend subscription/replication setup | Drop when replication is retired |
 | `nutsnews_app_rehearsal` | `NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD` | Non-production app/API cutover rehearsal | Drop after rehearsal |
+| `authenticator` | None; `NOLOGIN` compatibility role | Allows exact reviewed Supabase-origin migrations that alter PostgREST role defaults to run unchanged | Keep while the shared migration history requires it; it has no login or grants |
 
 ## Preflight
 
@@ -125,6 +126,13 @@ The protected apply:
 - verifies head, legacy marker, and matching fingerprints after commit;
 - retains only safe metadata, including a pre-schema SHA-256. Raw schema SQL,
   database dumps, credentials, and row data are not uploaded.
+
+The baseline provisions `authenticator` as a deliberately inert compatibility
+role: `NOLOGIN`, no superuser, no database/role creation, no inheritance, no
+replication, and no RLS bypass. It receives no database, schema, table,
+sequence, or function grants. This lets the exact shared migration SQL retain
+its `ALTER ROLE authenticator` statement without turning the backend into a
+PostgREST deployment or silently rewriting the migration.
 
 If SQL fails, PostgreSQL rolls back the transaction. If a post-commit fault is
 found, prefer a reviewed forward repair. Restore the exact encrypted logical

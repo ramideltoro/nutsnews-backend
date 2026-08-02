@@ -188,6 +188,10 @@ class BackendPostgresReleaseMigrationTests(unittest.TestCase):
         ):
             self.assertIn(required, remote)
 
+        postgres_tasks = (ROOT / "ansible" / "roles" / "backend_baseline" / "tasks" / "postgres.yml").read_text()
+        self.assertIn("name: authenticator", postgres_tasks)
+        self.assertIn("NOLOGIN,NOSUPERUSER,NOCREATEDB,NOCREATEROLE,NOINHERIT,NOREPLICATION,NOBYPASSRLS", postgres_tasks)
+
 
 if __name__ == "__main__":
     unittest.main()

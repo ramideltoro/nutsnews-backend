@@ -78,4 +78,6 @@ both Ollama and its authenticated proxy to loopback. Caddy publishes only
 `/wiki-ai/health` and `/wiki-ai/v1/responses`; raw Ollama management routes are
 not exposed. The proxy permits one active inference plus one authenticated,
 bounded waiter so a Codex follow-up can bridge a finishing stream; additional
-overlap fails with `429`.
+overlap fails with `429`. Streaming requests receive bounded SSE keep-alive
+comments while they wait for a CPU inference or its first token, preventing an
+idle edge timeout without fabricating model output.

@@ -47,6 +47,26 @@ class FakeOllamaHandler(BaseHTTPRequestHandler):
             return
         length = int(self.headers["content-length"])
         payload = json.loads(self.rfile.read(length))
+        if payload.get("input") == "slow-stream":
+            self.server.slow_request_started.set()
+            self.server.slow_request_release.wait(timeout=5)
+            body = b'event: response.completed\ndata: {"type":"response.completed"}\n\n'
+            self.send_response(200)
+            self.send_header("content-type", "text/event-stream")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if payload.get("input") == "slow-stream-body":
+            body = b'event: response.completed\ndata: {"type":"response.completed"}\n\n'
+            self.send_response(200)
+            self.send_header("content-type", "text/event-stream")
+            self.end_headers()
+            self.wfile.flush()
+            self.server.slow_body_started.set()
+            self.server.slow_body_release.wait(timeout=5)
+            self.wfile.write(body)
+            return
         self._reply(
             200,
             {
@@ -77,6 +97,10 @@ class BackendWikiAITests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.upstream = ThreadingHTTPServer(("127.0.0.1", 0), FakeOllamaHandler)
+        cls.upstream.slow_request_started = threading.Event()
+        cls.upstream.slow_request_release = threading.Event()
+        cls.upstream.slow_body_started = threading.Event()
+        cls.upstream.slow_body_release = threading.Event()
         cls.upstream_thread = threading.Thread(target=cls.upstream.serve_forever, daemon=True)
         cls.upstream_thread.start()
         cls.key = "synthetic-wiki-ai-key-with-at-least-32-characters"
@@ -90,6 +114,7 @@ class BackendWikiAITests(unittest.TestCase):
             upstream_port=cls.upstream.server_address[1],
             upstream_timeout_seconds=30,
             queue_wait_seconds=2,
+            heartbeat_interval_seconds=1,
         )
         cls.server = proxy.WikiAIHTTPServer(("127.0.0.1", 0), cls.config)
         cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
@@ -110,12 +135,15 @@ class BackendWikiAITests(unittest.TestCase):
         }
         self.assertEqual(proxy.load_config(base).bind, "127.0.0.1")
         self.assertEqual(proxy.load_config(base).queue_wait_seconds, 600)
+        self.assertEqual(proxy.load_config(base).heartbeat_interval_seconds, 15)
         with self.assertRaisesRegex(RuntimeError, "loopback"):
             proxy.load_config({**base, "NUTSNEWS_WIKI_AI_BIND": "0.0.0.0"})
         with self.assertRaisesRegex(RuntimeError, "at least 32"):
             proxy.load_config({**base, "NUTSNEWS_WIKI_AI_API_KEY": "short"})
         with self.assertRaisesRegex(RuntimeError, "between 1 and 900"):
             proxy.load_config({**base, "NUTSNEWS_WIKI_AI_QUEUE_WAIT_SECONDS": "901"})
+        with self.assertRaisesRegex(RuntimeError, "between 1 and 60"):
+            proxy.load_config({**base, "NUTSNEWS_WIKI_AI_HEARTBEAT_INTERVAL_SECONDS": "0"})
 
     def test_public_health_is_bounded_and_model_aware(self):
         with urllib.request.urlopen(f"{self.origin}/health", timeout=5) as response:
@@ -174,6 +202,70 @@ class BackendWikiAITests(unittest.TestCase):
         with urllib.request.urlopen(request, timeout=5) as response:
             payload = json.load(response)
         self.assertTrue(tool_call_is_valid(payload))
+
+    def test_streaming_proxy_sends_heartbeat_before_slow_upstream_headers(self):
+        self.upstream.slow_request_started.clear()
+        self.upstream.slow_request_release.clear()
+        body = json.dumps({
+            "model": "nutsnews-wiki-qwen",
+            "input": "slow-stream",
+            "stream": True,
+        }).encode()
+        request = urllib.request.Request(
+            f"{self.origin}/v1/responses",
+            method="POST",
+            data=body,
+            headers={
+                "authorization": f"Bearer {self.key}",
+                "content-type": "application/json",
+            },
+        )
+        started = time.monotonic()
+        try:
+            with urllib.request.urlopen(request, timeout=3) as response:
+                self.assertEqual(response.readline(), b": keep-alive\n")
+                self.assertEqual(response.readline(), b"\n")
+                self.assertLess(time.monotonic() - started, 1)
+                self.assertTrue(self.upstream.slow_request_started.wait(timeout=1))
+                heartbeat_started = time.monotonic()
+                self.assertEqual(response.readline(), b": keep-alive\n")
+                self.assertGreater(time.monotonic() - heartbeat_started, 0.5)
+                self.assertEqual(response.readline(), b"\n")
+                self.upstream.slow_request_release.set()
+                self.assertIn(b"response.completed", response.read())
+        finally:
+            self.upstream.slow_request_release.set()
+
+    def test_streaming_proxy_keeps_heartbeat_during_slow_upstream_body(self):
+        self.upstream.slow_body_started.clear()
+        self.upstream.slow_body_release.clear()
+        body = json.dumps({
+            "model": "nutsnews-wiki-qwen",
+            "input": "slow-stream-body",
+            "stream": True,
+        }).encode()
+        request = urllib.request.Request(
+            f"{self.origin}/v1/responses",
+            method="POST",
+            data=body,
+            headers={
+                "authorization": f"Bearer {self.key}",
+                "content-type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=3) as response:
+                self.assertEqual(response.readline(), b": keep-alive\n")
+                self.assertEqual(response.readline(), b"\n")
+                self.assertTrue(self.upstream.slow_body_started.wait(timeout=1))
+                heartbeat_started = time.monotonic()
+                self.assertEqual(response.readline(), b": keep-alive\n")
+                self.assertGreater(time.monotonic() - heartbeat_started, 0.5)
+                self.assertEqual(response.readline(), b"\n")
+                self.upstream.slow_body_release.set()
+                self.assertIn(b"response.completed", response.read())
+        finally:
+            self.upstream.slow_body_release.set()
 
     def test_responses_proxy_allows_one_bounded_waiter_and_rejects_more(self):
         self.assertTrue(self.server.inference_slot.acquire(blocking=False))
@@ -257,6 +349,7 @@ class BackendWikiAITests(unittest.TestCase):
         self.assertIn("backend_wiki_ai_base_model_id: 2a654d98e6fb", defaults)
         self.assertIn("backend_wiki_ai_context_length: 65536", defaults)
         self.assertIn("backend_wiki_ai_queue_wait_seconds: 600", defaults)
+        self.assertIn("backend_wiki_ai_heartbeat_interval_seconds: 15", defaults)
         self.assertIn("checksum: \"{{ backend_wiki_ai_archive_checksum }}\"", tasks)
         self.assertIn("not ansible_check_mode", tasks)
         self.assertIn("OLLAMA_NUM_PARALLEL=1", ollama_unit)
@@ -265,6 +358,10 @@ class BackendWikiAITests(unittest.TestCase):
         self.assertIn("EnvironmentFile={{ backend_wiki_ai_config_dir }}/proxy.env", proxy_unit)
         self.assertIn("NoNewPrivileges=true", proxy_unit)
         self.assertIn("NUTSNEWS_WIKI_AI_QUEUE_WAIT_SECONDS={{ backend_wiki_ai_queue_wait_seconds }}", tasks)
+        self.assertIn(
+            "NUTSNEWS_WIKI_AI_HEARTBEAT_INTERVAL_SECONDS={{ backend_wiki_ai_heartbeat_interval_seconds }}",
+            tasks,
+        )
         self.assertIn("handle {{ backend_wiki_ai_public_prefix | default('/wiki-ai') }}/v1/responses", caddy)
         self.assertNotIn("11434 }}", caddy)
         self.assertIn("name: backend_wiki_ai", playbook)

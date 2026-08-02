@@ -23,6 +23,7 @@ backend_wiki_ai_max_output_tokens: 8192
 backend_wiki_ai_max_request_bytes: 4194304
 backend_wiki_ai_upstream_timeout_seconds: 3300
 backend_wiki_ai_queue_wait_seconds: 600
+backend_wiki_ai_heartbeat_interval_seconds: 15
 backend_wiki_ai_memory_high: 6500M
 backend_wiki_ai_memory_max: 7500M
 backend_wiki_ai_cpu_quota: 300%

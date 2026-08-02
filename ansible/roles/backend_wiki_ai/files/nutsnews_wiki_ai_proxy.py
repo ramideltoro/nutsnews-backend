@@ -7,6 +7,7 @@ import hmac
 import http.client
 import json
 import os
+import queue
 import threading
 import time
 import uuid
@@ -26,6 +27,7 @@ class ProxyConfig:
     upstream_port: int
     upstream_timeout_seconds: int
     queue_wait_seconds: int
+    heartbeat_interval_seconds: int
 
 
 def _bounded_integer(
@@ -85,6 +87,13 @@ def load_config(env: dict[str, str] | os._Environ[str] = os.environ) -> ProxyCon
             600,
             1,
             900,
+        ),
+        heartbeat_interval_seconds=_bounded_integer(
+            env,
+            "NUTSNEWS_WIKI_AI_HEARTBEAT_INTERVAL_SECONDS",
+            15,
+            1,
+            60,
         ),
     )
 
@@ -212,11 +221,14 @@ class WikiAIHandler(BaseHTTPRequestHandler):
             self._audit(request_id, 400, started)
             return
         try:
-            validate_responses_payload(raw, self.config)
+            payload = validate_responses_payload(raw, self.config)
         except ValueError as error:
             self._json_response(400, {"error": "invalid_request", "detail": str(error), "request_id": request_id})
             self._audit(request_id, 400, started)
             return
+        stream_requested = payload.get("stream") is True
+        stream_started = False
+        downstream_open = True
         acquired = self.inference_slot.acquire(blocking=False)
         if not acquired and not self.waiter_slot.acquire(blocking=False):
             self._json_response(
@@ -228,24 +240,63 @@ class WikiAIHandler(BaseHTTPRequestHandler):
             return
         if not acquired:
             try:
-                acquired = self.inference_slot.acquire(timeout=self.config.queue_wait_seconds)
+                if stream_requested:
+                    stream_started = True
+                    downstream_open = self._begin_stream_response(request_id)
+                deadline = time.monotonic() + self.config.queue_wait_seconds
+                while not acquired:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    acquired = self.inference_slot.acquire(
+                        timeout=min(self.config.heartbeat_interval_seconds, remaining),
+                    )
+                    if not acquired and stream_started and downstream_open:
+                        downstream_open = self._write_stream_bytes(b": keep-alive\n\n")
             finally:
                 self.waiter_slot.release()
             if not acquired:
-                self._json_response(
-                    429,
-                    {"error": "wiki_ai_queue_timeout", "request_id": request_id},
-                    extra_headers={"Retry-After": "30"},
-                )
+                if stream_started and downstream_open:
+                    self._write_stream_error("wiki_ai_queue_timeout", request_id)
+                elif not stream_started:
+                    self._json_response(
+                        429,
+                        {"error": "wiki_ai_queue_timeout", "request_id": request_id},
+                        extra_headers={"Retry-After": "30"},
+                    )
                 self._audit(request_id, 429, started)
                 return
         try:
-            status = self._relay_response(raw, request_id)
+            status = self._relay_response(
+                raw,
+                request_id,
+                stream_requested=stream_requested,
+                stream_started=stream_started,
+                downstream_open=downstream_open,
+            )
         finally:
             self.inference_slot.release()
             self._audit(request_id, status, started)
 
-    def _relay_response(self, raw: bytes, request_id: str) -> int:
+    def _relay_response(
+        self,
+        raw: bytes,
+        request_id: str,
+        *,
+        stream_requested: bool,
+        stream_started: bool,
+        downstream_open: bool,
+    ) -> int:
+        if stream_requested:
+            return self._relay_stream_response(
+                raw,
+                request_id,
+                stream_started=stream_started,
+                downstream_open=downstream_open,
+            )
+        return self._relay_buffered_response(raw, request_id)
+
+    def _relay_buffered_response(self, raw: bytes, request_id: str) -> int:
         connection = http.client.HTTPConnection(
             self.config.upstream_host,
             self.config.upstream_port,
@@ -289,6 +340,131 @@ class WikiAIHandler(BaseHTTPRequestHandler):
             return 502
         finally:
             connection.close()
+
+    def _relay_stream_response(
+        self,
+        raw: bytes,
+        request_id: str,
+        *,
+        stream_started: bool,
+        downstream_open: bool,
+    ) -> int:
+        if not stream_started:
+            downstream_open = self._begin_stream_response(request_id)
+        ready = threading.Event()
+        result: dict[str, Any] = {}
+
+        def connect_upstream() -> None:
+            connection = http.client.HTTPConnection(
+                self.config.upstream_host,
+                self.config.upstream_port,
+                timeout=self.config.upstream_timeout_seconds,
+            )
+            result["connection"] = connection
+            try:
+                connection.request(
+                    "POST",
+                    "/v1/responses",
+                    body=raw,
+                    headers={
+                        "accept": "text/event-stream",
+                        "content-type": "application/json",
+                        "x-request-id": request_id,
+                    },
+                )
+                result["response"] = connection.getresponse()
+            except (OSError, http.client.HTTPException) as error:
+                result["error"] = error
+            finally:
+                ready.set()
+
+        threading.Thread(target=connect_upstream, daemon=True).start()
+        while not ready.wait(timeout=self.config.heartbeat_interval_seconds):
+            if downstream_open:
+                downstream_open = self._write_stream_bytes(b": keep-alive\n\n")
+
+        connection = result.get("connection")
+        response = result.get("response")
+        try:
+            if result.get("error") is not None or response is None:
+                if downstream_open:
+                    self._write_stream_error("upstream_unavailable", request_id)
+                return 502
+            if response.status < 200 or response.status >= 300:
+                response.read(4096)
+                if downstream_open:
+                    self._write_stream_error("upstream_rejected_request", request_id)
+                return response.status
+            chunks: queue.Queue[tuple[str, Any]] = queue.Queue()
+
+            def read_upstream() -> None:
+                try:
+                    while True:
+                        chunk = response.readline()
+                        if not chunk:
+                            break
+                        chunks.put(("data", chunk))
+                except (OSError, http.client.HTTPException) as error:
+                    chunks.put(("error", error))
+                finally:
+                    chunks.put(("done", None))
+
+            threading.Thread(target=read_upstream, daemon=True).start()
+            while True:
+                try:
+                    kind, value = chunks.get(timeout=self.config.heartbeat_interval_seconds)
+                except queue.Empty:
+                    if downstream_open:
+                        downstream_open = self._write_stream_bytes(b": keep-alive\n\n")
+                    continue
+                if kind == "done":
+                    break
+                if kind == "error":
+                    if downstream_open:
+                        self._write_stream_error("upstream_unavailable", request_id)
+                    return 502
+                if downstream_open:
+                    downstream_open = self._write_stream_bytes(value)
+            return response.status
+        finally:
+            if connection is not None:
+                connection.close()
+
+    def _begin_stream_response(self, request_id: str) -> bool:
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Request-Id", request_id)
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.close_connection = True
+            return self._write_stream_bytes(b": keep-alive\n\n")
+        except OSError:
+            return False
+
+    def _write_stream_bytes(self, content: bytes) -> bool:
+        try:
+            self.wfile.write(content)
+            self.wfile.flush()
+            return True
+        except OSError:
+            return False
+
+    def _write_stream_error(self, code: str, request_id: str) -> bool:
+        payload = json.dumps(
+            {
+                "type": "error",
+                "error": {
+                    "type": "server_error",
+                    "code": code,
+                    "message": code,
+                    "request_id": request_id,
+                },
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return self._write_stream_bytes(b"event: error\ndata: " + payload + b"\n\n")
 
     def _json_response(
         self,

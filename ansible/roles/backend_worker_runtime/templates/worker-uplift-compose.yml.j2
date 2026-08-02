@@ -46,10 +46,13 @@ services:
       driver: journald
       options:
         tag: "nutsnews-worker-uplift-{{ service.name }}"
-        labels: "com.nutsnews.service,com.nutsnews.version,com.nutsnews.queue"
+        labels: "com.nutsnews.service,com.nutsnews.version,com.nutsnews.service_version,com.nutsnews.revision,com.nutsnews.image_digest,com.nutsnews.queue"
     labels:
       com.nutsnews.service: "{{ service.name }}"
       com.nutsnews.version: "{{ service.contract_version | default(backend_worker_runtime_contract_version) }}"
+      com.nutsnews.service_version: "{{ service.service_version | default('0.1.0') }}"
+      com.nutsnews.revision: "{{ service.build_revision | default(service.image_tag) }}"
+      com.nutsnews.image_digest: "{{ service.image_digest | default(service.provenance.subject_digest) }}"
 {% if service.queues is defined and service.queues.main is defined %}
       com.nutsnews.queue: "{{ service.queues.main }}"
 {% endif %}

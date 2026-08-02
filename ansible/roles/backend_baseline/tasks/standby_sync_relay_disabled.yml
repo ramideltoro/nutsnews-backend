@@ -23,24 +23,6 @@
     state: stopped
   when: backend_supabase_sync_relay_service_unit.stat.exists
 
-- name: Clear historical backend Supabase sync relay timer failure state
-  ansible.builtin.command:
-    argv:
-      - systemctl
-      - reset-failed
-      - nutsnews-supabase-sync-relay.timer
-  changed_when: false
-  when: backend_supabase_sync_relay_timer_unit.stat.exists
-
-- name: Clear historical backend Supabase sync relay service failure state
-  ansible.builtin.command:
-    argv:
-      - systemctl
-      - reset-failed
-      - nutsnews-supabase-sync-relay.service
-  changed_when: false
-  when: backend_supabase_sync_relay_service_unit.stat.exists
-
 - name: Report backend Supabase sync relay suspension
   ansible.builtin.debug:
     msg:

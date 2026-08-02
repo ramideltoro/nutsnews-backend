@@ -5,6 +5,7 @@ import importlib.util
 import json
 import sys
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -88,6 +89,7 @@ class BackendWikiAITests(unittest.TestCase):
             upstream_host="127.0.0.1",
             upstream_port=cls.upstream.server_address[1],
             upstream_timeout_seconds=30,
+            queue_wait_seconds=2,
         )
         cls.server = proxy.WikiAIHTTPServer(("127.0.0.1", 0), cls.config)
         cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
@@ -107,10 +109,13 @@ class BackendWikiAITests(unittest.TestCase):
             "NUTSNEWS_WIKI_AI_MODEL": "nutsnews-wiki-qwen",
         }
         self.assertEqual(proxy.load_config(base).bind, "127.0.0.1")
+        self.assertEqual(proxy.load_config(base).queue_wait_seconds, 600)
         with self.assertRaisesRegex(RuntimeError, "loopback"):
             proxy.load_config({**base, "NUTSNEWS_WIKI_AI_BIND": "0.0.0.0"})
         with self.assertRaisesRegex(RuntimeError, "at least 32"):
             proxy.load_config({**base, "NUTSNEWS_WIKI_AI_API_KEY": "short"})
+        with self.assertRaisesRegex(RuntimeError, "between 1 and 900"):
+            proxy.load_config({**base, "NUTSNEWS_WIKI_AI_QUEUE_WAIT_SECONDS": "901"})
 
     def test_public_health_is_bounded_and_model_aware(self):
         with urllib.request.urlopen(f"{self.origin}/health", timeout=5) as response:
@@ -170,6 +175,60 @@ class BackendWikiAITests(unittest.TestCase):
             payload = json.load(response)
         self.assertTrue(tool_call_is_valid(payload))
 
+    def test_responses_proxy_allows_one_bounded_waiter_and_rejects_more(self):
+        self.assertTrue(self.server.inference_slot.acquire(blocking=False))
+        outcome = {}
+
+        def request_as_waiter():
+            try:
+                body = json.dumps({"model": "nutsnews-wiki-qwen", "input": "wait"}).encode()
+                request = urllib.request.Request(
+                    f"{self.origin}/v1/responses",
+                    method="POST",
+                    data=body,
+                    headers={
+                        "authorization": f"Bearer {self.key}",
+                        "content-type": "application/json",
+                    },
+                )
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    outcome["payload"] = json.load(response)
+            except Exception as error:  # pragma: no cover - reported by the assertion below
+                outcome["error"] = error
+
+        waiter = threading.Thread(target=request_as_waiter, daemon=True)
+        waiter.start()
+        try:
+            deadline = time.monotonic() + 1
+            while self.server.waiter_slot._value != 0 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(self.server.waiter_slot._value, 0)
+
+            body = json.dumps({"model": "nutsnews-wiki-qwen", "input": "overflow"}).encode()
+            overflow = urllib.request.Request(
+                f"{self.origin}/v1/responses",
+                method="POST",
+                data=body,
+                headers={
+                    "authorization": f"Bearer {self.key}",
+                    "content-type": "application/json",
+                },
+            )
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(overflow, timeout=5)
+            try:
+                self.assertEqual(caught.exception.code, 429)
+                self.assertEqual(caught.exception.headers["Retry-After"], "30")
+            finally:
+                caught.exception.close()
+        finally:
+            self.server.inference_slot.release()
+            waiter.join(timeout=5)
+
+        self.assertFalse(waiter.is_alive())
+        self.assertNotIn("error", outcome)
+        self.assertTrue(tool_call_is_valid(outcome["payload"]))
+
     def test_smoke_contract_helpers_are_fail_closed(self):
         self.assertEqual(
             health_url("https://backend.nutsnews.com/wiki-ai/v1/responses"),
@@ -197,6 +256,7 @@ class BackendWikiAITests(unittest.TestCase):
         self.assertIn("backend_wiki_ai_base_model: qwen3.5:4b-q4_K_M", defaults)
         self.assertIn("backend_wiki_ai_base_model_id: 2a654d98e6fb", defaults)
         self.assertIn("backend_wiki_ai_context_length: 65536", defaults)
+        self.assertIn("backend_wiki_ai_queue_wait_seconds: 600", defaults)
         self.assertIn("checksum: \"{{ backend_wiki_ai_archive_checksum }}\"", tasks)
         self.assertIn("not ansible_check_mode", tasks)
         self.assertIn("OLLAMA_NUM_PARALLEL=1", ollama_unit)
@@ -204,6 +264,7 @@ class BackendWikiAITests(unittest.TestCase):
         self.assertIn("MemoryMax={{ backend_wiki_ai_memory_max }}", ollama_unit)
         self.assertIn("EnvironmentFile={{ backend_wiki_ai_config_dir }}/proxy.env", proxy_unit)
         self.assertIn("NoNewPrivileges=true", proxy_unit)
+        self.assertIn("NUTSNEWS_WIKI_AI_QUEUE_WAIT_SECONDS={{ backend_wiki_ai_queue_wait_seconds }}", tasks)
         self.assertIn("handle {{ backend_wiki_ai_public_prefix | default('/wiki-ai') }}/v1/responses", caddy)
         self.assertNotIn("11434 }}", caddy)
         self.assertIn("name: backend_wiki_ai", playbook)

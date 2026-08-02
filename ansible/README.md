@@ -76,4 +76,6 @@ reviewed Ollama archive and checksum, pulls the pinned `qwen3.5:4b-q4_K_M`
 model identity, creates the `nutsnews-wiki-qwen` 65,536-token alias, and binds
 both Ollama and its authenticated proxy to loopback. Caddy publishes only
 `/wiki-ai/health` and `/wiki-ai/v1/responses`; raw Ollama management routes are
-not exposed.
+not exposed. The proxy permits one active inference plus one authenticated,
+bounded waiter so a Codex follow-up can bridge a finishing stream; additional
+overlap fails with `429`.

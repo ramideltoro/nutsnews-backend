@@ -12,6 +12,11 @@ backup/hot-standby target until a later owner-approved failover.
 > requires reviewed incremental replication that does not scan whole tables on
 > the production API database.
 
+Suspension stops the timer and any in-flight service, then clears only their
+retained systemd failed state. Clearing that bookkeeping state does not start or
+enable either unit; it keeps the host-wide failed-unit gate trustworthy after
+the intentionally suspended relay has been made inactive.
+
 ## Safety Boundary
 
 - The relay runs on the backend host through systemd.

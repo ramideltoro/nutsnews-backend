@@ -23,6 +23,35 @@
     state: stopped
   when: backend_supabase_sync_relay_service_unit.stat.exists
 
+- name: Inspect suspended backend Supabase sync relay unit states
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - show
+      - --property=ActiveState
+      - --value
+      - "{{ item.name }}"
+  loop:
+    - name: nutsnews-supabase-sync-relay.timer
+      installed: "{{ backend_supabase_sync_relay_timer_unit.stat.exists }}"
+    - name: nutsnews-supabase-sync-relay.service
+      installed: "{{ backend_supabase_sync_relay_service_unit.stat.exists }}"
+  when: item.installed | bool
+  register: backend_supabase_sync_relay_suspended_unit_states
+  changed_when: false
+
+- name: Clear retained failed state for suspended backend Supabase sync relay units
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - reset-failed
+      - "{{ item.item.name }}"
+  loop: "{{ backend_supabase_sync_relay_suspended_unit_states.results | default([]) }}"
+  when:
+    - item.item.installed | bool
+    - item.stdout | trim == 'failed'
+  changed_when: true
+
 - name: Report backend Supabase sync relay suspension
   ansible.builtin.debug:
     msg:

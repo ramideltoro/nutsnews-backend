@@ -165,9 +165,18 @@ class BackendDeploymentSafetyTests(unittest.TestCase):
         self.assertIn("/usr/local/sbin/nutsnews-rabbitmq-probe smoke", rabbitmq_smoke)
         self.assertNotIn("remote_command", rabbitmq_smoke)
         self.assertIn("Reset fixed one-shot failure state", protected_apply)
-        self.assertIn("sudo -n systemctl reset-failed \"$unit\"", protected_apply)
-        self.assertIn("nutsnews-backup.service nutsnews-backup-verify.service nutsnews-restore-drill.service", protected_apply)
+        self.assertIn("sudo -n systemctl reset-failed \"\\$unit\"", protected_apply)
+        self.assertIn("nutsnews-backup.service", protected_apply)
+        self.assertIn("nutsnews-backup-verify.service", protected_apply)
+        self.assertIn("nutsnews-restore-drill.service", protected_apply)
         self.assertIn("nutsnews-rabbitmq-canary.service", protected_apply)
+        self.assertIn('if [[ "$NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_ENABLED" == "false" ]]', protected_apply)
+        self.assertIn("nutsnews-supabase-sync-relay.service", protected_apply)
+        self.assertIn("nutsnews-supabase-sync-relay.timer", protected_apply)
+        self.assertLess(
+            protected_apply.index("nutsnews-supabase-sync-relay.service"),
+            protected_apply.index("- name: Run deployment safety preflight"),
+        )
         self.assertIn("phase=dry-run", protected_apply)
         self.assertIn("--enforce true", protected_apply)
         self.assertIn("--enforce true", cloudflare)

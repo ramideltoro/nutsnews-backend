@@ -177,22 +177,36 @@ jobs:
         env:
           NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
           NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_ENABLED: ${{ vars.NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_ENABLED || 'false' }}
         run: |
           set -euo pipefail
 
           ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          reset_units=(
+            nutsnews-backup.service
+            nutsnews-backup-verify.service
+            nutsnews-restore-drill.service
+            nutsnews-rabbitmq-canary.service
+          )
+          if [[ "$NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_ENABLED" == "false" ]]; then
+            reset_units+=(
+              nutsnews-supabase-sync-relay.service
+              nutsnews-supabase-sync-relay.timer
+            )
+          fi
+          printf -v reset_units_shell '%q ' "${reset_units[@]}"
           ssh -i "$HOME/.ssh/nutsnews_backend" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
-            'set -eu
-            for unit in nutsnews-backup.service nutsnews-backup-verify.service nutsnews-restore-drill.service nutsnews-rabbitmq-canary.service; do
-              if systemctl list-unit-files "$unit" --no-legend 2>/dev/null | grep -q "$unit"; then
-                sudo -n systemctl reset-failed "$unit"
+            "set -eu
+            for unit in $reset_units_shell; do
+              if systemctl list-unit-files "\$unit" --no-legend 2>/dev/null | grep -q "\$unit"; then
+                sudo -n systemctl reset-failed "\$unit"
               fi
-            done'
+            done"
 
       - name: Run deployment safety preflight
         shell: bash

@@ -270,6 +270,10 @@ def main() -> int:
         "backend_supabase_sync_relay_source_db_url",
         "backend_supabase_sync_relay_target_db_url",
         "nutsnews_migration_validation",
+        'if [[ "$NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_ENABLED" == "false" ]]',
+        "nutsnews-supabase-sync-relay.service",
+        "nutsnews-supabase-sync-relay.timer",
+        "sudo -n systemctl reset-failed",
     ):
         require(token in apply_workflow, f"protected apply workflow missing token: {token}", errors)
     for token in (

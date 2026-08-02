@@ -28,7 +28,17 @@ class FakeOllamaHandler(BaseHTTPRequestHandler):
         if self.path != "/api/tags":
             self.send_error(404)
             return
-        self._reply(200, {"models": [{"name": "nutsnews-wiki-qwen", "model": "nutsnews-wiki-qwen"}]})
+        self._reply(
+            200,
+            {
+                "models": [
+                    {
+                        "name": "nutsnews-wiki-qwen:latest",
+                        "model": "nutsnews-wiki-qwen:latest",
+                    }
+                ]
+            },
+        )
 
     def do_POST(self):
         if self.path != "/v1/responses":
@@ -108,6 +118,10 @@ class BackendWikiAITests(unittest.TestCase):
         self.assertEqual(
             payload,
             {"ok": True, "service": "nutsnews-wiki-ai", "model_ready": True},
+        )
+        self.assertIn(
+            "nutsnews-wiki-qwen",
+            proxy.model_names_from_tags({"models": [{"name": "nutsnews-wiki-qwen:latest"}]}),
         )
 
     def test_responses_proxy_rejects_missing_authentication(self):

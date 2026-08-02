@@ -115,6 +115,8 @@ def model_names_from_tags(payload: Any) -> set[str]:
                 value = model.get(key)
                 if isinstance(value, str) and value:
                     names.add(value)
+                    if value.endswith(":latest"):
+                        names.add(value.removesuffix(":latest"))
     return names
 
 

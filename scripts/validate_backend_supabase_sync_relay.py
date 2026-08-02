@@ -270,6 +270,8 @@ def main() -> int:
         "backend_supabase_sync_relay_source_db_url",
         "backend_supabase_sync_relay_target_db_url",
         "nutsnews_migration_validation",
+        "nutsnews-supabase-sync-relay.timer",
+        "nutsnews-supabase-sync-relay.service",
     ):
         require(token in apply_workflow, f"protected apply workflow missing token: {token}", errors)
     for token in (

@@ -188,7 +188,7 @@ jobs:
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
             'set -eu
-            for unit in nutsnews-backup.service nutsnews-backup-verify.service nutsnews-restore-drill.service nutsnews-rabbitmq-canary.service; do
+            for unit in nutsnews-backup.service nutsnews-backup-verify.service nutsnews-restore-drill.service nutsnews-rabbitmq-canary.service nutsnews-supabase-sync-relay.timer nutsnews-supabase-sync-relay.service; do
               if systemctl list-unit-files "$unit" --no-legend 2>/dev/null | grep -q "$unit"; then
                 sudo -n systemctl reset-failed "$unit"
               fi

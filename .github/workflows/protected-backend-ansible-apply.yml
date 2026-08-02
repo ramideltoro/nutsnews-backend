@@ -37,7 +37,7 @@ jobs:
   baseline:
     name: Backend baseline
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
     environment: production-backend
 
     steps:
@@ -235,6 +235,8 @@ jobs:
           NUTSNEWS_BACKEND_API_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_API_TOKEN }}
           LOCAL_AI_URL: ${{ vars.LOCAL_AI_URL || 'https://ai.nutsnews.com' }}
           LOCAL_AI_API_KEY: ${{ secrets.LOCAL_AI_API_KEY }}
+          NUTSNEWS_BACKEND_WIKI_AI_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WIKI_AI_ENABLED || 'true' }}
+          NUTSNEWS_WIKI_AI_API_KEY: ${{ secrets.NUTSNEWS_WIKI_AI_API_KEY }}
           NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN }}
           NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN }}
           NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED || 'false' }}
@@ -327,6 +329,7 @@ jobs:
             --required-secret GRAFANA_CLOUD_LOKI_URL \
             --required-secret GRAFANA_CLOUD_LOKI_USERNAME \
             --required-secret GRAFANA_CLOUD_LOKI_PASSWORD \
+            --required-secret NUTSNEWS_WIKI_AI_API_KEY \
             --required-secret NUTSNEWS_WORKER_UPLIFT_POSTGRES_SCHEDULER_PASSWORD \
             --required-secret NUTSNEWS_WORKER_UPLIFT_POSTGRES_FETCHER_PASSWORD \
             --required-secret NUTSNEWS_WORKER_UPLIFT_POSTGRES_CANONICALIZER_PASSWORD \
@@ -404,6 +407,8 @@ jobs:
           NUTSNEWS_BACKEND_API_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_API_TOKEN }}
           LOCAL_AI_URL: ${{ vars.LOCAL_AI_URL || 'https://ai.nutsnews.com' }}
           LOCAL_AI_API_KEY: ${{ secrets.LOCAL_AI_API_KEY }}
+          NUTSNEWS_BACKEND_WIKI_AI_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WIKI_AI_ENABLED || 'true' }}
+          NUTSNEWS_WIKI_AI_API_KEY: ${{ secrets.NUTSNEWS_WIKI_AI_API_KEY }}
           NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN }}
           NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN: ${{ secrets.NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN }}
           NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED: ${{ vars.NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED || 'false' }}
@@ -778,6 +783,19 @@ jobs:
                   extra_vars["backend_metrics_rabbitmq_enabled"] = True
                   extra_vars["backend_metrics_rabbitmq_vhost"] = rabbitmq_values["RABBITMQ_VHOST"]
 
+          wiki_ai_enabled = (
+              os.environ.get("NUTSNEWS_BACKEND_WIKI_AI_ENABLED", "true").strip().lower()
+              in {"1", "true", "yes"}
+          )
+          if wiki_ai_enabled:
+              wiki_ai_api_key = os.environ.get("NUTSNEWS_WIKI_AI_API_KEY", "")
+              if len(wiki_ai_api_key) < 32:
+                  raise SystemExit("Backend Wiki AI requires NUTSNEWS_WIKI_AI_API_KEY with at least 32 characters.")
+              if "\n" in wiki_ai_api_key or "\r" in wiki_ai_api_key:
+                  raise SystemExit("NUTSNEWS_WIKI_AI_API_KEY must be a single-line value.")
+              extra_vars["backend_wiki_ai_enabled"] = True
+              extra_vars["backend_wiki_ai_api_key"] = wiki_ai_api_key
+
           worker_runtime_enabled = os.environ.get("NUTSNEWS_BACKEND_WORKER_RUNTIME_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
           if worker_runtime_enabled:
               if not rabbitmq_enabled:
@@ -911,6 +929,17 @@ jobs:
 
           ansible-playbook "${args[@]}"
 
+      - name: Verify public Wiki AI Responses contract
+        if: inputs.run_mode == 'apply'
+        shell: bash
+        env:
+          NUTSNEWS_WIKI_AI_API_KEY: ${{ secrets.NUTSNEWS_WIKI_AI_API_KEY }}
+          NUTSNEWS_WIKI_AI_RESPONSES_ENDPOINT: https://backend.nutsnews.com/wiki-ai/v1/responses
+        run: |
+          set -euo pipefail
+
+          python3 scripts/backend_wiki_ai_smoke.py --model nutsnews-wiki-qwen --timeout 300
+
       - name: Run deployment safety postcheck
         if: always() && inputs.run_mode == 'apply'
         shell: bash
@@ -929,6 +958,7 @@ jobs:
           GRAFANA_CLOUD_LOKI_URL: ${{ secrets.GRAFANA_CLOUD_LOKI_URL }}
           GRAFANA_CLOUD_LOKI_USERNAME: ${{ secrets.GRAFANA_CLOUD_LOKI_USERNAME }}
           GRAFANA_CLOUD_LOKI_PASSWORD: ${{ secrets.GRAFANA_CLOUD_LOKI_PASSWORD }}
+          NUTSNEWS_WIKI_AI_API_KEY: ${{ secrets.NUTSNEWS_WIKI_AI_API_KEY }}
           NUTSNEWS_BACKEND_RABBITMQ_ENABLED: ${{ vars.NUTSNEWS_BACKEND_RABBITMQ_ENABLED || 'true' }}
           RABBITMQ_ERLANG_COOKIE: ${{ secrets.RABBITMQ_ERLANG_COOKIE }}
           RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD: ${{ secrets.RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD }}
@@ -956,6 +986,7 @@ jobs:
             --required-secret GRAFANA_CLOUD_LOKI_URL \
             --required-secret GRAFANA_CLOUD_LOKI_USERNAME \
             --required-secret GRAFANA_CLOUD_LOKI_PASSWORD \
+            --required-secret NUTSNEWS_WIKI_AI_API_KEY \
             --required-secret RABBITMQ_ERLANG_COOKIE \
             --required-secret RABBITMQ_BREAK_GLASS_ADMIN_PASSWORD \
             --output "$RUNNER_TEMP/backend-deployment-safety-post.json" \

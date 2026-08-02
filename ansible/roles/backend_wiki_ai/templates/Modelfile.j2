@@ -1,0 +1,4 @@
+FROM {{ backend_wiki_ai_base_model }}
+PARAMETER num_ctx {{ backend_wiki_ai_context_length }}
+PARAMETER num_predict {{ backend_wiki_ai_max_output_tokens }}
+PARAMETER temperature 0

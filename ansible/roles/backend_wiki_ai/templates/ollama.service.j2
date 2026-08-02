@@ -1,0 +1,51 @@
+[Unit]
+Description=NutsNews Wiki AI Ollama runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ backend_wiki_ai_user }}
+Group={{ backend_wiki_ai_group }}
+Environment=HOME={{ backend_wiki_ai_state_dir }}
+Environment=OLLAMA_HOST={{ backend_wiki_ai_bind }}:{{ backend_wiki_ai_ollama_port }}
+Environment=OLLAMA_MODELS={{ backend_wiki_ai_state_dir }}/models
+Environment=OLLAMA_CONTEXT_LENGTH={{ backend_wiki_ai_context_length }}
+Environment=OLLAMA_NUM_PARALLEL=1
+Environment=OLLAMA_MAX_LOADED_MODELS=1
+Environment=OLLAMA_MAX_QUEUE=1
+Environment=OLLAMA_KEEP_ALIVE=5m
+Environment=OLLAMA_NOHISTORY=1
+ExecStart={{ backend_wiki_ai_binary_path }} serve
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nutsnews-wiki-ai-ollama
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths={{ backend_wiki_ai_state_dir }}
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+MemoryHigh={{ backend_wiki_ai_memory_high }}
+MemoryMax={{ backend_wiki_ai_memory_max }}
+CPUQuota={{ backend_wiki_ai_cpu_quota }}
+Nice=10
+OOMScoreAdjust=500
+TasksMax=256
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

@@ -41,6 +41,7 @@ Add these to the `production-backend` Environment:
 | `GRAFANA_CLOUD_LOKI_URL` | Grafana Cloud Loki write endpoint |
 | `GRAFANA_CLOUD_LOKI_USERNAME` | Logs-publisher identity |
 | `GRAFANA_CLOUD_LOKI_PASSWORD` | Logs-publisher credential |
+| `NUTSNEWS_WIKI_AI_API_KEY` | Dedicated bearer credential for the authenticated Wiki AI Responses endpoint |
 
 Optional secrets:
 
@@ -57,6 +58,35 @@ Optional secrets:
 Prefer a dedicated automation user with tightly scoped key-based SSH and passwordless sudo for the reviewed Ansible command set. If a sudo password is used during early bootstrap, rotate it after the automation user exists.
 
 Do not commit secret values.
+
+## Wiki AI runtime
+
+The protected full-baseline path owns the complete Wiki AI installation on the
+backend host:
+
+- verified Ollama `0.32.5` amd64 archive installation
+- pinned `qwen3.5:4b-q4_K_M` model identity and `nutsnews-wiki-qwen` alias
+- 65,536-token context with one loaded model and one active request; excess
+  public inference requests are rejected with `429`
+- systemd CPU and memory ceilings that preserve capacity for PostgreSQL, Caddy,
+  RabbitMQ, and the Worker runtime
+- loopback-only Ollama and proxy listeners
+- a dedicated bearer-authenticated `/wiki-ai/v1/responses` route and a bounded
+  public `/wiki-ai/health` readiness route
+
+The proxy accepts only the configured model, rejects oversized or unauthenticated
+requests, strips the credential before forwarding to Ollama, and records only
+bounded request metadata. It never logs prompts, source patches, responses, or
+credentials. Do not reuse `LOCAL_AI_API_KEY`; Wiki automation requires the
+separate `NUTSNEWS_WIKI_AI_API_KEY` value, which is also stored as
+`WIKI_AI_API_KEY` in `ramideltoro/nutsnews-docs`.
+
+Run check mode from exact `main` before apply. Apply mode verifies the public
+health contract and a real Responses API tool call before the normal deployment
+safety postcheck. If the tool-call qualification fails, do not enable the wiki
+workflow. Roll back the wiki workflow to a non-publishing state first, then
+revert the backend change through a normal PR and protected check/apply cycle;
+never expose port `11434` or mutate the host manually.
 
 ## Run Check Mode
 

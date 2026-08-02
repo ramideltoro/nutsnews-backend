@@ -1,0 +1,414 @@
+---
+- name: Validate Wiki AI production contract
+  ansible.builtin.assert:
+    that:
+      - ansible_architecture in ['x86_64', 'amd64']
+      - backend_wiki_ai_bind == '127.0.0.1'
+      - backend_wiki_ai_ollama_port | int >= 1024
+      - backend_wiki_ai_ollama_port | int <= 65535
+      - backend_wiki_ai_proxy_port | int >= 1024
+      - backend_wiki_ai_proxy_port | int <= 65535
+      - backend_wiki_ai_proxy_port | int != backend_wiki_ai_ollama_port | int
+      - backend_wiki_ai_public_prefix == '/wiki-ai'
+      - backend_wiki_ai_version is match('^[0-9]+\.[0-9]+\.[0-9]+$')
+      - backend_wiki_ai_archive_checksum is match('^sha256:[0-9a-f]{64}$')
+      - backend_wiki_ai_base_model_id is match('^[0-9a-f]{12}$')
+      - backend_wiki_ai_model is match('^[a-z0-9][a-z0-9._-]{2,63}$')
+      - backend_wiki_ai_context_length | int >= 32768
+      - backend_wiki_ai_context_length | int <= 131072
+      - backend_wiki_ai_max_output_tokens | int >= 1024
+      - backend_wiki_ai_max_output_tokens | int <= 32768
+      - backend_wiki_ai_max_request_bytes | int >= 1048576
+      - backend_wiki_ai_max_request_bytes | int <= 8388608
+      - backend_wiki_ai_api_key | length >= 32
+      - "'\n' not in backend_wiki_ai_api_key"
+      - "'\r' not in backend_wiki_ai_api_key"
+    fail_msg: >-
+      Wiki AI requires the reviewed amd64 Ollama artifact, a pinned Qwen model,
+      loopback-only services, bounded context/output/request limits, and a protected
+      dedicated API credential.
+
+- name: Install Wiki AI runtime prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - python3
+      - zstd
+    state: present
+    update_cache: true
+  register: backend_wiki_ai_packages
+
+- name: Track whether Wiki AI can be managed in this run
+  ansible.builtin.set_fact:
+    backend_wiki_ai_manageable: "{{ (not ansible_check_mode) or not (backend_wiki_ai_packages is changed) }}"
+
+- name: Ensure Wiki AI group exists
+  ansible.builtin.group:
+    name: "{{ backend_wiki_ai_group }}"
+    system: true
+    state: present
+  when: backend_wiki_ai_manageable | bool
+
+- name: Ensure Wiki AI user exists
+  ansible.builtin.user:
+    name: "{{ backend_wiki_ai_user }}"
+    group: "{{ backend_wiki_ai_group }}"
+    system: true
+    create_home: false
+    home: "{{ backend_wiki_ai_state_dir }}"
+    shell: /usr/sbin/nologin
+    state: present
+  when: backend_wiki_ai_manageable | bool
+
+- name: Ensure Wiki AI directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ backend_wiki_ai_config_dir }}"
+      owner: root
+      group: "{{ backend_wiki_ai_group }}"
+      mode: "0750"
+    - path: "{{ backend_wiki_ai_state_dir }}"
+      owner: "{{ backend_wiki_ai_user }}"
+      group: "{{ backend_wiki_ai_group }}"
+      mode: "0750"
+    - path: "{{ backend_wiki_ai_state_dir }}/models"
+      owner: "{{ backend_wiki_ai_user }}"
+      group: "{{ backend_wiki_ai_group }}"
+      mode: "0750"
+    - path: "{{ backend_wiki_ai_cache_dir }}"
+      owner: root
+      group: root
+      mode: "0755"
+  when: backend_wiki_ai_manageable | bool
+
+- name: Inspect installed Ollama version
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_wiki_ai_binary_path }}"
+      - --version
+  register: backend_wiki_ai_installed_version
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: backend_wiki_ai_manageable | bool
+
+- name: Determine whether pinned Ollama installation is required
+  ansible.builtin.set_fact:
+    backend_wiki_ai_install_required: >-
+      {{
+        backend_wiki_ai_installed_version.rc | default(1) != 0
+        or backend_wiki_ai_version not in (backend_wiki_ai_installed_version.stdout | default(''))
+      }}
+  when: backend_wiki_ai_manageable | bool
+
+- name: Download verified Ollama archive
+  ansible.builtin.get_url:
+    url: "{{ backend_wiki_ai_archive_url }}"
+    dest: "{{ backend_wiki_ai_archive_path }}"
+    checksum: "{{ backend_wiki_ai_archive_checksum }}"
+    owner: root
+    group: root
+    mode: "0644"
+    timeout: 1800
+  when:
+    - backend_wiki_ai_manageable | bool
+    - not ansible_check_mode
+    - backend_wiki_ai_install_required | bool
+
+- name: Install verified Ollama archive
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/tar
+      - --use-compress-program=/usr/bin/unzstd
+      - -xf
+      - "{{ backend_wiki_ai_archive_path }}"
+      - -C
+      - /usr/local
+  changed_when: true
+  notify: Restart backend Ollama
+  when:
+    - backend_wiki_ai_manageable | bool
+    - not ansible_check_mode
+    - backend_wiki_ai_install_required | bool
+
+- name: Verify installed Ollama version
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_wiki_ai_binary_path }}"
+      - --version
+  register: backend_wiki_ai_verified_version
+  changed_when: false
+  failed_when:
+    - backend_wiki_ai_verified_version.rc != 0
+      or backend_wiki_ai_version not in backend_wiki_ai_verified_version.stdout
+  when:
+    - backend_wiki_ai_manageable | bool
+    - not ansible_check_mode
+
+- name: Install backend Ollama systemd unit
+  ansible.builtin.template:
+    src: ollama.service.j2
+    dest: /etc/systemd/system/nutsnews-wiki-ai-ollama.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd for Wiki AI
+    - Restart backend Ollama
+  when: backend_wiki_ai_manageable | bool
+
+- name: Flush Ollama handlers before model provisioning
+  ansible.builtin.meta: flush_handlers
+  when:
+    - backend_wiki_ai_manageable | bool
+    - not ansible_check_mode
+
+- name: Ensure backend Ollama is enabled and started
+  ansible.builtin.systemd:
+    name: nutsnews-wiki-ai-ollama
+    enabled: true
+    state: started
+  when:
+    - backend_wiki_ai_manageable | bool
+    - not ansible_check_mode
+
+- name: Wait for backend Ollama readiness
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/curl
+      - --fail
+      - --silent
+      - --show-error
+      - --noproxy
+      - "*"
+      - --max-time
+      - "5"
+      - "http://{{ backend_wiki_ai_bind }}:{{ backend_wiki_ai_ollama_port }}/api/tags"
+  register: backend_wiki_ai_ollama_health
+  changed_when: false
+  retries: 20
+  delay: 3
+  until: backend_wiki_ai_ollama_health.rc | default(1) == 0
+  when:
+    - backend_wiki_ai_manageable | bool
+    - not ansible_check_mode
+
+- name: Inspect installed Ollama models
+  become: true
+  become_user: "{{ backend_wiki_ai_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_wiki_ai_binary_path }}"
+      - list
+  environment:
+    OLLAMA_HOST: "http://{{ backend_wiki_ai_bind }}:{{ backend_wiki_ai_ollama_port }}"
+  register: backend_wiki_ai_model_list
+  changed_when: false
+  when:
+    - backend_wiki_ai_manageable | bool
+    - not ansible_check_mode
+
+- name: Reject a drifted base-model tag
+  ansible.builtin.assert:
+    that:
+      - >-
+        (backend_wiki_ai_model_list.stdout_lines
+          | select('match', '^' ~ (backend_wiki_ai_base_model | regex_escape) ~ '\\s+')
+          | list
+          | length == 0)
+        or
+        (backend_wiki_ai_model_list.stdout
+          is search('(?m)^' ~ (backend_wiki_ai_base_model | regex_escape) ~ '\\s+' ~ backend_wiki_ai_base_model_id ~ '\\s+'))
+    fail_msg: >-
+      The configured Qwen tag is already present with an unexpected model ID.
+      Review and deliberately update the pinned model ID before replacing it.
+  when:
+    - backend_wiki_ai_manageable | bool
+    - not ansible_check_mode
+
+- name: Pull pinned Qwen base model
+  become: true
+  become_user: "{{ backend_wiki_ai_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_wiki_ai_binary_path }}"
+      - pull
+      - "{{ backend_wiki_ai_base_model }}"
+  environment:
+    OLLAMA_HOST: "http://{{ backend_wiki_ai_bind }}:{{ backend_wiki_ai_ollama_port }}"
+  register: backend_wiki_ai_base_model_pull
+  changed_when: true
+  when:
+    - backend_wiki_ai_manageable | bool
+    - not ansible_check_mode
+    - >-
+      backend_wiki_ai_model_list.stdout_lines
+      | select('match', '^' ~ (backend_wiki_ai_base_model | regex_escape) ~ '\\s+')
+      | list
+      | length == 0
+
+- name: Verify pinned Qwen base-model identity
+  become: true
+  become_user: "{{ backend_wiki_ai_user }}"
+  ansible.builtin.shell: |
+    set -euo pipefail
+    "{{ backend_wiki_ai_binary_path }}" list \
+      | awk '$1 == expected_model { print $2 }' expected_model="{{ backend_wiki_ai_base_model }}" \
+      | grep -Fx "{{ backend_wiki_ai_base_model_id }}"
+  args:
+    executable: /bin/bash
+  environment:
+    OLLAMA_HOST: "http://{{ backend_wiki_ai_bind }}:{{ backend_wiki_ai_ollama_port }}"
+  changed_when: false
+  when:
+    - backend_wiki_ai_manageable | bool
+    - not ansible_check_mode
+
+- name: Install Wiki AI model contract
+  ansible.builtin.template:
+    src: Modelfile.j2
+    dest: "{{ backend_wiki_ai_config_dir }}/Modelfile"
+    owner: root
+    group: "{{ backend_wiki_ai_group }}"
+    mode: "0640"
+  register: backend_wiki_ai_modelfile
+  when: backend_wiki_ai_manageable | bool
+
+- name: Inspect Wiki AI model alias
+  become: true
+  become_user: "{{ backend_wiki_ai_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_wiki_ai_binary_path }}"
+      - show
+      - "{{ backend_wiki_ai_model }}"
+  environment:
+    OLLAMA_HOST: "http://{{ backend_wiki_ai_bind }}:{{ backend_wiki_ai_ollama_port }}"
+  register: backend_wiki_ai_model_alias
+  changed_when: false
+  failed_when: false
+  when:
+    - backend_wiki_ai_manageable | bool
+    - not ansible_check_mode
+
+- name: Create bounded Wiki AI model alias
+  become: true
+  become_user: "{{ backend_wiki_ai_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ backend_wiki_ai_binary_path }}"
+      - create
+      - "{{ backend_wiki_ai_model }}"
+      - --file
+      - "{{ backend_wiki_ai_config_dir }}/Modelfile"
+  environment:
+    OLLAMA_HOST: "http://{{ backend_wiki_ai_bind }}:{{ backend_wiki_ai_ollama_port }}"
+  changed_when: true
+  when:
+    - backend_wiki_ai_manageable | bool
+    - not ansible_check_mode
+    - >-
+      backend_wiki_ai_model_alias.rc | default(1) != 0
+      or backend_wiki_ai_modelfile is changed
+      or backend_wiki_ai_base_model_pull is changed
+
+- name: Install Wiki AI proxy script
+  ansible.builtin.copy:
+    src: nutsnews_wiki_ai_proxy.py
+    dest: "{{ backend_wiki_ai_config_dir }}/nutsnews_wiki_ai_proxy.py"
+    owner: root
+    group: "{{ backend_wiki_ai_group }}"
+    mode: "0750"
+  notify: Restart Wiki AI proxy
+  when: backend_wiki_ai_manageable | bool
+
+- name: Install protected Wiki AI proxy environment
+  ansible.builtin.copy:
+    dest: "{{ backend_wiki_ai_config_dir }}/proxy.env"
+    owner: root
+    group: "{{ backend_wiki_ai_group }}"
+    mode: "0640"
+    content: |
+      NUTSNEWS_WIKI_AI_BIND={{ backend_wiki_ai_bind }}
+      NUTSNEWS_WIKI_AI_PORT={{ backend_wiki_ai_proxy_port }}
+      NUTSNEWS_WIKI_AI_API_KEY={{ backend_wiki_ai_api_key }}
+      NUTSNEWS_WIKI_AI_MODEL={{ backend_wiki_ai_model }}
+      NUTSNEWS_WIKI_AI_MAX_REQUEST_BYTES={{ backend_wiki_ai_max_request_bytes }}
+      NUTSNEWS_WIKI_AI_UPSTREAM_HOST={{ backend_wiki_ai_bind }}
+      NUTSNEWS_WIKI_AI_UPSTREAM_PORT={{ backend_wiki_ai_ollama_port }}
+      NUTSNEWS_WIKI_AI_UPSTREAM_TIMEOUT_SECONDS={{ backend_wiki_ai_upstream_timeout_seconds }}
+  no_log: true
+  notify: Restart Wiki AI proxy
+  when: backend_wiki_ai_manageable | bool
+
+- name: Install Wiki AI proxy systemd unit
+  ansible.builtin.template:
+    src: proxy.service.j2
+    dest: /etc/systemd/system/nutsnews-wiki-ai-proxy.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd for Wiki AI
+    - Restart Wiki AI proxy
+  when: backend_wiki_ai_manageable | bool
+
+- name: Flush Wiki AI proxy handlers before health probe
+  ansible.builtin.meta: flush_handlers
+  when:
+    - backend_wiki_ai_manageable | bool
+    - not ansible_check_mode
+
+- name: Ensure Wiki AI proxy is enabled and started
+  ansible.builtin.systemd:
+    name: nutsnews-wiki-ai-proxy
+    enabled: true
+    state: started
+  when:
+    - backend_wiki_ai_manageable | bool
+    - not ansible_check_mode
+
+- name: Capture loopback Wiki AI readiness
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/curl
+      - --fail
+      - --silent
+      - --show-error
+      - --noproxy
+      - "*"
+      - --max-time
+      - "10"
+      - "http://{{ backend_wiki_ai_bind }}:{{ backend_wiki_ai_proxy_port }}/health"
+  register: backend_wiki_ai_health
+  changed_when: false
+  retries: 20
+  delay: 3
+  until:
+    - backend_wiki_ai_health.rc | default(1) == 0
+    - backend_wiki_ai_health.stdout | default('') is search('"ok":true')
+    - backend_wiki_ai_health.stdout | default('') is search('"model_ready":true')
+  when:
+    - backend_wiki_ai_manageable | bool
+    - not ansible_check_mode
+
+- name: Report Wiki AI deployment summary
+  ansible.builtin.debug:
+    msg:
+      enabled: "{{ backend_wiki_ai_enabled }}"
+      ollama_version: "{{ backend_wiki_ai_version }}"
+      base_model: "{{ backend_wiki_ai_base_model }}"
+      model_alias: "{{ backend_wiki_ai_model }}"
+      context_length: "{{ backend_wiki_ai_context_length }}"
+      concurrency: 1
+      ollama_listener: "{{ backend_wiki_ai_bind }}:{{ backend_wiki_ai_ollama_port }}"
+      proxy_listener: "{{ backend_wiki_ai_bind }}:{{ backend_wiki_ai_proxy_port }}"
+      public_health: "https://{{ backend_domain }}{{ backend_wiki_ai_public_prefix }}/health"
+      responses_endpoint: "https://{{ backend_domain }}{{ backend_wiki_ai_public_prefix }}/v1/responses"
+      health: "{{ backend_wiki_ai_health.stdout_lines | default([]) }}"

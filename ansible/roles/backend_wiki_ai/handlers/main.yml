@@ -1,0 +1,17 @@
+---
+- name: Reload systemd for Wiki AI
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: not ansible_check_mode
+
+- name: Restart backend Ollama
+  ansible.builtin.systemd:
+    name: nutsnews-wiki-ai-ollama
+    state: restarted
+  when: not ansible_check_mode
+
+- name: Restart Wiki AI proxy
+  ansible.builtin.systemd:
+    name: nutsnews-wiki-ai-proxy
+    state: restarted
+  when: not ansible_check_mode

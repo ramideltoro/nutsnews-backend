@@ -13,6 +13,7 @@ This tree will own backend host configuration that must be repeatable:
 - swap or zram safety buffer
 - Docker Compose runtime
 - Caddy reverse proxy
+- authenticated, loopback-isolated Ollama/Qwen runtime for Wiki automation
 - read-only ops dashboard collector
 - PostgreSQL failover target and protected management dashboard
 - backup, restore, monitoring, and verification tasks
@@ -69,3 +70,10 @@ GitHub Actions can run this playbook through `.github/workflows/protected-backen
 - Apply mode requires `confirm_apply` to equal `backend.nutsnews.com`.
 - The job uses the `production-backend` GitHub Environment.
 - Required secrets are documented in `../runbooks/PROTECTED_BACKEND_APPLY.md`.
+
+The Wiki AI runtime is installed only by this protected baseline. It pins the
+reviewed Ollama archive and checksum, pulls the pinned `qwen3.5:4b-q4_K_M`
+model identity, creates the `nutsnews-wiki-qwen` 65,536-token alias, and binds
+both Ollama and its authenticated proxy to loopback. Caddy publishes only
+`/wiki-ai/health` and `/wiki-ai/v1/responses`; raw Ollama management routes are
+not exposed.

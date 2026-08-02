@@ -87,6 +87,24 @@
               header Content-Type text/plain
               respond "{{ backend_caddy_health_response }}" 200
           }
+          {% if backend_wiki_ai_enabled | default(false) | bool %}
+
+          handle {{ backend_wiki_ai_public_prefix | default('/wiki-ai') }}/health {
+              uri strip_prefix {{ backend_wiki_ai_public_prefix | default('/wiki-ai') }}
+              reverse_proxy http://{{ backend_wiki_ai_bind | default('127.0.0.1') }}:{{ backend_wiki_ai_proxy_port | default('18089') }}
+          }
+
+          handle {{ backend_wiki_ai_public_prefix | default('/wiki-ai') }}/v1/responses {
+              uri strip_prefix {{ backend_wiki_ai_public_prefix | default('/wiki-ai') }}
+              reverse_proxy http://{{ backend_wiki_ai_bind | default('127.0.0.1') }}:{{ backend_wiki_ai_proxy_port | default('18089') }} {
+                  flush_interval -1
+                  transport http {
+                      dial_timeout 5s
+                      response_header_timeout 3300s
+                  }
+              }
+          }
+          {% endif %}
           {% if backend_worker_api_enabled | bool %}
 
           handle /livez {

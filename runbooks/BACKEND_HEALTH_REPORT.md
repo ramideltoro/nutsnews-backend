@@ -112,13 +112,17 @@ The standby relay health check reports only safe metadata:
 
 The snapshot relay is intentionally suspended after its full-table parity scan
 was shown to exhaust the shared Supabase production database. While suspended,
-relay health stays fail-closed and Supabase failover remains blocked. Production
-availability takes precedence over claiming a current standby. Do not re-enable
-the timer until reviewed incremental replication replaces snapshot polling.
+relay health reports `not_configured`, `expected_active=false`, and
+`reason=disabled_by_configuration`; Supabase failover remains blocked. This
+distinguishes a reviewed safe state from an operational outage without claiming
+a current standby. Production availability takes precedence over standby
+freshness. Do not re-enable the timer until reviewed incremental replication
+replaces snapshot polling.
 
-Lag over `180 seconds`, missing relay status, invalid relay status, stopped relay
-timer, failed relay result, unknown failed-table count, or any failed replicated
-table marks `supabase_sync_relay_health` as `critical`. That critical check
+When the relay is expected active, lag over `180 seconds`, missing relay status,
+invalid relay status, a stopped timer, failed relay result, unknown failed-table
+count, or any failed replicated table marks `supabase_sync_relay_health` as
+`critical`. That critical check
 creates an alert candidate and blocks Supabase failover decision-making until a
 fresh healthy relay report exists.
 

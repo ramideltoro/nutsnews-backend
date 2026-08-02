@@ -107,11 +107,15 @@ The report includes only safe metadata:
 - `failed_table_count`;
 - generic `last_error` code.
 
-Lag over `180` seconds marks standby failover as blocked with
-`relay_lag_exceeds_threshold`. Missing or stopped relay timer state marks the
-check critical with `relay_timer_stopped` or `relay_report_missing`. Failed
-relay status, failed table checks, invalid report JSON, or missing safe-metadata
-marking also fail closed.
+The protected disabled tuple (`timer=inactive/disabled`,
+`service=inactive/static`, and a successful last unit result) reports
+`not_configured` with `expected_active=false` and remains ineligible for
+failover. When the relay is expected active, lag over `180` seconds marks
+standby failover as blocked with `relay_lag_exceeds_threshold`. Missing or
+stopped relay timer state then marks the check critical with
+`relay_timer_stopped` or `relay_report_missing`. Failed relay status, failed
+table checks, invalid report JSON, or missing safe-metadata marking also fail
+closed.
 
 Run the health report manually without email:
 

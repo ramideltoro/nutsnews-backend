@@ -380,6 +380,37 @@ def classify_supabase_sync_relay(report: dict[str, Any]) -> dict[str, Any]:
     service_enabled = unit_states.get(f"{service_unit}.enabled", "unavailable")
     service_result = unit_states.get(f"{service_unit}.result", "unavailable")
 
+    intentionally_disabled = (
+        timer_active == "inactive"
+        and timer_enabled == "disabled"
+        and service_active == "inactive"
+        and service_enabled == "static"
+        and service_result in {"success", "", "unavailable"}
+    )
+    if intentionally_disabled:
+        return {
+            "name": "supabase_sync_relay_health",
+            "status": "not_configured",
+            "summary": (
+                "configured=false reason=disabled_by_configuration "
+                f"timer={timer_active} timer_enabled={timer_enabled} "
+                f"service={service_active} service_enabled={service_enabled} "
+                f"service_result={service_result} standby_failover_blocked=true"
+            ),
+            "blockers": [],
+            "lag_seconds": None,
+            "lag_critical_seconds": SUPABASE_SYNC_RELAY_LAG_CRITICAL_SECONDS,
+            "last_applied_at_utc": "unknown",
+            "failed_table_count": None,
+            "max_table_lag_rows": None,
+            "last_error": "none",
+            "timer_state": timer_active,
+            "service_state": service_active,
+            "service_result": service_result,
+            "expected_active": False,
+            "safe_metadata_only": True,
+        }
+
     raw_report = command_stdout(report, "supabase_sync_relay_status").strip()
     blockers: list[str] = []
     last_applied_at = "unknown"
@@ -467,6 +498,7 @@ def classify_supabase_sync_relay(report: dict[str, Any]) -> dict[str, Any]:
         "timer_state": timer_active,
         "service_state": service_active,
         "service_result": service_result,
+        "expected_active": True,
         "safe_metadata_only": True,
     }
 

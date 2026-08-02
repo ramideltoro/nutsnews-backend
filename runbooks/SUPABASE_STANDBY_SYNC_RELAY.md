@@ -5,6 +5,13 @@ Supabase database synchronized from backend PostgreSQL primary. Backend
 PostgreSQL remains the normal read/write database. Supabase is only the
 backup/hot-standby target until a later owner-approved failover.
 
+> Operational state: suspended. Snapshot parity scans were found to exhaust the
+> shared production Supabase database even without target writes. Keep
+> `NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_ENABLED=false`; the Ansible baseline
+> stops and disables both the timer and any in-flight service. Re-enablement
+> requires reviewed incremental replication that does not scan whole tables on
+> the production API database.
+
 ## Safety Boundary
 
 - The relay runs on the backend host through systemd.
@@ -21,7 +28,7 @@ backup/hot-standby target until a later owner-approved failover.
 
 Use the protected backend apply workflow:
 
-1. Set `NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_ENABLED=true` in the
+1. Keep `NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_ENABLED=false` in the
    `production-backend` environment.
 2. Confirm `NUTSNEWS_PRODUCTION_SUPABASE_DB_URL` and
    `NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD` exist in the same
@@ -40,7 +47,7 @@ The workflow renders `/etc/nutsnews-supabase-sync-relay/relay.env` as
 - Timer: `nutsnews-supabase-sync-relay.timer`
 - Default interval: 60 seconds after the prior run finishes, with up to 10
   seconds of jitter
-- Service runtime ceiling: 120 seconds
+- Oneshot startup timeout: 120 seconds
 - Last safe report: `/var/lib/nutsnews/supabase-sync-relay/last-run.json`
   with mode `0644`
 
@@ -59,8 +66,14 @@ Each run validates parity before applying changes. If parity already passes,
 the relay exits without writing. Otherwise it copies only drifted tables, and
 its target update statement touches only rows whose values changed. Target
 lock waits are capped at 2 seconds, statements at 45 seconds, and systemd stops
-the entire service at 120 seconds. These limits intentionally prefer a stale,
+the entire oneshot start at 120 seconds. These limits intentionally prefer a stale,
 fail-closed standby over production database starvation.
+
+These bounds are defense in depth only; they do not authorize the snapshot
+timer to be enabled in production. Apply the baseline with the enable variable
+false to stop and disable the timer and any in-flight service. Verify
+`systemctl is-enabled` reports `disabled` and `systemctl is-active` reports
+`inactive` for both units.
 
 Useful backend-host checks:
 

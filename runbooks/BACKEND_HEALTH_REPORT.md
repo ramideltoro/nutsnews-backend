@@ -110,6 +110,12 @@ The standby relay health check reports only safe metadata:
 - generic `last_error` code;
 - `standby_failover_blocked`.
 
+The snapshot relay is intentionally suspended after its full-table parity scan
+was shown to exhaust the shared Supabase production database. While suspended,
+relay health stays fail-closed and Supabase failover remains blocked. Production
+availability takes precedence over claiming a current standby. Do not re-enable
+the timer until reviewed incremental replication replaces snapshot polling.
+
 Lag over `180 seconds`, missing relay status, invalid relay status, stopped relay
 timer, failed relay result, unknown failed-table count, or any failed replicated
 table marks `supabase_sync_relay_health` as `critical`. That critical check

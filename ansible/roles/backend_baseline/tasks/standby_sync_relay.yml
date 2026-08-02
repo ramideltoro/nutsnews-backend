@@ -110,7 +110,7 @@
       EnvironmentFile={{ backend_supabase_sync_relay_env_path }}
       WorkingDirectory={{ backend_supabase_sync_relay_state_dir }}
       ExecStart=/usr/bin/python3 {{ backend_supabase_sync_relay_runner_path }} --contract {{ backend_supabase_sync_relay_contract_path }} --mode sync-once --enforce --batch-size {{ backend_supabase_sync_relay_batch_size }} --output {{ backend_supabase_sync_relay_state_dir }}/last-run.json
-      RuntimeMaxSec=120s
+      TimeoutStartSec=120s
       TimeoutStopSec=15s
       KillMode=mixed
       NoNewPrivileges=true

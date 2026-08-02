@@ -225,6 +225,8 @@ prometheus.scrape "worker_uplift" {
       service          = "{{ target.service }}",
       stage            = "{{ target.stage }}",
       observability_contract = "{{ backend_metrics_worker_uplift_contract_status }}",
+      deployment_mode  = "{{ backend_metrics_worker_uplift_deployment_mode }}",
+      expected_active  = "{{ backend_metrics_worker_uplift_expected_active }}",
     },
 {% endfor %}
   ]
@@ -293,7 +295,7 @@ prometheus.relabel "worker_uplift" {
   // result/retry/token_kind remain temporarily for metrics already emitted by
   // the shadow images; all are finite enums and are removed at image rollout.
   rule {
-    regex  = "^(__name__|job|instance|environment|deployment_environment|host|service|service_namespace|version|revision|stage|queue|outcome|dependency|language|provider|probe|check|le|observability_contract|deployment|adapter|result|retry|retry_class|token_kind)$"
+    regex  = "^(__name__|job|instance|environment|deployment_environment|host|service|service_namespace|version|revision|stage|queue|outcome|dependency|language|provider|probe|check|le|observability_contract|deployment_mode|expected_active|deployment|adapter|result|retry|retry_class|token_kind)$"
     action = "labelkeep"
   }
 }
@@ -611,7 +613,9 @@ prometheus.relabel "rabbitmq_detailed" {
 
   rule {
     source_labels = ["queue"]
-    regex         = {{ backend_metrics_rabbitmq_queue_regex | to_json }}
+    // Preserve the target-level up/scrape families, which have no queue
+    // label, while keeping only the reviewed worker queues for queue metrics.
+    regex         = {{ backend_metrics_rabbitmq_queue_or_empty_regex | to_json }}
     action        = "keep"
   }
 

@@ -138,8 +138,8 @@ class BackendAlloyObservabilityTests(unittest.TestCase):
         self.assertIn("label_limit", alloy)
         self.assertIn("observability_contract", alloy)
         self.assertIn("backend_metrics_worker_uplift_contract_status", alloy)
-        self.assertNotIn("expected_active", alloy)
-        self.assertNotIn("deployment_mode", alloy)
+        self.assertIn("backend_metrics_worker_uplift_expected_active", alloy)
+        self.assertIn("backend_metrics_worker_uplift_deployment_mode", alloy)
         worker_relabel = alloy.split('prometheus.relabel "worker_uplift"', 1)[1].split("{% endif %}", 1)[0]
         self.assertIn(
             'target_label = "service_namespace"\n    replacement  = "nutsnews"',
@@ -151,7 +151,14 @@ class BackendAlloyObservabilityTests(unittest.TestCase):
         )
         self.assertIsNotNone(labelkeep)
         self.assertIn("service_namespace", labelkeep.group(1).split("|"))
-        for identity_label in ("version", "revision", "deployment", "adapter"):
+        for identity_label in (
+            "version",
+            "revision",
+            "deployment",
+            "adapter",
+            "deployment_mode",
+            "expected_active",
+        ):
             self.assertIn(identity_label, worker_relabel)
 
     def test_worker_alert_ownership_comes_only_from_authoritative_control_row(self):
@@ -171,14 +178,14 @@ class BackendAlloyObservabilityTests(unittest.TestCase):
         self.assertIn('uplift_production_writes != "false"', protected_apply)
         self.assertIn("backend_metrics_worker_uplift_contract_status: awaiting-qualified-v1", defaults)
         self.assertIn("backend_metrics_worker_uplift_contract_enabled: false", defaults)
-        self.assertIn("selectattr('deployment_mode', 'defined')", tasks)
-        self.assertIn("selectattr('expected_active', 'defined')", tasks)
+        self.assertIn("backend_metrics_worker_uplift_deployment_mode in ['shadow', 'production']", tasks)
+        self.assertIn("backend_metrics_worker_uplift_expected_active in ['0', '1']", tasks)
         self.assertNotIn("NUTSNEWS_WORKER_UPLIFT_EXPECTED_ACTIVE", exporter)
         self.assertNotIn("NUTSNEWS_WORKER_UPLIFT_DEPLOYMENT_MODE", exporter)
-        self.assertNotIn("backend_metrics_worker_uplift_expected_active", tasks)
-        self.assertNotIn("backend_metrics_worker_uplift_deployment_mode", tasks)
-        self.assertNotIn("expected_active", alloy)
-        self.assertNotIn("deployment_mode", alloy)
+        self.assertIn('backend_metrics_worker_uplift_expected_active: "0"', defaults)
+        self.assertIn("backend_metrics_worker_uplift_deployment_mode: shadow", defaults)
+        self.assertIn("backend_metrics_worker_uplift_expected_active", alloy)
+        self.assertIn("backend_metrics_worker_uplift_deployment_mode", alloy)
 
     def test_host_and_alloy_self_have_distinct_scrape_identities(self):
         alloy = ALLOY.read_text(encoding="utf-8")

@@ -165,6 +165,10 @@ run `status`, inspect the scheduler readiness dependencies and current
 `checkedAt`, inspect bounded scheduler logs for one publisher-confirm event, and
 inspect the fetch queue for consumer health and drain. The evidence must retain
 `mode=shadow`, `production_writes_enabled=false`, and legacy ingestion ownership.
+The production scheduler cadence and lease are both bounded at 300 seconds;
+the backend manifest must not inject a lease above the scheduler's 300-second
+contract. Runtime `status` fails when any configured service readiness endpoint
+is unavailable, including producer-only services such as the scheduler.
 If a dependency fails closed after deployment, use the protected `rollback`
 operation for the scheduler only; do not change the dependency mode, queue
 topology, DNS/failover state, or production-write gate to make readiness pass.

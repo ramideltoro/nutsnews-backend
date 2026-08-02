@@ -336,7 +336,37 @@ class WorkerRuntimeManagerTests(unittest.TestCase):
                 report = manager.build_report(args, manager.load_json(manifest_path))
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["missing_consumers"], [])
+        self.assertEqual(report["unhealthy_readiness"], [])
         self.assertEqual(report["services"]["scheduler"]["consumer_readiness"]["status"], "not_applicable")
+        rabbitmq.assert_not_called()
+
+    def test_status_fails_when_scheduler_readiness_is_unhealthy(self):
+        manager = load_manager()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            manifest_path = root / "services.json"
+            compose_path = root / "compose.yml"
+            manifest_path.write_text(json.dumps(scheduler_manifest()), encoding="utf-8")
+            compose_path.write_text("services: {}\n", encoding="utf-8")
+            args = manager.parse_args(
+                [
+                    "status",
+                    "--manifest",
+                    str(manifest_path),
+                    "--compose",
+                    str(compose_path),
+                ]
+            )
+            with (
+                mock.patch.object(manager, "run_command", return_value={"returncode": 0, "stdout": "[]", "stderr": ""}),
+                mock.patch.object(manager, "rabbitmq_get_json") as rabbitmq,
+                mock.patch.object(manager, "http_get_local", return_value={"status": "critical", "error": "URLError"}),
+            ):
+                report = manager.build_report(args, manager.load_json(manifest_path))
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["missing_consumers"], [])
+        self.assertEqual(report["unhealthy_readiness"], ["scheduler"])
+        self.assertIn("required service readiness is not healthy", report["errors"])
         rabbitmq.assert_not_called()
 
     def test_queue_inspect_fails_when_declared_consumer_count_is_zero(self):

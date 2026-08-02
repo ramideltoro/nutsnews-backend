@@ -252,7 +252,7 @@ class BackendHealthReportTests(unittest.TestCase):
         self.assertEqual(alerts[0]["failure_class"], "supabase_sync_relay_lag")
         self.assertIn("standby_failover_blocked=true", alerts[0]["message"])
 
-    def test_supabase_sync_relay_missing_or_stopped_is_critical_alert(self):
+    def test_supabase_sync_relay_intentionally_disabled_is_not_configured(self):
         checks, _ = backend_health_report.classify(
             fixture_report(
                 supabase_sync_relay_unit_states=command(relay_unit_states(timer_active="inactive", timer_enabled="disabled")),
@@ -261,7 +261,23 @@ class BackendHealthReportTests(unittest.TestCase):
         )
         by_name = {item["name"]: item for item in checks}
         relay = by_name["supabase_sync_relay_health"]
+        self.assertEqual(relay["status"], "not_configured")
+        self.assertFalse(relay["expected_active"])
+        self.assertIn("reason=disabled_by_configuration", relay["summary"])
+        self.assertEqual(backend_health_report.current_alerts_from_checks([relay]), [])
+
+    def test_supabase_sync_relay_expected_but_stopped_is_critical_alert(self):
+        checks, _ = backend_health_report.classify(
+            fixture_report(
+                supabase_sync_relay_unit_states=command(
+                    relay_unit_states(timer_active="inactive", timer_enabled="enabled")
+                ),
+                supabase_sync_relay_status=command("not_configured\n"),
+            )
+        )
+        relay = {item["name"]: item for item in checks}["supabase_sync_relay_health"]
         self.assertEqual(relay["status"], "critical")
+        self.assertTrue(relay["expected_active"])
         self.assertIn("relay_timer_stopped", relay["blockers"])
         self.assertIn("relay_report_missing", relay["blockers"])
         alerts = backend_health_report.current_alerts_from_checks([relay])

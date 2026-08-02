@@ -896,7 +896,15 @@ class BackendMetricsTests(unittest.TestCase):
                 mock.patch.object(metrics, "POSTGRES_STATE_DIR", postgres_dir),
                 mock.patch.object(metrics, "POSTGRES_REPLICATION_HEALTH_PATH", postgres_dir / "replication-health.json"),
                 mock.patch.object(metrics, "SUPABASE_SYNC_RELAY_STATE_PATH", relay_path),
-                mock.patch.object(metrics, "shell", return_value="0"),
+                mock.patch.object(
+                    metrics,
+                    "shell",
+                    side_effect=lambda command: (
+                        "enabled"
+                        if "is-enabled nutsnews-supabase-sync-relay.timer" in command
+                        else "0"
+                    ),
+                ),
                 mock.patch.object(metrics, "service_active", return_value=1),
                 mock.patch.object(metrics, "postgres_json_query", return_value=None),
                 mock.patch.object(metrics, "fetch_json_url", return_value=None),
@@ -911,6 +919,7 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertIn("nutsnews_backend_postgres_replication_max_lag_seconds 12", output)
         self.assertIn("nutsnews_backend_metric_exporter_available 1", output)
         self.assertIn("nutsnews_backend_sync_relay_available 1", output)
+        self.assertIn("nutsnews_backend_sync_relay_expected_active 1", output)
         self.assertIn("nutsnews_backend_sync_relay_healthy 1", output)
         self.assertIn("nutsnews_backend_sync_relay_failed_table_count 0", output)
         self.assertIn("nutsnews_backend_sync_relay_last_success_timestamp_seconds", output)
@@ -1072,7 +1081,15 @@ class BackendMetricsTests(unittest.TestCase):
                     postgres_dir / "replication-health.json",
                 ),
                 mock.patch.object(metrics, "SUPABASE_SYNC_RELAY_STATE_PATH", relay_path),
-                mock.patch.object(metrics, "shell", return_value="0"),
+                mock.patch.object(
+                    metrics,
+                    "shell",
+                    side_effect=lambda command: (
+                        "enabled"
+                        if "is-enabled nutsnews-supabase-sync-relay.timer" in command
+                        else "0"
+                    ),
+                ),
                 mock.patch.object(metrics, "service_active", return_value=1),
                 mock.patch.object(metrics, "postgres_json_query", return_value=None),
                 mock.patch.object(metrics, "fetch_json_url", return_value=None),
@@ -1088,6 +1105,56 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertNotIn("nutsnews_backend_sync_relay_last_success_timestamp_seconds 0", output)
         self.assertNotIn("nutsnews_backend_sync_relay_last_success_age_seconds -1", output)
         self.assertIn("nutsnews_backend_sync_relay_healthy 0", output)
+
+    def test_disabled_sync_relay_overrides_stale_report_with_explicit_state(self):
+        metrics = load_metrics_module()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            relay_path = root / "relay.json"
+            relay_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "status": "fail",
+                        "mode": "sync-once",
+                        "checked_at_utc": "2026-08-01T03:59:00Z",
+                        "finished_at_utc": "2026-08-01T03:59:00Z",
+                        "safe_metadata_only": True,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(metrics, "BACKUP_STATE_DIR", root / "backups"),
+                mock.patch.object(metrics, "RABBITMQ_RECOVERY_STATE_DIR", root / "rabbitmq"),
+                mock.patch.object(metrics, "POSTGRES_STATE_DIR", root / "postgres"),
+                mock.patch.object(
+                    metrics,
+                    "POSTGRES_REPLICATION_HEALTH_PATH",
+                    root / "postgres" / "replication-health.json",
+                ),
+                mock.patch.object(metrics, "SUPABASE_SYNC_RELAY_STATE_PATH", relay_path),
+                mock.patch.object(
+                    metrics,
+                    "shell",
+                    side_effect=lambda command: (
+                        "disabled"
+                        if "is-enabled nutsnews-supabase-sync-relay.timer" in command
+                        else "0"
+                    ),
+                ),
+                mock.patch.object(metrics, "service_active", return_value=0),
+                mock.patch.object(metrics, "postgres_json_query", return_value=None),
+                mock.patch.object(metrics, "fetch_json_url", return_value=None),
+            ):
+                output = "\n".join(metrics.collect())
+
+        self.assertIn("nutsnews_backend_sync_relay_expected_active 0", output)
+        self.assertIn("nutsnews_backend_sync_relay_available 1", output)
+        self.assertIn("nutsnews_backend_sync_relay_collector_fresh 1", output)
+        self.assertIn('nutsnews_backend_sync_relay_status{status="not_configured"} 1', output)
+        self.assertIn("nutsnews_backend_sync_relay_lag_seconds -1", output)
+        self.assertIn("nutsnews_backend_sync_relay_failed_table_count -1", output)
 
     def test_durable_content_metrics_are_real_bounded_aggregates(self):
         metrics = load_metrics_module()

@@ -1065,6 +1065,15 @@ def service_active(service: str) -> int:
     return 1 if shell(f"systemctl is-active {service} 2>/dev/null || true") == "active" else 0
 
 
+def service_enabled(service: str) -> int:
+    return (
+        1
+        if shell(f"systemctl is-enabled {service} 2>/dev/null || true")
+        in {"enabled", "static"}
+        else 0
+    )
+
+
 def backup_stage_status(stage: str, data: dict[str, Any]) -> tuple[str, int]:
     status = str(data.get("freshness_status") or data.get("status") or "not_configured")
     if status not in STATUS_VALUE:
@@ -2038,6 +2047,9 @@ def collect() -> list[str]:
     )
 
     relay = read_json(SUPABASE_SYNC_RELAY_STATE_PATH)
+    relay_expected_active = bool(
+        service_enabled("nutsnews-supabase-sync-relay.timer")
+    )
     raw_relay_status = str(relay.get("status") or "not_configured")
     relay_status = (
         raw_relay_status
@@ -2069,10 +2081,21 @@ def collect() -> list[str]:
         and timestamp_seconds(relay_checked_at) is not None
         and timestamp_seconds(relay_finished_at) is not None
     )
+    if not relay_expected_active:
+        relay_status = "not_configured"
+        relay_available = True
+        relay_collector_age = 0
+        relay_collector_fresh = True
+        failed_table_count = None
+        max_table_lag_rows = None
+        relay_lag_seconds = None
+        last_success_timestamp = None
     sync = relay.get("sync", {})
     post_sync = relay.get("post_sync", {})
     relay_healthy = (
-        relay_status == "pass"
+        relay_expected_active
+        and service_active("nutsnews-supabase-sync-relay.timer") == 1
+        and relay_status == "pass"
         and relay.get("mode") == "sync-once"
         and isinstance(sync, dict)
         and sync.get("status") == "applied"
@@ -2086,6 +2109,12 @@ def collect() -> list[str]:
     )
     lines.extend(
         [
+            "# HELP nutsnews_backend_sync_relay_expected_active Whether the reviewed deployment mode requires the sync relay to run.",
+            "# TYPE nutsnews_backend_sync_relay_expected_active gauge",
+            metric(
+                "nutsnews_backend_sync_relay_expected_active",
+                1 if relay_expected_active else 0,
+            ),
             "# HELP nutsnews_backend_sync_relay_available Whether sync-relay telemetry is available.",
             "# TYPE nutsnews_backend_sync_relay_available gauge",
             metric("nutsnews_backend_sync_relay_available", 1 if relay_available else 0),

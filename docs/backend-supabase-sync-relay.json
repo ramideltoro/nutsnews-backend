@@ -30,6 +30,7 @@
     "network_path": "backend_host_outbound_to_supabase_postgresql"
   },
   "relay": {
+    "operational_state": "suspended-until-incremental-replication",
     "direction": "backend-postgres-to-existing-production-supabase",
     "runtime": "backend-host-systemd-timer",
     "service": "nutsnews-supabase-sync-relay.service",
@@ -43,7 +44,7 @@
       "sequence-readiness"
     ],
     "apply_strategy": "validate-parity-skip-mutation-when-current-otherwise-copy-only-drifted-tables-and-update-only-changed-rows",
-    "runtime_limit_seconds": 120,
+    "startup_timeout_seconds": 120,
     "target_lock_timeout_seconds": 2,
     "target_statement_timeout_seconds": 45,
     "schedule_basis": "seconds-after-prior-run-finishes",
@@ -108,6 +109,8 @@
     }
   },
   "safety": {
+    "snapshot_timer_must_remain_disabled": true,
+    "reenable_requires_incremental_replication": true,
     "safe_metadata_only_report": true,
     "backend_postgresql_remains_primary": true,
     "target_is_existing_production_supabase": true,

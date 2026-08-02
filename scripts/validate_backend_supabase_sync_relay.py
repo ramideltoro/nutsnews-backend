@@ -22,6 +22,7 @@ CHECKS_PATH = ROOT / ".github" / "workflows" / "backend-checks.yml"
 APPLY_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "protected-backend-ansible-apply.yml"
 DEFAULTS_PATH = ROOT / "ansible" / "roles" / "backend_baseline" / "defaults" / "main.yml"
 TASKS_PATH = ROOT / "ansible" / "roles" / "backend_baseline" / "tasks" / "standby_sync_relay.yml"
+DISABLED_TASKS_PATH = ROOT / "ansible" / "roles" / "backend_baseline" / "tasks" / "standby_sync_relay_disabled.yml"
 MAIN_TASKS_PATH = ROOT / "ansible" / "roles" / "backend_baseline" / "tasks" / "main.yml"
 RELATION_RE = re.compile(r"^public\.[a-z_][a-z0-9_]*$")
 SECRET_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
@@ -106,6 +107,7 @@ def main() -> int:
     apply_workflow = APPLY_WORKFLOW_PATH.read_text(encoding="utf-8") if APPLY_WORKFLOW_PATH.exists() else ""
     defaults = DEFAULTS_PATH.read_text(encoding="utf-8") if DEFAULTS_PATH.exists() else ""
     relay_tasks = TASKS_PATH.read_text(encoding="utf-8") if TASKS_PATH.exists() else ""
+    disabled_tasks = DISABLED_TASKS_PATH.read_text(encoding="utf-8") if DISABLED_TASKS_PATH.exists() else ""
     main_tasks = MAIN_TASKS_PATH.read_text(encoding="utf-8") if MAIN_TASKS_PATH.exists() else ""
     errors: list[str] = []
 
@@ -131,7 +133,8 @@ def main() -> int:
     require(relay.get("direction") == "backend-postgres-to-existing-production-supabase", "relay direction is incorrect", errors)
     require(relay.get("runtime") == "backend-host-systemd-timer", "relay runtime must be backend-host systemd timer", errors)
     require(relay.get("interval_seconds") == 60, "relay interval must be 60 seconds", errors)
-    require(relay.get("runtime_limit_seconds") == 120, "relay runtime limit must be 120 seconds", errors)
+    require(relay.get("operational_state") == "suspended-until-incremental-replication", "snapshot relay must be suspended", errors)
+    require(relay.get("startup_timeout_seconds") == 120, "relay startup timeout must be 120 seconds", errors)
     require(relay.get("target_lock_timeout_seconds") == 2, "relay lock timeout must be 2 seconds", errors)
     require(relay.get("target_statement_timeout_seconds") == 45, "relay statement timeout must be 45 seconds", errors)
     require(relay.get("app_worker_supabase_write_credentials_injected") is False, "relay must not inject app/worker Supabase write credentials", errors)
@@ -142,6 +145,8 @@ def main() -> int:
 
     safety = contract.get("safety", {})
     require(safety.get("safe_metadata_only_report") is True, "relay reports must be safe metadata only", errors)
+    require(safety.get("snapshot_timer_must_remain_disabled") is True, "snapshot relay timer must remain disabled", errors)
+    require(safety.get("reenable_requires_incremental_replication") is True, "relay re-enable must require incremental replication", errors)
     require(safety.get("backend_postgresql_remains_primary") is True, "backend PostgreSQL must remain primary", errors)
     require(safety.get("target_is_existing_production_supabase") is True, "target must be existing production Supabase", errors)
     require(safety.get("app_worker_writes_to_supabase_before_failover") is False, "app/worker Supabase writes must stay disabled", errors)
@@ -220,8 +225,11 @@ def main() -> int:
     ):
         require(token in defaults, f"defaults missing token: {token}", errors)
     for token in (
-        "standby_sync_relay.yml",
+        "standby_sync_relay_disabled.yml",
         "backend_supabase_sync_relay_enabled | bool",
+        "not (backend_supabase_sync_relay_enabled | bool)",
+        "Guard against re-enabling snapshot-based Supabase relay",
+        "Snapshot-based Supabase relay cannot be enabled",
     ):
         require(token in main_tasks, f"main tasks missing token: {token}", errors)
     for token in (
@@ -233,12 +241,20 @@ def main() -> int:
         "mode: \"0755\"",
         "safe_report_path",
         "NoNewPrivileges=true",
-        "RuntimeMaxSec=120s",
+        "TimeoutStartSec=120s",
         "OnUnitInactiveSec={{ backend_supabase_sync_relay_interval_seconds }}s",
         "RandomizedDelaySec=10s",
         "app/worker services do not receive Supabase write credentials",
     ):
         require(token in relay_tasks, f"relay Ansible tasks missing token: {token}", errors)
+    for token in (
+        "nutsnews-supabase-sync-relay.timer",
+        "enabled: false",
+        "state: stopped",
+        "Stop any in-flight backend Supabase sync relay service",
+        "reenable_boundary: replace snapshot polling with reviewed incremental replication",
+    ):
+        require(token in disabled_tasks, f"relay suspension tasks missing token: {token}", errors)
     for token in (
         "set local lock_timeout = '2s'",
         "set local statement_timeout = '45s'",

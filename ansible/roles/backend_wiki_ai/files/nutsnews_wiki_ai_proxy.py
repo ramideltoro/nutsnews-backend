@@ -25,6 +25,7 @@ class ProxyConfig:
     upstream_host: str
     upstream_port: int
     upstream_timeout_seconds: int
+    queue_wait_seconds: int
 
 
 def _bounded_integer(
@@ -78,6 +79,13 @@ def load_config(env: dict[str, str] | os._Environ[str] = os.environ) -> ProxyCon
             30,
             3600,
         ),
+        queue_wait_seconds=_bounded_integer(
+            env,
+            "NUTSNEWS_WIKI_AI_QUEUE_WAIT_SECONDS",
+            600,
+            1,
+            900,
+        ),
     )
 
 
@@ -127,6 +135,7 @@ class WikiAIHTTPServer(ThreadingHTTPServer):
         super().__init__(address, WikiAIHandler)
         self.config = config
         self.inference_slot = threading.BoundedSemaphore(value=1)
+        self.waiter_slot = threading.BoundedSemaphore(value=1)
 
 
 class WikiAIHandler(BaseHTTPRequestHandler):
@@ -141,6 +150,10 @@ class WikiAIHandler(BaseHTTPRequestHandler):
     @property
     def inference_slot(self) -> threading.BoundedSemaphore:
         return self.server.inference_slot  # type: ignore[attr-defined]
+
+    @property
+    def waiter_slot(self) -> threading.BoundedSemaphore:
+        return self.server.waiter_slot  # type: ignore[attr-defined]
 
     def do_GET(self) -> None:
         if self.path != "/health":
@@ -204,7 +217,8 @@ class WikiAIHandler(BaseHTTPRequestHandler):
             self._json_response(400, {"error": "invalid_request", "detail": str(error), "request_id": request_id})
             self._audit(request_id, 400, started)
             return
-        if not self.inference_slot.acquire(blocking=False):
+        acquired = self.inference_slot.acquire(blocking=False)
+        if not acquired and not self.waiter_slot.acquire(blocking=False):
             self._json_response(
                 429,
                 {"error": "wiki_ai_busy", "request_id": request_id},
@@ -212,6 +226,19 @@ class WikiAIHandler(BaseHTTPRequestHandler):
             )
             self._audit(request_id, 429, started)
             return
+        if not acquired:
+            try:
+                acquired = self.inference_slot.acquire(timeout=self.config.queue_wait_seconds)
+            finally:
+                self.waiter_slot.release()
+            if not acquired:
+                self._json_response(
+                    429,
+                    {"error": "wiki_ai_queue_timeout", "request_id": request_id},
+                    extra_headers={"Retry-After": "30"},
+                )
+                self._audit(request_id, 429, started)
+                return
         try:
             status = self._relay_response(raw, request_id)
         finally:

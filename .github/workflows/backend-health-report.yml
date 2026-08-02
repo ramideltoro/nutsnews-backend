@@ -34,10 +34,22 @@ jobs:
       - name: Prepare read-only SSH material
         shell: bash
         env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
           NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
           NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
+
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          if [[ "$NUTSNEWS_BACKEND_HOST" != "65.75.201.18" ]]; then
+            echo "NUTSNEWS_BACKEND_HOST must be the canonical backend IPv4 address." >&2
+            exit 1
+          fi
+          if [[ "$ssh_user" != "rami" ]]; then
+            echo "NUTSNEWS_BACKEND_ANSIBLE_USER must select the fixed read-only audit account." >&2
+            exit 1
+          fi
 
           missing=0
           for secret_name in NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
@@ -58,7 +70,7 @@ jobs:
           chmod 0600 "$HOME/.ssh/known_hosts"
 
           ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend_report" > /dev/null
-          ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
+          ssh-keygen -F "$NUTSNEWS_BACKEND_HOST" -f "$HOME/.ssh/known_hosts" > /dev/null
 
       - name: Download previous health report state
         shell: bash
@@ -85,7 +97,8 @@ jobs:
               --dir "$RUNNER_TEMP/previous-health" || true
           fi
 
-      - name: Generate report
+      - name: Generate report and bounded publication event
+        id: generate_report
         shell: bash
         env:
           NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
@@ -116,7 +129,48 @@ jobs:
             args+=(--send-email)
           fi
 
-          python3 scripts/backend_health_report.py "${args[@]}"
+          report_exit=0
+          python3 scripts/backend_health_report.py "${args[@]}" || report_exit=$?
+
+          umask 077
+          python3 ansible/roles/backend_baseline/files/nutsnews_health_audit_state.py event \
+            --report "$RUNNER_TEMP/backend-health-report.json" \
+            > "$RUNNER_TEMP/backend-health-audit-event.json"
+
+          exit "$report_exit"
+
+      - name: Publish bounded health-audit state to backend
+        if: ${{ always() && vars.NUTSNEWS_HEALTH_AUDIT_REMOTE_PUBLISH_ENABLED == 'true' }}
+        shell: bash
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+        run: |
+          set -euo pipefail
+
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          if [[ "$NUTSNEWS_BACKEND_HOST" != "65.75.201.18" || "$ssh_user" != "rami" ]]; then
+            echo "Refusing health-audit publication to a non-canonical SSH target." >&2
+            exit 1
+          fi
+          if [[ ! -s "$RUNNER_TEMP/backend-health-audit-event.json" ]]; then
+            echo "The bounded health-audit event was not produced." >&2
+            exit 1
+          fi
+
+          ssh_args=(
+            -i "$HOME/.ssh/nutsnews_backend_report"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o "UserKnownHostsFile=$HOME/.ssh/known_hosts"
+            -o ConnectTimeout=10
+          )
+          timeout 30s ssh "${ssh_args[@]}" \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            'sudo -n /usr/local/sbin/nutsnews-health-audit-state write' \
+            < "$RUNNER_TEMP/backend-health-audit-event.json"
+          echo "- Remote bounded state publication: \`success\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload health report
         if: always()

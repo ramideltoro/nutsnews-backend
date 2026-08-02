@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ DEFAULT_CONTRACT = ROOT / "docs" / "backend-supabase-sync-relay.json"
 DEFAULT_SOURCE_ENV = "NUTSNEWS_BACKEND_PRIMARY_DB_URL"
 DEFAULT_TARGET_ENV = "NUTSNEWS_PRODUCTION_SUPABASE_DB_URL"
 DEFAULT_BATCH_SIZE = 500
+REPORT_SCHEMA_VERSION = 2
 
 
 class RelayError(Exception):
@@ -44,6 +46,145 @@ def safe_contract_path(path: Path) -> str:
     except ValueError:
         pass
     return str(path)
+
+
+def safe_utc_timestamp(value: Any) -> str | None:
+    """Return a bounded UTC timestamp, rejecting arbitrary persisted content."""
+    if not isinstance(value, str) or not value or len(value) > 40:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
+        return None
+    return value
+
+
+def successful_sync_timestamp(report: dict[str, Any]) -> str | None:
+    """Return the completion time only for a fully validated sync-once run."""
+    sync = report.get("sync", {})
+    post_sync = report.get("post_sync", {})
+    validation_summary = report.get("validation_summary", {})
+    if not (
+        report.get("safe_metadata_only") is True
+        and report.get("mode") == "sync-once"
+        and report.get("status") == "pass"
+        and isinstance(sync, dict)
+        and sync.get("status") == "applied"
+        and isinstance(post_sync, dict)
+        and post_sync.get("status") == "pass"
+        and isinstance(validation_summary, dict)
+        and validation_summary.get("complete") is True
+        and validation_summary.get("failed_table_count") == 0
+        and validation_summary.get("max_table_lag_rows") == 0
+    ):
+        return None
+    return safe_utc_timestamp(report.get("completed_at_utc"))
+
+
+def load_relay_history(path: Path | None) -> dict[str, str]:
+    """Load only durable success timestamps from a previous safe report."""
+    if path is None or not path.exists():
+        return {}
+    try:
+        previous = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(previous, dict) or previous.get("safe_metadata_only") is not True:
+        return {}
+
+    successful_at = successful_sync_timestamp(previous)
+    last_applied_at = safe_utc_timestamp(previous.get("last_applied_at_utc")) or successful_at
+    legacy_success = (
+        previous.get("schema_version") is None
+        and previous.get("status") == "pass"
+        and previous.get("mode") == "sync-once"
+        and isinstance(previous.get("sync"), dict)
+        and previous["sync"].get("status") == "applied"
+        and isinstance(previous.get("post_sync"), dict)
+        and previous["post_sync"].get("status") == "pass"
+    )
+    last_success_at = (
+        safe_utc_timestamp(previous.get("last_success_at_utc"))
+        or successful_at
+        or (last_applied_at if legacy_success else None)
+    )
+    history: dict[str, str] = {}
+    if last_success_at is not None:
+        history["last_success_at_utc"] = last_success_at
+    if last_applied_at is not None:
+        history["last_applied_at_utc"] = last_applied_at
+    return history
+
+
+def preserve_relay_history(report: dict[str, Any], history: dict[str, str]) -> None:
+    """Advance history on a validated sync and preserve it on later failures."""
+    successful_at = successful_sync_timestamp(report)
+    if successful_at is not None:
+        report["last_success_at_utc"] = successful_at
+        report["last_applied_at_utc"] = successful_at
+        return
+    for field in ("last_success_at_utc", "last_applied_at_utc"):
+        value = safe_utc_timestamp(history.get(field))
+        if value is not None:
+            report[field] = value
+
+
+def relay_validation_summary(post_sync: Any, expected_table_count: int) -> dict[str, Any]:
+    """Summarize complete post-sync table validation without treating skips as failures."""
+    summary: dict[str, Any] = {
+        "expected_table_count": expected_table_count,
+        "validated_table_count": 0,
+        "failed_table_count": None,
+        "max_table_lag_rows": None,
+        "complete": False,
+        "safe_metadata_only": True,
+    }
+    if not isinstance(post_sync, dict) or post_sync.get("status") not in {"pass", "fail"}:
+        return summary
+    checks = post_sync.get("checks")
+    if not isinstance(checks, list):
+        return summary
+    table_checks = [
+        check
+        for check in checks
+        if isinstance(check, dict) and str(check.get("id", "")).startswith("table.")
+    ]
+    summary["validated_table_count"] = len(table_checks)
+    ids = [str(check.get("id")) for check in table_checks]
+    statuses_valid = all(check.get("status") in {"pass", "fail"} for check in table_checks)
+    coverage_complete = (
+        expected_table_count > 0
+        and len(table_checks) == expected_table_count
+        and len(set(ids)) == expected_table_count
+        and statuses_valid
+    )
+    if not coverage_complete:
+        return summary
+
+    summary["complete"] = True
+    summary["failed_table_count"] = sum(1 for check in table_checks if check.get("status") == "fail")
+    lag_rows = [check.get("target_lag_rows") for check in table_checks]
+    if all(type(value) is int and value >= 0 for value in lag_rows):
+        summary["max_table_lag_rows"] = max(lag_rows, default=0)
+    return summary
+
+
+def write_report_atomic(path: Path, text: str) -> None:
+    """Replace the safe report atomically so collectors never read a partial JSON file."""
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        delete=False,
+    ) as handle:
+        handle.write(text)
+        handle.write("\n")
+        temporary_path = Path(handle.name)
+    temporary_path.chmod(0o644)
+    temporary_path.replace(path)
 
 
 def relation_identity_sql(relation: reconcile.Relation) -> str:
@@ -243,6 +384,7 @@ def build_report(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     target_db_url = os.environ.get(args.target_db_url_env, "").strip()
     credentials_present = bool(source_db_url and target_db_url)
     report: dict[str, Any] = {
+        "schema_version": REPORT_SCHEMA_VERSION,
         "status": "blocked",
         "mode": args.mode,
         "checked_at_utc": reconcile.utc_now(),
@@ -264,6 +406,7 @@ def build_report(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         "app_worker_writes_to_supabase_before_failover": False,
         "app_worker_supabase_write_credentials_injected": False,
         "safe_metadata_only": True,
+        "validation_summary": relay_validation_summary(None, len(contract.get("tables", []))),
     }
 
     if args.offline or not credentials_present:
@@ -296,10 +439,12 @@ def build_report(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     post_sync = reconcile.validate_standby(contract, source_db_url, target_db_url)
     completed_at_utc = reconcile.utc_now()
     report["completed_at_utc"] = completed_at_utc
-    if post_sync["status"] == "pass":
-        report["last_applied_at_utc"] = completed_at_utc
     report["sync"] = sync_result
     report["post_sync"] = post_sync
+    report["validation_summary"] = relay_validation_summary(
+        post_sync,
+        len(contract.get("tables", [])),
+    )
     report["status"] = post_sync["status"]
     return report, 0 if (not args.enforce or post_sync["status"] == "pass") else 1
 
@@ -322,11 +467,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main_args(argv: list[str] | None = None) -> int:
     args: argparse.Namespace | None = None
+    output_path: Path | None = None
+    history: dict[str, str] = {}
     try:
         args = parse_args(argv)
+        output_path = Path(args.output) if args.output else None
+        history = load_relay_history(output_path)
         report, exit_code = build_report(args)
     except RelayError as exc:
         report = {
+            "schema_version": REPORT_SCHEMA_VERSION,
             "status": "fail",
             "checked_at_utc": reconcile.utc_now(),
             "error": str(exc),
@@ -335,6 +485,7 @@ def main_args(argv: list[str] | None = None) -> int:
         exit_code = 1
     except Exception:
         report = {
+            "schema_version": REPORT_SCHEMA_VERSION,
             "status": "fail",
             "checked_at_utc": reconcile.utc_now(),
             "error": "unexpected_sync_relay_error",
@@ -342,12 +493,11 @@ def main_args(argv: list[str] | None = None) -> int:
         }
         exit_code = 1
 
+    report["finished_at_utc"] = safe_utc_timestamp(report.get("completed_at_utc")) or reconcile.utc_now()
+    preserve_relay_history(report, history)
     text = json.dumps(report, indent=2, sort_keys=True)
-    output = args.output if args is not None else ""
-    if output:
-        output_path = Path(output)
-        output_path.write_text(text + "\n", encoding="utf-8")
-        output_path.chmod(0o644)
+    if output_path is not None:
+        write_report_atomic(output_path, text)
     print(text)
     return exit_code
 

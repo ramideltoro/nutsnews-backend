@@ -280,6 +280,18 @@ def load_previous_report(path: str) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def preserved_last_success(previous_report: dict[str, Any], run_at: str) -> str | None:
+    """Return only a well-formed prior success that does not postdate this run."""
+    previous_success = previous_report.get("last_report_success_at")
+    if not isinstance(previous_success, str):
+        return None
+    success_at = parse_utc_datetime(previous_success)
+    current_run = parse_utc_datetime(run_at)
+    if success_at is None or current_run is None or success_at > current_run:
+        return None
+    return success_at.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
 def status_from_backup_section(section: dict[str, Any]) -> str:
     status = str(section.get("freshness_status") or section.get("status") or "not_configured")
     if status == "ok":
@@ -312,28 +324,32 @@ def status_from_replication(replication: dict[str, Any]) -> str:
     return "not_configured"
 
 
-def relay_failed_table_count(relay_report: dict[str, Any]) -> int | None:
-    post_sync = relay_report.get("post_sync", {})
-    checks = post_sync.get("checks") if isinstance(post_sync, dict) else None
-    if isinstance(checks, list):
-        return sum(
-            1
-            for check in checks
-            if isinstance(check, dict)
-            and str(check.get("id", "")).startswith("table.")
-            and str(check.get("status", "unknown")) != "pass"
-        )
+def relay_validation_values(relay_report: dict[str, Any]) -> tuple[int | None, int | None, bool]:
+    summary = relay_report.get("validation_summary", {})
+    if not isinstance(summary, dict) or summary.get("safe_metadata_only") is not True:
+        return None, None, False
+    expected = summary.get("expected_table_count")
+    validated = summary.get("validated_table_count")
+    failed = summary.get("failed_table_count")
+    max_lag_rows = summary.get("max_table_lag_rows")
+    complete = (
+        summary.get("complete") is True
+        and type(expected) is int
+        and expected > 0
+        and type(validated) is int
+        and validated == expected
+        and type(failed) is int
+        and 0 <= failed <= expected
+    )
+    if not complete:
+        return None, None, False
+    normalized_lag = max_lag_rows if type(max_lag_rows) is int and max_lag_rows >= 0 else None
+    return failed, normalized_lag, True
 
-    sync = relay_report.get("sync", {})
-    tables = sync.get("tables") if isinstance(sync, dict) else None
-    if isinstance(tables, list):
-        return sum(
-            1
-            for table in tables
-            if isinstance(table, dict)
-            and str(table.get("status", "unknown")) not in {"applied", "pass"}
-        )
-    return None
+
+def relay_failed_table_count(relay_report: dict[str, Any]) -> int | None:
+    failed, _, complete = relay_validation_values(relay_report)
+    return failed if complete else None
 
 
 def relay_safe_last_error(relay_report: dict[str, Any]) -> str:
@@ -369,6 +385,7 @@ def classify_supabase_sync_relay(report: dict[str, Any]) -> dict[str, Any]:
     last_applied_at = "unknown"
     lag_seconds: int | None = None
     failed_table_count: int | None = None
+    max_table_lag_rows: int | None = None
     last_error = "none"
 
     if timer_active != "active":
@@ -389,16 +406,24 @@ def classify_supabase_sync_relay(report: dict[str, Any]) -> dict[str, Any]:
 
         if isinstance(relay_report, dict) and relay_report:
             relay_status = str(relay_report.get("status") or "unknown")
-            if relay_status != "pass":
+            sync = relay_report.get("sync", {})
+            post_sync = relay_report.get("post_sync", {})
+            successful_sync = (
+                relay_status == "pass"
+                and relay_report.get("mode") == "sync-once"
+                and isinstance(sync, dict)
+                and sync.get("status") == "applied"
+                and isinstance(post_sync, dict)
+                and post_sync.get("status") == "pass"
+            )
+            if not successful_sync:
                 blockers.append("relay_last_run_not_pass")
+            if relay_report.get("schema_version") != 2:
+                blockers.append("relay_report_schema_invalid")
             if relay_report.get("safe_metadata_only") is not True:
                 blockers.append("relay_report_not_marked_safe_metadata_only")
 
-            last_applied = (
-                relay_report.get("last_applied_at_utc")
-                or relay_report.get("completed_at_utc")
-                or relay_report.get("checked_at_utc")
-            )
+            last_applied = relay_report.get("last_applied_at_utc")
             last_applied_at = str(last_applied or "unknown")
             lag_seconds = seconds_since(str(report.get("last_report_run_at") or ""), last_applied_at)
             if lag_seconds is None:
@@ -406,11 +431,15 @@ def classify_supabase_sync_relay(report: dict[str, Any]) -> dict[str, Any]:
             elif lag_seconds > SUPABASE_SYNC_RELAY_LAG_CRITICAL_SECONDS:
                 blockers.append("relay_lag_exceeds_threshold")
 
-            failed_table_count = relay_failed_table_count(relay_report)
-            if failed_table_count is None:
+            failed_table_count, max_table_lag_rows, validation_complete = relay_validation_values(relay_report)
+            if not validation_complete or failed_table_count is None:
                 blockers.append("relay_failed_table_count_unknown")
             elif failed_table_count > 0:
                 blockers.append("relay_failed_tables_present")
+            if max_table_lag_rows is None:
+                blockers.append("relay_table_lag_unknown")
+            elif max_table_lag_rows > 0:
+                blockers.append("relay_table_lag_rows_present")
             last_error = relay_safe_last_error(relay_report)
 
     summary = (
@@ -418,6 +447,7 @@ def classify_supabase_sync_relay(report: dict[str, Any]) -> dict[str, Any]:
         f"service={service_active} service_enabled={service_enabled} service_result={service_result} "
         f"last_applied_at={last_applied_at} "
         f"lag_seconds={lag_seconds if lag_seconds is not None else 'unknown'} "
+        f"max_table_lag_rows={max_table_lag_rows if max_table_lag_rows is not None else 'unknown'} "
         f"failed_tables={failed_table_count if failed_table_count is not None else 'unknown'} "
         f"last_error={last_error} "
         f"standby_failover_blocked={str(bool(blockers)).lower()}"
@@ -431,6 +461,7 @@ def classify_supabase_sync_relay(report: dict[str, Any]) -> dict[str, Any]:
         "lag_critical_seconds": SUPABASE_SYNC_RELAY_LAG_CRITICAL_SECONDS,
         "last_applied_at_utc": last_applied_at,
         "failed_table_count": failed_table_count,
+        "max_table_lag_rows": max_table_lag_rows,
         "last_error": last_error,
         "timer_state": timer_active,
         "service_state": service_active,
@@ -914,6 +945,7 @@ def write_summary(report: dict[str, Any], path: Path) -> None:
         f"- Run: `{report['last_report_run_at']}`",
         f"- Next expected run: `{report['next_report_run_at']}`",
         f"- Target: `{report['target']['user']}@{report['target']['host']}`",
+        f"- Conclusion: `{report.get('conclusion', 'failure')}`",
         f"- Delivery: `{report['delivery']['status']}`",
         "",
         "| Status | Count |",
@@ -1002,13 +1034,28 @@ def current_alerts_from_checks(checks: list[dict[str, Any]]) -> list[dict[str, A
     return alerts
 
 
+def report_succeeded(report: dict[str, Any]) -> bool:
+    summary = report.get("summary", {})
+    critical = summary.get("critical") if isinstance(summary, dict) else None
+    delivery = report.get("delivery", {})
+    delivery_status = delivery.get("status") if isinstance(delivery, dict) else None
+    return (
+        type(critical) is int
+        and critical == 0
+        and report.get("last_error") is None
+        and delivery_status != "error"
+    )
+
+
 def build_report(args: argparse.Namespace) -> dict[str, Any]:
     run_at = utc_now()
+    previous_report = load_previous_report(args.previous_state)
     report: dict[str, Any] = {
         "version": 1,
         "last_report_run_at": run_at,
         "next_report_run_at": iso_after(args.next_run_interval_hours),
-        "last_report_success_at": None,
+        "last_report_success_at": preserved_last_success(previous_report, run_at),
+        "conclusion": "failure",
         "last_error": None,
         "target": {"host": args.ssh_host, "user": args.ssh_user},
         "delivery": {"status": "not_attempted", "detail": "email disabled"},
@@ -1027,7 +1074,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     report["checks"] = checks
     report["summary"] = summary
     alerting = backend_alert_state.evaluate_alerts(
-        load_previous_report(args.previous_state),
+        previous_report,
         current_alerts_from_checks(checks),
         run_at,
         cooldown_seconds=args.alert_cooldown_hours * 60 * 60,
@@ -1061,8 +1108,9 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     else:
         report["delivery"] = {"status": "skipped", "detail": "send_email=false"}
 
-    if report["last_error"] is None and report["delivery"]["status"] != "error":
+    if report_succeeded(report):
         report["last_report_success_at"] = run_at
+        report["conclusion"] = "success"
 
     return report
 
@@ -1095,7 +1143,7 @@ def main(argv: list[str] | None = None) -> int:
         write_summary(report, Path(args.summary))
 
     print(render_text(report))
-    return 0 if report["delivery"]["status"] != "error" else 1
+    return 0 if report_succeeded(report) else 1
 
 
 if __name__ == "__main__":

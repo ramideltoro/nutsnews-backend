@@ -5,7 +5,17 @@
       - backend_postgres_enabled | bool
       - backend_worker_api_token | length > 0
       - backend_worker_api_db_password | length > 0
-    fail_msg: "Worker database API requires PostgreSQL plus backend_worker_api_token and backend_worker_api_db_password."
+      - backend_worker_api_bind == '127.0.0.1'
+      - backend_worker_api_port | int >= 1024
+      - backend_worker_api_port | int <= 65535
+      - backend_worker_api_deployment_environment in ['production', 'staging', 'test', 'development']
+      - >-
+        backend_worker_api_deployment_environment != 'production'
+        or backend_worker_api_build_revision is match('^[0-9a-f]{40}$')
+    fail_msg: >-
+      Worker database API requires PostgreSQL, protected credentials, an unprivileged
+      loopback listener, and a full Git revision whenever it identifies as production;
+      unknown production revisions are rejected.
 
 - name: Install Worker database API runtime packages
   ansible.builtin.apt:
@@ -65,6 +75,10 @@
     content: |
       NUTSNEWS_WORKER_DB_API_BIND={{ backend_worker_api_bind }}
       NUTSNEWS_WORKER_DB_API_PORT={{ backend_worker_api_port }}
+      NUTSNEWS_SERVICE_VERSION={{ backend_worker_api_service_version }}
+      NUTSNEWS_BUILD_REVISION={{ backend_worker_api_build_revision }}
+      NUTSNEWS_DEPLOYMENT_ENVIRONMENT={{ backend_worker_api_deployment_environment }}
+      NUTSNEWS_TELEMETRY_HOST={{ backend_worker_api_telemetry_host }}
       NUTSNEWS_BACKEND_API_TOKEN={{ backend_worker_api_token }}
       NUTSNEWS_BACKEND_WORKER_UPLIFT_PERSISTENCE_TOKEN={{ backend_worker_api_uplift_persistence_token }}
       NUTSNEWS_BACKEND_WORKER_UPLIFT_PUBLICATION_TOKEN={{ backend_worker_api_uplift_publication_token }}
@@ -103,6 +117,9 @@
       ExecStart=/usr/bin/python3 {{ backend_worker_api_script_path }}
       Restart=on-failure
       RestartSec=5s
+      StandardOutput=journal
+      StandardError=journal
+      SyslogIdentifier=nutsnews-worker-db-api
       NoNewPrivileges=true
       PrivateTmp=true
       ProtectHome=true
@@ -131,11 +148,26 @@
     - backend_worker_api_manageable | bool
     - not ansible_check_mode
 
-- name: Capture Worker database API loopback health
-  ansible.builtin.command: "curl -fsS http://{{ backend_worker_api_bind }}:{{ backend_worker_api_port }}/healthz"
+- name: Capture Worker database API loopback readiness
+  ansible.builtin.command:
+    argv:
+      - curl
+      - --fail
+      - --silent
+      - --show-error
+      - --noproxy
+      - "*"
+      - --max-time
+      - "10"
+      - "http://{{ backend_worker_api_bind }}:{{ backend_worker_api_port }}{{ backend_worker_api_monitoring_path }}"
   register: backend_worker_api_health
   changed_when: false
-  failed_when: false
+  retries: 10
+  delay: 3
+  until:
+    - backend_worker_api_health.rc | default(1) == 0
+    - backend_worker_api_health.stdout | default('') is search('"ready"[ ]*:[ ]*true')
+    - backend_worker_api_health.stdout | default('') is search('"buildRevision"[ ]*:[ ]*"' ~ backend_worker_api_build_revision ~ '"')
   when:
     - backend_worker_api_manageable | bool
     - not ansible_check_mode
@@ -151,4 +183,6 @@
       writes_enabled: "{{ backend_worker_api_writes_enabled }}"
       public_route: "https://{{ backend_domain }}/api/worker/db/*"
       app_route: "https://{{ backend_domain }}/api/app/db/*"
+      monitoring_source: "http://{{ backend_worker_api_bind }}:{{ backend_worker_api_port }}{{ backend_worker_api_monitoring_path }}"
+      metrics_source: "http://{{ backend_worker_api_bind }}:{{ backend_worker_api_port }}/metrics"
       health: "{{ backend_worker_api_health.stdout_lines | default([]) }}"

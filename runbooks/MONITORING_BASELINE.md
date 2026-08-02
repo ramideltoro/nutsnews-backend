@@ -24,6 +24,23 @@ The monitoring baseline:
 - installs `/usr/local/sbin/nutsnews-backend-smoke`;
 - includes a local Caddy `/healthz` probe in the smoke output when Caddy is active.
 
+Production inventory also declares Grafana Alloy as enabled desired state.
+Protected apply fails closed unless all three Prometheus remote-write secrets
+and all three Loki write secrets are present. Disabling production Alloy
+requires a reviewed desired-state change plus the exact
+`DISABLE_PRODUCTION_ALLOY` confirmation; withholding credentials is not a
+rollback mechanism.
+
+Alloy exposes distinct `nutsnews-backend-host` and
+`nutsnews-backend-alloy` scrape identities. It also scrapes the private
+backend API, PostgreSQL exporter, Caddy admin endpoint, TLS probe, RabbitMQ
+endpoints, and exactly eight worker metrics endpoints on
+`127.0.0.1:18081`–`18088`. The current worker fleet does not yet satisfy the
+qualified v1 telemetry contract, so it is declared
+`awaiting-qualified-v1` with contract processing disabled; only basic
+per-target scrape health and freshness are trustworthy until a reviewed worker
+release qualifies the contract.
+
 ## Health Checks
 
 Host smoke command:
@@ -107,16 +124,31 @@ documented in [WORKER_UPLIFT_LOGS_TRACES.md](WORKER_UPLIFT_LOGS_TRACES.md).
 Before logs are shipped, Alloy drops private-key markers and oversized lines,
 redacts authorization headers, cookies, token/password/API-key style values,
 query strings, and email addresses, drops production JSON `debug`/`trace`
-entries, truncates long lines, and keeps only stable labels:
+entries, truncates long lines, and keeps exactly these stable indexed labels:
 
 ```text
-environment, host, source, service, unit, severity, filename, job
+deployment_environment, service, service_version, host, source, severity
 ```
 
-Worker-uplift container logs can also use the approved bounded `version`,
-`queue`, and `outcome` stream labels. Correlation IDs, traceparent, message IDs,
-idempotency keys, article/feed identifiers, prompts, and model responses remain
-structured metadata or payload-prohibited fields, not stream labels.
+Queue, outcome, correlation IDs, traceparent, message IDs, idempotency keys,
+article/feed identifiers, revision, and image digest remain structured
+metadata, not indexed labels. Prompts and model responses are prohibited from
+the payload. Alloy promotes only full-match, producer-contracted identifier
+shapes, omits opaque `tracestate`, and applies explicit extracted-field byte
+bounds before attaching metadata.
+
+The PostgreSQL exporter intentionally excludes `process_idle` and the
+per-relation `statio_user_tables` / `statio_user_indexes` collectors. Global
+`stat_database` block hit/read counters retain cache visibility, while
+`stat_user_tables` retains relation size, dead-row, vacuum, and autovacuum
+signals. The scrape capacity is bounded at 4,096 samples and validated against
+a 64-relation budget (32 samples per relation plus 512 fixed samples), avoiding
+the former 1,200-sample configuration that could fail before all managed worker
+schemas were represented.
+
+Caddy deletes the request URI, client addresses, request headers, and response
+headers before writing its bounded local access log; Loki redaction is an
+additional boundary, not the first privacy control.
 
 The managed Grafana folder is `NutsNews Backend Ops` (`nutsnews-backend-ops`).
 The logs dashboard is `NutsNews Backend Logs` (`nutsnews-backend-logs`) and uses
@@ -147,6 +179,23 @@ queues, 21 retry queues, and 7 terminal DLQs.
 
 The backend remains the telemetry producer only. Grafana resources, quota
 guardrails, dashboards, and alerts remain managed by `ramideltoro/nutsnews-infra`.
+
+The host textfile exporter overwrites stale output with explicit unavailable
+values on collection failure. Worker ownership is projected only from exactly
+`worker_uplift_final.cutover_control(control_id='production')`; a missing,
+duplicate, malformed, or internally inconsistent row yields
+`ownership_available=0` and `expected_active=0`. The verified-backup
+freshness threshold is consistently 30 hours (108,000 seconds), and later
+failed backup attempts preserve the age of the last verified success.
+
+The same exporter runs one dependency-free, five-second-bounded
+`docker stats --no-stream` snapshot. It maps only the fixed RabbitMQ singleton
+and worker-uplift Compose replica names 1-3 to the bounded `service` label,
+ignores all other containers, and exposes per-service plus fleet CPU, memory,
+network, block-I/O, PID, and availability gauges. Docker command or parse failures emit
+`nutsnews_docker_stats_collection_available=0`, per-service availability `0`,
+and `-1` resource sentinels in the newly replaced textfile; stale Docker values
+are never retained. Alloy remains without Docker socket access.
 
 ## Grafana Alert Guardrails
 
@@ -187,6 +236,12 @@ artifact, and can send the report by SMTP when `send_email=true`.
 
 The delivery result is recorded in the report artifact as
 `delivery.status=sent`, `skipped`, `not_configured`, or `error`.
+
+Critical checks fail the workflow only after the artifact and step summary are
+written. The optional bounded state publication used by the
+`nutsnews_backend_health_audit_*` metrics is default-off and must follow the
+freeze-safe installation order in `runbooks/BACKEND_HEALTH_REPORT.md`; it uses
+one fixed remote writer and never forwards raw report content.
 
 ## Apply Path
 

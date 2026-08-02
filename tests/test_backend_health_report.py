@@ -41,16 +41,30 @@ def relay_unit_states(
 
 def relay_last_run(**overrides) -> str:
     report = {
+        "schema_version": 2,
         "status": "pass",
+        "mode": "sync-once",
         "checked_at_utc": "2026-07-16T11:59:45Z",
+        "finished_at_utc": "2026-07-16T11:59:45Z",
+        "last_success_at_utc": "2026-07-16T11:59:45Z",
         "last_applied_at_utc": "2026-07-16T11:59:45Z",
         "safe_metadata_only": True,
+        "sync": {"status": "applied", "table_count": 2},
         "post_sync": {
+            "status": "pass",
             "checks": [
-                {"id": "table.public.articles", "status": "pass"},
-                {"id": "table.public.rss_feeds", "status": "pass"},
+                {"id": "table.public.articles", "status": "pass", "target_lag_rows": 0},
+                {"id": "table.public.rss_feeds", "status": "pass", "target_lag_rows": 0},
                 {"id": "sequence.public.rss_feeds_id_seq", "status": "pass"},
             ]
+        },
+        "validation_summary": {
+            "expected_table_count": 2,
+            "validated_table_count": 2,
+            "failed_table_count": 0,
+            "max_table_lag_rows": 0,
+            "complete": True,
+            "safe_metadata_only": True,
         },
     }
     report.update(overrides)
@@ -240,11 +254,20 @@ class BackendHealthReportTests(unittest.TestCase):
                     relay_last_run(
                         status="fail",
                         post_sync={
+                            "status": "fail",
                             "failed_required_checks": ["table.public.articles"],
                             "checks": [
-                                {"id": "table.public.articles", "status": "fail"},
-                                {"id": "table.public.rss_feeds", "status": "pass"},
+                                {"id": "table.public.articles", "status": "fail", "target_lag_rows": 1},
+                                {"id": "table.public.rss_feeds", "status": "pass", "target_lag_rows": 0},
                             ],
+                        },
+                        validation_summary={
+                            "expected_table_count": 2,
+                            "validated_table_count": 2,
+                            "failed_table_count": 1,
+                            "max_table_lag_rows": 1,
+                            "complete": True,
+                            "safe_metadata_only": True,
                         },
                     )
                 )
@@ -330,6 +353,73 @@ class BackendHealthReportTests(unittest.TestCase):
         by_name = {item["name"]: item for item in checks}
         self.assertEqual(by_name["backend_endpoint_health"]["status"], "critical")
         self.assertGreaterEqual(summary["critical"], 1)
+
+    def test_critical_report_preserves_prior_success_and_is_not_successful(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            key_path = root / "key"
+            known_hosts_path = root / "known_hosts"
+            previous_path = root / "previous.json"
+            key_path.touch()
+            known_hosts_path.touch()
+            previous_path.write_text(
+                json.dumps({"last_report_success_at": "2026-07-15T12:00:00Z"}),
+                encoding="utf-8",
+            )
+            args = backend_health_report.parse_args(
+                [
+                    "--ssh-key",
+                    str(key_path),
+                    "--known-hosts",
+                    str(known_hosts_path),
+                    "--previous-state",
+                    str(previous_path),
+                    "--output",
+                    str(root / "report.json"),
+                ]
+            )
+            collected = fixture_report(backend_health=command(""))["ssh"]
+            with (
+                patch.object(backend_health_report, "utc_now", return_value="2026-07-16T12:00:00Z"),
+                patch.object(backend_health_report, "iso_after", return_value="2026-07-17T12:00:00Z"),
+                patch.object(backend_health_report, "collect_ssh", return_value=collected),
+            ):
+                report = backend_health_report.build_report(args)
+
+        self.assertGreater(report["summary"]["critical"], 0)
+        self.assertEqual(report["conclusion"], "failure")
+        self.assertEqual(report["last_report_success_at"], "2026-07-15T12:00:00Z")
+        self.assertFalse(backend_health_report.report_succeeded(report))
+
+    def test_main_writes_report_and_summary_before_critical_exit(self):
+        report = fixture_report(backend_health=command(""))
+        report["checks"], report["summary"] = backend_health_report.classify(report)
+        report.update(
+            {
+                "last_report_success_at": "2026-07-15T12:00:00Z",
+                "last_error": None,
+                "conclusion": "failure",
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "report.json"
+            summary_path = Path(tmpdir) / "summary.md"
+            with (
+                patch.object(backend_health_report, "build_report", return_value=report),
+                patch("builtins.print"),
+            ):
+                exit_code = backend_health_report.main(
+                    ["--output", str(output_path), "--summary", str(summary_path)]
+                )
+
+            persisted = json.loads(output_path.read_text(encoding="utf-8"))
+            summary_text = summary_path.read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 1)
+        self.assertGreater(persisted["summary"]["critical"], 0)
+        self.assertIn("# Backend Health Report", summary_text)
+        self.assertIn("Conclusion: `failure`", summary_text)
+        self.assertIn("`critical`", summary_text)
 
     def test_missing_smtp_degrades_without_failure(self):
         env = {key: value for key, value in os.environ.items() if not key.startswith("NUTSNEWS_REPORT_")}

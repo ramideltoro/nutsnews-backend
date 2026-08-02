@@ -1,4 +1,27 @@
 ---
+- name: Require explicit confirmation before disabling production Alloy
+  ansible.builtin.assert:
+    that:
+      - backend_metrics_alloy_disable_confirmation == 'DISABLE_PRODUCTION_ALLOY'
+    fail_msg: >-
+      Production Alloy is an enabled desired state. Set
+      backend_metrics_alloy_disable_confirmation=DISABLE_PRODUCTION_ALLOY together with
+      backend_metrics_enabled=false only for an intentional, approved shutdown.
+  when:
+    - backend_metrics_production_desired_state | bool
+    - not (backend_metrics_enabled | bool)
+
+- name: Disable production Alloy after explicit confirmation
+  ansible.builtin.systemd:
+    name: alloy
+    enabled: false
+    state: stopped
+  when:
+    - backend_metrics_production_desired_state | bool
+    - not (backend_metrics_enabled | bool)
+    - backend_metrics_alloy_disable_confirmation == 'DISABLE_PRODUCTION_ALLOY'
+    - not ansible_check_mode
+
 - name: Configure SSH hardening
   ansible.builtin.import_tasks: ssh.yml
 

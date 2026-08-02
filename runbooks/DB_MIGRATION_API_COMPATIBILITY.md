@@ -71,7 +71,7 @@ Current evidence:
 ## App And Worker Database API
 
 The backend database compatibility API is disabled by default and, when enabled,
-is bound on loopback behind Caddy at:
+is required to bind to `127.0.0.1` behind Caddy at:
 
 ```text
 https://backend.nutsnews.com/api/app/db/*
@@ -93,8 +93,37 @@ Protected apply inputs:
   other and from `NUTSNEWS_BACKEND_API_TOKEN` before scoped tokens are enabled.
 - `NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE=shadow` and
   `NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED=false` keep scoped
-  worker-uplift production commands blocked until the protected cutover issue
-  explicitly approves `cutover-approved`.
+  worker-uplift production commands blocked. Generic protected apply accepts
+  exactly those safe values; owner transitions and production-write changes
+  belong only to the dedicated cutover control path.
+
+Health and telemetry endpoints are:
+
+- `/livez`: process liveness only; it never probes PostgreSQL;
+- `/readyz`: PostgreSQL-aware readiness with no-store headers and bounded
+  deployment identity; apply fails if it is not ready or reports a different
+  build revision;
+- `/metrics`: loopback-only Prometheus RED counters and fixed-bucket
+  histograms using bounded operation, method, and status-class labels. Invalid
+  method, route, and authentication traffic uses fixed aggregate operations;
+  the registry has a 200-key hard limit and its 3,206-sample worst case remains
+  below the Alloy scrape limit of 4,096;
+- `/healthz`: retained for compatibility/infrastructure routing only and not
+  used as application readiness.
+
+The public `/readyz` probe is single-flight with at most one PostgreSQL check
+in progress and caches completed success or failure for two seconds. Once that
+cache expires, it never serves a stale success: a concurrent uncached request
+fails closed with `503`. Each database attempt has a three-second connection
+timeout and a two-second PostgreSQL statement timeout, bounding one sequential
+attempt to five seconds.
+
+Caddy exposes `/livez` and `/readyz` when the API is enabled but does not
+publish `/metrics`. POST mutation routes reject query strings and trailing
+slashes. API completion logs contain bounded identity, method, operation,
+status class, duration, request ID, and an optional valid `traceparent`; they
+never contain a path, query, header, body, credential, database error text, or
+user identifier.
 
 The initial shadow configuration uses the backend PostgreSQL read-only role
 against `nutsnews_primary_shadow`. Backend writes remain disabled until the

@@ -42,6 +42,15 @@ The workflow renders `/etc/nutsnews-supabase-sync-relay/relay.env` as
 - Last safe report: `/var/lib/nutsnews/supabase-sync-relay/last-run.json`
   with mode `0644`
 
+The report is schema version 2 and is replaced atomically. Every attempt records
+`checked_at_utc` and `finished_at_utc`. Only a fully validated
+`mode=sync-once`, `sync.status=applied`, `post_sync.status=pass` run
+advances `last_success_at_utc` and `last_applied_at_utc`; later failures
+preserve both timestamps so their ages continue to increase. Dry runs never
+create success history. `validation_summary` reports complete table coverage,
+failed-table count, and bounded maximum target lag rows; skipped or incomplete
+validation remains explicitly unavailable.
+
 Useful backend-host checks:
 
 ```bash
@@ -67,9 +76,10 @@ timer/service state and the safe relay report at:
 The report includes only safe metadata:
 
 - timer state, service state, and last service result;
-- `last_applied_at_utc` from successful relay runs, falling back to
-  `checked_at_utc` for older reports;
-- `lag_seconds`;
+- durable `last_applied_at_utc` and `last_success_at_utc` from successful
+  sync-once runs;
+- last validated sync age (`lag_seconds`, retained for compatibility) and
+  maximum table lag rows;
 - `failed_table_count`;
 - generic `last_error` code.
 

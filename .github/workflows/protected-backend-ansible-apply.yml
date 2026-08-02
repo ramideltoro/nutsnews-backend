@@ -651,14 +651,32 @@ jobs:
                   extra_vars[f"backend_worker_uplift_postgres_{stage_name}_user"] = username
                   extra_vars[f"backend_worker_uplift_postgres_{stage_name}_password"] = password
 
+          cutover_state = os.environ.get("NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE", "shadow").strip()
+          if cutover_state != "shadow":
+              raise SystemExit("Generic Ansible apply requires NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE=shadow")
+          uplift_production_writes = os.environ.get(
+              "NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED",
+              "false",
+          ).strip().lower()
+          if uplift_production_writes != "false":
+              raise SystemExit(
+                  "Generic Ansible apply requires NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED=false"
+              )
+          extra_vars["backend_worker_api_uplift_cutover_state"] = "shadow"
+          extra_vars["backend_worker_api_uplift_production_writes_enabled"] = False
+
           worker_api_enabled = os.environ.get("NUTSNEWS_BACKEND_WORKER_API_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
           if worker_api_enabled:
               token = os.environ.get("NUTSNEWS_BACKEND_API_TOKEN", "")
               if not token:
                   raise SystemExit("Missing required Worker database API secret: NUTSNEWS_BACKEND_API_TOKEN")
+              build_revision = os.environ.get("GITHUB_SHA", "").strip().lower()
+              if not re.fullmatch(r"[0-9a-f]{40}", build_revision):
+                  raise SystemExit("GITHUB_SHA must be a full Git commit revision for backend API identity")
               writes_enabled = os.environ.get("NUTSNEWS_BACKEND_WORKER_API_WRITES_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
               extra_vars["backend_worker_api_enabled"] = True
               extra_vars["backend_worker_api_token"] = token
+              extra_vars["backend_worker_api_build_revision"] = build_revision
               scoped_uplift_enabled = (
                   os.environ.get("NUTSNEWS_BACKEND_WORKER_UPLIFT_SCOPED_TOKENS_ENABLED", "false").strip().lower()
                   in {"1", "true", "yes"}
@@ -680,17 +698,6 @@ jobs:
                       raise SystemExit("Worker API legacy, persistence, and publication tokens must be distinct")
                   extra_vars["backend_worker_api_uplift_persistence_token"] = persistence_token
                   extra_vars["backend_worker_api_uplift_publication_token"] = publication_token
-              cutover_state = os.environ.get("NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE", "shadow").strip() or "shadow"
-              if cutover_state not in {"shadow", "cutover-approved"}:
-                  raise SystemExit("NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE must be shadow or cutover-approved")
-              uplift_production_writes_enabled = (
-                  os.environ.get("NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED", "false").strip().lower()
-                  in {"1", "true", "yes"}
-              )
-              if uplift_production_writes_enabled and cutover_state != "cutover-approved":
-                  raise SystemExit("Worker uplift production writes require cutover-approved state")
-              extra_vars["backend_worker_api_uplift_cutover_state"] = cutover_state
-              extra_vars["backend_worker_api_uplift_production_writes_enabled"] = uplift_production_writes_enabled
               extra_vars["backend_worker_api_db_name"] = extra_vars.get(
                   "backend_postgres_primary_shadow_database",
                   os.environ.get("NUTSNEWS_BACKEND_POSTGRES_PRIMARY_SHADOW_DATABASE", "nutsnews_primary_shadow").strip() or "nutsnews_primary_shadow",

@@ -39,17 +39,22 @@ Docker socket. The package-managed `alloy` user remains limited to
 Allowed Loki stream labels for worker-uplift logs are bounded:
 
 ```text
-environment, host, source, service, version, queue, outcome
+deployment_environment, service, service_version, host, source, severity
 ```
 
-System and backend host logs can also retain the existing low-cardinality
-`unit`, `severity`, `filename`, and `job` labels.
-
-Correlation fields remain structured metadata or log body fields only:
+Validated correlation fields remain structured metadata, never stream labels:
 
 ```text
-correlationId, causationId, messageId, idempotencyKey, traceparent, tracestate
+requestId, correlationId, causationId, messageId, idempotencyKey, traceparent,
+articleId, feedId, pipelineRunId, queue, outcome, revision, imageDigest
 ```
+
+Alloy promotes only full-match producer-contracted identifier shapes into
+structured metadata and applies explicit byte bounds before attachment.
+Malformed, oversized, or opaque candidates have no fallback metadata path.
+`trace_id` is derived only from a validated W3C `traceparent`. Opaque
+`tracestate` is redacted from the shipped line and is not retained as
+structured metadata.
 
 Do not promote article, feed, message, idempotency, trace, span, correlation,
 causation, payload, URL, path, user, IP, token, secret, prompt, or model-output
@@ -63,7 +68,7 @@ Before Loki export, Alloy:
 - drops JSON `debug` and `trace` log levels in production;
 - drops log lines larger than 8 KiB;
 - redacts authorization headers, cookies, tokens, passwords, API keys, query
-  strings, and email addresses;
+  strings, email addresses, and `tracestate`;
 - truncates retained long lines to 4 KiB;
 - caps Loki streams with `backend_logs_loki_max_streams`.
 
@@ -96,13 +101,14 @@ container source count, trace-export-disabled proof, recent RabbitMQ journal log
 count, and Loki result counts. It must not print log lines, credentials,
 headers, article content, prompts, or provider responses.
 
-Worker service Loki queries can be `not_configured` until the service containers
-exist. RabbitMQ container logs must be queryable for this issue to close.
+When `require_loki_data=true`, the check requires a recent stream for every
+one of the eight worker services as well as RabbitMQ. Shadow mode changes alert
+ownership, not the log-source inventory.
 
 ## Rollback
 
-If log volume or privacy guardrails fail, disable log shipping by removing or
-withholding the protected Loki credentials and rerun `Protected Backend Ansible
-Apply`. To roll back the source-controlled container logging path, revert the
-backend PR and run protected check/apply. This does not mutate queues, worker
-state, RabbitMQ data, or Grafana resources.
+If log volume or privacy guardrails fail, use a reviewed desired-state change
+and the explicit production-Alloy disable confirmation, or revert the backend
+PR and run protected check/apply. Do not remove or withhold protected
+credentials: missing write credentials fail apply closed. This does not mutate
+queues, worker state, RabbitMQ data, or Grafana resources.

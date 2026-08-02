@@ -120,8 +120,14 @@ class BackendBackupTests(unittest.TestCase):
             backup_path.write_text(
                 json.dumps(
                     {
+                        "schema_version": 1,
+                        "action": "backup",
                         "status": "healthy",
+                        "freshness_status": "healthy",
                         "snapshot_id": full_id,
+                        "finished_at_utc": "2026-07-17T00:05:00Z",
+                        "last_run_at_utc": "2026-07-17T00:05:00Z",
+                        "last_success_at_utc": None,
                         "alerts": [
                             {"kind": "unverified_latest_snapshot", "status": "warning"},
                             {"kind": "storage_quota_warning", "status": "not_configured"},
@@ -133,6 +139,8 @@ class BackendBackupTests(unittest.TestCase):
             runner.mark_backup_verified(state_dir, "1a999564", "2026-07-17T00:08:40Z")
             updated = json.loads(backup_path.read_text(encoding="utf-8"))
         self.assertEqual(updated["latest_snapshot_verified_at_utc"], "2026-07-17T00:08:40Z")
+        self.assertEqual(updated["last_success_at_utc"], "2026-07-17T00:05:00Z")
+        self.assertEqual(updated["last_verified_success_at_utc"], "2026-07-17T00:08:40Z")
         self.assertEqual(updated["alerts"], [{"kind": "storage_quota_warning", "status": "not_configured"}])
 
     def test_verify_falls_back_to_last_healthy_backup_snapshot_from_state(self):
@@ -145,9 +153,14 @@ class BackendBackupTests(unittest.TestCase):
             backup_path.write_text(
                 json.dumps(
                     {
+                        "schema_version": 1,
+                        "action": "backup",
                         "status": "healthy",
                         "freshness_status": "healthy",
                         "snapshot_id": full_id,
+                        "finished_at_utc": "2026-07-17T00:05:00Z",
+                        "last_run_at_utc": "2026-07-17T00:05:00Z",
+                        "last_success_at_utc": None,
                         "alerts": [{"kind": "unverified_latest_snapshot", "status": "warning"}],
                     }
                 ),
@@ -166,6 +179,111 @@ class BackendBackupTests(unittest.TestCase):
         self.assertEqual(status["snapshot_source"], "backup_status")
         self.assertEqual(updated["alerts"], [])
         self.assertIn("latest_snapshot_verified_at_utc", updated)
+        self.assertEqual(updated["last_success_at_utc"], "2026-07-17T00:05:00Z")
+
+    def test_first_backup_failure_records_run_without_inventing_success(self):
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = type(
+                "Args",
+                (),
+                {
+                    "state_dir": Path(tmpdir),
+                    "matrix": MATRIX_PATH,
+                    "init_if_missing": "true",
+                    "quota_warn_bytes": 0,
+                },
+            )()
+            with (
+                mock.patch.object(runner, "require_restic_env", return_value=["RESTIC_PASSWORD"]),
+                mock.patch.object(runner, "existing_backup_paths", return_value=[]),
+                mock.patch.object(
+                    runner,
+                    "utc_now",
+                    side_effect=["2026-07-17T01:00:00Z", "2026-07-17T01:00:05Z"],
+                ),
+            ):
+                status = runner.action_backup(args)
+
+        self.assertEqual("critical", status["status"])
+        self.assertEqual("2026-07-17T01:00:05Z", status["last_run_at_utc"])
+        self.assertIsNone(status["last_success_at_utc"])
+
+    def test_failed_backup_preserves_verified_success_and_advances_last_run(self):
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir)
+            backup_path = state_dir / runner.STATUS_FILES["backup"]
+            backup_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "action": "backup",
+                        "status": "healthy",
+                        "freshness_status": "healthy",
+                        "snapshot_id": "1a999564",
+                        "finished_at_utc": "2026-07-16T00:00:00Z",
+                        "last_run_at_utc": "2026-07-16T00:00:00Z",
+                        "last_success_at_utc": "2026-07-16T00:00:00Z",
+                        "latest_snapshot_verified_at_utc": "2026-07-16T01:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = type(
+                "Args",
+                (),
+                {
+                    "state_dir": state_dir,
+                    "matrix": MATRIX_PATH,
+                    "init_if_missing": "true",
+                    "quota_warn_bytes": 0,
+                },
+            )()
+            with (
+                mock.patch.object(runner, "require_restic_env", return_value=["RESTIC_PASSWORD"]),
+                mock.patch.object(runner, "existing_backup_paths", return_value=[]),
+                mock.patch.object(
+                    runner,
+                    "utc_now",
+                    side_effect=["2026-07-17T01:00:00Z", "2026-07-17T01:00:05Z"],
+                ),
+            ):
+                status = runner.action_backup(args)
+            written = json.loads(backup_path.read_text(encoding="utf-8"))
+
+        self.assertEqual("critical", status["status"])
+        self.assertEqual("2026-07-17T01:00:05Z", written["last_run_at_utc"])
+        self.assertEqual("2026-07-16T00:00:00Z", written["last_success_at_utc"])
+
+    def test_corrupt_previous_backup_state_cannot_create_stale_success(self):
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir)
+            (state_dir / runner.STATUS_FILES["backup"]).write_text("not-json", encoding="utf-8")
+            args = type(
+                "Args",
+                (),
+                {
+                    "state_dir": state_dir,
+                    "matrix": MATRIX_PATH,
+                    "init_if_missing": "true",
+                    "quota_warn_bytes": 0,
+                },
+            )()
+            with (
+                mock.patch.object(runner, "require_restic_env", return_value=["RESTIC_PASSWORD"]),
+                mock.patch.object(runner, "existing_backup_paths", return_value=[]),
+                mock.patch.object(
+                    runner,
+                    "utc_now",
+                    side_effect=["2026-07-17T01:00:00Z", "2026-07-17T01:00:05Z"],
+                ),
+            ):
+                status = runner.action_backup(args)
+
+        self.assertEqual("2026-07-17T01:00:05Z", status["last_run_at_utc"])
+        self.assertIsNone(status["last_success_at_utc"])
 
     def test_verify_reports_unavailable_snapshot_when_restic_and_state_have_no_snapshot(self):
         runner = load_runner()

@@ -121,6 +121,18 @@
   no_log: true
   when: backend_postgres_manageable | bool
 
+- name: Grant PostgreSQL monitoring statistics to the read-only role
+  community.postgresql.postgresql_membership:
+    groups:
+      - pg_monitor
+    target_roles:
+      - "{{ backend_postgres_readonly_user }}"
+    state: present
+  become_user: postgres
+  when:
+    - backend_postgres_manageable | bool
+    - (not ansible_check_mode) or not (backend_postgres_readonly_user_result is changed)
+
 - name: Ensure migration restore role exists
   community.postgresql.postgresql_user:
     name: "{{ backend_postgres_restore_user }}"

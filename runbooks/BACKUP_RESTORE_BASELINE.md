@@ -178,6 +178,14 @@ The runner writes:
 | `/var/lib/nutsnews/backups/last-verification.json` | latest restic check result |
 | `/var/lib/nutsnews/backups/last-restore-verification.json` | lightweight restore-drill result |
 
+`last-backup.json` records the latest attempt separately from the latest
+verified success. `last_run_at_utc` advances on every attempt;
+`last_success_at_utc` advances only after the produced snapshot is verified
+and is preserved across later failures. Missing or corrupt history is exported
+as unavailable rather than as a stale success. Grafana and the textfile
+exporter use one backup-stale threshold everywhere: 30 hours, or 108,000
+seconds.
+
 The restore drill resolves one bounded latest Restic snapshot and restores that
 exact immutable snapshot ID. If the snapshot-list query is temporarily
 unavailable, it may use the ID from a fresh healthy `last-backup.json` record;

@@ -24,6 +24,7 @@ ROLE_NAMES = [
     "nutsnews_app_rehearsal",
     "anon",
     "authenticated",
+    "authenticator",
     "service_role",
 ]
 PRIMARY_SHADOW_CONNECT_ROLES = [

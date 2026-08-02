@@ -198,6 +198,8 @@
       flags: NOLOGIN
     - name: authenticated
       flags: NOLOGIN
+    - name: authenticator
+      flags: NOLOGIN,NOSUPERUSER,NOCREATEDB,NOCREATEROLE,NOINHERIT,NOREPLICATION,NOBYPASSRLS
     - name: service_role
       flags: NOLOGIN,BYPASSRLS
   become_user: postgres

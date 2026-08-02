@@ -71,6 +71,15 @@ class BackendPostgresFailoverTests(unittest.TestCase):
         self.assertIn("{{ backend_postgres_worker_api_user }}", enforce_grant)
         self.assertIn("not ansible_check_mode", enforce_grant)
         self.assertIn("Ensure Worker API read role exists", tasks)
+        compatibility_roles = tasks.split("- name: Ensure Supabase compatibility roles exist", 1)[1].split(
+            "- name: Validate worker-uplift PostgreSQL stage role identifiers",
+            1,
+        )[0]
+        self.assertIn("name: authenticator", compatibility_roles)
+        self.assertIn(
+            "flags: NOLOGIN,NOSUPERUSER,NOCREATEDB,NOCREATEROLE,NOINHERIT,NOREPLICATION,NOBYPASSRLS",
+            compatibility_roles,
+        )
         self.assertIn("Allow database API roles to read future-primary shadow app and worker objects", tasks)
         self.assertIn("GRANT SELECT ON TABLE %s TO %I", tasks)
         self.assertIn("public.rss_feeds", tasks)

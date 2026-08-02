@@ -1,0 +1,295 @@
+name: Backend PostgreSQL Release Migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Build the immutable offline plan or apply it through the protected backend environment.
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - apply
+      source_commit:
+        description: Full app SHA already reachable from ramideltoro/nutsnews main.
+        required: true
+        type: string
+      migration_head:
+        description: Exact 14-digit app migration head.
+        required: true
+        type: string
+      backup_proof_run_id:
+        description: Fresh successful primary-shadow PostgreSQL backup restore proof run ID.
+        required: true
+        type: string
+      confirmation:
+        description: Type apply-backend-postgres-release-migrations (required for both plan and apply).
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: production-backend-postgres-release-migration
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Validate immutable source, allowlist, and backup proof
+    if: github.repository == 'ramideltoro/nutsnews-backend' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      source_commit: ${{ steps.request.outputs.source_commit }}
+      migration_head: ${{ steps.request.outputs.migration_head }}
+      backup_run_id: ${{ steps.request.outputs.backup_run_id }}
+      backup_completed_at: ${{ steps.request.outputs.backup_completed_at }}
+      schema_version: ${{ steps.contract.outputs.schema_version }}
+
+    steps:
+      - name: Checkout reviewed backend automation with history
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: automation
+
+      - name: Validate immutable migration request and fresh backup proof run
+        id: request
+        working-directory: automation
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REQUEST_SOURCE_COMMIT: ${{ inputs.source_commit }}
+          REQUEST_MIGRATION_HEAD: ${{ inputs.migration_head }}
+          REQUEST_BACKUP_RUN_ID: ${{ inputs.backup_proof_run_id }}
+          REQUEST_CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          python3 scripts/backend_postgres_release_migration_request.py \
+            --source-commit "$REQUEST_SOURCE_COMMIT" \
+            --migration-head "$REQUEST_MIGRATION_HEAD" \
+            --backup-run-id "$REQUEST_BACKUP_RUN_ID" \
+            --confirmation "$REQUEST_CONFIRMATION" \
+            --output "$GITHUB_OUTPUT"
+
+      - name: Checkout exact approved app migration source with history
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          repository: ramideltoro/nutsnews
+          ref: ${{ steps.request.outputs.source_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: approved-source
+
+      - name: Verify approved source is reachable from app main
+        working-directory: approved-source
+        env:
+          SOURCE_COMMIT: ${{ steps.request.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          git merge-base --is-ancestor "$SOURCE_COMMIT" origin/main
+
+      - name: Use Node.js for the app's compiled migration contract
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Verify requested, repository, and compiled migration heads
+        id: contract
+        env:
+          SOURCE_ROOT: ${{ github.workspace }}/approved-source
+          EXPECTED_HEAD: ${{ steps.request.outputs.migration_head }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from "node:fs";
+          import { getMigrationContract, readApplicationMigrationContract } from "./approved-source/scripts/migration_contract.mjs";
+
+          const [repository, application] = await Promise.all([
+            getMigrationContract(process.env.SOURCE_ROOT),
+            readApplicationMigrationContract(process.env.SOURCE_ROOT),
+          ]);
+          if (repository.head !== process.env.EXPECTED_HEAD || application.migrationHead !== repository.head) {
+            throw new Error("Requested, repository, and compiled app migration heads do not match.");
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT, `schema_version=${application.legacyVersion}\n`, "utf8");
+          console.log(`Verified compiled app migration contract at ${repository.head}.`);
+          NODE
+
+      - name: Build exact hash-locked migration bundle
+        working-directory: automation
+        env:
+          SOURCE_COMMIT: ${{ steps.request.outputs.source_commit }}
+          MIGRATION_HEAD: ${{ steps.request.outputs.migration_head }}
+        run: |
+          set -euo pipefail
+          python3 scripts/backend_postgres_release_migration_plan.py \
+            --app-root "$GITHUB_WORKSPACE/approved-source" \
+            --source-commit "$SOURCE_COMMIT" \
+            --migration-head "$MIGRATION_HEAD" \
+            --output-dir "$RUNNER_TEMP/backend-postgres-release-migration-bundle"
+
+      - name: Upload immutable migration bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-postgres-release-migration-bundle-${{ github.run_id }}
+          path: ${{ runner.temp }}/backend-postgres-release-migration-bundle
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Summarize non-mutating migration preflight
+        env:
+          MODE: ${{ inputs.mode }}
+          SOURCE_COMMIT: ${{ steps.request.outputs.source_commit }}
+          MIGRATION_HEAD: ${{ steps.request.outputs.migration_head }}
+          SCHEMA_VERSION: ${{ steps.contract.outputs.schema_version }}
+          BACKUP_RUN_ID: ${{ steps.request.outputs.backup_run_id }}
+        run: |
+          {
+            echo "## Backend PostgreSQL release migration preflight"
+            echo
+            echo "- Mode: \`$MODE\`"
+            echo "- Source commit: \`$SOURCE_COMMIT\`"
+            echo "- Migration head: \`$MIGRATION_HEAD\`"
+            echo "- Legacy-compatible schema marker: \`$SCHEMA_VERSION\`"
+            echo "- Fresh successful backup/restore proof run: \`$BACKUP_RUN_ID\`"
+            echo "- SQL is restricted to the reviewed SHA-256 allowlist."
+            echo "- No backend host or database credentials were available to this job."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  migrate:
+    name: Apply reviewed forward migrations transactionally
+    if: inputs.mode == 'apply'
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production-backend
+
+    steps:
+      - name: Checkout reviewed backend automation
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          path: automation
+
+      - name: Download immutable migration bundle
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0  # v5
+        with:
+          name: backend-postgres-release-migration-bundle-${{ github.run_id }}
+          path: ${{ runner.temp }}/backend-postgres-release-migration-bundle
+
+      - name: Prepare strict SSH material
+        env:
+          NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+        run: |
+          set -euo pipefail
+          for name in NUTSNEWS_BACKEND_SSH_PRIVATE_KEY NUTSNEWS_BACKEND_KNOWN_HOSTS; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing required production-backend environment secret: $name" >&2
+              exit 1
+            fi
+          done
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$NUTSNEWS_BACKEND_SSH_PRIVATE_KEY" > "$HOME/.ssh/nutsnews_backend"
+          chmod 0600 "$HOME/.ssh/nutsnews_backend"
+          printf '%s\n' "$NUTSNEWS_BACKEND_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/nutsnews_backend" > /dev/null
+          ssh-keygen -F "$NUTSNEWS_BACKEND_HOST" -f "$HOME/.ssh/known_hosts" > /dev/null
+
+      - name: Apply bundle through loopback PostgreSQL under one transaction and advisory lock
+        env:
+          NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
+          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          SOURCE_COMMIT: ${{ needs.preflight.outputs.source_commit }}
+          MIGRATION_HEAD: ${{ needs.preflight.outputs.migration_head }}
+          SCHEMA_VERSION: ${{ needs.preflight.outputs.schema_version }}
+          BACKUP_RUN_ID: ${{ needs.preflight.outputs.backup_run_id }}
+        run: |
+          set -euo pipefail
+          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh_base=(
+            ssh
+            -i "$HOME/.ssh/nutsnews_backend"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+          )
+          scp_base=(
+            scp
+            -i "$HOME/.ssh/nutsnews_backend"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+          )
+          remote_dir="$("${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            'mktemp -d /tmp/nutsnews-backend-release-migration.XXXXXXXX')"
+          if [[ ! "$remote_dir" =~ ^/tmp/nutsnews-backend-release-migration\.[A-Za-z0-9]+$ ]]; then
+            echo "Backend returned an unsafe migration temporary path." >&2
+            exit 1
+          fi
+          "${scp_base[@]}" \
+            "$RUNNER_TEMP/backend-postgres-release-migration-bundle/bundle-manifest.json" \
+            "$RUNNER_TEMP/backend-postgres-release-migration-bundle/"*.sql \
+            automation/scripts/backend_postgres_release_migrate_remote.sh \
+            "$ssh_user@$NUTSNEWS_BACKEND_HOST:$remote_dir/"
+          "${ssh_base[@]}" "$ssh_user@$NUTSNEWS_BACKEND_HOST" \
+            "sudo -n env TARGET_DATABASE='nutsnews_primary_shadow' EXPECTED_MIGRATION_HEAD='$MIGRATION_HEAD' EXPECTED_SCHEMA_VERSION='$SCHEMA_VERSION' SOURCE_COMMIT='$SOURCE_COMMIT' BUNDLE_DIR='$remote_dir' EXPECTED_BACKUP_PROOF_URL='https://github.com/ramideltoro/nutsnews-backend/actions/runs/$BACKUP_RUN_ID' bash '$remote_dir/backend_postgres_release_migrate_remote.sh'" \
+            | tee "$RUNNER_TEMP/backend-postgres-release-migration-report.json"
+
+      - name: Validate safe migration evidence
+        if: always()
+        working-directory: automation
+        run: |
+          set -euo pipefail
+          if [[ -s "$RUNNER_TEMP/backend-postgres-release-migration-report.json" ]]; then
+            python3 scripts/validate_backend_postgres_release_migration_report.py \
+              "$RUNNER_TEMP/backend-postgres-release-migration-report.json"
+          fi
+
+      - name: Upload safe migration evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: backend-postgres-release-migration-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/backend-postgres-release-migration-report.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Summarize protected migration result
+        if: success()
+        env:
+          SOURCE_COMMIT: ${{ needs.preflight.outputs.source_commit }}
+          MIGRATION_HEAD: ${{ needs.preflight.outputs.migration_head }}
+          BACKUP_RUN_ID: ${{ needs.preflight.outputs.backup_run_id }}
+        run: |
+          {
+            echo "## Backend PostgreSQL release migration complete"
+            echo
+            echo "- Active primary: \`nutsnews_primary_shadow\`"
+            echo "- Source commit: \`$SOURCE_COMMIT\`"
+            echo "- Migration head: \`$MIGRATION_HEAD\`"
+            echo "- Exact backup/restore proof run: \`$BACKUP_RUN_ID\`"
+            echo "- Migrations ran transactionally under the fixed advisory lock."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove ephemeral SSH material
+        if: always()
+        run: |
+          set +e
+          for path in "$HOME/.ssh/nutsnews_backend" "$HOME/.ssh/known_hosts"; do
+            if [[ -f "$path" ]]; then
+              shred -u "$path" 2>/dev/null || rm -f "$path"
+            fi
+          done

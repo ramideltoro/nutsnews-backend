@@ -31,6 +31,11 @@
       ansible.builtin.include_role:
         name: backend_baseline
 
+    - name: Apply backend Wiki AI runtime
+      ansible.builtin.include_role:
+        name: backend_wiki_ai
+      when: backend_wiki_ai_enabled | default(false) | bool
+
     - name: Apply backend RabbitMQ service
       ansible.builtin.include_role:
         name: backend_rabbitmq

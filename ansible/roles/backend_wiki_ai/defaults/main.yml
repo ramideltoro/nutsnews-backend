@@ -1,0 +1,28 @@
+---
+backend_wiki_ai_enabled: false
+backend_wiki_ai_user: nutsnews-wiki-ai
+backend_wiki_ai_group: nutsnews-wiki-ai
+backend_wiki_ai_config_dir: /etc/nutsnews-wiki-ai
+backend_wiki_ai_state_dir: /var/lib/nutsnews/wiki-ai
+backend_wiki_ai_cache_dir: /var/cache/nutsnews/wiki-ai
+backend_wiki_ai_binary_path: /usr/local/bin/ollama
+backend_wiki_ai_library_path: /usr/local/lib/ollama
+backend_wiki_ai_version: "0.32.5"
+backend_wiki_ai_archive_url: "https://github.com/ollama/ollama/releases/download/v{{ backend_wiki_ai_version }}/ollama-linux-amd64.tar.zst"
+backend_wiki_ai_archive_checksum: "sha256:f7d6bdbcf71b83aa8670c4e7dc4b6936c0952fcf8b114eaf6a11cbadb9684214"
+backend_wiki_ai_archive_path: "{{ backend_wiki_ai_cache_dir }}/ollama-linux-amd64-{{ backend_wiki_ai_version }}.tar.zst"
+backend_wiki_ai_bind: 127.0.0.1
+backend_wiki_ai_ollama_port: "11434"
+backend_wiki_ai_proxy_port: "18089"
+backend_wiki_ai_public_prefix: /wiki-ai
+backend_wiki_ai_base_model: qwen3.5:4b-q4_K_M
+backend_wiki_ai_base_model_id: 2a654d98e6fb
+backend_wiki_ai_model: nutsnews-wiki-qwen
+backend_wiki_ai_context_length: 65536
+backend_wiki_ai_max_output_tokens: 8192
+backend_wiki_ai_max_request_bytes: 4194304
+backend_wiki_ai_upstream_timeout_seconds: 3300
+backend_wiki_ai_memory_high: 6500M
+backend_wiki_ai_memory_max: 7500M
+backend_wiki_ai_cpu_quota: 300%
+backend_wiki_ai_api_key: ""

@@ -1,0 +1,37 @@
+[Unit]
+Description=NutsNews authenticated Wiki AI Responses proxy
+After=network-online.target nutsnews-wiki-ai-ollama.service
+Wants=network-online.target
+Requires=nutsnews-wiki-ai-ollama.service
+
+[Service]
+Type=simple
+User={{ backend_wiki_ai_user }}
+Group={{ backend_wiki_ai_group }}
+EnvironmentFile={{ backend_wiki_ai_config_dir }}/proxy.env
+ExecStart=/usr/bin/python3 {{ backend_wiki_ai_config_dir }}/nutsnews_wiki_ai_proxy.py
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nutsnews-wiki-ai-proxy
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+MemoryMax=128M
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target

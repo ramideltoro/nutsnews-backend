@@ -41,6 +41,19 @@ qualified v1 telemetry contract, so it is declared
 per-target scrape health and freshness are trustworthy until a reviewed worker
 release qualifies the contract.
 
+The remote-write boundary is intentionally narrower than each local exporter.
+Alloy self-scraping retains readiness, configuration, remote-write backlog and
+failure, plus Loki retry/drop families. Worker scraping retains readiness and
+lifecycle telemetry but drops the per-check health-duration histogram; the
+separate stage and processing histograms remain. PostgreSQL retains the
+dashboard-backed availability, connection, transaction, lock, deadlock, cache,
+checkpoint, autovacuum, storage, WAL, and replication families, while unused
+per-table families are discarded before remote write. This keeps the shared
+Grafana Cloud stack inside its active-series limit without weakening the
+documented dashboards or alerts. Roll back by reverting the relabel allowlists,
+running protected check/apply, and confirming quota headroom before the broader
+families are restored.
+
 ## Health Checks
 
 Host smoke command:

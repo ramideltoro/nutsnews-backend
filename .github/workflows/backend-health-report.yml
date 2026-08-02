@@ -35,19 +35,18 @@ jobs:
         shell: bash
         env:
           NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
-          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
           NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
           NUTSNEWS_BACKEND_KNOWN_HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
 
-          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh_user="rami"
           if [[ "$NUTSNEWS_BACKEND_HOST" != "65.75.201.18" ]]; then
             echo "NUTSNEWS_BACKEND_HOST must be the canonical backend IPv4 address." >&2
             exit 1
           fi
           if [[ "$ssh_user" != "rami" ]]; then
-            echo "NUTSNEWS_BACKEND_ANSIBLE_USER must select the fixed read-only audit account." >&2
+            echo "The health audit must select the fixed read-only audit account." >&2
             exit 1
           fi
 
@@ -102,7 +101,6 @@ jobs:
         shell: bash
         env:
           NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
-          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
           NUTSNEWS_REPORT_SMTP_HOST: ${{ secrets.NUTSNEWS_REPORT_SMTP_HOST }}
           NUTSNEWS_REPORT_SMTP_USERNAME: ${{ secrets.NUTSNEWS_REPORT_SMTP_USERNAME }}
           NUTSNEWS_REPORT_SMTP_PASSWORD: ${{ secrets.NUTSNEWS_REPORT_SMTP_PASSWORD }}
@@ -117,7 +115,7 @@ jobs:
 
           args=(
             --ssh-host "$NUTSNEWS_BACKEND_HOST"
-            --ssh-user "${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+            --ssh-user "rami"
             --ssh-key "$HOME/.ssh/nutsnews_backend_report"
             --known-hosts "$HOME/.ssh/known_hosts"
             --output "$RUNNER_TEMP/backend-health-report.json"
@@ -144,11 +142,10 @@ jobs:
         shell: bash
         env:
           NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
-          NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
         run: |
           set -euo pipefail
 
-          ssh_user="${NUTSNEWS_BACKEND_ANSIBLE_USER:-rami}"
+          ssh_user="rami"
           if [[ "$NUTSNEWS_BACKEND_HOST" != "65.75.201.18" || "$ssh_user" != "rami" ]]; then
             echo "Refusing health-audit publication to a non-canonical SSH target." >&2
             exit 1

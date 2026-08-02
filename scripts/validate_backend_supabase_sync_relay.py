@@ -252,6 +252,9 @@ def main() -> int:
         "enabled: false",
         "state: stopped",
         "Stop any in-flight backend Supabase sync relay service",
+        "Clear historical backend Supabase sync relay timer failure state",
+        "Clear historical backend Supabase sync relay service failure state",
+        "reset-failed",
         "reenable_boundary: replace snapshot polling with reviewed incremental replication",
     ):
         require(token in disabled_tasks, f"relay suspension tasks missing token: {token}", errors)

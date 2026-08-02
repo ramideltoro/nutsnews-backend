@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "source_repository": "ramideltoro/nutsnews",
+  "target_database": "nutsnews_primary_shadow",
+  "baseline_head": "20260717113000",
+  "baseline_contract": {
+    "schema_version": "20260712170000",
+    "expected_schema_fingerprint": "8355292e449f5aeaa5dfb614f35910b5",
+    "actual_schema_fingerprint": "8d56a962631e2867ae38d89a24b3f366"
+  },
+  "migrations": [
+    {
+      "version": "20260802022105",
+      "previous_head": "20260717113000",
+      "filename": "20260802022105_optimize_schema_fingerprint_rpc.sql",
+      "sha256": "1390d5efba6aca58c935b2bffcae86e28ae035b341aa1543ca5e7d31ffed28a0",
+      "required_roles": []
+    },
+    {
+      "version": "20260802040522",
+      "previous_head": "20260802022105",
+      "filename": "20260802040522_extend_postgrest_schema_cache_timeout.sql",
+      "sha256": "0997c803330329cf441f5fa004cfa66a83fc781d292a69fcb9d5939c00bc378f",
+      "required_roles": [
+        "authenticator"
+      ]
+    }
+  ]
+}

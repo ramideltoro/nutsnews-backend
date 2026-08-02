@@ -531,6 +531,10 @@ jobs:
         shell: bash
         run: python3 scripts/backend_postgres_benchmark_tuning.py --offline
 
+      - name: Validate protected backend release-migration shell runner
+        shell: bash
+        run: bash -n scripts/backend_postgres_release_migrate_remote.sh
+
       - name: Run backend drift check tests
         shell: bash
         run: python3 -m unittest discover -s tests

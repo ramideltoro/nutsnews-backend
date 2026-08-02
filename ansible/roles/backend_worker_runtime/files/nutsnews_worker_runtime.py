@@ -1926,14 +1926,18 @@ def build_report(args: argparse.Namespace, manifest: dict[str, Any]) -> dict[str
             service_status: dict[str, Any] = {}
             missing_consumers: list[str] = []
             unverifiable_consumers: list[str] = []
+            unhealthy_readiness: list[str] = []
             for configured_service in manifest["services"]:
                 name = str(configured_service["name"])
                 consumer_readiness = service_consumer_readiness(args, configured_service)
                 port = SERVICE_HTTP_PORTS.get(str(configured_service.get("stage")))
+                readiness = http_get_local("/ready", port) if port is not None else {"status": "not_configured"}
                 service_status[name] = {
-                    "readiness": http_get_local("/ready", port) if port is not None else {"status": "not_configured"},
+                    "readiness": readiness,
                     "consumer_readiness": consumer_readiness,
                 }
+                if readiness["status"] != "healthy":
+                    unhealthy_readiness.append(name)
                 if consumer_readiness["status"] == "critical":
                     missing_consumers.append(name)
                 elif consumer_readiness["status"] == "unknown":
@@ -1941,9 +1945,13 @@ def build_report(args: argparse.Namespace, manifest: dict[str, Any]) -> dict[str
             report["services"] = service_status
             report["missing_consumers"] = missing_consumers
             report["unverifiable_consumers"] = unverifiable_consumers
-            if missing_consumers or unverifiable_consumers:
+            report["unhealthy_readiness"] = unhealthy_readiness
+            if missing_consumers or unverifiable_consumers or unhealthy_readiness:
                 report["status"] = "fail"
+            if missing_consumers or unverifiable_consumers:
                 report["errors"].append("required RabbitMQ consumer readiness is not healthy")
+            if unhealthy_readiness:
+                report["errors"].append("required service readiness is not healthy")
     elif args.action == "logs":
         command = compose_base(args) + ["logs", "--no-color", "--tail", str(args.tail), service["name"]]
         report["commands"].append(run_command(command))

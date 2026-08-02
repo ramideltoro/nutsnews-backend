@@ -162,6 +162,7 @@ def validate() -> list[str]:
             "NUTSNEWS_ENVIRONMENT: production",
             "DEPENDENCY_MODE: production",
             "SHADOW_MODE: \"true\"",
+            "NUTSNEWS_SCHEDULER_LEASE_MS: \"300000\"",
             "secret_env",
             "backend_worker_runtime_secret_values",
             "production_write_path: false",

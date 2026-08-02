@@ -113,6 +113,15 @@ prometheus.relabel "backend_host" {
 prometheus.relabel "alloy_self" {
   forward_to = [prometheus.remote_write.grafana_cloud.receiver]
 
+  // Keep only the collector health, remote-write, and Loki delivery families
+  // used by the dashboards and alerts. Internal controller histograms and
+  // component-graph labels are diagnostic noise on the free-tier series budget.
+  rule {
+    source_labels = ["__name__"]
+    regex         = "^(up|scrape_(duration_seconds|samples_scraped|samples_post_metric_relabeling|series_added)|alloy_build_info|alloy_config_(last_load_successful|last_load_success_timestamp_seconds|load_failures_total)|prometheus_remote_storage_(samples_(pending|failed_total|retries_total|retried_total|total)|enqueue_retries_total|queue_highest_sent_timestamp_seconds)|prometheus_remote_write_wal_(out_of_order_samples_total|storage_active_series)|loki_write_(dropped_entries_total|dropped_bytes_total|batch_retries_total|sent_entries_total)|loki_process_dropped_lines(_by_label)?_total)$"
+    action        = "keep"
+  }
+
   rule {
     target_label = "job"
     replacement  = "nutsnews-backend-alloy"
@@ -235,6 +244,15 @@ prometheus.relabel "worker_uplift" {
     source_labels = ["__name__"]
     regex         = "^(up|scrape_.+|nutsnews_.+)$"
     action        = "keep"
+  }
+
+  // Readiness state is retained below. Per-check duration histograms multiply
+  // eight services, 44 checks, three probes, and 16 buckets without informing
+  // a production SLO, so they are intentionally excluded from remote write.
+  rule {
+    source_labels = ["__name__"]
+    regex         = "^nutsnews_worker_health_check_duration_seconds_(bucket|sum|count)$"
+    action        = "drop"
   }
 
   rule {
@@ -444,7 +462,7 @@ prometheus.relabel "postgres" {
 
   rule {
     source_labels = ["__name__"]
-    regex         = "^(up|scrape_.+|pg_(up|database.*|locks.*|long_running.*|postmaster.*|replication.*|stat_activity.*|stat_bgwriter.*|stat_checkpointer.*|stat_database.*|stat_progress_vacuum.*|stat_user_tables.*|stat_wal_receiver.*|wal.*|xlog.*|exporter_last_scrape.*))$"
+    regex         = "^(up|scrape_.+|pg_(up|database_size_bytes|locks_.+|replication_.+|stat_activity_autovacuum_.+|stat_bgwriter_.+|stat_checkpointer_.+|stat_database_.+|stat_progress_vacuum_.+|stat_user_tables_n_dead_tup|stat_wal_receiver_.+|wal_.+|exporter_last_scrape_.+))$"
     action        = "keep"
   }
 

@@ -197,6 +197,16 @@ class BackendAlloyObservabilityTests(unittest.TestCase):
         for relabel in (host_relabel, self_relabel):
             self.assertIn('target_label = "service_namespace"', relabel)
             self.assertIn('replacement  = "nutsnews"', relabel)
+        for required_metric in (
+            "prometheus_remote_storage_",
+            "samples_(pending|failed_total|retries_total|retried_total|total)",
+            "loki_write_",
+            "dropped_entries_total",
+            "batch_retries_total",
+        ):
+            self.assertIn(required_metric, self_relabel)
+        self.assertNotIn("prometheus_fanout_latency", self_relabel)
+        self.assertNotIn("alloy_component_graph_connection", self_relabel)
         self.assertNotIn('prometheus.relabel "backend"', alloy)
 
     def test_backend_api_postgres_and_caddy_metrics_are_scraped(self):
@@ -230,7 +240,8 @@ class BackendAlloyObservabilityTests(unittest.TestCase):
         postgres_relabel = alloy.split('prometheus.relabel "postgres"', 1)[1].split(
             "{% endif %}", 1
         )[0]
-        self.assertIn("stat_user_tables.*", postgres_relabel)
+        self.assertIn("stat_user_tables_n_dead_tup", postgres_relabel)
+        self.assertNotIn("stat_user_tables.*", postgres_relabel)
         self.assertNotIn("process_idle.*", postgres_relabel)
         self.assertNotIn("statio_user_indexes.*", postgres_relabel)
         self.assertNotIn("statio_user_tables.*", postgres_relabel)
@@ -259,6 +270,22 @@ class BackendAlloyObservabilityTests(unittest.TestCase):
                 self.assertIsNotNone(metric_allowlist.fullmatch(metric_name))
         for bounded_relation_label in ("schemaname", "relname"):
             self.assertIn(bounded_relation_label, postgres_relabel)
+
+    def test_remote_write_excludes_worker_health_check_duration_histograms(self):
+        alloy = ALLOY.read_text(encoding="utf-8")
+        worker_relabel = alloy.split('prometheus.relabel "worker_uplift"', 1)[1].split(
+            "{% endif %}", 1
+        )[0]
+
+        self.assertIn(
+            "^nutsnews_worker_health_check_duration_seconds_(bucket|sum|count)$",
+            worker_relabel,
+        )
+        self.assertIn('action        = "drop"', worker_relabel)
+        dropped_family = re.compile(
+            r"^nutsnews_worker_health_check_duration_seconds_(bucket|sum|count)$"
+        )
+        self.assertIsNone(dropped_family.fullmatch("nutsnews_worker_health_check_success"))
 
     def test_postgres_scrape_capacity_has_bounded_relation_headroom(self):
         defaults = DEFAULTS.read_text(encoding="utf-8")

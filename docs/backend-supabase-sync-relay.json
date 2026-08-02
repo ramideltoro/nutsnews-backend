@@ -3,15 +3,15 @@
   "version": 1,
   "issue": "ramideltoro/nutsnews#499",
   "epic": "ramideltoro/nutsnews#223",
-  "updated_at_utc": "2026-07-26",
+  "updated_at_utc": "2026-08-01",
   "source_manifest": {
     "repository": "ramideltoro/nutsnews",
     "path": "supabase/standby_manifest.json",
     "issue": "ramideltoro/nutsnews#497",
-    "schema_fingerprint": "9f8cffa694100f438abaddbf6e00db13ff969572e8c16fd4b8ee4afa5087088f",
+    "schema_fingerprint": "578058367cfa4451f452c57d6969d2d5c2854623835d7bf26b92e3b8249fbf44",
     "policy": "backend-postgres-primary-to-existing-production-supabase-standby"
   },
-  "manifest_schema_fingerprint": "9f8cffa694100f438abaddbf6e00db13ff969572e8c16fd4b8ee4afa5087088f",
+  "manifest_schema_fingerprint": "578058367cfa4451f452c57d6969d2d5c2854623835d7bf26b92e3b8249fbf44",
   "source": {
     "label": "backend_postgres_primary",
     "role": "normal production read/write primary",
@@ -34,15 +34,19 @@
     "runtime": "backend-host-systemd-timer",
     "service": "nutsnews-supabase-sync-relay.service",
     "timer": "nutsnews-supabase-sync-relay.timer",
-    "interval_seconds": 30,
-    "mode": "snapshot-apply-relay",
+    "interval_seconds": 60,
+    "mode": "parity-first-selective-snapshot-apply-relay",
     "supported_change_types": [
       "insert",
       "update",
       "delete",
       "sequence-readiness"
     ],
-    "apply_strategy": "copy-source-snapshot-to-temp-table-update-insert-delete-target-rows",
+    "apply_strategy": "validate-parity-skip-mutation-when-current-otherwise-copy-only-drifted-tables-and-update-only-changed-rows",
+    "runtime_limit_seconds": 120,
+    "target_lock_timeout_seconds": 2,
+    "target_statement_timeout_seconds": 45,
+    "schedule_basis": "seconds-after-prior-run-finishes",
     "sequence_readiness_metadata_fields": [
       "last_value",
       "next_value",
@@ -72,7 +76,7 @@
     "issue": "ramideltoro/nutsnews#500",
     "report_path": "/var/lib/nutsnews/supabase-sync-relay/last-run.json",
     "check_name": "supabase_sync_relay_health",
-    "lag_critical_seconds": 30,
+    "lag_critical_seconds": 180,
     "source": "backend_health_report",
     "safe_metadata_only": true,
     "reported_fields": [

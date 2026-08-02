@@ -38,18 +38,29 @@ The workflow renders `/etc/nutsnews-supabase-sync-relay/relay.env` as
 
 - Service: `nutsnews-supabase-sync-relay.service`
 - Timer: `nutsnews-supabase-sync-relay.timer`
-- Default interval: 30 seconds
+- Default interval: 60 seconds after the prior run finishes, with up to 10
+  seconds of jitter
+- Service runtime ceiling: 120 seconds
 - Last safe report: `/var/lib/nutsnews/supabase-sync-relay/last-run.json`
   with mode `0644`
 
 The report is schema version 2 and is replaced atomically. Every attempt records
 `checked_at_utc` and `finished_at_utc`. Only a fully validated
-`mode=sync-once`, `sync.status=applied`, `post_sync.status=pass` run
-advances `last_success_at_utc` and `last_applied_at_utc`; later failures
+`mode=sync-once`, `post_sync.status=pass` run advances
+`last_success_at_utc`. A run that repaired drift also advances
+`last_applied_at_utc`; a parity pass with `sync.status=not_required` preserves
+the prior apply timestamp and performs no target mutation. Later failures
 preserve both timestamps so their ages continue to increase. Dry runs never
 create success history. `validation_summary` reports complete table coverage,
 failed-table count, and bounded maximum target lag rows; skipped or incomplete
 validation remains explicitly unavailable.
+
+Each run validates parity before applying changes. If parity already passes,
+the relay exits without writing. Otherwise it copies only drifted tables, and
+its target update statement touches only rows whose values changed. Target
+lock waits are capped at 2 seconds, statements at 45 seconds, and systemd stops
+the entire service at 120 seconds. These limits intentionally prefer a stale,
+fail-closed standby over production database starvation.
 
 Useful backend-host checks:
 
@@ -83,7 +94,7 @@ The report includes only safe metadata:
 - `failed_table_count`;
 - generic `last_error` code.
 
-Lag over `30` seconds marks standby failover as blocked with
+Lag over `180` seconds marks standby failover as blocked with
 `relay_lag_exceeds_threshold`. Missing or stopped relay timer state marks the
 check critical with `relay_timer_stopped` or `relay_report_missing`. Failed
 relay status, failed table checks, invalid report JSON, or missing safe-metadata

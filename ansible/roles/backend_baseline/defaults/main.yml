@@ -200,7 +200,7 @@ backend_supabase_sync_relay_reconcile_library_source_path: "{{ playbook_dir }}/.
 backend_supabase_sync_relay_contract_source_path: "{{ playbook_dir }}/../../docs/backend-supabase-sync-relay.json"
 backend_supabase_sync_relay_source_db_url: ""
 backend_supabase_sync_relay_target_db_url: ""
-backend_supabase_sync_relay_interval_seconds: 30
+backend_supabase_sync_relay_interval_seconds: 60
 backend_supabase_sync_relay_batch_size: 500
 backend_db_dashboard_enabled: false
 backend_db_dashboard_bind: 127.0.0.1

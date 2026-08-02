@@ -215,18 +215,38 @@ class BackendHealthReportTests(unittest.TestCase):
         self.assertIn("lag_seconds=15", relay["summary"])
         self.assertIn("standby_failover_blocked=false", relay["summary"])
 
-    def test_supabase_sync_relay_lag_over_30_seconds_is_critical_alert(self):
+    def test_supabase_sync_relay_health_accepts_recent_noop_parity_pass(self):
         checks, _ = backend_health_report.classify(
             fixture_report(
                 supabase_sync_relay_status=command(
-                    relay_last_run(checked_at_utc="2026-07-16T11:58:00Z", last_applied_at_utc="2026-07-16T11:58:00Z")
+                    relay_last_run(
+                        sync={"status": "not_required", "reason": "standby_already_in_sync"},
+                        last_applied_at_utc="2026-07-16T10:00:00Z",
+                    )
+                )
+            )
+        )
+        relay = {item["name"]: item for item in checks}["supabase_sync_relay_health"]
+        self.assertEqual("healthy", relay["status"])
+        self.assertEqual(15, relay["lag_seconds"])
+        self.assertNotIn("relay_last_run_not_pass", relay["blockers"])
+
+    def test_supabase_sync_relay_lag_over_180_seconds_is_critical_alert(self):
+        checks, _ = backend_health_report.classify(
+            fixture_report(
+                supabase_sync_relay_status=command(
+                    relay_last_run(
+                        checked_at_utc="2026-07-16T11:56:00Z",
+                        last_success_at_utc="2026-07-16T11:56:00Z",
+                        last_applied_at_utc="2026-07-16T11:56:00Z",
+                    )
                 )
             )
         )
         by_name = {item["name"]: item for item in checks}
         relay = by_name["supabase_sync_relay_health"]
         self.assertEqual(relay["status"], "critical")
-        self.assertEqual(relay["lag_seconds"], 120)
+        self.assertEqual(relay["lag_seconds"], 240)
         self.assertIn("relay_lag_exceeds_threshold", relay["blockers"])
         alerts = backend_health_report.current_alerts_from_checks([relay])
         self.assertEqual(alerts[0]["failure_class"], "supabase_sync_relay_lag")

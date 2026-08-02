@@ -13,6 +13,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = ROOT / "docs" / "backend-supabase-sync-relay.json"
 SCRIPT_PATH = ROOT / "scripts" / "backend_supabase_sync_relay.py"
+RECONCILE_PATH = ROOT / "scripts" / "backend_supabase_standby_reconcile.py"
 TEST_PATH = ROOT / "tests" / "test_backend_supabase_sync_relay.py"
 SMOKE_SCRIPT_PATH = ROOT / "scripts" / "backend_supabase_sync_relay_smoke.py"
 SMOKE_TEST_PATH = ROOT / "tests" / "test_backend_supabase_sync_relay_smoke.py"
@@ -96,6 +97,7 @@ def require_path(relative_path: str, field: str, errors: list[str]) -> None:
 def main() -> int:
     contract = load_json(CONTRACT_PATH)
     script = SCRIPT_PATH.read_text(encoding="utf-8") if SCRIPT_PATH.exists() else ""
+    reconcile = RECONCILE_PATH.read_text(encoding="utf-8") if RECONCILE_PATH.exists() else ""
     tests = TEST_PATH.read_text(encoding="utf-8") if TEST_PATH.exists() else ""
     smoke_script = SMOKE_SCRIPT_PATH.read_text(encoding="utf-8") if SMOKE_SCRIPT_PATH.exists() else ""
     smoke_tests = SMOKE_TEST_PATH.read_text(encoding="utf-8") if SMOKE_TEST_PATH.exists() else ""
@@ -128,7 +130,10 @@ def main() -> int:
     relay = contract.get("relay", {})
     require(relay.get("direction") == "backend-postgres-to-existing-production-supabase", "relay direction is incorrect", errors)
     require(relay.get("runtime") == "backend-host-systemd-timer", "relay runtime must be backend-host systemd timer", errors)
-    require(relay.get("interval_seconds") == 30, "relay interval must be 30 seconds for #499", errors)
+    require(relay.get("interval_seconds") == 60, "relay interval must be 60 seconds", errors)
+    require(relay.get("runtime_limit_seconds") == 120, "relay runtime limit must be 120 seconds", errors)
+    require(relay.get("target_lock_timeout_seconds") == 2, "relay lock timeout must be 2 seconds", errors)
+    require(relay.get("target_statement_timeout_seconds") == 45, "relay statement timeout must be 45 seconds", errors)
     require(relay.get("app_worker_supabase_write_credentials_injected") is False, "relay must not inject app/worker Supabase write credentials", errors)
     for change_type in ("insert", "update", "delete", "sequence-readiness"):
         require(change_type in relay.get("supported_change_types", []), f"relay missing change type: {change_type}", errors)
@@ -190,6 +195,9 @@ def main() -> int:
     for token in (
         "relay_preflight",
         "apply_sync_once",
+        "safely_repairable_failed_check_ids",
+        "standby_already_in_sync",
+        "parity_check_not_safely_repairable",
         "preflight_failed",
         "manifest_replica_identity_not_primary_key",
         "app_worker_supabase_write_credentials_injected",
@@ -200,12 +208,13 @@ def main() -> int:
         "preflight_failed",
         "manifest_replica_identity_not_primary_key",
         "apply_table_backfill.assert_called_once",
+        "apply_table_backfill.assert_not_called",
         "app_worker_supabase_write_credentials_injected",
     ):
         require(token in tests, f"relay tests missing token: {token}", errors)
     for token in (
         "backend_supabase_sync_relay_enabled: false",
-        "backend_supabase_sync_relay_interval_seconds: 30",
+        "backend_supabase_sync_relay_interval_seconds: 60",
         "backend_supabase_sync_relay_source_db_url: \"\"",
         "backend_supabase_sync_relay_target_db_url: \"\"",
     ):
@@ -224,9 +233,18 @@ def main() -> int:
         "mode: \"0755\"",
         "safe_report_path",
         "NoNewPrivileges=true",
+        "RuntimeMaxSec=120s",
+        "OnUnitInactiveSec={{ backend_supabase_sync_relay_interval_seconds }}s",
+        "RandomizedDelaySec=10s",
         "app/worker services do not receive Supabase write credentials",
     ):
         require(token in relay_tasks, f"relay Ansible tasks missing token: {token}", errors)
+    for token in (
+        "set local lock_timeout = '2s'",
+        "set local statement_timeout = '45s'",
+        "is distinct from row(",
+    ):
+        require(token in reconcile, f"relay reconcile library missing token: {token}", errors)
     for token in (
         "NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_ENABLED",
         "NUTSNEWS_PRODUCTION_SUPABASE_DB_URL",

@@ -181,17 +181,39 @@ class BackendSupabaseSyncRelayTests(unittest.TestCase):
                     with mock.patch.object(
                         relay.reconcile,
                         "validate_standby",
-                        return_value={
-                            "status": "pass",
-                            "failed_required_checks": [],
-                            "checks": [
-                                {
-                                    "id": "table.public.worker_runs",
-                                    "status": "pass",
-                                    "target_lag_rows": 0,
-                                }
-                            ],
-                        },
+                        side_effect=[
+                            {
+                                "status": "fail",
+                                "failed_required_checks": [
+                                    "table.public.worker_runs",
+                                    "sequence.public.worker_runs_id_seq",
+                                ],
+                                "checks": [
+                                    {
+                                        "id": "table.public.worker_runs",
+                                        "status": "fail",
+                                        "reasons": ["row_count_mismatch"],
+                                        "target_lag_rows": 1,
+                                    },
+                                    {
+                                        "id": "sequence.public.worker_runs_id_seq",
+                                        "status": "fail",
+                                        "reasons": ["target_next_value_lt_source_next_value"],
+                                    },
+                                ],
+                            },
+                            {
+                                "status": "pass",
+                                "failed_required_checks": [],
+                                "checks": [
+                                    {
+                                        "id": "table.public.worker_runs",
+                                        "status": "pass",
+                                        "target_lag_rows": 0,
+                                    }
+                                ],
+                            },
+                        ],
                     ):
                         exit_code, report = run_with_contract(
                             contract(),
@@ -223,6 +245,87 @@ class BackendSupabaseSyncRelayTests(unittest.TestCase):
         self.assertEqual(["insert", "update", "delete", "sequence-readiness"], report["sync"]["supported_change_types"])
         apply_table_backfill.assert_called_once()
         apply_sequence_safety.assert_called_once()
+
+    def test_sync_once_skips_mutation_when_standby_is_already_in_sync(self) -> None:
+        parity = {
+            "status": "pass",
+            "failed_required_checks": [],
+            "checks": [
+                {
+                    "id": "table.public.worker_runs",
+                    "status": "pass",
+                    "target_lag_rows": 0,
+                }
+            ],
+        }
+        with mock.patch.object(relay, "relay_preflight", return_value={"status": "pass", "failed_required_checks": [], "checks": []}):
+            with mock.patch.object(relay.reconcile, "validate_standby", return_value=parity):
+                with mock.patch.object(relay.reconcile, "apply_table_backfill") as apply_table_backfill:
+                    with mock.patch.object(relay.reconcile, "apply_sequence_safety") as apply_sequence_safety:
+                        exit_code, report = run_with_contract(
+                            contract(),
+                            ["--mode", "sync-once", "--enforce"],
+                            {"SRC": "postgresql://source", "TGT": "postgresql://target"},
+                        )
+
+        self.assertEqual(0, exit_code)
+        self.assertEqual("pass", report["status"])
+        self.assertEqual("not_required", report["sync"]["status"])
+        self.assertEqual("standby_already_in_sync", report["sync"]["reason"])
+        self.assertEqual(report["completed_at_utc"], report["last_success_at_utc"])
+        self.assertNotIn("last_applied_at_utc", report)
+        apply_table_backfill.assert_not_called()
+        apply_sequence_safety.assert_not_called()
+
+    def test_sync_once_blocks_when_parity_failure_is_not_safely_repairable(self) -> None:
+        with mock.patch.object(relay, "relay_preflight", return_value={"status": "pass", "failed_required_checks": [], "checks": []}):
+            with mock.patch.object(
+                relay.reconcile,
+                "validate_standby",
+                return_value={
+                    "status": "fail",
+                    "failed_required_checks": ["schema-fingerprint"],
+                    "checks": [{"id": "schema-fingerprint", "status": "fail"}],
+                },
+            ):
+                with mock.patch.object(relay.reconcile, "apply_table_backfill") as apply_table_backfill:
+                    exit_code, report = run_with_contract(
+                        contract(),
+                        ["--mode", "sync-once", "--enforce"],
+                        {"SRC": "postgresql://source", "TGT": "postgresql://target"},
+                    )
+
+        self.assertEqual(1, exit_code)
+        self.assertEqual("parity_check_not_safely_repairable", report["sync"]["reason"])
+        apply_table_backfill.assert_not_called()
+
+    def test_sync_once_does_not_mutate_after_parity_query_failure(self) -> None:
+        with mock.patch.object(relay, "relay_preflight", return_value={"status": "pass", "failed_required_checks": [], "checks": []}):
+            with mock.patch.object(
+                relay.reconcile,
+                "validate_standby",
+                return_value={
+                    "status": "fail",
+                    "failed_required_checks": ["table.public.worker_runs"],
+                    "checks": [
+                        {
+                            "id": "table.public.worker_runs",
+                            "status": "fail",
+                            "errors": {"target_count_error": "query_timeout"},
+                        }
+                    ],
+                },
+            ):
+                with mock.patch.object(relay.reconcile, "apply_table_backfill") as apply_table_backfill:
+                    exit_code, report = run_with_contract(
+                        contract(),
+                        ["--mode", "sync-once", "--enforce"],
+                        {"SRC": "postgresql://source", "TGT": "postgresql://target"},
+                    )
+
+        self.assertEqual(1, exit_code)
+        self.assertEqual("parity_check_not_safely_repairable", report["sync"]["reason"])
+        apply_table_backfill.assert_not_called()
 
     def test_failed_run_preserves_last_success_and_last_applied_history(self) -> None:
         previous = {

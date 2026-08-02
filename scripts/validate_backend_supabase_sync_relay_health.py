@@ -43,7 +43,7 @@ def main() -> int:
 
     for token in (
         "SUPABASE_SYNC_RELAY_REPORT_PATH = \"/var/lib/nutsnews/supabase-sync-relay/last-run.json\"",
-        "SUPABASE_SYNC_RELAY_LAG_CRITICAL_SECONDS = 30",
+        "SUPABASE_SYNC_RELAY_LAG_CRITICAL_SECONDS = 180",
         "\"supabase_sync_relay_unit_states\"",
         "\"supabase_sync_relay_status\"",
         "nutsnews-supabase-sync-relay.timer",
@@ -66,7 +66,7 @@ def main() -> int:
 
     for token in (
         "test_supabase_sync_relay_health_is_healthy_when_recent_and_timer_active",
-        "test_supabase_sync_relay_lag_over_30_seconds_is_critical_alert",
+        "test_supabase_sync_relay_lag_over_180_seconds_is_critical_alert",
         "test_supabase_sync_relay_missing_or_stopped_is_critical_alert",
         "test_supabase_sync_relay_failed_table_count_is_critical",
         "supabase_sync_relay_health",
@@ -84,7 +84,7 @@ def main() -> int:
         "lag_seconds",
         "failed_table_count",
         "last_applied_at_utc",
-        "30 seconds",
+        "180 seconds",
         "critical",
     ):
         require(token, runbook, "backend health report runbook", errors)
@@ -93,7 +93,7 @@ def main() -> int:
         "Issue #500",
         "last_applied_at_utc",
         "lag_seconds",
-        "Lag over `30` seconds",
+        "Lag over `180` seconds",
         "Missing or stopped relay timer",
     ):
         require(token, relay_runbook, "sync relay runbook", errors)
@@ -102,7 +102,7 @@ def main() -> int:
         "\"health\"",
         "\"issue\": \"ramideltoro/nutsnews#500\"",
         "\"check_name\": \"supabase_sync_relay_health\"",
-        "\"lag_critical_seconds\": 30",
+        "\"lag_critical_seconds\": 180",
         "\"relay_lag_exceeds_threshold\"",
     ):
         require(token, contract, "sync relay contract", errors)

@@ -36,7 +36,7 @@ PRIVATE_KEY_RE = re.compile(
 URL_SECRET_RE = re.compile(r"([a-z][a-z0-9+.-]*://[^:/\s]+:)([^@\s]+)(@)", re.IGNORECASE)
 EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 SUPABASE_SYNC_RELAY_REPORT_PATH = "/var/lib/nutsnews/supabase-sync-relay/last-run.json"
-SUPABASE_SYNC_RELAY_LAG_CRITICAL_SECONDS = 30
+SUPABASE_SYNC_RELAY_LAG_CRITICAL_SECONDS = 180
 
 
 REMOTE_COMMANDS: dict[str, str] = {
@@ -412,7 +412,7 @@ def classify_supabase_sync_relay(report: dict[str, Any]) -> dict[str, Any]:
                 relay_status == "pass"
                 and relay_report.get("mode") == "sync-once"
                 and isinstance(sync, dict)
-                and sync.get("status") == "applied"
+                and sync.get("status") in {"applied", "not_required"}
                 and isinstance(post_sync, dict)
                 and post_sync.get("status") == "pass"
             )
@@ -425,7 +425,8 @@ def classify_supabase_sync_relay(report: dict[str, Any]) -> dict[str, Any]:
 
             last_applied = relay_report.get("last_applied_at_utc")
             last_applied_at = str(last_applied or "unknown")
-            lag_seconds = seconds_since(str(report.get("last_report_run_at") or ""), last_applied_at)
+            last_success = relay_report.get("last_success_at_utc")
+            lag_seconds = seconds_since(str(report.get("last_report_run_at") or ""), str(last_success or "unknown"))
             if lag_seconds is None:
                 blockers.append("relay_lag_unknown")
             elif lag_seconds > SUPABASE_SYNC_RELAY_LAG_CRITICAL_SECONDS:

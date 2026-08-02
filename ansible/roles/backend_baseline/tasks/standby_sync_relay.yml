@@ -9,7 +9,7 @@
       - backend_supabase_sync_relay_source_db_url is search('^postgresql?://')
       - backend_supabase_sync_relay_target_db_url is search('^postgresql?://')
       - "'nutsnews-standby' not in backend_supabase_sync_relay_target_db_url"
-      - backend_supabase_sync_relay_interval_seconds | int >= 10
+      - backend_supabase_sync_relay_interval_seconds | int >= 60
       - backend_supabase_sync_relay_interval_seconds | int <= 3600
       - backend_supabase_sync_relay_batch_size | int >= 1
       - backend_supabase_sync_relay_batch_size | int <= 5000
@@ -110,6 +110,9 @@
       EnvironmentFile={{ backend_supabase_sync_relay_env_path }}
       WorkingDirectory={{ backend_supabase_sync_relay_state_dir }}
       ExecStart=/usr/bin/python3 {{ backend_supabase_sync_relay_runner_path }} --contract {{ backend_supabase_sync_relay_contract_path }} --mode sync-once --enforce --batch-size {{ backend_supabase_sync_relay_batch_size }} --output {{ backend_supabase_sync_relay_state_dir }}/last-run.json
+      RuntimeMaxSec=120s
+      TimeoutStopSec=15s
+      KillMode=mixed
       NoNewPrivileges=true
       PrivateTmp=true
       ProtectHome=true
@@ -133,8 +136,9 @@
 
       [Timer]
       OnBootSec={{ backend_supabase_sync_relay_interval_seconds }}s
-      OnUnitActiveSec={{ backend_supabase_sync_relay_interval_seconds }}s
-      AccuracySec=5s
+      OnUnitInactiveSec={{ backend_supabase_sync_relay_interval_seconds }}s
+      RandomizedDelaySec=10s
+      AccuracySec=10s
       Persistent=false
       Unit=nutsnews-supabase-sync-relay.service
 

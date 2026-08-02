@@ -601,10 +601,10 @@ jobs:
                   raise SystemExit("NUTSNEWS_BACKEND_POSTGRES_PRIMARY_DATABASE must be a safe PostgreSQL identifier")
               if any("\n" in value or "\r" in value for value in (source_password, target_db_url, str(primary_database))):
                   raise SystemExit("Backend Supabase sync relay DB URL values must be single-line values")
-              interval_seconds = int(os.environ.get("NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_INTERVAL_SECONDS", "30") or "30")
+              interval_seconds = int(os.environ.get("NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_INTERVAL_SECONDS", "60") or "60")
               batch_size = int(os.environ.get("NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_BATCH_SIZE", "500") or "500")
-              if interval_seconds < 10 or interval_seconds > 3600:
-                  raise SystemExit("NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_INTERVAL_SECONDS must be between 10 and 3600")
+              if interval_seconds < 60 or interval_seconds > 3600:
+                  raise SystemExit("NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_INTERVAL_SECONDS must be between 60 and 3600")
               if batch_size < 1 or batch_size > 5000:
                   raise SystemExit("NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_BATCH_SIZE must be between 1 and 5000")
               source_user = "nutsnews_migration_validation"

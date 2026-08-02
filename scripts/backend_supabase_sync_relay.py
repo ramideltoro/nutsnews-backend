@@ -71,7 +71,7 @@ def successful_sync_timestamp(report: dict[str, Any]) -> str | None:
         and report.get("mode") == "sync-once"
         and report.get("status") == "pass"
         and isinstance(sync, dict)
-        and sync.get("status") == "applied"
+        and sync.get("status") in {"applied", "not_required"}
         and isinstance(post_sync, dict)
         and post_sync.get("status") == "pass"
         and isinstance(validation_summary, dict)
@@ -123,7 +123,11 @@ def preserve_relay_history(report: dict[str, Any], history: dict[str, str]) -> N
     successful_at = successful_sync_timestamp(report)
     if successful_at is not None:
         report["last_success_at_utc"] = successful_at
-        report["last_applied_at_utc"] = successful_at
+        sync = report.get("sync", {})
+        if isinstance(sync, dict) and sync.get("status") == "applied":
+            report["last_applied_at_utc"] = successful_at
+        elif safe_utc_timestamp(history.get("last_applied_at_utc")) is not None:
+            report["last_applied_at_utc"] = history["last_applied_at_utc"]
         return
     for field in ("last_success_at_utc", "last_applied_at_utc"):
         value = safe_utc_timestamp(history.get(field))
@@ -333,7 +337,14 @@ def relay_preflight(contract: dict[str, Any], source_db_url: str, target_db_url:
     }
 
 
-def apply_sync_once(contract: dict[str, Any], source_db_url: str, target_db_url: str, *, batch_size: int) -> dict[str, Any]:
+def apply_sync_once(
+    contract: dict[str, Any],
+    source_db_url: str,
+    target_db_url: str,
+    *,
+    batch_size: int,
+    required_check_ids: set[str],
+) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="nutsnews-supabase-sync-relay-") as tmpdir:
         workdir = Path(tmpdir)
         table_by_name = {str(table["name"]): table for table in contract.get("tables", [])}
@@ -343,10 +354,12 @@ def apply_sync_once(contract: dict[str, Any], source_db_url: str, target_db_url:
         table_results = [
             reconcile.apply_table_backfill(source_db_url, target_db_url, table_by_name[name], batch_size=batch_size, workdir=workdir)
             for name in ordered_names
+            if f"table.{name}" in required_check_ids
         ]
         sequence_results = [
             reconcile.apply_sequence_safety(source_db_url, target_db_url, sequence)
             for sequence in contract.get("sequences", [])
+            if f"sequence.{sequence.get('name')}" in required_check_ids
         ]
     return {
         "status": "applied",
@@ -357,6 +370,41 @@ def apply_sync_once(contract: dict[str, Any], source_db_url: str, target_db_url:
         "supported_change_types": ["insert", "update", "delete", "sequence-readiness"],
         "safe_metadata_only": True,
     }
+
+
+def repairable_check_ids(contract: dict[str, Any]) -> set[str]:
+    return {
+        *(f"table.{table.get('name')}" for table in contract.get("tables", [])),
+        *(f"sequence.{sequence.get('name')}" for sequence in contract.get("sequences", [])),
+    }
+
+
+def safely_repairable_failed_check_ids(
+    contract: dict[str, Any],
+    parity: dict[str, Any],
+) -> set[str]:
+    declared = repairable_check_ids(contract)
+    safe_ids: set[str] = set()
+    safe_table_reasons = {"row_count_mismatch", "row_checksum_mismatch"}
+    safe_sequence_reasons = {
+        "target_last_value_lt_source_last_value",
+        "target_next_value_not_above_target_max_id",
+        "target_next_value_not_above_source_max_id",
+        "target_next_value_lt_source_next_value",
+    }
+    for check in parity.get("checks", []):
+        if not isinstance(check, dict) or check.get("status") != "fail":
+            continue
+        check_id = str(check.get("id", ""))
+        reasons = check.get("reasons", [])
+        if check_id not in declared or check.get("errors") or not isinstance(reasons, list) or not reasons:
+            continue
+        reason_set = {str(reason) for reason in reasons}
+        if check_id.startswith("table.") and reason_set <= safe_table_reasons:
+            safe_ids.add(check_id)
+        elif check_id.startswith("sequence.") and reason_set <= safe_sequence_reasons:
+            safe_ids.add(check_id)
+    return safe_ids
 
 
 def skipped_preflight(contract: dict[str, Any], reason: str) -> dict[str, Any]:
@@ -435,8 +483,43 @@ def build_report(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         report["status"] = "fail"
         return report, 1 if args.enforce else 0
 
-    sync_result = apply_sync_once(contract, source_db_url, target_db_url, batch_size=args.batch_size)
-    post_sync = reconcile.validate_standby(contract, source_db_url, target_db_url)
+    current_parity = reconcile.validate_standby(contract, source_db_url, target_db_url)
+    report["current_parity"] = current_parity
+    failed_check_ids = set(current_parity.get("failed_required_checks", []))
+    if current_parity.get("status") == "pass":
+        sync_result = {
+            "status": "not_required",
+            "reason": "standby_already_in_sync",
+            "table_count": 0,
+            "sequence_count": 0,
+            "safe_metadata_only": True,
+        }
+        post_sync = current_parity
+    else:
+        safe_repair_ids = safely_repairable_failed_check_ids(contract, current_parity)
+        unrepairable_check_ids = failed_check_ids - safe_repair_ids
+        if not failed_check_ids or unrepairable_check_ids:
+            report["sync"] = {
+                "status": "blocked",
+                "reason": "parity_check_not_safely_repairable",
+                "failed_check_ids": sorted(unrepairable_check_ids or failed_check_ids),
+                "safe_metadata_only": True,
+            }
+            report["post_sync"] = current_parity
+            report["validation_summary"] = relay_validation_summary(
+                current_parity,
+                len(contract.get("tables", [])),
+            )
+            report["status"] = "fail"
+            return report, 1 if args.enforce else 0
+        sync_result = apply_sync_once(
+            contract,
+            source_db_url,
+            target_db_url,
+            batch_size=args.batch_size,
+            required_check_ids=safe_repair_ids,
+        )
+        post_sync = reconcile.validate_standby(contract, source_db_url, target_db_url)
     completed_at_utc = reconcile.utc_now()
     report["completed_at_utc"] = completed_at_utc
     report["sync"] = sync_result

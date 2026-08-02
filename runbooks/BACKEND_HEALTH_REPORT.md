@@ -104,13 +104,13 @@ The JSON report includes:
 The standby relay health check reports only safe metadata:
 
 - relay timer state, service state, and last service result;
-- `last_applied_at_utc`;
+- `last_applied_at_utc` and the latest validated success timestamp;
 - `lag_seconds`;
 - `failed_table_count`;
 - generic `last_error` code;
 - `standby_failover_blocked`.
 
-Lag over `30 seconds`, missing relay status, invalid relay status, stopped relay
+Lag over `180 seconds`, missing relay status, invalid relay status, stopped relay
 timer, failed relay result, unknown failed-table count, or any failed replicated
 table marks `supabase_sync_relay_health` as `critical`. That critical check
 creates an alert candidate and blocks Supabase failover decision-making until a

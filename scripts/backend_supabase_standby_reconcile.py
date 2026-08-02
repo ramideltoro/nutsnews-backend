@@ -1054,13 +1054,6 @@ def apply_table_backfill(
     quoted_columns = ", ".join(quote_ident(column) for column in columns)
     temp_select_columns = ", ".join(f"s.{quote_ident(column)}" for column in columns)
     quoted_pk = ", ".join(quote_ident(column) for column in primary_key)
-    if columns:
-        update_assignments = ", ".join(
-            f"{quote_ident(column)} = s.{quote_ident(column)}" for column in columns
-        )
-        update_sql = f"update {relation.sql} as t set {update_assignments}"
-    else:
-        update_sql = ""
     temp_table = quote_ident(f"standby_backfill_{relation.name}")
     match_predicate = " and ".join(
         f"t.{quote_ident(column)} is not distinct from s.{quote_ident(column)}" for column in match_key
@@ -1068,6 +1061,14 @@ def apply_table_backfill(
     pk_predicate = " and ".join(
         f"t.{quote_ident(column)} is not distinct from s.{quote_ident(column)}" for column in primary_key
     )
+    update_assignments = ", ".join(
+        f"{quote_ident(column)} = s.{quote_ident(column)}" for column in columns
+    )
+    changed_predicate = (
+        "row(" + ", ".join(f"t.{quote_ident(column)}" for column in columns) + ") "
+        "is distinct from row(" + ", ".join(f"s.{quote_ident(column)}" for column in columns) + ")"
+    )
+    update_sql = f"update {relation.sql} as t set {update_assignments}"
     delete_collision_sql = ""
     if match_key != primary_key:
         delete_collision_sql = (
@@ -1096,12 +1097,14 @@ def apply_table_backfill(
     target_insert_sql = "\n".join(
         [
             "begin;",
+            "set local lock_timeout = '2s';",
+            "set local statement_timeout = '45s';",
             f"create temp table {temp_table} (like {relation.sql} including defaults) on commit drop;",
             f"\\copy {temp_table} ({quoted_columns}) from {psql_meta_literal(str(csv_path))} with (format csv)",
             f"alter table {relation.sql} disable trigger user;",
             *([delete_collision_sql] if delete_collision_sql else []),
             delete_missing_sql,
-            *([f"{update_sql} from {temp_table} as s where {match_predicate};"] if update_sql else []),
+            f"{update_sql} from {temp_table} as s where {match_predicate} and {changed_predicate};",
             f"insert into {relation.sql} ({quoted_columns})",
             f"select {temp_select_columns}",
             f"from {temp_table} as s",

@@ -28,6 +28,12 @@ HEALTH_AUDIT_STATE_PATH = Path(
         "/var/lib/nutsnews/health-audit/last-run.json",
     )
 )
+WORKER_UPLIFT_RUNTIME_MANIFEST_PATH = Path(
+    os.environ.get(
+        "NUTSNEWS_WORKER_UPLIFT_RUNTIME_MANIFEST_PATH",
+        "/etc/nutsnews-worker-uplift/services.json",
+    )
+)
 POSTGRES_METRICS_DATABASE = os.environ.get("NUTSNEWS_METRICS_POSTGRES_DATABASE", "nutsnews_primary_shadow")
 PUBLIC_FEED_STATUS_URL = os.environ.get(
     "NUTSNEWS_PUBLIC_FEED_STATUS_URL",
@@ -52,6 +58,11 @@ WORKER_UPLIFT_STAGES = (
     "persistence",
     "publication",
 )
+WORKER_SERVICE_VERSION_RE = re.compile(
+    r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"
+)
+WORKER_BUILD_REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
+WORKER_IMAGE_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 DOCKER_STATS_TIMEOUT_SECONDS = 5
 DOCKER_STATS_SERVICES = ("rabbitmq", *WORKER_UPLIFT_STAGES)
 DOCKER_STATS_CONTAINER_ALLOWLIST = {
@@ -853,6 +864,201 @@ def read_json(path: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {"status": "unknown"}
     return data if isinstance(data, dict) else {"status": "unknown"}
+
+
+def running_worker_uplift_label_sets() -> list[dict[str, str]] | None:
+    """Read only bounded immutable identity labels from running worker containers."""
+    try:
+        containers = subprocess.run(
+            [
+                "docker",
+                "ps",
+                "--filter",
+                "label=com.nutsnews.service",
+                "--filter",
+                "label=com.docker.compose.project=nutsnews-worker-uplift",
+                "--format",
+                "{{.ID}}",
+            ],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=8,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if containers.returncode != 0:
+        return None
+    container_ids = [
+        value.strip() for value in containers.stdout.splitlines() if value.strip()
+    ]
+    if len(container_ids) > 24 or any(
+        not re.fullmatch(r"[0-9a-f]{12,64}", value) for value in container_ids
+    ):
+        return None
+    if not container_ids:
+        return []
+    try:
+        inspected = subprocess.run(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                (
+                    '[{{json .Config.Image}},'
+                    '{{json (index .Config.Labels "com.nutsnews.service")}},'
+                    '{{json (index .Config.Labels "com.nutsnews.service_version")}},'
+                    '{{json (index .Config.Labels "com.nutsnews.revision")}},'
+                    '{{json (index .Config.Labels "com.nutsnews.image_digest")}}]'
+                ),
+                *container_ids,
+            ],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=12,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if inspected.returncode != 0:
+        return None
+    label_sets: list[dict[str, str]] = []
+    for raw in inspected.stdout.splitlines():
+        try:
+            identity = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(identity, list) or len(identity) != 5 or not all(
+            isinstance(value, str) for value in identity
+        ):
+            return None
+        image, service, service_version, revision, image_digest = identity
+        label_sets.append(
+            {
+                "__config_image": image,
+                "com.nutsnews.service": service,
+                "com.nutsnews.service_version": service_version,
+                "com.nutsnews.revision": revision,
+                "com.nutsnews.image_digest": image_digest,
+            }
+        )
+    return label_sets
+
+
+def worker_uplift_deployed_identity_metric_lines(
+    manifest_path: Path = WORKER_UPLIFT_RUNTIME_MANIFEST_PATH,
+    running_label_sets: list[dict[str, str]] | None = None,
+) -> list[str]:
+    """Export identities only when running containers match the reviewed manifest."""
+    manifest = read_json(manifest_path)
+    services = manifest.get("services")
+    valid = bool(
+        manifest.get("schema_version") == 1
+        and manifest.get("generated_by") == "backend_worker_runtime"
+        and isinstance(services, list)
+        and len(services) == len(WORKER_UPLIFT_STAGES)
+    )
+    configured_identities: dict[str, dict[str, str]] = {}
+    if valid and isinstance(services, list):
+        for service in services:
+            if not isinstance(service, dict):
+                valid = False
+                break
+            name = str(service.get("name") or "")
+            image = str(service.get("image") or "")
+            provenance = service.get("provenance")
+            service_version = str(service.get("service_version") or "0.1.0")
+            revision = str(service.get("build_revision") or service.get("image_tag") or "")
+            image_digest = str(
+                service.get("image_digest")
+                or (
+                    provenance.get("subject_digest")
+                    if isinstance(provenance, dict)
+                    else ""
+                )
+            )
+            identity_valid = bool(
+                name in WORKER_UPLIFT_STAGES
+                and name not in configured_identities
+                and WORKER_SERVICE_VERSION_RE.fullmatch(service_version)
+                and WORKER_BUILD_REVISION_RE.fullmatch(revision)
+                and WORKER_IMAGE_DIGEST_RE.fullmatch(image_digest)
+                and str(service.get("image_tag") or "") == revision
+                and image.endswith(f"@{image_digest}")
+                and isinstance(provenance, dict)
+                and provenance.get("subject_digest") == image_digest
+            )
+            if not identity_valid:
+                valid = False
+                break
+            configured_identities[name] = {
+                "worker_service": name,
+                "service_version": service_version,
+                "revision": revision,
+                "image_digest": image_digest,
+                "image_reference": image,
+            }
+    valid = valid and set(configured_identities) == set(WORKER_UPLIFT_STAGES)
+
+    observed = (
+        running_label_sets
+        if running_label_sets is not None
+        else running_worker_uplift_label_sets()
+    )
+    observed_identities: dict[str, dict[str, str]] = {}
+    observed_counts: dict[str, int] = {}
+    if valid and observed is not None and len(WORKER_UPLIFT_STAGES) <= len(observed) <= 24:
+        for labels in observed:
+            name = labels.get("com.nutsnews.service", "")
+            if name not in WORKER_UPLIFT_STAGES:
+                valid = False
+                break
+            identity = {
+                "worker_service": name,
+                "service_version": labels.get("com.nutsnews.service_version", ""),
+                "revision": labels.get("com.nutsnews.revision", ""),
+                "image_digest": labels.get("com.nutsnews.image_digest", ""),
+                "image_reference": labels.get("__config_image", ""),
+            }
+            if identity != configured_identities.get(name):
+                valid = False
+                break
+            prior = observed_identities.get(name)
+            if prior is not None and prior != identity:
+                valid = False
+                break
+            observed_counts[name] = observed_counts.get(name, 0) + 1
+            if observed_counts[name] > 3:
+                valid = False
+                break
+            observed_identities[name] = identity
+    else:
+        valid = False
+    valid = valid and set(observed_identities) == set(WORKER_UPLIFT_STAGES)
+
+    lines = [
+        "# HELP nutsnews_backend_worker_uplift_deployed_identity_available Whether all eight deployed worker identities are valid and available.",
+        "# TYPE nutsnews_backend_worker_uplift_deployed_identity_available gauge",
+        metric("nutsnews_backend_worker_uplift_deployed_identity_available", 1 if valid else 0),
+        "# HELP nutsnews_backend_worker_uplift_deployed_service_info Exact deployed worker service version, Git revision, and image digest.",
+        "# TYPE nutsnews_backend_worker_uplift_deployed_service_info gauge",
+    ]
+    if valid:
+        for name in WORKER_UPLIFT_STAGES:
+            lines.append(
+                metric(
+                    "nutsnews_backend_worker_uplift_deployed_service_info",
+                    1,
+                    {
+                        key: value
+                        for key, value in observed_identities[name].items()
+                        if key != "image_reference"
+                    },
+                )
+            )
+    return lines
 
 
 def service_active(service: str) -> int:
@@ -1928,6 +2134,7 @@ def collect() -> list[str]:
     lines.extend(durable_content_metric_lines(now))
     lines.extend(health_audit_metric_lines(now))
     lines.extend(worker_uplift_ownership_metric_lines())
+    lines.extend(worker_uplift_deployed_identity_metric_lines())
     lines.extend(worker_uplift_observability_contract_metric_lines())
     lines.extend(docker_stats_metric_lines())
 
@@ -1961,6 +2168,7 @@ def main() -> int:
             *exporter_state_lines(now, available=False),
             *alloy_readiness_metric_lines(0),
             *worker_uplift_ownership_metric_lines(),
+            *worker_uplift_deployed_identity_metric_lines(),
             *worker_uplift_observability_contract_metric_lines(),
             *docker_stats_unavailable_metric_lines(),
         ]

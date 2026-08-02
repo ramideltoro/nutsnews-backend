@@ -164,6 +164,9 @@ def validate() -> list[str]:
             "secret_files",
             "secret_env",
             "network_mode:",
+            "com.nutsnews.service_version",
+            "com.nutsnews.revision",
+            "com.nutsnews.image_digest",
         ),
         errors,
     )

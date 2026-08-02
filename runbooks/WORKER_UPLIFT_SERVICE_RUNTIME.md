@@ -132,6 +132,14 @@ RabbitMQ and unrelated service containers are not redeployed by the service
 runtime operations workflow. Service deploy, restart, scale, and rollback use
 `docker compose up/restart` scoped to the selected service name.
 
+Each worker container also carries the reviewed `service_version`, immutable
+Git `revision`, and image `sha256` digest as bounded Docker labels. The host
+textfile collector emits `nutsnews_backend_worker_uplift_deployed_service_info`
+for exactly eight services only when every running label matches the generated
+runtime manifest and the manifest provenance digest. Any missing, duplicate, or
+mismatched identity suppresses all service-info series and sets
+`nutsnews_backend_worker_uplift_deployed_identity_available` to `0`.
+
 The protected apply builds these service credentials from existing
 production-backend secrets:
 

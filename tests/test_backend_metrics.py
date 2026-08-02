@@ -142,6 +142,135 @@ class BackendMetricsTests(unittest.TestCase):
         )
         self.assertIn('status="invalid"', invalid)
 
+    def test_worker_uplift_deployed_identity_is_exact_bounded_and_fail_closed(self):
+        metrics = load_metrics_module()
+        services = []
+        for index, name in enumerate(metrics.WORKER_UPLIFT_STAGES, start=1):
+            revision = f"{index:x}" * 40
+            digest = f"sha256:{index:x}" + ("a" * 63)
+            services.append(
+                {
+                    "name": name,
+                    "image": f"ghcr.io/ramideltoro/{name}@{digest}",
+                    "image_tag": revision,
+                    "service_version": "0.1.0",
+                    "build_revision": revision,
+                    "image_digest": digest,
+                    "provenance": {"subject_digest": digest},
+                }
+            )
+        manifest = {
+            "schema_version": 1,
+            "generated_by": "backend_worker_runtime",
+            "services": services,
+        }
+        running_label_sets = [
+            {
+                "com.nutsnews.service": service["name"],
+                "com.nutsnews.service_version": service["service_version"],
+                "com.nutsnews.revision": service["build_revision"],
+                "com.nutsnews.image_digest": service["image_digest"],
+                "__config_image": service["image"],
+            }
+            for service in services
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "services.json"
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            output = "\n".join(
+                metrics.worker_uplift_deployed_identity_metric_lines(
+                    path, running_label_sets
+                )
+            )
+            self.assertIn(
+                "nutsnews_backend_worker_uplift_deployed_identity_available 1",
+                output,
+            )
+            self.assertEqual(
+                output.count("nutsnews_backend_worker_uplift_deployed_service_info{"),
+                8,
+            )
+            self.assertIn('worker_service="scheduler"', output)
+            self.assertIn('service_version="0.1.0"', output)
+            self.assertIn(
+                'revision="1111111111111111111111111111111111111111"', output
+            )
+
+            for service in manifest["services"]:
+                service.pop("service_version")
+                service.pop("build_revision")
+                service.pop("image_digest")
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            derived = "\n".join(
+                metrics.worker_uplift_deployed_identity_metric_lines(
+                    path, running_label_sets
+                )
+            )
+            self.assertIn(
+                "nutsnews_backend_worker_uplift_deployed_identity_available 1",
+                derived,
+            )
+
+            invalid_running_cases = {
+                "image mismatch": [
+                    {
+                        **item,
+                        "__config_image": "ghcr.io/ramideltoro/wrong@sha256:"
+                        + ("f" * 64),
+                    }
+                    if index == 0
+                    else dict(item)
+                    for index, item in enumerate(running_label_sets)
+                ],
+                "unknown service": [
+                    {**item, "com.nutsnews.service": "unknown"}
+                    if index == 0
+                    else dict(item)
+                    for index, item in enumerate(running_label_sets)
+                ],
+                "mismatched replica": [
+                    *[dict(item) for item in running_label_sets],
+                    {
+                        **running_label_sets[1],
+                        "com.nutsnews.revision": "f" * 40,
+                    },
+                ],
+                "too many replicas": [
+                    *[dict(item) for item in running_label_sets],
+                    *[dict(running_label_sets[0]) for _ in range(3)],
+                ],
+                "missing service": [dict(item) for item in running_label_sets[:-1]],
+            }
+            for case, observed in invalid_running_cases.items():
+                with self.subTest(case=case):
+                    unavailable = "\n".join(
+                        metrics.worker_uplift_deployed_identity_metric_lines(
+                            path, observed
+                        )
+                    )
+                    self.assertIn(
+                        "nutsnews_backend_worker_uplift_deployed_identity_available 0",
+                        unavailable,
+                    )
+                    self.assertNotIn(
+                        "nutsnews_backend_worker_uplift_deployed_service_info{",
+                        unavailable,
+                    )
+
+            manifest["services"][0]["build_revision"] = "unknown"
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            invalid = "\n".join(
+                metrics.worker_uplift_deployed_identity_metric_lines(
+                    path, running_label_sets
+                )
+            )
+        self.assertIn(
+            "nutsnews_backend_worker_uplift_deployed_identity_available 0", invalid
+        )
+        self.assertNotIn(
+            "nutsnews_backend_worker_uplift_deployed_service_info{", invalid
+        )
+
 
     def test_grafana_dashboard_spec_passes_guardrails(self):
         spec = provision_grafana_metrics.load_spec(GRAFANA_SPEC)

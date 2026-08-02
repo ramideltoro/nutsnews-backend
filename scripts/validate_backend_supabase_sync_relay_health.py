@@ -67,7 +67,8 @@ def main() -> int:
     for token in (
         "test_supabase_sync_relay_health_is_healthy_when_recent_and_timer_active",
         "test_supabase_sync_relay_lag_over_180_seconds_is_critical_alert",
-        "test_supabase_sync_relay_missing_or_stopped_is_critical_alert",
+        "test_supabase_sync_relay_intentionally_disabled_is_not_configured",
+        "test_supabase_sync_relay_expected_but_stopped_is_critical_alert",
         "test_supabase_sync_relay_failed_table_count_is_critical",
         "supabase_sync_relay_health",
         "supabase_sync_relay_lag",
@@ -93,8 +94,9 @@ def main() -> int:
         "Issue #500",
         "last_applied_at_utc",
         "lag_seconds",
-        "Lag over `180` seconds",
-        "Missing or stopped relay timer",
+        "expected_active=false",
+        "lag over `180` seconds",
+        "stopped relay timer state",
     ):
         require(token, relay_runbook, "sync relay runbook", errors)
 

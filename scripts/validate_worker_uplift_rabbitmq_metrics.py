@@ -84,6 +84,21 @@ def validate() -> list[str]:
         ),
         errors,
     )
+    worker_relabel = alloy.split('prometheus.relabel "worker_uplift" {', 1)[-1].split(
+        "{% endif %}", 1
+    )[0]
+    require(
+        "worker-uplift relabel cache",
+        worker_relabel,
+        (
+            "max_cache_size = {{ backend_metrics_worker_uplift_relabel_cache_size }}",
+        ),
+        errors,
+    )
+    if "max_cache_size" in worker_relabel and "cache_ttl" in worker_relabel:
+        errors.append(
+            "worker-uplift relabel cache cannot set both max_cache_size and cache_ttl"
+        )
     for forbidden in (
         "article_id",
         "feed_id",

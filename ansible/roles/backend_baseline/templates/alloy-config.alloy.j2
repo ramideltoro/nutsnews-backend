@@ -231,7 +231,6 @@ prometheus.scrape "worker_uplift" {
 prometheus.relabel "worker_uplift" {
   forward_to     = [prometheus.remote_write.grafana_cloud.receiver]
   max_cache_size = {{ backend_metrics_worker_uplift_relabel_cache_size }}
-  cache_ttl      = "{{ backend_metrics_worker_uplift_relabel_cache_ttl }}"
 
   rule {
     source_labels = ["__name__"]

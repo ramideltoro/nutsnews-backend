@@ -269,6 +269,8 @@ backend_metrics_worker_uplift_relabel_cache_size: 128
 backend_metrics_worker_uplift_relabel_cache_ttl: 10m
 backend_metrics_worker_uplift_contract_status: awaiting-qualified-v1
 backend_metrics_worker_uplift_contract_enabled: false
+backend_metrics_worker_uplift_deployment_mode: shadow
+backend_metrics_worker_uplift_expected_active: "0"
 backend_metrics_worker_uplift_targets:
   - service: scheduler
     stage: scheduler
@@ -326,6 +328,7 @@ backend_metrics_rabbitmq_sample_limit: 1200
 backend_metrics_rabbitmq_label_limit: 13
 backend_metrics_rabbitmq_relabel_cache_ttl: 10m
 backend_metrics_rabbitmq_queue_regex: "^(nutsnews\\.worker\\.(fetch|canonicalization|enrichment|approval|translation|persistence|publication)\\.v1(\\.retry-(30s|5m|30m)|\\.dlq)?)$"
+backend_metrics_rabbitmq_queue_or_empty_regex: "^$|^(nutsnews\\.worker\\.(fetch|canonicalization|enrichment|approval|translation|persistence|publication)\\.v1(\\.retry-(30s|5m|30m)|\\.dlq)?)$"
 backend_metrics_rabbitmq_detailed_families:
   - queue_coarse_metrics
   - queue_consumer_count

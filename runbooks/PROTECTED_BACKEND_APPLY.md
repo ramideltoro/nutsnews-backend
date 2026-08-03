@@ -66,8 +66,8 @@ backend host:
 
 - verified Ollama `0.32.5` amd64 archive installation
 - pinned `qwen3.5:4b-q4_K_M` model identity and `nutsnews-wiki-qwen` alias
-- 65,536-token context with one loaded model and one active request; excess
-  public inference requests are rejected with `429`
+- 49,152-token context and 6,144-token output ceiling with one loaded model and
+  one active request; excess public inference requests are rejected with `429`
 - systemd CPU and memory ceilings that preserve capacity for PostgreSQL, Caddy,
   RabbitMQ, and the Worker runtime
 - loopback-only Ollama and proxy listeners

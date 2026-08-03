@@ -18,8 +18,8 @@ backend_wiki_ai_public_prefix: /wiki-ai
 backend_wiki_ai_base_model: qwen3.5:4b-q4_K_M
 backend_wiki_ai_base_model_id: 2a654d98e6fb
 backend_wiki_ai_model: nutsnews-wiki-qwen
-backend_wiki_ai_context_length: 65536
-backend_wiki_ai_max_output_tokens: 8192
+backend_wiki_ai_context_length: 49152
+backend_wiki_ai_max_output_tokens: 6144
 backend_wiki_ai_max_request_bytes: 4194304
 backend_wiki_ai_upstream_timeout_seconds: 3300
 backend_wiki_ai_queue_wait_seconds: 600

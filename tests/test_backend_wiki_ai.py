@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import importlib.util
+import http.client
 import json
+import socket
 import sys
 import threading
 import time
@@ -55,7 +57,10 @@ class FakeOllamaHandler(BaseHTTPRequestHandler):
             self.send_header("content-type", "text/event-stream")
             self.send_header("content-length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
             return
         if payload.get("input") == "slow-stream-body":
             body = b'event: response.completed\ndata: {"type":"response.completed"}\n\n'
@@ -266,6 +271,47 @@ class BackendWikiAITests(unittest.TestCase):
                 self.assertIn(b"response.completed", response.read())
         finally:
             self.upstream.slow_body_release.set()
+
+    def test_streaming_proxy_releases_inference_when_client_disconnects(self):
+        self.upstream.slow_request_started.clear()
+        self.upstream.slow_request_release.clear()
+        body = json.dumps({
+            "model": "nutsnews-wiki-qwen",
+            "input": "slow-stream",
+            "stream": True,
+        }).encode()
+        connection = http.client.HTTPConnection(
+            "127.0.0.1",
+            self.server.server_address[1],
+            timeout=3,
+        )
+        acquired_after_disconnect = False
+        try:
+            connection.request(
+                "POST",
+                "/v1/responses",
+                body=body,
+                headers={
+                    "authorization": f"Bearer {self.key}",
+                    "content-type": "application/json",
+                },
+            )
+            response = connection.getresponse()
+            self.assertEqual(response.readline(), b": keep-alive\n")
+            self.assertEqual(response.readline(), b"\n")
+            self.assertTrue(self.upstream.slow_request_started.wait(timeout=1))
+            downstream_socket = response.fp.raw._sock
+            self.assertIsInstance(downstream_socket, socket.socket)
+            downstream_socket.shutdown(socket.SHUT_RDWR)
+            response.close()
+            connection.close()
+            acquired_after_disconnect = self.server.inference_slot.acquire(timeout=4)
+            self.assertTrue(acquired_after_disconnect)
+        finally:
+            if acquired_after_disconnect:
+                self.server.inference_slot.release()
+            self.upstream.slow_request_release.set()
+            connection.close()
 
     def test_responses_proxy_allows_one_bounded_waiter_and_rejects_more(self):
         self.assertTrue(self.server.inference_slot.acquire(blocking=False))

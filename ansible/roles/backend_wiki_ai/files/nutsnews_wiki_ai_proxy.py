@@ -8,6 +8,7 @@ import http.client
 import json
 import os
 import queue
+import socket
 import threading
 import time
 import uuid
@@ -239,6 +240,7 @@ class WikiAIHandler(BaseHTTPRequestHandler):
             self._audit(request_id, 429, started)
             return
         if not acquired:
+            client_disconnected = False
             try:
                 if stream_requested:
                     stream_started = True
@@ -251,10 +253,17 @@ class WikiAIHandler(BaseHTTPRequestHandler):
                     acquired = self.inference_slot.acquire(
                         timeout=min(self.config.heartbeat_interval_seconds, remaining),
                     )
-                    if not acquired and stream_started and downstream_open:
-                        downstream_open = self._write_stream_bytes(b": keep-alive\n\n")
+                    if not acquired and stream_started:
+                        if downstream_open:
+                            downstream_open = self._write_stream_bytes(b": keep-alive\n\n")
+                        if not downstream_open:
+                            client_disconnected = True
+                            break
             finally:
                 self.waiter_slot.release()
+            if client_disconnected:
+                self._audit(request_id, 499, started)
+                return
             if not acquired:
                 if stream_started and downstream_open:
                     self._write_stream_error("wiki_ai_queue_timeout", request_id)
@@ -351,6 +360,8 @@ class WikiAIHandler(BaseHTTPRequestHandler):
     ) -> int:
         if not stream_started:
             downstream_open = self._begin_stream_response(request_id)
+        if not downstream_open:
+            return 499
         ready = threading.Event()
         result: dict[str, Any] = {}
 
@@ -380,8 +391,12 @@ class WikiAIHandler(BaseHTTPRequestHandler):
 
         threading.Thread(target=connect_upstream, daemon=True).start()
         while not ready.wait(timeout=self.config.heartbeat_interval_seconds):
-            if downstream_open:
-                downstream_open = self._write_stream_bytes(b": keep-alive\n\n")
+            downstream_open = self._write_stream_bytes(b": keep-alive\n\n")
+            if not downstream_open:
+                connection = result.get("connection")
+                if connection is not None:
+                    self._abort_upstream_connection(connection)
+                return 499
 
         connection = result.get("connection")
         response = result.get("response")
@@ -414,8 +429,10 @@ class WikiAIHandler(BaseHTTPRequestHandler):
                 try:
                     kind, value = chunks.get(timeout=self.config.heartbeat_interval_seconds)
                 except queue.Empty:
-                    if downstream_open:
-                        downstream_open = self._write_stream_bytes(b": keep-alive\n\n")
+                    downstream_open = self._write_stream_bytes(b": keep-alive\n\n")
+                    if not downstream_open:
+                        self._abort_upstream_connection(connection)
+                        return 499
                     continue
                 if kind == "done":
                     break
@@ -425,10 +442,23 @@ class WikiAIHandler(BaseHTTPRequestHandler):
                     return 502
                 if downstream_open:
                     downstream_open = self._write_stream_bytes(value)
+                if not downstream_open:
+                    self._abort_upstream_connection(connection)
+                    return 499
             return response.status
         finally:
             if connection is not None:
                 connection.close()
+
+    @staticmethod
+    def _abort_upstream_connection(connection: http.client.HTTPConnection) -> None:
+        upstream_socket = connection.sock
+        if upstream_socket is not None:
+            try:
+                upstream_socket.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        connection.close()
 
     def _begin_stream_response(self, request_id: str) -> bool:
         try:

@@ -77,7 +77,10 @@ backend host:
 The proxy accepts only the configured model, rejects oversized or unauthenticated
 requests, strips the credential before forwarding to Ollama, and records only
 bounded request metadata. It never logs prompts, source patches, responses, or
-credentials. Do not reuse `LOCAL_AI_API_KEY`; Wiki automation requires the
+credentials. A closed downstream streaming connection aborts its matching
+loopback Ollama request and releases the single inference slot, so a canceled
+GitHub job cannot leave an abandoned generation blocking the serialized queue.
+Do not reuse `LOCAL_AI_API_KEY`; Wiki automation requires the
 separate `NUTSNEWS_WIKI_AI_API_KEY` value, which is also stored as
 `WIKI_AI_API_KEY` in `ramideltoro/nutsnews-docs`.
 

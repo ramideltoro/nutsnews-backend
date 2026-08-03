@@ -83,4 +83,7 @@ overlap fails with `429`. Streaming requests receive bounded SSE keep-alive
 comments while they wait for a CPU inference or its first token, preventing an
 idle edge timeout without fabricating model output. The context and output
 bounds keep a tool-capable turn inside the protected upstream deadline on the
-CPU-only host.
+CPU-only host. If GitHub cancels a streaming job or otherwise closes its
+connection, the proxy closes the matching Ollama connection and releases the
+inference slot instead of allowing an abandoned generation to block the next
+serialized job.

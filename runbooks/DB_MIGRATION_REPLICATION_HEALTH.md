@@ -69,9 +69,30 @@ Re-seed from a fresh dump when:
 - the subscription was inactive beyond the approved lag window;
 - parity cannot be proven after repair.
 
+## Automated Collection
+
+The protected backend Ansible apply installs
+`nutsnews-postgres-replication-health.timer`. It runs every five minutes with
+root-only database URLs from
+`/etc/nutsnews-backend-postgres-replication-health.env`, refreshes the JSON and
+textfile evidence paths below, and fails the oneshot service when replication is
+unhealthy. The timer remains enabled so later runs can record recovery.
+
+Verify with read-only commands:
+
+```bash
+systemctl is-enabled nutsnews-postgres-replication-health.timer
+systemctl list-timers nutsnews-postgres-replication-health.timer --no-pager
+sudo systemctl status nutsnews-postgres-replication-health.service --no-pager
+```
+
+Rollback by setting the protected environment variable
+`NUTSNEWS_BACKEND_POSTGRES_REPLICATION_HEALTH_ENABLED=false` and running the
+protected baseline apply after a reviewed replacement telemetry path exists.
+
 ## Dashboard and Alerts
 
-The protected workflow publishes sanitized report JSON to
+The systemd collector and the protected manual workflow publish sanitized report JSON to
 `/var/lib/nutsnews/postgres/replication-health.json` and low-cardinality
 textfile metrics to `/var/lib/nutsnews/metrics/backend-postgres-replication-health.prom`.
 The ops dashboard collector overlays that replication section into

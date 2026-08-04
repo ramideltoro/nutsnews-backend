@@ -85,6 +85,14 @@ backend_postgres_readonly_password: ""
 backend_postgres_restore_password: ""
 backend_postgres_validation_password: ""
 backend_postgres_replication_password: ""
+backend_postgres_replication_health_enabled: false
+backend_postgres_replication_health_script_path: /usr/local/libexec/nutsnews-backend-postgres-replication-health
+backend_postgres_replication_health_env_path: /etc/nutsnews-backend-postgres-replication-health.env
+backend_postgres_replication_health_output_path: "{{ backend_postgres_state_dir }}/replication-health.json"
+backend_postgres_replication_health_textfile_path: "{{ backend_metrics_textfile_dir }}/backend-postgres-replication-health.prom"
+backend_postgres_replication_health_calendar: "*:0/5:30"
+backend_postgres_replication_health_target_db_url: ""
+backend_postgres_replication_health_source_db_url: ""
 backend_postgres_app_rehearsal_password: ""
 backend_postgres_worker_api_password: ""
 backend_worker_uplift_postgres_enabled: false
@@ -387,6 +395,10 @@ backend_logs_journal_units:
     unit: nutsnews-metrics-textfile.service
   - service: timer
     unit: nutsnews-metrics-textfile.timer
+  - service: postgresql
+    unit: nutsnews-postgres-replication-health.service
+  - service: postgresql
+    unit: nutsnews-postgres-replication-health.timer
   - service: timer
     unit: nutsnews-ops-dashboard-collect.service
   - service: timer
@@ -395,8 +407,6 @@ backend_logs_journal_units:
     unit: fail2ban.service
   - service: security
     unit: ufw.service
-  - service: security
-    unit: ssh.service
   - service: updates
     unit: unattended-upgrades.service
   - service: updates
@@ -481,6 +491,9 @@ backend_newrelic_metric_jobs:
   - name: nutsnews-metrics-textfile
     service_unit: nutsnews-metrics-textfile.service
     timer_unit: nutsnews-metrics-textfile.timer
+  - name: nutsnews-postgres-replication-health
+    service_unit: nutsnews-postgres-replication-health.service
+    timer_unit: nutsnews-postgres-replication-health.timer
   - name: nutsnews-ops-dashboard-collect
     service_unit: nutsnews-ops-dashboard-collect.service
     timer_unit: nutsnews-ops-dashboard-collect.timer

@@ -12,11 +12,31 @@ POSTGRES_TASKS = ROOT / "ansible/roles/backend_baseline/tasks/postgres.yml"
 CADDY_TASKS = ROOT / "ansible/roles/backend_baseline/tasks/caddy.yml"
 FIREWALL_TASKS = ROOT / "ansible/roles/backend_baseline/tasks/firewall.yml"
 APPLY_WORKFLOW = ROOT / ".github/workflows/protected-backend-ansible-apply.yml"
+REPLICATION_HEALTH_TASKS = ROOT / "ansible/roles/backend_baseline/tasks/postgres_replication_health.yml"
 DRILL_WORKFLOW = ROOT / ".github/workflows/backend-postgres-failover-drill.yml"
 PLAN = ROOT / "docs/backend-postgres-replacement-plan.json"
 
 
 class BackendPostgresFailoverTests(unittest.TestCase):
+    def test_replication_health_is_collected_by_a_protected_five_minute_timer(self):
+        defaults = DEFAULTS.read_text(encoding="utf-8")
+        tasks = REPLICATION_HEALTH_TASKS.read_text(encoding="utf-8")
+        workflow = APPLY_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("backend_postgres_replication_health_enabled: false", defaults)
+        self.assertIn('backend_postgres_replication_health_calendar: "*:0/5:30"', defaults)
+        self.assertIn("nutsnews-postgres-replication-health.service", tasks)
+        self.assertIn("nutsnews-postgres-replication-health.timer", tasks)
+        self.assertIn("EnvironmentFile={{ backend_postgres_replication_health_env_path }}", tasks)
+        self.assertIn("--enforce", tasks)
+        self.assertIn("mode: \"0600\"", tasks)
+        self.assertIn("no_log: true", tasks)
+        self.assertIn("Remove disabled PostgreSQL replication health configuration", tasks)
+        self.assertIn("NUTSNEWS_BACKEND_POSTGRES_REPLICATION_HEALTH_ENABLED", workflow)
+        self.assertIn('extra_vars["backend_postgres_replication_health_target_db_url"]', workflow)
+        self.assertIn('extra_vars["backend_postgres_replication_health_source_db_url"]', workflow)
+        self.assertIn("NUTSNEWS_PRODUCTION_SUPABASE_DB_URL", workflow)
+
     def test_postgres_defaults_are_private_and_opt_in(self):
         defaults = DEFAULTS.read_text(encoding="utf-8")
         self.assertIn("backend_postgres_enabled: false", defaults)

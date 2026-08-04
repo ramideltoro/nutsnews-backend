@@ -717,6 +717,12 @@ class BackendAlloyObservabilityTests(unittest.TestCase):
         self.assertIn("http://127.0.0.1:12345/-/ready", metrics_tasks)
         self.assertIn("http://127.0.0.1:12345/-/healthy", metrics_tasks)
 
+    def test_ssh_authentication_uses_one_canonical_log_source(self):
+        defaults = DEFAULTS.read_text(encoding="utf-8")
+
+        self.assertIn("source: auth\n    path: /var/log/auth.log", defaults)
+        self.assertNotIn("unit: ssh.service", defaults)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -120,7 +120,7 @@ The same protected Ansible apply that manages metrics renders
 Collected sources:
 
 - filtered systemd journal units for Caddy, Alloy, backup/restore verification,
-  NutsNews timers, SSH, UFW, fail2ban, unattended-upgrades, and apt timers;
+  NutsNews timers, UFW, fail2ban, unattended-upgrades, and apt timers;
 - `/var/log/auth.log` and `/var/log/fail2ban.log` when readable through the
   host `adm` group;
 - `/var/log/caddy/access.log`, `/var/log/caddy/error.log`, and
@@ -133,6 +133,9 @@ Alloy runs as the package-managed `alloy` user and is added only to
 access. Generic Docker/Compose container logs remain intentionally excluded;
 the only reviewed container-log path is the worker-uplift journald tag allowlist
 documented in [WORKER_UPLIFT_LOGS_TRACES.md](WORKER_UPLIFT_LOGS_TRACES.md).
+`/var/log/auth.log` is the canonical SSH authentication source; `ssh.service`
+journal ingestion is intentionally excluded so one authentication event is not
+counted twice.
 
 Before logs are shipped, Alloy drops private-key markers and oversized lines,
 redacts authorization headers, cookies, token/password/API-key style values,

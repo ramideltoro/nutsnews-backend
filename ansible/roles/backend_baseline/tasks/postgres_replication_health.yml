@@ -1,0 +1,151 @@
+---
+- name: Validate PostgreSQL replication health telemetry configuration
+  ansible.builtin.assert:
+    that:
+      - backend_postgres_enabled | bool
+      - backend_postgres_replication_health_target_db_url is match('^postgres(ql)?://')
+      - backend_postgres_replication_health_source_db_url is match('^postgres(ql)?://')
+      - "'\n' not in backend_postgres_replication_health_target_db_url"
+      - "'\r' not in backend_postgres_replication_health_target_db_url"
+      - "'\n' not in backend_postgres_replication_health_source_db_url"
+      - "'\r' not in backend_postgres_replication_health_source_db_url"
+    fail_msg: Replication health telemetry requires fixed single-line target and source PostgreSQL URLs.
+  no_log: true
+  when: backend_postgres_replication_health_enabled | bool
+
+- name: Ensure PostgreSQL replication health state directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ backend_postgres_replication_health_script_path | dirname }}"
+    - "{{ backend_postgres_state_dir }}"
+    - "{{ backend_metrics_textfile_dir }}"
+  when: backend_postgres_replication_health_enabled | bool
+
+- name: Install PostgreSQL replication health collector
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../scripts/backend_postgres_replication_health.py"
+    dest: "{{ backend_postgres_replication_health_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  when: backend_postgres_replication_health_enabled | bool
+
+- name: Install PostgreSQL replication health credentials
+  ansible.builtin.copy:
+    dest: "{{ backend_postgres_replication_health_env_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      NUTSNEWS_BACKEND_TARGET_DB_URL={{ backend_postgres_replication_health_target_db_url | quote }}
+      NUTSNEWS_SOURCE_DB_URL={{ backend_postgres_replication_health_source_db_url | quote }}
+  no_log: true
+  when: backend_postgres_replication_health_enabled | bool
+
+- name: Install PostgreSQL replication health service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nutsnews-postgres-replication-health.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      [Unit]
+      Description=NutsNews backend PostgreSQL replication health
+      After=network-online.target postgresql.service
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      User=root
+      Group=root
+      EnvironmentFile={{ backend_postgres_replication_health_env_path }}
+      ExecStart={{ backend_postgres_replication_health_script_path }} --output {{ backend_postgres_replication_health_output_path }} --textfile-output {{ backend_postgres_replication_health_textfile_path }} --enforce
+      NoNewPrivileges=true
+      PrivateTmp=true
+      ProtectHome=true
+      ProtectSystem=strict
+      ReadWritePaths={{ backend_postgres_state_dir }} {{ backend_metrics_textfile_dir }}
+      UMask=0022
+      TimeoutStartSec=90
+  notify: Reload systemd
+  when: backend_postgres_replication_health_enabled | bool
+
+- name: Install PostgreSQL replication health timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nutsnews-postgres-replication-health.timer
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ramideltoro/nutsnews-backend.
+      [Unit]
+      Description=Refresh NutsNews backend PostgreSQL replication health
+
+      [Timer]
+      OnCalendar={{ backend_postgres_replication_health_calendar }}
+      Persistent=true
+      RandomizedDelaySec=15
+      Unit=nutsnews-postgres-replication-health.service
+
+      [Install]
+      WantedBy=timers.target
+  notify: Reload systemd
+  when: backend_postgres_replication_health_enabled | bool
+
+- name: Flush systemd reload before replication health collection
+  ansible.builtin.meta: flush_handlers
+  when: backend_postgres_replication_health_enabled | bool
+
+- name: Generate PostgreSQL replication health evidence once
+  ansible.builtin.systemd:
+    name: nutsnews-postgres-replication-health.service
+    state: started
+    daemon_reload: true
+  when:
+    - backend_postgres_replication_health_enabled | bool
+    - not ansible_check_mode
+
+- name: Ensure PostgreSQL replication health timer is enabled and started
+  ansible.builtin.systemd:
+    name: nutsnews-postgres-replication-health.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when:
+    - backend_postgres_replication_health_enabled | bool
+    - not ansible_check_mode
+
+- name: Check for an installed PostgreSQL replication health timer
+  ansible.builtin.stat:
+    path: /etc/systemd/system/nutsnews-postgres-replication-health.timer
+  register: backend_postgres_replication_health_timer_unit
+  when: not (backend_postgres_replication_health_enabled | bool)
+
+- name: Stop a disabled PostgreSQL replication health timer
+  ansible.builtin.systemd:
+    name: nutsnews-postgres-replication-health.timer
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  when:
+    - not (backend_postgres_replication_health_enabled | bool)
+    - backend_postgres_replication_health_timer_unit.stat.exists | default(false)
+    - not ansible_check_mode
+
+- name: Remove disabled PostgreSQL replication health configuration
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/nutsnews-postgres-replication-health.service
+    - /etc/systemd/system/nutsnews-postgres-replication-health.timer
+    - "{{ backend_postgres_replication_health_env_path }}"
+    - "{{ backend_postgres_replication_health_script_path }}"
+  notify: Reload systemd
+  when: not (backend_postgres_replication_health_enabled | bool)

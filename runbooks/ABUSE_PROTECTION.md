@@ -76,8 +76,13 @@ nn-backend-fail2ban-ban-events
 ```
 
 These rules use low-cardinality Loki queries scoped to
-`host="backend.nutsnews.com"` and `service="security"`. They do not label,
-group, or route on IP address, path, user, request ID, or raw message text.
+`host="backend.nutsnews.com"` and `service="security"`. The SSH rule reads
+only the canonical `source="auth"` stream, counts canonical failure lines by a
+transiently parsed remote address, and collapses the result before alerting. It
+fires when one source reaches five failures in 15 minutes, matching the
+Fail2ban attempt threshold. The address is not retained as an alert label or
+notification field, and the rules do not route on address, path, user, request
+ID, or raw message text.
 
 ## CrowdSec Versus Fail2ban
 

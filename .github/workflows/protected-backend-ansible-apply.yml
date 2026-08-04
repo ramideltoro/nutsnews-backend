@@ -223,6 +223,7 @@ jobs:
           NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD }}
           NUTSNEWS_WORKER_UPLIFT_WATERMARK_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_WATERMARK_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_REPLICATION_PASSWORD }}
+          NUTSNEWS_BACKEND_POSTGRES_REPLICATION_HEALTH_ENABLED: ${{ vars.NUTSNEWS_BACKEND_POSTGRES_REPLICATION_HEALTH_ENABLED || 'true' }}
           NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD }}
           NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD: ${{ secrets.NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD }}
           NUTSNEWS_WORKER_UPLIFT_CUTOVER_PASSWORD: ${{ secrets.NUTSNEWS_WORKER_UPLIFT_CUTOVER_PASSWORD }}
@@ -582,6 +583,28 @@ jobs:
               extra_vars["backend_postgres_app_rehearsal_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_APP_REHEARSAL_PASSWORD"]
               extra_vars["backend_postgres_worker_api_password"] = os.environ["NUTSNEWS_BACKEND_POSTGRES_WORKER_API_PASSWORD"]
               extra_vars["backend_worker_uplift_cutover_password"] = os.environ["NUTSNEWS_WORKER_UPLIFT_CUTOVER_PASSWORD"]
+
+              replication_health_enabled = (
+                  os.environ.get("NUTSNEWS_BACKEND_POSTGRES_REPLICATION_HEALTH_ENABLED", "true").strip().lower()
+                  in {"1", "true", "yes"}
+              )
+              if replication_health_enabled:
+                  source_db_url = os.environ.get("NUTSNEWS_PRODUCTION_SUPABASE_DB_URL", "").strip()
+                  validation_password = os.environ["NUTSNEWS_BACKEND_POSTGRES_MIGRATION_VALIDATION_PASSWORD"]
+                  if not source_db_url:
+                      raise SystemExit("PostgreSQL replication health requires NUTSNEWS_PRODUCTION_SUPABASE_DB_URL")
+                  if any("\n" in value or "\r" in value for value in (source_db_url, validation_password)):
+                      raise SystemExit("PostgreSQL replication health URL values must be single-line values")
+                  target_db_url = (
+                      "postgresql://nutsnews_migration_validation:"
+                      f"{urllib.parse.quote(validation_password, safe='')}"
+                      "@127.0.0.1:5432/"
+                      f"{urllib.parse.quote(primary_shadow_database, safe='')}"
+                      "?sslmode=disable"
+                  )
+                  extra_vars["backend_postgres_replication_health_enabled"] = True
+                  extra_vars["backend_postgres_replication_health_target_db_url"] = target_db_url
+                  extra_vars["backend_postgres_replication_health_source_db_url"] = source_db_url
 
           supabase_sync_relay_enabled = (
               os.environ.get("NUTSNEWS_BACKEND_SUPABASE_SYNC_RELAY_ENABLED", "false").strip().lower()

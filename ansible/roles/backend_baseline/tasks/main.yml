@@ -44,6 +44,9 @@
   ansible.builtin.import_tasks: postgres.yml
   when: backend_postgres_enabled | bool
 
+- name: Configure PostgreSQL replication health telemetry
+  ansible.builtin.import_tasks: postgres_replication_health.yml
+
 - name: Configure Worker database compatibility API
   ansible.builtin.import_tasks: worker_api.yml
   when: backend_worker_api_enabled | bool

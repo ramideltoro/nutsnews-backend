@@ -151,6 +151,28 @@ class BackendHealthReportTests(unittest.TestCase):
         self.assertEqual(by_name["sudo_nopasswd"]["status"], "warning")
         self.assertGreaterEqual(summary["warning"], 2)
 
+    def test_semantic_one_shot_failures_use_dedicated_health_checks(self):
+        checks, _ = backend_health_report.classify(
+            fixture_report(
+                failed_units=command(
+                    "● nutsnews-newrelic-job-metrics.service loaded failed failed New Relic job metrics\n"
+                    "nutsnews-postgres-replication-health.service loaded failed failed PostgreSQL replication\n"
+                ),
+                newrelic_job_metrics_status=command(
+                    '{"status":"fail","reason":"HTTPError","checked_at_utc":"2026-07-16T11:55:00Z"}\n'
+                ),
+                postgres_replication_health=command(
+                    '{"status":"blocked","blockers":["subscription_inactive"],'
+                    '"replication":{"mode":"logical_replication","expected_active":false,'
+                    '"lag_status":"inactive","slot_status":"inactive"}}\n'
+                ),
+            )
+        )
+        by_name = {item["name"]: item for item in checks}
+        self.assertEqual(by_name["failed_systemd_units"]["status"], "healthy")
+        self.assertEqual(by_name["newrelic_job_metrics_delivery"]["status"], "warning")
+        self.assertEqual(by_name["postgres_replication_health"]["status"], "warning")
+
     def test_postgres_restore_readiness_is_exposed_when_present(self):
         checks, _ = backend_health_report.classify(
             fixture_report(

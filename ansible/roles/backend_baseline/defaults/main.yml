@@ -86,6 +86,7 @@ backend_postgres_restore_password: ""
 backend_postgres_validation_password: ""
 backend_postgres_replication_password: ""
 backend_postgres_replication_health_enabled: false
+backend_postgres_replication_health_expected_active: false
 backend_postgres_replication_health_script_path: /usr/local/libexec/nutsnews-backend-postgres-replication-health
 backend_postgres_replication_health_env_path: /etc/nutsnews-backend-postgres-replication-health.env
 backend_postgres_replication_health_output_path: "{{ backend_postgres_state_dir }}/replication-health.json"

@@ -109,3 +109,14 @@ Production cutover is blocked unless replication is healthy or an approved final
 dump path intentionally bypasses replication. Any bypass must be documented in
 the production cutover issue with backup freshness, validation, and rollback
 evidence.
+
+## Cutover-aware enforcement
+
+`backend_postgres_replication_health_expected_active` is `false` while
+Supabase remains the only approved production writer. In that state, replication
+readiness failures are reported as `blocked` warnings and do not fail the
+one-shot systemd unit.
+
+The protected cutover must set the variable to `true`. Once active,
+missing, lagging, or inactive replication is fail-closed: the report status is
+`fail` and `--enforce` returns non-zero.

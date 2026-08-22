@@ -165,34 +165,27 @@ events, malformed prior state, symbolic-link targets, and values outside the
 closed schema are rejected without replacing durable truth. An exact replay is
 idempotent.
 
-## Rollout Order and Current Freeze
+## Rollout Order After Incident Freeze
 
-The generation-5 production incident freeze supersedes normal mutation
-instructions: do not run backend Ansible/runtime apply, queue
-replay/purge/drain, worker or Cloudflare deploy, Runtime1/fetcher migration,
-Grafana apply/drills, or web production deploy. The authoritative worker mode
-remains `shadow_comparison`. Source review and read-only verification remain
-allowed.
+The generation-5 production incident freeze was explicitly lifted by the
+operator on 2026-08-22 for production alert remediation. Automated validation
+remains required. Merges to `main` may now run the backend baseline and related
+production workflows without a manual approval or confirmation step.
 
-Source review is non-mutating, and a later authorized merge cannot publish
-remotely while the publication variable remains absent or `false`. That safety
-property is not authorization to merge or apply during the current freeze.
-Keep `NUTSNEWS_HEALTH_AUDIT_REMOTE_PUBLISH_ENABLED` absent or `false` until the
-freeze is explicitly lifted and all of these steps complete in order:
+The authoritative worker mode remains `shadow_comparison`. Lifting the incident
+freeze does not authorize the database or worker-uplift cutover; those state
+transitions still require their declared automated health gates.
 
-1. Run the protected backend Ansible workflow in check mode and review the
-   fixed writer path, root ownership, and exact-argument sudoers validation.
-2. After approval, apply the baseline so
-   `/usr/local/sbin/nutsnews-health-audit-state` exists on the backend.
-3. Verify the installed writer checksum and the metrics state directory with
-   read-only commands. Do not hand-create the state file.
-4. Set `NUTSNEWS_HEALTH_AUDIT_REMOTE_PUBLISH_ENABLED=true` as an explicit
-   repository variable.
-5. Dispatch one report and confirm both a successful publication summary and
-   scrapeable `nutsnews_backend_health_audit_*` metrics.
-6. Exercise a bounded critical-check test only after the incident freeze and
-   failure-drill approval are lifted; confirm the workflow fails while its
-   artifact remains available and last success does not advance.
+After a qualifying merge:
+
+1. The Backend Ansible Apply workflow automatically runs the full baseline in
+   apply mode against `backend.nutsnews.com`.
+2. Verify the installed writer checksum, metrics state directory, service
+   health, and exported `nutsnews_backend_health_audit_*` metrics.
+3. Dispatch one health report and confirm a successful bounded publication.
+4. Exercise critical-check fixtures only through the controlled failure-drill
+   workflow; confirm the report fails while its artifact remains available and
+   last success does not advance.
 
 ## Alert Deduplication
 
@@ -267,3 +260,11 @@ Their underlying state remains visible through
 `postgres_replication_health` and `newrelic_job_metrics_delivery`.
 New Relic metric delivery failures are warnings because Grafana remains the
 primary backend alerting path.
+
+## Cutover-aware failover readiness
+
+The PostgreSQL failover-ready metric always requires a healthy database status
+and a healthy restore drill. Before cutover, when replication evidence declares
+`expected_active=false`, inactive replication does not make restore readiness
+false. Once `expected_active=true`, readiness is fail-closed unless replication
+evidence is fresh, lag is healthy, and there are no blockers.

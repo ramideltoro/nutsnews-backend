@@ -1,6 +1,9 @@
-name: Protected Backend Ansible Apply
+name: Backend Ansible Apply
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       run_mode:
@@ -39,6 +42,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     environment: production-backend
+    env:
+      RUN_MODE: ${{ github.event_name == 'push' && 'apply' || inputs.run_mode || 'check' }}
+      DEPLOYMENT_SCOPE: ${{ github.event_name == 'push' && 'full-baseline' || inputs.deployment_scope || 'full-baseline' }}
+      CONFIRM_APPLY: ${{ github.event_name == 'push' && 'backend.nutsnews.com' || inputs.confirm_apply || '' }}
 
     steps:
       - name: Checkout
@@ -49,9 +56,9 @@ jobs:
       - name: Validate dispatch inputs
         shell: bash
         env:
-          RUN_MODE: ${{ inputs.run_mode }}
-          DEPLOYMENT_SCOPE: ${{ inputs.deployment_scope }}
-          CONFIRM_APPLY: ${{ inputs.confirm_apply }}
+          RUN_MODE: ${{ env.RUN_MODE }}
+          DEPLOYMENT_SCOPE: ${{ env.DEPLOYMENT_SCOPE }}
+          CONFIRM_APPLY: ${{ env.CONFIRM_APPLY }}
         run: |
           set -euo pipefail
 
@@ -126,7 +133,7 @@ jobs:
           ssh-keygen -F 65.75.201.18 -f "$HOME/.ssh/known_hosts" > /dev/null
 
       - name: Block generic Ansible mutation outside exact shadow state
-        if: inputs.run_mode == 'apply'
+        if: env.RUN_MODE == 'apply'
         shell: bash
         env:
           NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
@@ -172,7 +179,7 @@ jobs:
             | tee "$RUNNER_TEMP/backend-rabbitmq-credential-readiness.json"
 
       - name: Reset fixed one-shot failure state
-        if: inputs.run_mode == 'apply' && inputs.deployment_scope == 'full-baseline'
+        if: env.RUN_MODE == 'apply' && env.DEPLOYMENT_SCOPE == 'full-baseline'
         shell: bash
         env:
           NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
@@ -197,8 +204,8 @@ jobs:
       - name: Run deployment safety preflight
         shell: bash
         env:
-          RUN_MODE: ${{ inputs.run_mode }}
-          DEPLOYMENT_SCOPE: ${{ inputs.deployment_scope }}
+          RUN_MODE: ${{ env.RUN_MODE }}
+          DEPLOYMENT_SCOPE: ${{ env.DEPLOYMENT_SCOPE }}
           NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
           NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
           NUTSNEWS_BACKEND_SSH_PRIVATE_KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
@@ -931,8 +938,8 @@ jobs:
         shell: bash
         working-directory: ansible
         env:
-          RUN_MODE: ${{ inputs.run_mode }}
-          DEPLOYMENT_SCOPE: ${{ inputs.deployment_scope }}
+          RUN_MODE: ${{ env.RUN_MODE }}
+          DEPLOYMENT_SCOPE: ${{ env.DEPLOYMENT_SCOPE }}
         run: |
           set -euo pipefail
 
@@ -953,7 +960,7 @@ jobs:
           ansible-playbook "${args[@]}"
 
       - name: Verify public Wiki AI Responses contract
-        if: inputs.run_mode == 'apply'
+        if: env.RUN_MODE == 'apply'
         shell: bash
         env:
           NUTSNEWS_WIKI_AI_API_KEY: ${{ secrets.NUTSNEWS_WIKI_AI_API_KEY }}
@@ -964,7 +971,7 @@ jobs:
           python3 scripts/backend_wiki_ai_smoke.py --model nutsnews-wiki-qwen --timeout 300
 
       - name: Run deployment safety postcheck
-        if: always() && inputs.run_mode == 'apply'
+        if: always() && env.RUN_MODE == 'apply'
         shell: bash
         env:
           NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}

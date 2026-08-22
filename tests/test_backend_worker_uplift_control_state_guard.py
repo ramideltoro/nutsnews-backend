@@ -114,7 +114,7 @@ class BackendWorkerUpliftControlStateGuardTests(unittest.TestCase):
             "- name: Check RabbitMQ credential readiness", ansible_guard
         )
         ansible_guard_block = ansible[ansible_guard:ansible_guard_end]
-        self.assertIn("if: inputs.run_mode == 'apply'", ansible_guard_block)
+        self.assertIn("if: env.RUN_MODE == 'apply'", ansible_guard_block)
         self.assertNotIn("deployment_scope", ansible_guard_block)
         self.assertLess(
             ansible_guard,

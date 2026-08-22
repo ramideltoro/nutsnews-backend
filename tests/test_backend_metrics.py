@@ -67,6 +67,65 @@ class BackendMetricsTests(unittest.TestCase):
             ["ssh.service"],
         )
 
+    def test_postgres_failover_readiness_requires_replication_only_after_cutover(self):
+        metrics = load_metrics_module()
+        pre_cutover = {
+            "expected_active": False,
+            "lag_status": "inactive",
+            "blockers": ["subscription_inactive"],
+        }
+        post_cutover_healthy = {
+            "expected_active": True,
+            "lag_status": "healthy",
+            "blockers": [],
+        }
+
+        self.assertEqual(
+            1,
+            metrics.postgres_failover_ready_value(
+                "healthy",
+                "healthy",
+                pre_cutover,
+                replication_fresh=False,
+            ),
+        )
+        self.assertEqual(
+            1,
+            metrics.postgres_failover_ready_value(
+                "healthy",
+                "healthy",
+                post_cutover_healthy,
+                replication_fresh=True,
+            ),
+        )
+        self.assertEqual(
+            0,
+            metrics.postgres_failover_ready_value(
+                "healthy",
+                "healthy",
+                post_cutover_healthy,
+                replication_fresh=False,
+            ),
+        )
+        self.assertEqual(
+            0,
+            metrics.postgres_failover_ready_value(
+                "warning",
+                "healthy",
+                pre_cutover,
+                replication_fresh=True,
+            ),
+        )
+        self.assertEqual(
+            0,
+            metrics.postgres_failover_ready_value(
+                "healthy",
+                "critical",
+                pre_cutover,
+                replication_fresh=True,
+            ),
+        )
+
     def test_worker_uplift_ownership_uses_authoritative_generation_five_shadow_row(self):
         metrics = load_metrics_module()
         row = {
@@ -609,6 +668,15 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertNotIn("chmod 666", task)
         self.assertNotIn("become_user: root", task)
 
+    def test_backend_apply_automatically_deploys_main(self):
+        workflow = PROTECTED_APPLY_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("name: Backend Ansible Apply", workflow)
+        self.assertIn("push:\n    branches:\n      - main", workflow)
+        self.assertIn("github.event_name == 'push' && 'apply'", workflow)
+        self.assertIn("github.event_name == 'push' && 'full-baseline'", workflow)
+        self.assertNotIn("if: inputs.run_mode == 'apply'", workflow)
+
     def test_protected_apply_wires_loki_secret_names(self):
         workflow = PROTECTED_APPLY_WORKFLOW.read_text(encoding="utf-8")
         for name in ("GRAFANA_CLOUD_LOKI_URL", "GRAFANA_CLOUD_LOKI_USERNAME", "GRAFANA_CLOUD_LOKI_PASSWORD"):
@@ -1043,6 +1111,7 @@ class BackendMetricsTests(unittest.TestCase):
                     {
                         "checked_at_utc": "2020-01-01T00:00:00Z",
                         "replication": {
+                            "expected_active": True,
                             "lag_status": "healthy",
                             "max_lag_seconds": 1,
                             "validation_stale_threshold_seconds": 900,

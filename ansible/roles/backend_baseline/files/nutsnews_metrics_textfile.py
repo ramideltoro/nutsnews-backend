@@ -1118,6 +1118,23 @@ def postgres_status_value(data: dict[str, Any]) -> str:
     return "unknown"
 
 
+def postgres_failover_ready_value(
+    postgres_status: str,
+    restore_drill_status: str,
+    replication: dict[str, Any],
+    *,
+    replication_fresh: bool,
+) -> int:
+    if postgres_status != "healthy" or restore_drill_status != "healthy":
+        return 0
+    if replication.get("expected_active") is not True:
+        return 1
+    lag_status = str(replication.get("lag_status") or "not_configured")
+    blockers = replication.get("blockers")
+    blocker_count = len(blockers) if isinstance(blockers, list) else 0
+    return 1 if replication_fresh and lag_status == "healthy" and blocker_count == 0 else 0
+
+
 def age_seconds(timestamp: str, now: int) -> int | None:
     if not timestamp:
         return None
@@ -2017,15 +2034,13 @@ def collect() -> list[str]:
     replication_fresh = (
         replication_evidence_age is not None and replication_evidence_age <= replication_stale_threshold
     )
-    replication_required = lag_status != "not_configured"
-    failover_ready = 1 if (
-        postgres_status == "healthy"
-        and restore_drill_status == "healthy"
-        and (
-            not replication_required
-            or (replication_fresh and lag_status == "healthy" and blocker_count == 0)
-        )
-    ) else 0
+    replication_expected_active = replication.get("expected_active") is True
+    failover_ready = postgres_failover_ready_value(
+        postgres_status,
+        restore_drill_status,
+        replication,
+        replication_fresh=replication_fresh,
+    )
     lines.extend(
         [
             "# HELP nutsnews_backend_postgres_failover_telemetry_available Whether bounded failover-state telemetry is available.",
@@ -2048,6 +2063,12 @@ def collect() -> list[str]:
             metric(
                 "nutsnews_backend_postgres_restore_drill_age_seconds",
                 restore_drill_age if restore_drill_age is not None else -1,
+            ),
+            "# HELP nutsnews_backend_postgres_replication_expected_active Whether production cutover requires continuous PostgreSQL replication.",
+            "# TYPE nutsnews_backend_postgres_replication_expected_active gauge",
+            metric(
+                "nutsnews_backend_postgres_replication_expected_active",
+                1 if replication_expected_active else 0,
             ),
             "# HELP nutsnews_backend_postgres_replication_lag_configured Whether continuous replication lag is configured for the selected topology.",
             "# TYPE nutsnews_backend_postgres_replication_lag_configured gauge",

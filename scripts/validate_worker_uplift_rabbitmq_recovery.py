@@ -200,14 +200,15 @@ def main() -> int:
 
     for label, text, required_items in (
         (
-            "protected backend apply workflow",
+            "backend apply workflow",
             protected_apply,
             (
                 "deployment_scope:",
                 "- full-baseline",
                 "- rabbitmq-recovery-helper",
                 "args+=(--tags worker_uplift_rabbitmq_recovery_helper)",
-                "inputs.deployment_scope == 'full-baseline'",
+                "github.event_name == 'push' && 'full-baseline'",
+                "DEPLOYMENT_SCOPE: ${{ env.DEPLOYMENT_SCOPE }}",
             ),
         ),
         (
@@ -231,8 +232,8 @@ def main() -> int:
         "- name: Run deployment safety postcheck",
         1,
     )[0]
-    if "DEPLOYMENT_SCOPE: ${{ inputs.deployment_scope }}" not in ansible_step:
-        errors.append("protected backend Ansible step does not receive the fixed deployment scope")
+    if "DEPLOYMENT_SCOPE: ${{ env.DEPLOYMENT_SCOPE }}" not in ansible_step:
+        errors.append("backend Ansible step does not receive the fixed deployment scope")
 
     if "python3 scripts/validate_worker_uplift_rabbitmq_recovery.py" not in backend_checks:
         errors.append("Backend Checks must run RabbitMQ recovery validator")

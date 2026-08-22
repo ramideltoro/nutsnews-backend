@@ -1,10 +1,10 @@
-# Protected Backend Apply Runbook
+# Backend Apply Runbook
 
-Use this runbook for the manual GitHub Actions workflow that applies backend host changes through the protected `production-backend` Environment.
+Use this runbook for the GitHub Actions workflow that automatically applies backend host changes after a successful merge to `main`. The `production-backend` Environment scopes credentials only; it has no required reviewers, wait timer, or deployment-branch protection.
 
 ## What This Owns
 
-The protected backend workflow is the normal mutation path for `65.75.201.18`.
+The backend workflow is the normal mutation path for `65.75.201.18`.
 
 It must own or orchestrate backend host changes for:
 
@@ -23,7 +23,7 @@ It must own or orchestrate backend host changes for:
 
 Create a GitHub Environment named `production-backend` in `ramideltoro/nutsnews-backend`.
 
-The Environment must require explicit approval before jobs can access secrets or mutate the backend server.
+The Environment must not require reviewers, approvals, or a wait timer. Automated main-branch deployment starts immediately and uses the Environment only to access scoped secrets.
 
 The credential bootstrap path is documented in [CREDENTIAL_BOOTSTRAP.md](CREDENTIAL_BOOTSTRAP.md). Use it to create or update the Environment, set non-secret variables, and load Environment secrets from local-only values.
 
@@ -84,59 +84,51 @@ Do not reuse `LOCAL_AI_API_KEY`; Wiki automation requires the
 separate `NUTSNEWS_WIKI_AI_API_KEY` value, which is also stored as
 `WIKI_AI_API_KEY` in `ramideltoro/nutsnews-docs`.
 
-Run check mode from exact `main` before apply. Apply mode verifies the public
-health contract and a real Responses API tool call before the normal deployment
-safety postcheck. If the tool-call qualification fails, do not enable the wiki
-workflow. Roll back the wiki workflow to a non-publishing state first, then
-revert the backend change through a normal PR and protected check/apply cycle;
-never expose port `11434` or mutate the host manually.
+Pull-request automation validates the source before merge. A push to exact
+`main` automatically runs apply mode and verifies the public health contract
+and a real Responses API tool call before the deployment safety postcheck. If
+the tool-call qualification fails, roll back the wiki workflow to a
+non-publishing state, then revert through a normal tested pull request; never
+expose port `11434` or mutate the host manually.
 
 ## Run Check Mode
 
-1. Open GitHub Actions.
-2. Select `Protected Backend Ansible Apply`.
-3. Select `Run workflow`.
-4. Leave `run_mode` as `check`.
-5. Leave `confirm_apply` blank.
-6. Approve the `production-backend` Environment gate if prompted.
-7. Review the Ansible diff and recap.
+Manual check mode remains available for diagnostics:
 
-Check mode is required before apply mode.
+1. Open GitHub Actions and select `Backend Ansible Apply`.
+2. Run the workflow from exact `main`.
+3. Leave `run_mode` as `check` and `confirm_apply` blank.
+4. Review the Ansible diff and recap.
 
-Check mode must stay non-mutating. When a package such as `fail2ban` or
-`sysstat` is not installed yet, Ansible may report that it would install the
-package, then skip dependent service management until apply mode creates the
-service unit. Swapfile permission and format steps follow the same pattern when
-the swapfile would only be created by a real apply.
+Check mode is non-mutating. It is not a deployment approval gate.
 
-## Run Apply Mode
+## Automatic Apply Mode
 
-1. Run check mode first and review the output.
-2. Select `Protected Backend Ansible Apply`.
-3. Set `run_mode` to `apply`.
-4. Set `confirm_apply` to `backend.nutsnews.com`.
-5. Approve the `production-backend` Environment gate.
-6. Review the final Ansible recap.
+Every push to exact `main` automatically selects `run_mode=apply`,
+`deployment_scope=full-baseline`, and the fixed
+`backend.nutsnews.com` confirmation. No reviewer, approval, or manual
+dispatch is required after merge.
 
-Apply mode must never be run from a pull request branch.
+Manual apply dispatch remains available for recovery or a scoped helper run.
+It must use exact `main`; choose `apply` and the fixed host confirmation.
 
 Production Alloy is a code-controlled enabled desired state. Missing Grafana
-write credentials fail the workflow closed. Disabling Alloy requires a
-reviewed desired-state change and the exact
+write credentials fail the automated workflow closed. Disabling Alloy requires
+a desired-state change and the exact
 `backend_metrics_alloy_disable_confirmation=DISABLE_PRODUCTION_ALLOY`; do not
 use credential removal as a disable mechanism.
 
-Generic apply also accepts only
+Generic apply accepts only
 `NUTSNEWS_WORKER_UPLIFT_CUTOVER_STATE=shadow` and
 `NUTSNEWS_WORKER_UPLIFT_PRODUCTION_WRITES_ENABLED=false`. It cannot perform
-or preserve a production owner/write transition; use only the dedicated,
-reviewed cutover-control path for that state.
+or preserve a production owner/write transition; use the dedicated automated
+cutover-control path for that state.
 
 Routine baseline applies must not be used as a broad OS-upgrade or reboot
-shortcut. The backend baseline defaults keep `dist` upgrades, package autoremove,
-and reboot disabled. Use the `Backend Controlled Maintenance` workflow for
-fixed-purpose `precheck`, `security-upgrade`, or `reboot` actions, each under the
-same protected `production-backend` approval gate.
+shortcut. The backend baseline defaults keep `dist` upgrades, package
+autoremove, and reboot disabled. Use the `Backend Controlled Maintenance`
+workflow for fixed-purpose `precheck`, `security-upgrade`, or `reboot`
+actions.
 
 ## Deployment Safety Gates
 
@@ -168,8 +160,8 @@ If break-glass is used:
 4. Open a concrete issue or PR that reconciles the server state back into this repository.
 5. Update shared docs with the lesson learned.
 
-Do not use break-glass to bypass normal review or approval.
+Do not use break-glass to bypass the normal automated workflow.
 
 ## Current Blockers
 
-The workflow cannot apply to `65.75.201.18` until the `production-backend` Environment exists, required secrets are present, and the environment approval gate is available.
+The workflow cannot apply to `65.75.201.18` until the `production-backend` Environment exists and all required secrets are present. No environment approval gate is expected.

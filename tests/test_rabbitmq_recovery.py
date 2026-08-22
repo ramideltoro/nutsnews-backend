@@ -338,7 +338,7 @@ class RabbitMQRecoveryTests(unittest.TestCase):
         checks = BACKEND_CHECKS.read_text(encoding="utf-8")
         self.assertIn("python3 scripts/validate_worker_uplift_rabbitmq_recovery.py", checks)
 
-    def test_recovery_helper_has_fixed_protected_deployment_scope(self):
+    def test_recovery_helper_has_fixed_deployment_scope(self):
         workflow = PROTECTED_APPLY.read_text(encoding="utf-8")
         bootstrap = BOOTSTRAP.read_text(encoding="utf-8")
         tasks = RABBITMQ_TASKS.read_text(encoding="utf-8")
@@ -346,14 +346,14 @@ class RabbitMQRecoveryTests(unittest.TestCase):
         self.assertIn("- rabbitmq-recovery-helper", workflow)
         self.assertIn("args+=(--tags worker_uplift_rabbitmq_recovery_helper)", workflow)
         self.assertIn(
-            "if: inputs.run_mode == 'apply' && inputs.deployment_scope == 'full-baseline'",
+            "if: env.RUN_MODE == 'apply' && env.DEPLOYMENT_SCOPE == 'full-baseline'",
             workflow,
         )
         ansible_step = workflow.split("- name: Run backend Ansible baseline", 1)[1].split(
             "- name: Run deployment safety postcheck",
             1,
         )[0]
-        self.assertIn("DEPLOYMENT_SCOPE: ${{ inputs.deployment_scope }}", ansible_step)
+        self.assertIn("DEPLOYMENT_SCOPE: ${{ env.DEPLOYMENT_SCOPE }}", ansible_step)
         self.assertIn("worker_uplift_rabbitmq_recovery_helper", bootstrap)
         helper_block = tasks.split("- name: Install RabbitMQ recovery helper", 1)[1].split("\n- name:", 1)[0]
         self.assertIn("worker_uplift_rabbitmq_recovery_helper", helper_block)

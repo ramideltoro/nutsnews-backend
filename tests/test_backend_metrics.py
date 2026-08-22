@@ -54,6 +54,19 @@ def load_worker_logs_check_module():
 
 
 class BackendMetricsTests(unittest.TestCase):
+    def test_semantic_one_shot_failures_are_not_counted_as_generic_failed_units(self):
+        metrics = load_metrics_module()
+        failed_output = (
+            "● nutsnews-newrelic-job-metrics.service loaded failed failed New Relic job metrics\n"
+            "nutsnews-postgres-replication-health.service loaded failed failed PostgreSQL replication\n"
+            "ssh.service loaded failed failed OpenSSH server\n"
+        )
+
+        self.assertEqual(
+            metrics.actionable_failed_systemd_unit_names(failed_output),
+            ["ssh.service"],
+        )
+
     def test_worker_uplift_ownership_uses_authoritative_generation_five_shadow_row(self):
         metrics = load_metrics_module()
         row = {

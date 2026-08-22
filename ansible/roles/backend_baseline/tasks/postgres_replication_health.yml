@@ -65,7 +65,7 @@
       User=root
       Group=root
       EnvironmentFile={{ backend_postgres_replication_health_env_path }}
-      ExecStart={{ backend_postgres_replication_health_script_path }} --output {{ backend_postgres_replication_health_output_path }} --textfile-output {{ backend_postgres_replication_health_textfile_path }} --enforce
+      ExecStart={{ backend_postgres_replication_health_script_path }} --output {{ backend_postgres_replication_health_output_path }} --textfile-output {{ backend_postgres_replication_health_textfile_path }} {{ backend_postgres_replication_health_expected_active | bool | ternary('--expected-active ', '') }}--enforce
       NoNewPrivileges=true
       PrivateTmp=true
       ProtectHome=true

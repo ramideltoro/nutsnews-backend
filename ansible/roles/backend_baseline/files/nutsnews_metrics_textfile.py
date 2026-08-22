@@ -114,6 +114,12 @@ RABBITMQ_RECOVERY_STATUS_FILES = {
     "stopped_volume_restore_drill": "last-stopped-volume-restore-drill.json",
     "scheduled_check": "last-scheduled-check.json",
 }
+SEMANTIC_STATUS_SERVICE_UNITS = frozenset(
+    {
+        "nutsnews-newrelic-job-metrics.service",
+        "nutsnews-postgres-replication-health.service",
+    }
+)
 SERVICES = (
     "ssh",
     "ufw",
@@ -384,6 +390,30 @@ def run(command: list[str], timeout: int = 8) -> str:
 
 def shell(command: str, timeout: int = 8) -> str:
     return run(["sh", "-lc", command], timeout=timeout)
+
+
+def failed_systemd_unit_names(output: str) -> list[str]:
+    stripped = output.strip()
+    if not stripped:
+        return []
+    if stripped.isdigit():
+        return [f"unknown-failed-unit-{index}" for index in range(int(stripped))]
+    names: list[str] = []
+    for line in stripped.splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        if fields[0] in {"●", "*"} and len(fields) > 1:
+            names.append(fields[1])
+        else:
+            names.append(fields[0].lstrip("●"))
+    return names
+
+
+def actionable_failed_systemd_unit_names(output: str) -> list[str]:
+    return sorted(
+        unit for unit in failed_systemd_unit_names(output) if unit not in SEMANTIC_STATUS_SERVICE_UNITS
+    )
 
 
 def label(value: str) -> str:
@@ -1854,7 +1884,9 @@ def collect() -> list[str]:
     for service in SERVICES:
         lines.append(metric("nutsnews_backend_service_active", service_active(service), {"unit": service}))
 
-    failed_units = shell("systemctl --failed --no-legend --no-pager | wc -l")
+    failed_units = actionable_failed_systemd_unit_names(
+        shell("systemctl --failed --no-legend --no-pager --plain || true")
+    )
     upgradable = shell("apt list --upgradable 2>/dev/null | tail -n +2 | wc -l")
     reboot_required = 1 if Path("/var/run/reboot-required").exists() else 0
     endpoint_body = shell(
@@ -1880,9 +1912,9 @@ def collect() -> list[str]:
 
     lines.extend(
         [
-            "# HELP nutsnews_backend_failed_systemd_units Failed systemd units on the backend host.",
+            "# HELP nutsnews_backend_failed_systemd_units Failed systemd units not covered by dedicated semantic checks.",
             "# TYPE nutsnews_backend_failed_systemd_units gauge",
-            metric("nutsnews_backend_failed_systemd_units", int(failed_units or "0")),
+            metric("nutsnews_backend_failed_systemd_units", len(failed_units)),
             "# HELP nutsnews_backend_upgradable_packages APT packages visible as upgradable.",
             "# TYPE nutsnews_backend_upgradable_packages gauge",
             metric("nutsnews_backend_upgradable_packages", int(upgradable or "0")),

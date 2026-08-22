@@ -37,6 +37,12 @@ URL_SECRET_RE = re.compile(r"([a-z][a-z0-9+.-]*://[^:/\s]+:)([^@\s]+)(@)", re.IG
 EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 SUPABASE_SYNC_RELAY_REPORT_PATH = "/var/lib/nutsnews/supabase-sync-relay/last-run.json"
 SUPABASE_SYNC_RELAY_LAG_CRITICAL_SECONDS = 180
+SEMANTIC_STATUS_SERVICE_UNITS = frozenset(
+    {
+        "nutsnews-newrelic-job-metrics.service",
+        "nutsnews-postgres-replication-health.service",
+    }
+)
 
 
 REMOTE_COMMANDS: dict[str, str] = {
@@ -57,7 +63,12 @@ REMOTE_COMMANDS: dict[str, str] = {
     "swap": "swapon --show --bytes --noheadings || true",
     "reboot_required": "test -e /var/run/reboot-required && echo yes || echo no",
     "upgradable_count": "apt list --upgradable 2>/dev/null | tail -n +2 | wc -l",
-    "failed_units": "systemctl --failed --no-legend --no-pager || true",
+    "failed_units": "systemctl --failed --no-legend --no-pager --plain || true",
+    "newrelic_job_metrics_status": (
+        "if test -r /var/lib/nutsnews/newrelic/job-metrics-last.json; then "
+        "cat /var/lib/nutsnews/newrelic/job-metrics-last.json; "
+        "else echo not_configured; fi"
+    ),
     "service_states": (
         "for unit in ssh ufw fail2ban docker caddy postgresql alloy sysstat nutsnews-backup.timer nutsnews-rabbitmq nutsnews-rabbitmq-canary.timer; do "
         "state=$(systemctl is-active \"$unit\" 2>/dev/null || true); "
@@ -550,6 +561,25 @@ def command_stdout(report: dict[str, Any], name: str) -> str:
     return str(report.get("ssh", {}).get("commands", {}).get(name, {}).get("stdout", ""))
 
 
+def failed_systemd_unit_names(output: str) -> list[str]:
+    names: list[str] = []
+    for line in output.strip().splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        if fields[0] in {"●", "*"} and len(fields) > 1:
+            names.append(fields[1])
+        else:
+            names.append(fields[0].lstrip("●"))
+    return names
+
+
+def actionable_failed_systemd_unit_names(output: str) -> list[str]:
+    return sorted(
+        unit for unit in failed_systemd_unit_names(output) if unit not in SEMANTIC_STATUS_SERVICE_UNITS
+    )
+
+
 def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, int]]:
     checks: list[dict[str, Any]] = []
 
@@ -566,14 +596,48 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
     inodes = parse_df_line(command_stdout(report, "root_inodes"))
     checks.append(threshold_check("root_inode_used_percent", inodes.get("used_percent"), warn=80, crit=90, unit="%"))
 
-    failed_units = command_stdout(report, "failed_units").strip()
+    failed_units = actionable_failed_systemd_unit_names(command_stdout(report, "failed_units"))
     checks.append(
         {
             "name": "failed_systemd_units",
             "status": "healthy" if not failed_units else "critical",
-            "summary": "no failed systemd units" if not failed_units else "failed systemd units present",
+            "summary": (
+                "no actionable failed systemd units"
+                if not failed_units
+                else f"failed systemd units present: {','.join(failed_units)}"
+            ),
         }
     )
+
+    newrelic_raw = command_stdout(report, "newrelic_job_metrics_status").strip()
+    if not newrelic_raw or newrelic_raw == "not_configured":
+        checks.append(
+            {
+                "name": "newrelic_job_metrics_delivery",
+                "status": "not_configured",
+                "summary": "newrelic_job_metrics_delivery=not_configured",
+            }
+        )
+    else:
+        newrelic_status = parse_json_object(newrelic_raw)
+        delivery_status = str(newrelic_status.get("status") or "unknown")
+        checks.append(
+            {
+                "name": "newrelic_job_metrics_delivery",
+                "status": (
+                    "healthy"
+                    if delivery_status == "pass"
+                    else "warning"
+                    if delivery_status == "fail"
+                    else "unknown"
+                ),
+                "summary": (
+                    f"status={delivery_status} "
+                    f"reason={newrelic_status.get('reason', 'none')} "
+                    f"checked_at={newrelic_status.get('checked_at_utc', 'unknown')}"
+                ),
+            }
+        )
 
     reboot_required = command_stdout(report, "reboot_required").strip()
     checks.append(
@@ -806,6 +870,10 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
     postgres_status_raw = command_stdout(report, "postgres_status").strip()
     replication_health = parse_json_object(command_stdout(report, "postgres_replication_health"))
     replication_from_health = replication_health.get("replication", {}) if isinstance(replication_health.get("replication"), dict) else {}
+    if replication_from_health:
+        replication_from_health = dict(replication_from_health)
+        replication_from_health.setdefault("status", replication_health.get("status"))
+        replication_from_health.setdefault("blockers", replication_health.get("blockers", []))
     if postgres_status_raw == "not_configured" or not postgres_status_raw:
         checks.append(
             {
@@ -841,6 +909,7 @@ def classify(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, in
             "status": status_from_replication(replication_for_check),
             "summary": (
                 f"mode={replication_for_check.get('mode', 'not_configured')} "
+                f"expected_active={replication_for_check.get('expected_active', False)} "
                 f"lag={replication_for_check.get('lag_status', 'not_configured')} "
                 f"max_lag_seconds={replication_for_check.get('max_lag_seconds', 'unknown')} "
                 f"slot={replication_for_check.get('slot_status', 'not_configured')}"

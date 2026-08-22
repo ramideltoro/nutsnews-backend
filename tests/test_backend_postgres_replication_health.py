@@ -54,7 +54,7 @@ class BackendPostgresReplicationHealthTests(unittest.TestCase):
         with mock.patch.dict("os.environ", {"NUTSNEWS_BACKEND_TARGET_DB_URL": "postgresql://redacted"}, clear=True):
             with mock.patch.object(backend_postgres_replication_health, "run_psql", return_value=(payload, None)):
                 with redirect_stdout(StringIO()):
-                    exit_code = backend_postgres_replication_health.main_args(["--max-lag-seconds", "300", "--enforce"])
+                    exit_code = backend_postgres_replication_health.main_args(["--max-lag-seconds", "300", "--expected-active", "--enforce"])
         self.assertEqual(exit_code, 1)
 
     def test_subscription_without_source_slot_check_is_blocked(self):
@@ -75,7 +75,7 @@ class BackendPostgresReplicationHealthTests(unittest.TestCase):
                 with mock.patch.object(backend_postgres_replication_health, "run_psql", return_value=(payload, None)):
                     with redirect_stdout(StringIO()):
                         exit_code = backend_postgres_replication_health.main_args(
-                            ["--output", str(output), "--enforce"]
+                            ["--output", str(output), "--expected-active", "--enforce"]
                         )
             report = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(exit_code, 1)
@@ -122,7 +122,7 @@ class BackendPostgresReplicationHealthTests(unittest.TestCase):
                 with mock.patch.object(backend_postgres_replication_health, "run_psql", side_effect=fake_run_psql):
                     with redirect_stdout(StringIO()):
                         exit_code = backend_postgres_replication_health.main_args(
-                            ["--output", str(output), "--enforce"]
+                            ["--output", str(output), "--expected-active", "--enforce"]
                         )
             report = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(exit_code, 0)
@@ -130,12 +130,25 @@ class BackendPostgresReplicationHealthTests(unittest.TestCase):
         self.assertEqual(report["replication"]["slot_status"], "healthy_idle")
         self.assertEqual(report["blockers"], [])
 
-    def test_simulated_broken_mode_fails_with_clear_blocker(self):
+    def test_pre_cutover_replication_failure_is_blocked_and_not_enforced(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             output = Path(tmpdir) / "health.json"
             with redirect_stdout(StringIO()):
                 exit_code = backend_postgres_replication_health.main_args(
                     ["--simulate-broken", "--enforce", "--output", str(output)]
+                )
+            report = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(report["status"], "blocked")
+        self.assertFalse(report["expected_active"])
+        self.assertFalse(report["replication"]["expected_active"])
+
+    def test_simulated_broken_mode_fails_with_clear_blocker(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = Path(tmpdir) / "health.json"
+            with redirect_stdout(StringIO()):
+                exit_code = backend_postgres_replication_health.main_args(
+                    ["--simulate-broken", "--expected-active", "--enforce", "--output", str(output)]
                 )
             report = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(exit_code, 1)

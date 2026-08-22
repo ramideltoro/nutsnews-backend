@@ -67,6 +67,65 @@ class BackendMetricsTests(unittest.TestCase):
             ["ssh.service"],
         )
 
+    def test_postgres_failover_readiness_requires_replication_only_after_cutover(self):
+        metrics = load_metrics_module()
+        pre_cutover = {
+            "expected_active": False,
+            "lag_status": "inactive",
+            "blockers": ["subscription_inactive"],
+        }
+        post_cutover_healthy = {
+            "expected_active": True,
+            "lag_status": "healthy",
+            "blockers": [],
+        }
+
+        self.assertEqual(
+            1,
+            metrics.postgres_failover_ready_value(
+                "healthy",
+                "healthy",
+                pre_cutover,
+                replication_fresh=False,
+            ),
+        )
+        self.assertEqual(
+            1,
+            metrics.postgres_failover_ready_value(
+                "healthy",
+                "healthy",
+                post_cutover_healthy,
+                replication_fresh=True,
+            ),
+        )
+        self.assertEqual(
+            0,
+            metrics.postgres_failover_ready_value(
+                "healthy",
+                "healthy",
+                post_cutover_healthy,
+                replication_fresh=False,
+            ),
+        )
+        self.assertEqual(
+            0,
+            metrics.postgres_failover_ready_value(
+                "warning",
+                "healthy",
+                pre_cutover,
+                replication_fresh=True,
+            ),
+        )
+        self.assertEqual(
+            0,
+            metrics.postgres_failover_ready_value(
+                "healthy",
+                "critical",
+                pre_cutover,
+                replication_fresh=True,
+            ),
+        )
+
     def test_worker_uplift_ownership_uses_authoritative_generation_five_shadow_row(self):
         metrics = load_metrics_module()
         row = {

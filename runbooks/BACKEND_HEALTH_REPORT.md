@@ -254,3 +254,16 @@ intact. Revert source through a pull request and remove the writer only through
 the protected Ansible apply path after the current freeze is lifted.
 
 Rotate SMTP or SSH credentials in GitHub secrets if a secret is suspected to be exposed. Do not commit report artifacts that contain live host evidence.
+
+## Semantic one-shot failure handling
+
+The generic `failed_systemd_units` check excludes
+`nutsnews-postgres-replication-health.service` and
+`nutsnews-newrelic-job-metrics.service`. Those one-shot units intentionally
+fail when their domain check is unhealthy, so counting them again as generic
+host failures creates duplicate critical alerts.
+
+Their underlying state remains visible through
+`postgres_replication_health` and `newrelic_job_metrics_delivery`.
+New Relic metric delivery failures are warnings because Grafana remains the
+primary backend alerting path.

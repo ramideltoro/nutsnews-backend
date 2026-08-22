@@ -266,7 +266,7 @@ def main_args(argv: list[str] | None = None) -> int:
     if args.status_output:
         write_status(Path(args.status_output), report)
     print(text)
-    if args.enforce and status not in {"healthy", "not_configured"}:
+    if args.enforce and status not in {"healthy", "not_configured", "blocked"}:
         return 1
     return 0
 

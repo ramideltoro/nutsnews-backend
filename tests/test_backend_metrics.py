@@ -1111,6 +1111,7 @@ class BackendMetricsTests(unittest.TestCase):
                     {
                         "checked_at_utc": "2020-01-01T00:00:00Z",
                         "replication": {
+                            "expected_active": True,
                             "lag_status": "healthy",
                             "max_lag_seconds": 1,
                             "validation_stale_threshold_seconds": 900,

@@ -668,6 +668,15 @@ class BackendMetricsTests(unittest.TestCase):
         self.assertNotIn("chmod 666", task)
         self.assertNotIn("become_user: root", task)
 
+    def test_backend_apply_automatically_deploys_main(self):
+        workflow = PROTECTED_APPLY_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("name: Backend Ansible Apply", workflow)
+        self.assertIn("push:\n    branches:\n      - main", workflow)
+        self.assertIn("github.event_name == 'push' && 'apply'", workflow)
+        self.assertIn("github.event_name == 'push' && 'full-baseline'", workflow)
+        self.assertNotIn("if: inputs.run_mode == 'apply'", workflow)
+
     def test_protected_apply_wires_loki_secret_names(self):
         workflow = PROTECTED_APPLY_WORKFLOW.read_text(encoding="utf-8")
         for name in ("GRAFANA_CLOUD_LOKI_URL", "GRAFANA_CLOUD_LOKI_USERNAME", "GRAFANA_CLOUD_LOKI_PASSWORD"):

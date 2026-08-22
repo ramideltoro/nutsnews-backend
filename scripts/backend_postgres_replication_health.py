@@ -112,6 +112,11 @@ def main_args(argv: list[str] | None = None) -> int:
     parser.add_argument("--validation-stale-seconds", type=int, default=900)
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--simulate-broken", action="store_true")
+    parser.add_argument(
+        "--expected-active",
+        action="store_true",
+        help="Treat replication readiness failures as production-critical after protected cutover.",
+    )
     parser.add_argument("--enforce", action="store_true")
     args = parser.parse_args(argv)
 
@@ -220,9 +225,15 @@ def main_args(argv: list[str] | None = None) -> int:
     if blockers and status == "healthy":
         status = "fail"
 
+    if args.expected_active and status == "blocked":
+        status = "fail"
+    elif not args.expected_active and status == "fail":
+        status = "blocked"
+
     max_lag_seconds = max((int(item["lag_seconds"]) for item in subscriptions if item.get("lag_seconds") is not None), default=None)
     report = {
         "status": status,
+        "expected_active": args.expected_active,
         "checked_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "target_db_url_env": args.target_db_url_env,
         "target_db_url_present": bool(target_db_url),
@@ -230,6 +241,7 @@ def main_args(argv: list[str] | None = None) -> int:
         "source_db_url_present": bool(source_db_url),
         "replication": {
             "mode": "logical_replication",
+            "expected_active": args.expected_active,
             "lag_status": lag_status,
             "validation_status": "not_configured" if args.offline else "current",
             "validation_stale_threshold_seconds": args.validation_stale_seconds,

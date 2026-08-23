@@ -130,11 +130,16 @@ autoremove, and reboot disabled. Use the `Backend Controlled Maintenance`
 workflow for fixed-purpose `precheck`, `security-upgrade`, or `reboot`
 actions.
 
-## Deployment Safety Gates
+## Deployment Safety Reports
 
-Apply mode runs the deployment safety gate before and after Ansible. Check mode
-runs the same gate as a non-blocking dry run. The gate and rollback map are
-documented in [DEPLOYMENT_SAFETY_GATES.md](DEPLOYMENT_SAFETY_GATES.md).
+Apply mode records deployment safety findings before and after Ansible, but
+those reports, the cutover-state probe, credential-readiness probe, and public
+Wiki AI smoke test do not stop or delay the production apply. Pull-request
+tests are the automated source gate; after a tested merge reaches exact
+`main`, only an actual inability to run Ansible or apply the desired state
+fails the deployment. Check mode keeps the same reports as a non-mutating dry
+run. The report model and rollback map are documented in
+[DEPLOYMENT_SAFETY_GATES.md](DEPLOYMENT_SAFETY_GATES.md).
 
 ## Read-Only Verification After Apply
 

@@ -33,19 +33,21 @@ Workflow: `Backend Controlled Maintenance`
 Allowed actions:
 
 - `precheck`: read-only state collection only.
-- `security-upgrade`: runs the fixed `unattended-upgrade` path only after prechecks pass and `confirm_target` is exactly `backend.nutsnews.com`.
-- `reboot`: runs a fixed reboot path only after prechecks pass and `confirm_target` is exactly `backend.nutsnews.com`.
+- `security-upgrade`: records precheck evidence, then runs the fixed `unattended-upgrade` path.
+- `reboot`: records precheck evidence, then runs the fixed reboot path.
 
-The workflow has no arbitrary command input. All actions run under the protected
-`production-backend` Environment approval gate and upload a sanitized
+The workflow has no arbitrary command input. The `production-backend`
+Environment scopes credentials only; it has no reviewer, approval, or wait
+gate. Every action uploads a sanitized
 `backend-controlled-maintenance-report` artifact.
 
 When the backend RabbitMQ broker is healthy before a controlled reboot, the
-reboot action publishes a durable RabbitMQ probe message, reboots the host, then
-waits for SSH to return with a changed boot ID before verifying and deleting
-the probe message. Probe credentials are read from the root-only broker
-environment file and are not passed as workflow inputs or command-line secret
-values.
+reboot action attempts to publish a durable RabbitMQ probe message, reboots the
+host, then waits for SSH to return with a changed boot ID before attempting to
+verify and delete the probe message. Probe failures are advisory evidence and
+do not block the reboot or turn a changed boot ID into a failed maintenance
+result. Probe credentials are read from the root-only broker environment file
+and are not passed as workflow inputs or command-line secret values.
 
 Deployment safety and recovery paths for this workflow are summarized in
 [DEPLOYMENT_SAFETY_GATES.md](DEPLOYMENT_SAFETY_GATES.md).
@@ -63,30 +65,25 @@ Prechecks include:
 - reboot-required and package-update visibility;
 - unattended-upgrade availability.
 
-Current expected not-configured states are explicit. A reboot is blocked until
-backup freshness is healthy and no active alerts are present. If the active
-alert state directory is not yet configured, the workflow reports that gap but
-does not block an otherwise healthy controlled reboot.
+Current expected not-configured states are explicit. Precheck findings and the
+derived `mutation_blockers` list are advisory evidence: they do not stop or
+delay a fixed maintenance action. A reboot succeeds when the host returns with
+a changed boot ID; post-reboot service, kernel, backup, alert, and RabbitMQ
+findings remain visible in the report.
 
 ## Apply Path
 
-For baseline changes, run only through the protected backend workflow:
-
-1. Merge the reviewed OS maintenance PR.
-2. Run `Protected Backend Ansible Apply` in `check` mode.
-3. Confirm the baseline plan does not enable broad upgrades or reboot unless a
-   reviewed issue explicitly adds those variables.
-4. Run `apply` mode only during an approved maintenance window.
-5. Run the verification commands below.
+For baseline changes, merge a tested pull request to exact `main`. The
+`Backend Ansible Apply` workflow starts automatically in apply mode without a
+reviewer, approval, wait timer, or manual dispatch. Manual check mode remains
+available for diagnostics but is not a production gate.
 
 For controlled maintenance:
 
 1. Run `Backend Controlled Maintenance` with `action=precheck`.
 2. Review the report artifact and summary.
 3. Run `action=security-upgrade` or `action=reboot` only when required.
-4. For mutating actions, set `confirm_target=backend.nutsnews.com` and approve
-   the `production-backend` gate.
-5. Review the postcheck report before closing any maintenance issue.
+4. Review the postcheck report before closing any maintenance issue.
 
 ## Verification
 

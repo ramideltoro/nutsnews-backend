@@ -338,7 +338,8 @@ def main() -> int:
         "rabbitmq_probe_command",
         "run_rabbitmq_probe_action",
         "rabbitmq_host_reboot_probe",
-        "RabbitMQ host-restart probe publish failed",
+        "publish_failed_before_reboot",
+        "verify_failed_after_reboot",
         "/var/lib/nutsnews/rabbitmq-probes/host-restart-probe.json",
     ):
         if required not in controlled_maintenance:

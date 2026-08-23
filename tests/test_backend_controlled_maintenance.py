@@ -135,13 +135,24 @@ class BackendControlledMaintenanceTests(unittest.TestCase):
         blockers = maintenance.mutation_blockers("security-upgrade", checks)
         self.assertIn({"check": "unattended_security_updates", "status": "warning"}, blockers)
 
+    def test_mutation_prechecks_and_rabbitmq_probes_are_advisory(self):
+        source = Path("scripts/backend_controlled_maintenance.py").read_text(encoding="utf-8")
+        self.assertNotIn('elif precheck["mutation_blockers"]', source)
+        self.assertIn("publish_failed_before_reboot", source)
+        self.assertIn("verify_failed_after_reboot", source)
+        self.assertIn(
+            'report["status"] = "pass" if postcheck["boot_id_changed"] else "fail"',
+            source,
+        )
+
     def test_workflow_has_no_freeform_command_input(self):
         workflow = (ROOT / ".github/workflows/backend-controlled-maintenance.yml").read_text(encoding="utf-8")
         self.assertIn("- precheck", workflow)
         self.assertIn("- security-upgrade", workflow)
         self.assertIn("- reboot", workflow)
-        self.assertIn("confirm_target", workflow)
-        self.assertIn("backend.nutsnews.com", workflow)
+        self.assertNotIn("confirm_target:", workflow)
+        self.assertNotIn("inputs.confirm_target", workflow)
+        self.assertIn("CONFIRM_TARGET: backend.nutsnews.com", workflow)
         self.assertNotIn("command:", workflow)
         self.assertNotIn("remote_command", workflow)
 

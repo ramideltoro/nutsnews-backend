@@ -69,6 +69,9 @@
 
       [Service]
       Type=oneshot
+      # The emitter persists bounded failure evidence; optional telemetry delivery
+      # must not poison generic systemd health or stop the baseline deployment.
+      SuccessExitStatus=1
       EnvironmentFile={{ backend_newrelic_metric_env_path }}
       ExecStart={{ backend_newrelic_metric_emitter_path }} --jobs-config {{ backend_newrelic_metric_jobs_path }} --output {{ backend_newrelic_metric_output_path }}
   notify: Reload systemd

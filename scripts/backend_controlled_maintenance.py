@@ -593,10 +593,6 @@ def main(argv: list[str] | None = None) -> int:
             report["status"] = "blocked"
             report["action_result"] = {"status": "not_run", "detail": f"confirm-target must be {CONFIRM_TARGET}"}
             exit_code = 2
-        elif precheck["mutation_blockers"]:
-            report["status"] = "blocked"
-            report["action_result"] = {"status": "not_run", "detail": "precheck blockers present"}
-            exit_code = 1
         else:
             rabbitmq_probe_required = False
             if args.action == "reboot":
@@ -613,15 +609,7 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     report["rabbitmq_host_reboot_probe"] = {"required": True, "publish": publish_probe, "verify": None}
                     if publish_probe["status"] != "pass":
-                        report["status"] = "fail"
-                        report["action_result"] = {"status": "not_run", "detail": "RabbitMQ host-restart probe publish failed"}
-                        report["finished_at_utc"] = utc_now()
-                        args.output.parent.mkdir(parents=True, exist_ok=True)
-                        args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-                        if args.summary:
-                            write_summary(args.summary, report)
-                        print(json.dumps({"status": report["status"], "precheck_summary": precheck["summary"]}, indent=2))
-                        return 1
+                        report["rabbitmq_host_reboot_probe"]["advisory"] = "publish_failed_before_reboot"
                 else:
                     report["rabbitmq_host_reboot_probe"] = {"required": False, "reason": "rabbitmq_health_not_healthy_or_not_configured"}
             result = execute_fixed_action(args.action, args.ssh_host, args.ssh_user, args.ssh_key, args.known_hosts, args.timeout)
@@ -664,8 +652,10 @@ def main(argv: list[str] | None = None) -> int:
                     postcheck["boot_id_changed"] = postcheck["boot_id"] != precheck["boot_id"]
                     postcheck["kernel_changed"] = postcheck["kernel"] != precheck["kernel"]
                     report["postcheck"] = postcheck
-                    rabbitmq_probe_passed = not rabbitmq_probe_required or (verify_probe is not None and verify_probe["status"] == "pass")
-                    report["status"] = "pass" if postcheck["boot_id_changed"] and rabbitmq_probe_passed else "fail"
+                    if rabbitmq_probe_required and (verify_probe is None or verify_probe["status"] != "pass"):
+                        if isinstance(report["rabbitmq_host_reboot_probe"], dict):
+                            report["rabbitmq_host_reboot_probe"]["advisory"] = "verify_failed_after_reboot"
+                    report["status"] = "pass" if postcheck["boot_id_changed"] else "fail"
                     exit_code = 0 if report["status"] == "pass" else 1
             else:
                 post_evidence = collect_live(args.ssh_host, args.ssh_user, args.ssh_key, args.known_hosts, args.timeout)

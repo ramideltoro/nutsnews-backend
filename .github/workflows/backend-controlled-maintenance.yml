@@ -12,11 +12,6 @@ on:
           - precheck
           - security-upgrade
           - reboot
-      confirm_target:
-        description: For security-upgrade or reboot only, type backend.nutsnews.com.
-        required: false
-        default: ""
-        type: string
 
 permissions:
   contents: read
@@ -42,7 +37,7 @@ jobs:
         shell: bash
         env:
           ACTION: ${{ inputs.action }}
-          CONFIRM_TARGET: ${{ inputs.confirm_target }}
+          CONFIRM_TARGET: backend.nutsnews.com
         run: |
           set -euo pipefail
 
@@ -54,10 +49,6 @@ jobs:
               ;;
           esac
 
-          if [[ "$ACTION" != "precheck" && "$CONFIRM_TARGET" != "backend.nutsnews.com" ]]; then
-            echo "Maintenance action $ACTION requires confirm_target to be exactly backend.nutsnews.com." >&2
-            exit 1
-          fi
 
       - name: Prepare SSH material
         shell: bash
@@ -92,7 +83,7 @@ jobs:
         shell: bash
         env:
           ACTION: ${{ inputs.action }}
-          CONFIRM_TARGET: ${{ inputs.confirm_target }}
+          CONFIRM_TARGET: backend.nutsnews.com
           NUTSNEWS_BACKEND_HOST: ${{ vars.NUTSNEWS_BACKEND_HOST || '65.75.201.18' }}
           NUTSNEWS_BACKEND_ANSIBLE_USER: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
         run: |

@@ -334,6 +334,15 @@ class RabbitMQRecoveryTests(unittest.TestCase):
         for forbidden in ("remote_command", "shell_command", "script_body", "ansible_tags"):
             self.assertNotIn(forbidden, workflow)
 
+    def test_rabbitmq_capacity_probe_reports_without_blocking_apply(self):
+        tasks = RABBITMQ_TASKS.read_text(encoding="utf-8")
+        report = tasks.split(
+            "- name: Report root filesystem headroom for RabbitMQ",
+            1,
+        )[1].split("- name: Install Docker and Compose packages for RabbitMQ", 1)[0]
+        self.assertIn("blocking: false", report)
+        self.assertNotIn("ansible.builtin.assert", report)
+
     def test_backend_checks_runs_recovery_validator(self):
         checks = BACKEND_CHECKS.read_text(encoding="utf-8")
         self.assertIn("python3 scripts/validate_worker_uplift_rabbitmq_recovery.py", checks)

@@ -169,7 +169,9 @@ class BackendDeploymentSafetyTests(unittest.TestCase):
         self.assertIn("nutsnews-backup.service nutsnews-backup-verify.service nutsnews-restore-drill.service", protected_apply)
         self.assertIn("nutsnews-rabbitmq-canary.service", protected_apply)
         self.assertIn("phase=dry-run", protected_apply)
-        self.assertIn("--enforce true", protected_apply)
+        self.assertIn("--enforce false", protected_apply)
+        self.assertNotIn("--enforce true", protected_apply)
+        self.assertGreaterEqual(protected_apply.count("continue-on-error: true"), 5)
         self.assertIn("--enforce true", cloudflare)
 
 

@@ -150,8 +150,9 @@ class BackendControlledMaintenanceTests(unittest.TestCase):
         self.assertIn("- precheck", workflow)
         self.assertIn("- security-upgrade", workflow)
         self.assertIn("- reboot", workflow)
-        self.assertIn("confirm_target", workflow)
-        self.assertIn("backend.nutsnews.com", workflow)
+        self.assertNotIn("confirm_target:", workflow)
+        self.assertNotIn("inputs.confirm_target", workflow)
+        self.assertIn("CONFIRM_TARGET: backend.nutsnews.com", workflow)
         self.assertNotIn("command:", workflow)
         self.assertNotIn("remote_command", workflow)
 

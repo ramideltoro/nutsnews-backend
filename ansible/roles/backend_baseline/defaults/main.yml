@@ -376,10 +376,6 @@ backend_logs_journal_units:
     unit: nutsnews-supabase-sync-relay.timer
   - service: rabbitmq
     unit: nutsnews-rabbitmq.service
-  - service: rabbitmq-canary
-    unit: nutsnews-rabbitmq-canary.service
-  - service: rabbitmq-canary
-    unit: nutsnews-rabbitmq-canary.timer
   - service: backup
     unit: nutsnews-backup.service
   - service: backup

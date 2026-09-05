@@ -708,11 +708,11 @@ class BackendAlloyObservabilityTests(unittest.TestCase):
             "nutsnews-supabase-sync-relay.timer",
             "postgresql.service",
             "nutsnews-rabbitmq.service",
-            "nutsnews-rabbitmq-canary.service",
-            "nutsnews-rabbitmq-canary.timer",
             "nutsnews-metrics-textfile.timer",
         ):
             self.assertIn(f"unit: {unit}", defaults)
+        self.assertNotIn("unit: nutsnews-rabbitmq-canary.service", defaults)
+        self.assertNotIn("unit: nutsnews-rabbitmq-canary.timer", defaults)
         self.assertIn('unit: "postgresql@{{ backend_postgres_major_version }}-main.service"', defaults)
         self.assertIn("http://127.0.0.1:12345/-/ready", metrics_tasks)
         self.assertIn("http://127.0.0.1:12345/-/healthy", metrics_tasks)

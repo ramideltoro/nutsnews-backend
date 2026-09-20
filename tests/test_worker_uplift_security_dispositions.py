@@ -11,7 +11,9 @@ from scripts import validate_worker_uplift_security_dispositions as dispositions
 class WorkerUpliftSecurityDispositionTests(unittest.TestCase):
     def setUp(self):
         self.document = dispositions.load_json(dispositions.DEFAULT_DISPOSITIONS_PATH)
-        self.today = date(2026, 7, 31)
+        self.today = date.fromisoformat(
+            self.document.get("revalidated_at_utc", self.document["captured_at_utc"])[:10]
+        )
 
     def validate(self, document=None, *, enforce_closure=False, backend_checks_text=None):
         return dispositions.validate_dispositions(

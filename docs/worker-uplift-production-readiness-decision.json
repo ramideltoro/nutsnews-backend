@@ -367,7 +367,7 @@
     },
     {
       "path": "docs/worker-uplift-security-dispositions.json",
-      "sha256": "a457bd1acabeb48e2a85f30a8bd8e5e0e1b5b4509961354f84795e2b74a39d48"
+      "sha256": "6ee740e3cc766f4795d40af7434e8d568d388905549d810dda1127528f0e43d7"
     },
     {
       "path": "docs/worker-uplift-cutover-control-plan.json",
@@ -756,7 +756,7 @@
     "review_merge_commit": "b619cf91504eafca21f70c5d68888563f5fca7a9",
     "post_merge_checks_run": 30484088483,
     "disposition_artifact": "docs/worker-uplift-security-dispositions.json",
-    "disposition_artifact_sha256": "a457bd1acabeb48e2a85f30a8bd8e5e0e1b5b4509961354f84795e2b74a39d48",
+    "disposition_artifact_sha256": "6ee740e3cc766f4795d40af7434e8d568d388905549d810dda1127528f0e43d7",
     "disposition_tracking_issue": "ramideltoro/nutsnews-worker#164",
     "current_record_validator": "python3 scripts/validate_worker_uplift_security_dispositions.py",
     "closure_validator": "python3 scripts/validate_worker_uplift_security_dispositions.py --enforce-closure",

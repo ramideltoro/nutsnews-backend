@@ -1,0 +1,49 @@
+name: Observe recovery configuration
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Apply the validated recovery-only configuration
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: production-backend-ansible-baseline
+  cancel-in-progress: false
+jobs:
+  recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-backend
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - name: Prepare existing deployment identity
+        env:
+          KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$KEY" > "$HOME/.ssh/backend"
+          printf '%s\n' "$HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/backend" "$HOME/.ssh/known_hosts"
+      - name: Validate and apply only recovery configuration
+        env:
+          USERNAME: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          APPLY: ${{ inputs.apply }}
+        run: |
+          set -euo pipefail
+          target="${USERNAME:-rami}@65.75.201.18"
+          opts=(-i "$HOME/.ssh/backend" -o BatchMode=yes -o StrictHostKeyChecking=yes)
+          archive="$RUNNER_TEMP/observe-recovery.tar"
+          tar cf "$archive" scripts/observe-recovery-export.sh scripts/apply-observe-recovery.sh config/recovery/reader.pub
+          remote=$(ssh "${opts[@]}" "$target" mktemp -d /tmp/observe-recovery.XXXXXXXX)
+          trap 'ssh "${opts[@]}" "$target" "rm -rf -- $remote"' EXIT
+          scp "${opts[@]}" "$archive" "$target:$remote/source.tar"
+          ssh "${opts[@]}" "$target" "tar xf $remote/source.tar -C $remote && sudo -n bash $remote/scripts/apply-observe-recovery.sh check $remote"
+          if [[ "$APPLY" == true ]]; then
+            ssh "${opts[@]}" "$target" "sudo -n bash $remote/scripts/apply-observe-recovery.sh apply $remote"
+          fi

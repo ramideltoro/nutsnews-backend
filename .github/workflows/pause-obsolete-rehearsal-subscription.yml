@@ -1,0 +1,76 @@
+name: Pause obsolete rehearsal subscription
+on:
+  pull_request:
+    paths:
+      - "scripts/pause-obsolete-rehearsal-subscription.*"
+      - "tests/rehearsal-subscription-smoke.mjs"
+      - ".github/workflows/pause-obsolete-rehearsal-subscription.yml"
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Disable only the obsolete migration subscription in nutsnews_restore_rehearsal
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.event_name == 'workflow_dispatch' && 'production-backend-ansible-baseline' || format('rehearsal-guard-{0}', github.ref) }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: "22" }
+      - name: Test isolated PostgreSQL guards
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql
+          export PG_BIN="$(pg_config --bindir)/"
+          export SMOKE_USER="$(id -un)"
+          export SMOKE_ROOT="$(mktemp -d)"
+          trap 'rm -rf -- "$SMOKE_ROOT"' EXIT
+          cp scripts/pause-obsolete-rehearsal-subscription.sql "$SMOKE_ROOT/"
+          bash -n scripts/pause-obsolete-rehearsal-subscription.sh
+          node tests/rehearsal-subscription-smoke.mjs
+  recovery:
+    needs: validate
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-backend
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - name: Prepare existing deployment identity
+        env:
+          KEY: ${{ secrets.NUTSNEWS_BACKEND_SSH_PRIVATE_KEY }}
+          HOSTS: ${{ secrets.NUTSNEWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$KEY" > "$HOME/.ssh/backend"
+          printf '%s\n' "$HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/backend" "$HOME/.ssh/known_hosts"
+      - name: Validate and pause only the obsolete rehearsal subscription
+        env:
+          USERNAME: ${{ secrets.NUTSNEWS_BACKEND_ANSIBLE_USER }}
+          APPLY: ${{ inputs.apply }}
+        run: |
+          set -euo pipefail
+          target="${USERNAME:-rami}@65.75.201.18"
+          opts=(-i "$HOME/.ssh/backend" -o BatchMode=yes -o StrictHostKeyChecking=yes)
+          archive="$RUNNER_TEMP/rehearsal-subscription.tar"
+          tar cf "$archive" scripts/pause-obsolete-rehearsal-subscription.sh scripts/pause-obsolete-rehearsal-subscription.sql
+          remote=$(ssh "${opts[@]}" "$target" mktemp -d /tmp/rehearsal-subscription.XXXXXXXX)
+          trap 'ssh "${opts[@]}" "$target" "rm -rf -- $remote"' EXIT
+          scp "${opts[@]}" "$archive" "$target:$remote/source.tar"
+          ssh "${opts[@]}" "$target" "tar xf $remote/source.tar -C $remote && sudo -n bash $remote/scripts/pause-obsolete-rehearsal-subscription.sh check"
+          if [[ "$APPLY" == true ]]; then
+            ssh "${opts[@]}" "$target" "sudo -n bash $remote/scripts/pause-obsolete-rehearsal-subscription.sh apply"
+          fi

@@ -2,6 +2,23 @@
 set -euo pipefail
 # Fixed read-only exports. This account cannot select paths, SQL, or commands.
 case "${1:-}" in
+  worker-fetcher-*|worker-canonicalizer-*|worker-enrichment-*|worker-approval-*|worker-persistence-*|worker-publication-*)
+    action=${1#worker-}; service=${action%%-*}; action=${action#*-}
+    container="nutsnews-worker-uplift-${service}-1"
+    case "$action" in
+      revision) { docker inspect --format '{{.Image}} {{json .Config.Env}}' "$container"; sha256sum /etc/nutsnews-rabbitmq/worker-uplift-topology.json; } | sha256sum | cut -d' ' -f1 ;;
+      app) exec docker exec "$container" tar cf - -C /app . ;;
+      config) exec docker inspect --format '{{json .Config.Env}}' "$container" ;;
+      *) echo 'Unsupported worker export' >&2; exit 64 ;;
+    esac ;;
+  worker-database) exec runuser -u postgres -- /usr/bin/pg_dump --format=custom nutsnews_primary_shadow ;;
+  worker-roles) exec runuser -u postgres -- /usr/bin/pg_dumpall --roles-only --no-role-passwords ;;
+  broker-runtime) exec docker export nutsnews-rabbitmq ;;
+  broker-definitions)
+    file=/var/lib/nutsnews/rabbitmq-recovery/definitions.sanitized.json
+    [[ $(stat -c %Y "$file") -ge $(($(date +%s)-691200)) ]] || exit 1
+    exec cat "$file" ;;
+  broker-queues) exec docker exec nutsnews-rabbitmq rabbitmqctl -q list_queues -p nutsnews-worker-uplift name messages ;;
   backend-revision) sha256sum /opt/nutsnews-worker-db-api/nutsnews_worker_db_api.py /etc/nutsnews-worker-db-api.env | sha256sum | cut -d' ' -f1 ;;
   backend-app) tar cf - -C /opt/nutsnews-worker-db-api . ;;
   backend-config) cat /etc/nutsnews-worker-db-api.env ;;

@@ -23,6 +23,11 @@ try{
  // Killing psql may leave its server query alive until socket detection; cancel
  // this isolated test session explicitly before testing the permitted operation.
  sql('postgres',"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='nutsnews_restore_rehearsal'");
+ for(let i=0;i<50;i++){
+  if(sql('postgres',"SELECT count(*) FROM pg_stat_activity WHERE datname='nutsnews_restore_rehearsal'").trim()==='0')break;
+  await new Promise(r=>setTimeout(r,100));
+ }
+ assert.equal(sql('postgres',"SELECT count(*) FROM pg_stat_activity WHERE datname='nutsnews_restore_rehearsal'").trim(),'0');
  script('nutsnews_restore_rehearsal','true');assert.equal(state(),'f');script('nutsnews_restore_rehearsal','true');assert.equal(state(),'f');
  assert.equal(sql('nutsnews_primary_shadow','TABLE preserved').trim(),'42');assert.equal(sql('nutsnews_restore_rehearsal','TABLE preserved').trim(),'7');
  sql('nutsnews_restore_rehearsal',"ALTER SUBSCRIPTION nutsnews_backend_migration_sub SET (slot_name='unexpected_slot')");

@@ -1386,7 +1386,7 @@ class BackendMetricsTests(unittest.TestCase):
     def test_metrics_service_runs_durable_signals_every_five_minutes(self):
         defaults = Path("ansible/roles/backend_baseline/defaults/main.yml").read_text(encoding="utf-8")
         tasks = METRICS_TASKS.read_text(encoding="utf-8")
-        self.assertIn('backend_metrics_textfile_calendar: "*:0/5:00"', defaults)
+        self.assertIn('backend_metrics_textfile_calendar: "*-*-* *:*:00"', defaults)
         self.assertIn("NUTSNEWS_METRICS_POSTGRES_DATABASE={{ backend_postgres_primary_shadow_database }}", tasks)
         self.assertIn("NUTSNEWS_PUBLIC_FEED_STATUS_URL={{ backend_metrics_public_feed_status_url }}", tasks)
         self.assertIn("NUTSNEWS_HEALTH_AUDIT_STATE_PATH={{ backend_metrics_health_audit_state_path }}", tasks)

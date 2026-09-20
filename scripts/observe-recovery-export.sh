@@ -2,12 +2,12 @@
 set -euo pipefail
 # Fixed read-only exports. This account cannot select paths, SQL, or commands.
 case "${1:-}" in
-  worker-fetcher-*|worker-canonicalizer-*|worker-enrichment-*|worker-approval-*|worker-persistence-*|worker-publication-*)
+  worker-scheduler-*|worker-translation-*|worker-fetcher-*|worker-canonicalizer-*|worker-enrichment-*|worker-approval-*|worker-persistence-*|worker-publication-*)
     action=${1#worker-}; service=${action%%-*}; action=${action#*-}
     container="nutsnews-worker-uplift-${service}-1"
     case "$action" in
       revision) { docker inspect --format '{{.Image}} {{json .Config.Env}}' "$container"; sha256sum /etc/nutsnews-rabbitmq/worker-uplift-topology.json; } | sha256sum | cut -d' ' -f1 ;;
-      app) exec docker exec "$container" tar cf - -C /app . ;;
+      app) exec docker cp "$container":/app/. - ;;
       config) exec docker inspect --format '{{json .Config.Env}}' "$container" ;;
       *) echo 'Unsupported worker export' >&2; exit 64 ;;
     esac ;;
